@@ -11,3 +11,5 @@ The system aims to improve visitors satisfication and reduce confusion during la
 - **3D Modeling:** Blender  
 - **Backend & Cloud Services:** Firebase 
 - **Other Tools:** Figma, GitHub, Jira  
+
+## Launching Instructions

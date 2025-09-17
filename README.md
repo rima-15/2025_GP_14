@@ -6,10 +6,10 @@ Madar helps attendees navigate entrances, exits, and facilites, while also enabl
 The system aims to improve visitors satisfication and reduce confusion during large gatherings
 
 ## Technologies 
-- **Mobile Framework:** Flutter & Dart (cross-platform development)  
-- **AR Tools:** Unity, ARCore, MultiSet SDK  
-- **3D Modeling:** Blender  
-- **Backend & Cloud Services:** Firebase 
-- **Other Tools:** Figma, GitHub, Jira  
+- **Mobile Framework :** Flutter & Dart (cross-platform development)  
+- **AR Tools :** Unity, ARCore, MultiSet SDK  
+- **3D Modeling :** Blender  
+- **Backend & Cloud Services :** Firebase 
+- **Other Tools :** Figma, GitHub, Jira  
 
 ## Launching Instructions

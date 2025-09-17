@@ -1,4 +1,12 @@
-Authors : 
+Authors :
+
+Graduation Project: MADAR  
+King Saud University  
+College of Computer and Information Sciences  
+Department of Information Technology  
+Semester-1 1447H ( Fall 2025 )
+
+Prepared by :
 1 - Remas Hezam Al-Subaie | 444200712 ( Leader ) 
 2 - Mona Saleh Alnajjar | 444200091
 3 - Razan Saeed Aldosari | 444201215 

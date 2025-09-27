@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
-class CustomScaffold
-    extends StatelessWidget {
+class CustomScaffold extends StatelessWidget {
   final Widget? child;
   final bool showLogo;
   final String logoPath;
@@ -10,19 +9,15 @@ class CustomScaffold
     super.key,
     this.child,
     this.showLogo = false,
-    this.logoPath =
-        'images/MadarLogoEnglish.png',
+    this.logoPath = 'images/MadarLogoEnglish.png',
   });
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        iconTheme: const IconThemeData(
-          color: Colors.white,
-        ),
-        backgroundColor:
-            Colors.transparent,
+        iconTheme: const IconThemeData(color: Colors.white),
+        backgroundColor: Colors.transparent,
         elevation: 0,
       ),
       extendBodyBehindAppBar: true,
@@ -39,19 +34,10 @@ class CustomScaffold
             child: Column(
               children: [
                 if (showLogo) ...[
-                  Image.asset(
-                    logoPath,
-                    height: 65,
-                  ),
-                  const SizedBox(
-                    height: 12,
-                  ),
+                  Image.asset(logoPath, height: 65),
+                  const SizedBox(height: 12),
                 ],
-                Expanded(
-                  child:
-                      child ??
-                      const SizedBox(),
-                ),
+                Expanded(child: child ?? const SizedBox()),
               ],
             ),
           ),

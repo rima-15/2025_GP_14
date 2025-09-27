@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "22673919053",
+    "project_id": "madar-database",
+    "storage_bucket": "madar-database.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:22673919053:android:b268ca287205199a8c6004",
+        "android_client_info": {
+          "package_name": "com.example.madar_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCMO7Vm6hF-hsjJTBRT24n4zsjsCaOqwko"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

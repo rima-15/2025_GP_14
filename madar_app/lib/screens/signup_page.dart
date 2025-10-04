@@ -58,21 +58,94 @@ class _SignUpScreenState extends State<SignUpScreen> {
     setState(() => _loading = true);
 
     try {
-      final cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: _emailCtrl.text.trim(),
-        password: _passCtrl.text,
-      );
-
-      final user = cred.user!;
       final fullPhone = '+966${_phoneCtrl.text}';
 
-      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+      //Phone num check
+      final phoneDoc = await FirebaseFirestore.instance
+          .collection('phoneNumbers')
+          .doc(fullPhone)
+          .get();
+
+      final bool phoneExists = phoneDoc.exists;
+
+      UserCredential? cred;
+      bool emailExists = false;
+
+      // Create an account
+      try {
+        cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+          email: _emailCtrl.text.trim(),
+          password: _passCtrl.text,
+        );
+      } on FirebaseAuthException catch (e) {
+        if (e.code == 'email-already-in-use') {
+          emailExists = true;
+        } else {
+          rethrow;
+        }
+      }
+
+      // email and phone already in use
+      if (emailExists && phoneExists) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Both email and phone number are already in use'),
+            ),
+          );
+        }
+        return;
+      }
+
+      // phone in use
+      if (phoneExists) {
+        if (cred != null) {
+          await cred.user!.delete();
+        }
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Phone number is already in use')),
+          );
+        }
+        return;
+      }
+
+      // email in use
+      if (emailExists) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Email is already in use')),
+          );
+        }
+        return;
+      }
+
+      // all good ? save user
+      final user = cred!.user!;
+
+      final batch = FirebaseFirestore.instance.batch();
+
+      final userRef = FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid);
+      batch.set(userRef, {
         'firstName': _firstNameCtrl.text.trim(),
         'lastName': _lastNameCtrl.text.trim(),
         'email': _emailCtrl.text.trim(),
         'phone': fullPhone,
         'createdAt': FieldValue.serverTimestamp(),
       });
+
+      final phoneRef = FirebaseFirestore.instance
+          .collection('phoneNumbers')
+          .doc(fullPhone);
+      batch.set(phoneRef, {
+        'uid': user.uid,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      await batch.commit();
 
       await user.sendEmailVerification();
       await FirebaseAuth.instance.signOut();
@@ -87,11 +160,35 @@ class _SignUpScreenState extends State<SignUpScreen> {
       }
     } on FirebaseAuthException catch (e) {
       String msg = 'Something went wrong';
-      if (e.code == 'email-already-in-use') msg = 'Email already in use';
+      if (e.code == 'email-already-in-use') msg = 'Email is already in use';
       if (e.code == 'invalid-email') msg = 'Invalid email format';
-      if (e.code == 'weak-password') msg = 'Weak password';
+      if (e.code == 'weak-password') msg = 'Password is too weak';
 
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(msg)));
+      }
+    } on FirebaseException catch (e) {
+      String msg = 'Something went wrong';
+      if (e.code == 'permission-denied') msg = 'Permission denied';
+      if (e.code == 'unavailable') msg = 'Service unavailable';
+
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(msg)));
+      }
+
+      try {
+        await FirebaseAuth.instance.currentUser?.delete();
+      } catch (_) {}
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('An unexpected error occurred')),
+        );
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }

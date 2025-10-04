@@ -27,8 +27,47 @@ class _SignInScreenState extends State<SignInScreen> {
     super.dispose();
   }
 
+  // Show error messages
+  void _showErrorSnackBar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 4),
+        action: SnackBarAction(
+          label: '',
+          textColor: Colors.white,
+          onPressed: () {},
+        ),
+      ),
+    );
+  }
+
+  // Show success messages
+  void _showSuccessSnackBar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: green,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  }
+
   Future<void> _signIn() async {
-    if (!_formSignInKey.currentState!.validate() || !rememberPassword) return;
+    if (!_formSignInKey.currentState!.validate()) {
+      _showErrorSnackBar('Please fill all fields correctly');
+      return;
+    }
+
+    if (!rememberPassword) {
+      _showErrorSnackBar('Please agree to remember password');
+      return;
+    }
 
     setState(() => _loading = true);
 
@@ -41,21 +80,23 @@ class _SignInScreenState extends State<SignInScreen> {
       final user = cred.user!;
       await user.reload();
 
+      // Check email verification
       if (!user.emailVerified) {
-        await user.sendEmailVerification();
+        try {
+          await user.sendEmailVerification();
+        } catch (e) {
+          // Ignore error if verification email fails to send
+        }
         await FirebaseAuth.instance.signOut();
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Please verify your email. We re-sent a verification link.',
-            ),
-          ),
+        _showErrorSnackBar(
+          'Email not verified!\nPlease check your email and verify your account',
         );
+        setState(() => _loading = false);
         return;
       }
 
-      // الدخول إلى MainLayout
+      // Sign in successfully
       if (mounted) {
         Navigator.pushReplacement(
           context,
@@ -63,12 +104,35 @@ class _SignInScreenState extends State<SignInScreen> {
         );
       }
     } on FirebaseAuthException catch (e) {
-      String msg = 'Login failed. Try again.';
-      if (e.code == 'user-not-found') msg = 'No account found with this email';
-      if (e.code == 'wrong-password') msg = 'Wrong password';
-      if (e.code == 'invalid-email') msg = 'Invalid email address';
+      String msg = '';
 
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      switch (e.code) {
+        case 'user-not-found':
+          msg = 'No account found with this email';
+          break;
+        case 'wrong-password':
+          msg = 'Wrong password';
+          break;
+        case 'invalid-email':
+          msg = 'Invalid email address';
+          break;
+        case 'user-disabled':
+          msg = 'This account is disabled, please contact support';
+          break;
+        case 'too-many-requests':
+          msg =
+              'Too many login attempts. Please try again in a few minutes or reset your password';
+          break;
+        case 'invalid-credential':
+          msg = 'Email or password is incorrect';
+          break;
+        default:
+          msg = 'Login error occurred: ${e.message}';
+      }
+
+      _showErrorSnackBar(msg);
+    } catch (e) {
+      _showErrorSnackBar('Unexpected error occurred, please try again');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -111,9 +175,15 @@ class _SignInScreenState extends State<SignInScreen> {
                       // Email
                       TextFormField(
                         controller: _emailCtrl,
-                        validator: (v) => (v == null || v.isEmpty)
-                            ? 'Please enter Email'
-                            : null,
+                        validator: (v) {
+                          if (v == null || v.isEmpty) {
+                            return 'Please enter email';
+                          }
+                          if (!v.contains('@') || !v.contains('.')) {
+                            return 'Invalid email address';
+                          }
+                          return null;
+                        },
                         decoration: _input('Email', 'Enter Email'),
                         keyboardType: TextInputType.emailAddress,
                       ),
@@ -124,9 +194,15 @@ class _SignInScreenState extends State<SignInScreen> {
                         controller: _passCtrl,
                         obscureText: true,
                         obscuringCharacter: '*',
-                        validator: (v) => (v == null || v.isEmpty)
-                            ? 'Please enter Password'
-                            : null,
+                        validator: (v) {
+                          if (v == null || v.isEmpty) {
+                            return 'Please enter password';
+                          }
+                          if (v.length < 6) {
+                            return 'Password must be at least 6 characters';
+                          }
+                          return null;
+                        },
                         decoration: _input('Password', 'Enter Password'),
                       ),
                       const SizedBox(height: 25),

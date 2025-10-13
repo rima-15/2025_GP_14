@@ -165,10 +165,12 @@ class _SignInScreenState extends State<SignInScreen> {
                       TextFormField(
                         controller: _emailCtrl,
                         validator: (v) {
-                          if (v == null || v.isEmpty)
+                          if (v == null || v.isEmpty) {
                             return 'Please enter email';
-                          if (!v.contains('@') || !v.contains('.'))
+                          }
+                          if (!v.contains('@') || !v.contains('.')) {
                             return 'Invalid email';
+                          }
                           return null;
                         },
                         decoration: _input('Email', 'Enter Email'),
@@ -182,10 +184,12 @@ class _SignInScreenState extends State<SignInScreen> {
                         obscureText: true,
                         obscuringCharacter: '*',
                         validator: (v) {
-                          if (v == null || v.isEmpty)
+                          if (v == null || v.isEmpty) {
                             return 'Please enter password';
-                          if (v.length < 6)
+                          }
+                          if (v.length < 6) {
                             return 'Password must be at least 6 characters';
+                          }
                           return null;
                         },
                         decoration: _input('Password', 'Enter Password'),

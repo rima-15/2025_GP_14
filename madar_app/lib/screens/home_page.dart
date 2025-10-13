@@ -14,9 +14,7 @@ const double _riyadhLng = 46.6753;
 
 /// ONLY these venues will be shown, grouped by tabs.
 const Map<VenueCategory, List<String>> _curatedNames = {
-  VenueCategory.airports: [
-    'King Khalid International Airport',
-  ],
+  VenueCategory.airports: ['King Khalid International Airport'],
   VenueCategory.stadiums: [
     'King Fahd Stadium',
     'KINGDOM ARENA',
@@ -85,8 +83,9 @@ class HomePageState extends State<HomePage> {
   double baseLat = _riyadhLat, baseLng = _riyadhLng;
 
   // Places service
-  late final _PlacesSvc _svc =
-      _PlacesSvc(dotenv.maybeGet('GOOGLE_API_KEY') ?? '');
+  late final _PlacesSvc _svc = _PlacesSvc(
+    dotenv.maybeGet('GOOGLE_API_KEY') ?? '',
+  );
 
   // Concurrency guard
   int _loadToken = 0;
@@ -120,7 +119,8 @@ class HomePageState extends State<HomePage> {
             perm != LocationPermission.denied &&
             perm != LocationPermission.deniedForever) {
           final p = await Geolocator.getCurrentPosition(
-              desiredAccuracy: LocationAccuracy.high);
+            desiredAccuracy: LocationAccuracy.high,
+          );
           baseLat = p.latitude;
           baseLng = p.longitude;
         }
@@ -145,8 +145,10 @@ class HomePageState extends State<HomePage> {
       final tab = filters[selectedFilterIndex];
 
       // helper: resolve a list of names under a category into VenueData
-      Future<List<VenueData>> _resolveList(
-          VenueCategory cat, List<String> names) async {
+      Future<List<VenueData>> resolveList(
+        VenueCategory cat,
+        List<String> names,
+      ) async {
         final futures = names.map((name) async {
           // 1) use pinned ID if available
           final pinned = _knownPlaceIds[name];
@@ -192,25 +194,33 @@ class HomePageState extends State<HomePage> {
       List<Future<List<VenueData>>> tasks;
       if (tab == 'All') {
         tasks = [
-          _resolveList(VenueCategory.malls, _curatedNames[VenueCategory.malls]!),
-          _resolveList(
-              VenueCategory.stadiums, _curatedNames[VenueCategory.stadiums]!),
-          _resolveList(
-              VenueCategory.airports, _curatedNames[VenueCategory.airports]!),
+          resolveList(VenueCategory.malls, _curatedNames[VenueCategory.malls]!),
+          resolveList(
+            VenueCategory.stadiums,
+            _curatedNames[VenueCategory.stadiums]!,
+          ),
+          resolveList(
+            VenueCategory.airports,
+            _curatedNames[VenueCategory.airports]!,
+          ),
         ];
       } else if (tab == 'Malls') {
         tasks = [
-          _resolveList(VenueCategory.malls, _curatedNames[VenueCategory.malls]!)
+          resolveList(VenueCategory.malls, _curatedNames[VenueCategory.malls]!),
         ];
       } else if (tab == 'Stadiums') {
         tasks = [
-          _resolveList(VenueCategory.stadiums,
-              _curatedNames[VenueCategory.stadiums]!)
+          resolveList(
+            VenueCategory.stadiums,
+            _curatedNames[VenueCategory.stadiums]!,
+          ),
         ];
       } else {
         tasks = [
-          _resolveList(VenueCategory.airports,
-              _curatedNames[VenueCategory.airports]!)
+          resolveList(
+            VenueCategory.airports,
+            _curatedNames[VenueCategory.airports]!,
+          ),
         ];
       }
 
@@ -221,23 +231,31 @@ class HomePageState extends State<HomePage> {
       if (_query.isNotEmpty) {
         final q = _query.toLowerCase();
         items = items
-            .where((v) =>
-                (v.name ?? '').toLowerCase().contains(q) ||
-                (v.address ?? '').toLowerCase().contains(q))
+            .where(
+              (v) =>
+                  (v.name ?? '').toLowerCase().contains(q) ||
+                  (v.address ?? '').toLowerCase().contains(q),
+            )
             .toList();
       }
 
       // distance + sort (local)
       for (final v in items) {
         if (v.lat != null && v.lng != null) {
-          v.distanceMeters =
-              Geolocator.distanceBetween(baseLat, baseLng, v.lat!, v.lng!);
+          v.distanceMeters = Geolocator.distanceBetween(
+            baseLat,
+            baseLng,
+            v.lat!,
+            v.lng!,
+          );
         } else {
           v.distanceMeters = 1e12;
         }
       }
-      items.sort((a, b) =>
-          (a.distanceMeters ?? 1e12).compareTo(b.distanceMeters ?? 1e12));
+      items.sort(
+        (a, b) =>
+            (a.distanceMeters ?? 1e12).compareTo(b.distanceMeters ?? 1e12),
+      );
 
       if (mounted && myToken == _loadToken) {
         setState(() {
@@ -268,8 +286,8 @@ class HomePageState extends State<HomePage> {
           child: _loading
               ? const Center(child: CircularProgressIndicator())
               : _error != null
-                  ? Center(child: Text('Error: $_error'))
-                  : _buildVenueList(),
+              ? Center(child: Text('Error: $_error'))
+              : _buildVenueList(),
         ),
       ],
     );
@@ -283,9 +301,10 @@ class HomePageState extends State<HomePage> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-              color: Colors.grey.withOpacity(0.1),
-              blurRadius: 4,
-              offset: const Offset(0, 2))
+            color: Colors.grey.withOpacity(0.1),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
         ],
       ),
       child: TextField(
@@ -297,8 +316,7 @@ class HomePageState extends State<HomePage> {
           hintText: 'Search for a venue ...',
           prefixIcon: Icon(Icons.search, color: Colors.grey),
           border: InputBorder.none,
-          contentPadding:
-              EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         ),
       ),
     );
@@ -330,8 +348,9 @@ class HomePageState extends State<HomePage> {
                   filters[index],
                   style: TextStyle(
                     color: isSelected ? Colors.white : Colors.grey[700],
-                    fontWeight:
-                        isSelected ? FontWeight.w600 : FontWeight.normal,
+                    fontWeight: isSelected
+                        ? FontWeight.w600
+                        : FontWeight.normal,
                   ),
                 ),
               ),
@@ -360,7 +379,7 @@ class HomePageState extends State<HomePage> {
         builder: (_) => VenuePage(
           placeId: v.placeId!,
           name: v.name ?? '',
-          image: v.photoUrl,          // null -> placeholder in VenuePage
+          image: v.photoUrl, // null -> placeholder in VenuePage
           description: v.address ?? '',
         ),
       ),
@@ -382,9 +401,10 @@ class HomePageState extends State<HomePage> {
           borderRadius: BorderRadius.circular(12),
           boxShadow: [
             BoxShadow(
-                color: Colors.grey.withOpacity(0.1),
-                blurRadius: 4,
-                offset: const Offset(0, 2))
+              color: Colors.grey.withOpacity(0.1),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
           ],
         ),
         child: Row(
@@ -396,8 +416,11 @@ class HomePageState extends State<HomePage> {
                       width: 100,
                       height: 100,
                       color: Colors.grey[200],
-                      child: const Icon(Icons.location_city,
-                          size: 40, color: Colors.grey),
+                      child: const Icon(
+                        Icons.location_city,
+                        size: 40,
+                        color: Colors.grey,
+                      ),
                     )
                   : Image.network(
                       v.photoUrl!,
@@ -412,17 +435,21 @@ class HomePageState extends State<HomePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(v.name ?? 'Unnamed',
-                        style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.black87)),
+                    Text(
+                      v.name ?? 'Unnamed',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.black87,
+                      ),
+                    ),
                     const SizedBox(height: 4),
-                    Text(v.address ?? '',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style:
-                            TextStyle(fontSize: 14, color: Colors.grey[600])),
+                    Text(
+                      v.address ?? '',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                    ),
                     const SizedBox(height: 8),
                     Row(
                       children: [
@@ -431,13 +458,17 @@ class HomePageState extends State<HomePage> {
                         Text(
                           (v.rating ?? 0).toStringAsFixed(1),
                           style: TextStyle(
-                              fontSize: 14, color: Colors.grey[700]),
+                            fontSize: 14,
+                            color: Colors.grey[700],
+                          ),
                         ),
                         const Spacer(),
                         Text(
                           distanceText,
                           style: TextStyle(
-                              fontSize: 14, color: Colors.grey[500]),
+                            fontSize: 14,
+                            color: Colors.grey[500],
+                          ),
                         ),
                       ],
                     ),
@@ -515,13 +546,18 @@ class _PlacesSvc {
 
     int score(Map<String, dynamic> c) {
       final name = (c['name'] ?? '').toString().toLowerCase();
-      final types =
-          ((c['types'] as List?)?.cast<String>() ?? const []).map((e) => e.toLowerCase()).toSet();
+      final types = ((c['types'] as List?)?.cast<String>() ?? const [])
+          .map((e) => e.toLowerCase())
+          .toSet();
       int s = 0;
       // prefer expected google type
-      if (expectCategory == VenueCategory.stadiums && types.contains('stadium')) s += 100;
-      if (expectCategory == VenueCategory.airports && types.contains('airport')) s += 100;
-      if (expectCategory == VenueCategory.malls && types.contains('shopping_mall')) s += 100;
+      if (expectCategory == VenueCategory.stadiums && types.contains('stadium'))
+        s += 100;
+      if (expectCategory == VenueCategory.airports && types.contains('airport'))
+        s += 100;
+      if (expectCategory == VenueCategory.malls &&
+          types.contains('shopping_mall'))
+        s += 100;
       // Name tokens to help disambiguate common cases
       if (name.contains('awwal')) s += 10;
       if (name.contains('kingdom arena')) s += 10;
@@ -558,6 +594,3 @@ class _PlacesSvc {
   String photoUrl(String photoRef) =>
       'https://maps.googleapis.com/maps/api/place/photo?maxwidth=600&photo_reference=$photoRef&key=$apiKey';
 }
-
-
-

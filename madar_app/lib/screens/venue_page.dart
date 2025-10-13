@@ -3,12 +3,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 
+// Optional theme color (replace with your app theme color if you have one)
+const kGreen = Color(0xFF787E65);
+
 /// Venue details page
 class VenuePage extends StatefulWidget {
-  final String placeId;       // required
-  final String name;          // required
-  final String? image;        // optional cover
-  final String? description;  // optional (fallback if API has no summary/address)
+  final String placeId; // required
+  final String name; // required
+  final String? image; // optional cover (URL)
+  final String?
+  description; // optional (fallback if API has no summary/address)
+  final bool eventBased; // if true and hours missing → show event message
 
   const VenuePage({
     super.key,
@@ -16,6 +21,7 @@ class VenuePage extends StatefulWidget {
     required this.name,
     this.image,
     this.description,
+    this.eventBased = false,
   });
 
   @override
@@ -28,9 +34,9 @@ class _VenuePageState extends State<VenuePage> {
 
   // Data from Place Details
   String? _address;
-  String? _summary; // prefer editorial summary if available; else address/prop desc
+  String? _summary; // editorial_summary > description > address
   bool? _openNow;
-  List<String> _weekdayText = const []; // e.g., ["Monday: 9:00 AM – 10:00 PM", ...]
+  List<String> _weekdayText = const []; // ["Monday: 9:00 AM – 5:00 PM", ...]
 
   @override
   void initState() {
@@ -50,14 +56,13 @@ class _VenuePageState extends State<VenuePage> {
         '/maps/api/place/details/json',
         {
           'place_id': widget.placeId,
-          // Essentials-only fields (no Pro). editorial_summary may return when available;
-          // if it’s absent, we’ll fallback to address/prop description.
           'fields': [
+            'place_id',
+            'name',
             'formatted_address',
             'opening_hours',
-            'editorial_summary', // if not returned, that’s fine
+            'editorial_summary',
             'website',
-            'name',
           ].join(','),
           'key': key,
         },
@@ -67,25 +72,31 @@ class _VenuePageState extends State<VenuePage> {
       final j = jsonDecode(r.body) as Map<String, dynamic>;
 
       if (j['status'] != 'OK') {
-        throw Exception('Details error: ${j['status']} ${j['error_message'] ?? ''}');
+        throw Exception(
+          'Details error: ${j['status']} ${j['error_message'] ?? ''}',
+        );
       }
 
       final res = (j['result'] as Map<String, dynamic>?) ?? {};
       final opening = (res['opening_hours'] as Map<String, dynamic>?) ?? {};
 
-      final editorial = (res['editorial_summary'] as Map<String, dynamic>?)?['overview'] as String?;
+      final editorial =
+          (res['editorial_summary'] as Map<String, dynamic>?)?['overview']
+              as String?;
       final addr = res['formatted_address'] as String?;
 
       setState(() {
         _address = addr;
-        // Pick best available description
-        _summary = editorial?.trim().isNotEmpty == true
-            ? editorial!.trim()
-            : (widget.description?.trim().isNotEmpty == true
-                ? widget.description!.trim()
-                : (addr ?? ''));
+        // Prefer Google editorial summary, else use passed description, else address
+        _summary = (editorial != null && editorial.trim().isNotEmpty)
+            ? editorial.trim()
+            : ((widget.description != null &&
+                      widget.description!.trim().isNotEmpty)
+                  ? widget.description!.trim()
+                  : (addr ?? ''));
         _openNow = opening['open_now'] as bool?;
-        _weekdayText = (opening['weekday_text'] as List?)?.cast<String>() ?? const [];
+        _weekdayText =
+            (opening['weekday_text'] as List?)?.cast<String>() ?? const [];
         _loading = false;
       });
     } catch (e) {
@@ -100,266 +111,60 @@ class _VenuePageState extends State<VenuePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          name,
-          style: const TextStyle(
-            color: kGreen,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
+        title: Text(widget.name, overflow: TextOverflow.ellipsis),
+        foregroundColor: Colors.white,
+        backgroundColor: kGreen,
       ),
-      body: ListView(
-        padding: const EdgeInsets.only(
-          bottom: 24,
-        ),
-        children: [
-          // صورة المكان
-          Image.asset(
-            image,
-            height: 200,
-            width: double.infinity,
-            fit: BoxFit.cover,
-          ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _error != null
+          ? Center(child: Text(_error!, textAlign: TextAlign.center))
+          : ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                if (widget.image != null)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.network(
+                      widget.image!,
+                      height: 200,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                if (widget.image != null) const SizedBox(height: 16),
 
-          // الوصف
-          Padding(
-            padding:
-                const EdgeInsets.all(
-                  16,
-                ),
-            child: Text(
-              description,
-              style: const TextStyle(
-                color: Colors.black87,
-                height: 1.4,
-              ),
-            ),
-          ),
+                // Description (≈ 2.5 lines → clamp to 3 lines with ellipsis)
+                if (_summary != null && _summary!.isNotEmpty)
+                  Text(
+                    _summary!,
+                    style: const TextStyle(fontSize: 16, height: 1.15),
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
 
-          // أوقات العمل
-          // أوقات العمل
-          Card(
-            margin:
-                const EdgeInsets.symmetric(
-                  horizontal: 16,
-                ),
-            shape: RoundedRectangleBorder(
-              borderRadius:
-                  BorderRadius.circular(
-                    12,
-                  ),
-            ),
-            color: Colors
-                .white, // نخلي الخلفية بيضاء وواضحة
-            shadowColor: Colors.black
-                .withOpacity(0.05),
-            elevation: 3,
-            child: Theme(
-              data: Theme.of(context)
-                  .copyWith(
-                    dividerColor: Colors
-                        .transparent, // نخفي الخط اللي يفصل
-                    splashColor: Colors
-                        .transparent,
-                    highlightColor:
-                        Colors
-                            .transparent,
-                  ),
-              child: ExpansionTile(
-                leading: const Icon(
-                  Icons.schedule,
-                  color:
-                      kGreen, // نفس لون الثيم الأخضر
-                ),
-                title: const Text(
-                  "Open · 10 AM – 12 AM",
-                  style: TextStyle(
-                    fontWeight:
-                        FontWeight.w600,
-                    color:
-                        Colors.black87,
-                  ),
-                ),
-                iconColor: kGreen,
-                collapsedIconColor:
-                    kGreen,
-                childrenPadding:
-                    const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 4,
-                    ),
-                children: const [
-                  ListTile(
-                    dense: true,
-                    visualDensity:
-                        VisualDensity(
-                          vertical: -3,
-                        ),
-                    title: Text(
-                      "Sun – Wed",
-                      style: TextStyle(
-                        color: Colors
-                            .black87,
-                      ),
-                    ),
-                    trailing: Text(
-                      "10 AM – 12 AM",
-                      style: TextStyle(
-                        color: Colors
-                            .black54,
-                      ),
-                    ),
-                  ),
-                  ListTile(
-                    dense: true,
-                    visualDensity:
-                        VisualDensity(
-                          vertical: -3,
-                        ),
-                    title: Text(
-                      "Thu – Fri",
-                      style: TextStyle(
-                        color: Colors
-                            .black87,
-                      ),
-                    ),
-                    trailing: Text(
-                      "10 AM – 1 AM",
-                      style: TextStyle(
-                        color: Colors
-                            .black54,
-                      ),
-                    ),
-                  ),
-                  ListTile(
-                    dense: true,
-                    visualDensity:
-                        VisualDensity(
-                          vertical: -3,
-                        ),
-                    title: Text(
-                      "Sat",
-                      style: TextStyle(
-                        color: Colors
-                            .black87,
-                      ),
-                    ),
-                    trailing: Text(
-                      "10 AM – 12 AM",
-                      style: TextStyle(
-                        color: Colors
-                            .black54,
-                      ),
-                    ),
+                if (_address != null && _address!.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    _address!,
+                    style: TextStyle(fontSize: 14, color: Colors.grey[700]),
                   ),
                 ],
-              ),
-            ),
-          ),
 
-          const SizedBox(height: 16),
-
-          const Padding(
-            padding:
-                EdgeInsets.symmetric(
-                  horizontal: 16,
-                ),
-            child: Text(
-              "Floor Map",
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight:
-                    FontWeight.w700,
-              ),
-            ),
-          ),
-          Padding(
-            padding:
-                const EdgeInsets.all(
-                  16,
-                ),
-            child: Container(
-              height: 150,
-              decoration: BoxDecoration(
-                color: const Color(
-                  0xFFEDEFE3,
-                ),
-                borderRadius:
-                    BorderRadius.circular(
-                      12,
-                    ),
-              ),
-              child: const Center(
-                child: Icon(
-                  Icons.map_outlined,
-                  size: 48,
-                  color: Colors.black45,
-                ),
-              ),
-            ),
-          ),
-
-          // كاتيجوريز
-          const Padding(
-            padding:
-                EdgeInsets.symmetric(
-                  horizontal: 16,
-                ),
-            child: Text(
-              "Explore Categories",
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight:
-                    FontWeight.w700,
-              ),
-            ),
-          ),
-          SizedBox(
-            height: 200,
-            child: ListView(
-              scrollDirection:
-                  Axis.horizontal,
-              padding:
-                  const EdgeInsets.all(
-                    16,
-                  ),
-              children: [
-                _categoryCard(
-                  context,
-                  "Shops",
-                  "120 places",
-                  "images/Shops.png",
-                ),
-                const SizedBox(
-                  width: 12,
-                ),
-                _categoryCard(
-                  context,
-                  "Cafes",
-                  "25 places",
-                  "images/Cafes.jpg",
-                ),
-                const SizedBox(
-                  width: 12,
-                ),
-                _categoryCard(
-                  context,
-                  "Restaurants",
-                  "40 places",
-                  "images/restaurants.jpeg",
-                ),
+                const SizedBox(height: 16),
+                _buildHoursCard(),
               ],
             ),
-          ),
-        ],
-      ),
     );
   }
 
   Widget _buildHoursCard() {
-    final todayIndex = DateTime.now().weekday % 7; // 1=Mon..7=Sun -> 0..6
+    // Fix: weekday_text is Monday..Sunday, so Monday=0 → Sunday=6
+    final todayIndex = DateTime.now().weekday - 1; // 1..7 → 0..6
     String? todayLine;
-    if (_weekdayText.isNotEmpty && todayIndex < _weekdayText.length) {
+    if (_weekdayText.isNotEmpty &&
+        todayIndex >= 0 &&
+        todayIndex < _weekdayText.length) {
       todayLine = _weekdayText[todayIndex];
     }
 
@@ -375,13 +180,21 @@ class _VenuePageState extends State<VenuePage> {
               children: [
                 const Icon(Icons.access_time, size: 20),
                 const SizedBox(width: 8),
-                const Text('Opening hours', style: TextStyle(fontWeight: FontWeight.w600)),
+                const Text(
+                  'Opening hours',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
                 const Spacer(),
                 if (_openNow != null)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
                     decoration: BoxDecoration(
-                      color: _openNow! ? Colors.green.withOpacity(0.12) : Colors.red.withOpacity(0.12),
+                      color: _openNow!
+                          ? Colors.green.withOpacity(0.12)
+                          : Colors.red.withOpacity(0.12),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
@@ -400,7 +213,10 @@ class _VenuePageState extends State<VenuePage> {
             if (todayLine != null) ...[
               Text(
                 todayLine,
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
               const SizedBox(height: 8),
             ],
@@ -417,16 +233,20 @@ class _VenuePageState extends State<VenuePage> {
                       style: TextStyle(
                         fontSize: 13,
                         color: isToday ? Colors.black87 : Colors.grey[700],
-                        fontWeight: isToday ? FontWeight.w600 : FontWeight.normal,
+                        fontWeight: isToday
+                            ? FontWeight.w600
+                            : FontWeight.normal,
                       ),
                     ),
                   );
                 }).toList(),
               )
             else
-              const Text(
-                'Hours not available.',
-                style: TextStyle(fontSize: 13, color: Colors.grey),
+              Text(
+                widget.eventBased
+                    ? 'Hours vary by event. Please check the venue schedule or website.'
+                    : 'Hours not available.',
+                style: const TextStyle(fontSize: 13, color: Colors.grey),
               ),
           ],
         ),

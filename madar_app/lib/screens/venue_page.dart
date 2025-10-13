@@ -71,47 +71,123 @@ class VenuePage
           ),
 
           // أوقات العمل
+          // أوقات العمل
           Card(
             margin:
                 const EdgeInsets.symmetric(
                   horizontal: 16,
                 ),
-            child: ExpansionTile(
-              leading: const Icon(
-                Icons.schedule,
-                color: Colors.black87,
+            shape: RoundedRectangleBorder(
+              borderRadius:
+                  BorderRadius.circular(
+                    12,
+                  ),
+            ),
+            color: Colors
+                .white, // نخلي الخلفية بيضاء وواضحة
+            shadowColor: Colors.black
+                .withOpacity(0.05),
+            elevation: 3,
+            child: Theme(
+              data: Theme.of(context)
+                  .copyWith(
+                    dividerColor: Colors
+                        .transparent, // نخفي الخط اللي يفصل
+                    splashColor: Colors
+                        .transparent,
+                    highlightColor:
+                        Colors
+                            .transparent,
+                  ),
+              child: ExpansionTile(
+                leading: const Icon(
+                  Icons.schedule,
+                  color:
+                      kGreen, // نفس لون الثيم الأخضر
+                ),
+                title: const Text(
+                  "Open · 10 AM – 12 AM",
+                  style: TextStyle(
+                    fontWeight:
+                        FontWeight.w600,
+                    color:
+                        Colors.black87,
+                  ),
+                ),
+                iconColor: kGreen,
+                collapsedIconColor:
+                    kGreen,
+                childrenPadding:
+                    const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 4,
+                    ),
+                children: const [
+                  ListTile(
+                    dense: true,
+                    visualDensity:
+                        VisualDensity(
+                          vertical: -3,
+                        ),
+                    title: Text(
+                      "Sun – Wed",
+                      style: TextStyle(
+                        color: Colors
+                            .black87,
+                      ),
+                    ),
+                    trailing: Text(
+                      "10 AM – 12 AM",
+                      style: TextStyle(
+                        color: Colors
+                            .black54,
+                      ),
+                    ),
+                  ),
+                  ListTile(
+                    dense: true,
+                    visualDensity:
+                        VisualDensity(
+                          vertical: -3,
+                        ),
+                    title: Text(
+                      "Thu – Fri",
+                      style: TextStyle(
+                        color: Colors
+                            .black87,
+                      ),
+                    ),
+                    trailing: Text(
+                      "10 AM – 1 AM",
+                      style: TextStyle(
+                        color: Colors
+                            .black54,
+                      ),
+                    ),
+                  ),
+                  ListTile(
+                    dense: true,
+                    visualDensity:
+                        VisualDensity(
+                          vertical: -3,
+                        ),
+                    title: Text(
+                      "Sat",
+                      style: TextStyle(
+                        color: Colors
+                            .black87,
+                      ),
+                    ),
+                    trailing: Text(
+                      "10 AM – 12 AM",
+                      style: TextStyle(
+                        color: Colors
+                            .black54,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              title: const Text(
-                "Open · 10 AM – 12 AM",
-                style: TextStyle(
-                  fontWeight:
-                      FontWeight.w600,
-                ),
-              ),
-              children: const [
-                ListTile(
-                  title: Text(
-                    "Sun – Wed",
-                  ),
-                  trailing: Text(
-                    "10 AM – 12 AM",
-                  ),
-                ),
-                ListTile(
-                  title: Text(
-                    "Thu – Fri",
-                  ),
-                  trailing: Text(
-                    "10 AM – 1 AM",
-                  ),
-                ),
-                ListTile(
-                  title: Text("Sat"),
-                  trailing: Text(
-                    "10 AM – 12 AM",
-                  ),
-                ),
-              ],
             ),
           ),
 

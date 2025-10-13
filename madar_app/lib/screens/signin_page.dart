@@ -4,6 +4,7 @@ import 'package:madar_app/screens/signup_page.dart';
 import 'package:madar_app/screens/forgot_password_page.dart';
 import 'package:madar_app/widgets/MainLayout.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // ✅ جديد
 
 class SignInScreen extends StatefulWidget {
   const SignInScreen({super.key});
@@ -16,18 +17,37 @@ class _SignInScreenState extends State<SignInScreen> {
   final _formSignInKey = GlobalKey<FormState>();
   final _emailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
-  bool rememberPassword = true;
+  bool rememberPassword = false; // يبدأ False
   bool _loading = false;
   final Color green = const Color(0xFF787E65);
 
   @override
-  void dispose() {
-    _emailCtrl.dispose();
-    _passCtrl.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    _checkAutoLogin(); // ✅ تسجيل دخول تلقائي لو Remember Me مفعّل
   }
 
-  // Show error messages
+  // ✅ تحقق إذا المستخدم مفعّل "Remember Me" و Logged In
+  Future<void> _checkAutoLogin() async {
+    final prefs = await SharedPreferences.getInstance();
+    final remember = prefs.getBool('remember_me') ?? false;
+    final currentUser = FirebaseAuth.instance.currentUser;
+
+    if (remember && currentUser != null) {
+      // المستخدم مفعّل Remember Me وموجود في Firebase
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const MainLayout()),
+      );
+    }
+  }
+
+  // ✅ حفظ حالة Remember Me بعد تسجيل الدخول
+  Future<void> _saveRememberMe(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('remember_me', value);
+  }
+
   void _showErrorSnackBar(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -35,25 +55,6 @@ class _SignInScreenState extends State<SignInScreen> {
         content: Text(message),
         backgroundColor: Colors.red,
         behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 4),
-        action: SnackBarAction(
-          label: '',
-          textColor: Colors.white,
-          onPressed: () {},
-        ),
-      ),
-    );
-  }
-
-  // Show success messages
-  void _showSuccessSnackBar(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: green,
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 4),
       ),
     );
   }
@@ -61,11 +62,6 @@ class _SignInScreenState extends State<SignInScreen> {
   Future<void> _signIn() async {
     if (!_formSignInKey.currentState!.validate()) {
       _showErrorSnackBar('Please fill all fields correctly');
-      return;
-    }
-
-    if (!rememberPassword) {
-      _showErrorSnackBar('Please agree to remember password');
       return;
     }
 
@@ -80,23 +76,22 @@ class _SignInScreenState extends State<SignInScreen> {
       final user = cred.user!;
       await user.reload();
 
-      // Check email verification
       if (!user.emailVerified) {
         try {
           await user.sendEmailVerification();
-        } catch (e) {
-          // Ignore error if verification email fails to send
-        }
+        } catch (_) {}
         await FirebaseAuth.instance.signOut();
 
         _showErrorSnackBar(
-          'Email not verified!\nPlease check your email and verify your account',
+          'Email not verified! Please verify your email first.',
         );
         setState(() => _loading = false);
         return;
       }
 
-      // Sign in successfully
+      // ✅ إذا فعّل Remember Me نحفظ حالته
+      await _saveRememberMe(rememberPassword);
+
       if (mounted) {
         Navigator.pushReplacement(
           context,
@@ -104,8 +99,7 @@ class _SignInScreenState extends State<SignInScreen> {
         );
       }
     } on FirebaseAuthException catch (e) {
-      String msg = '';
-
+      String msg;
       switch (e.code) {
         case 'user-not-found':
           msg = 'No account found with this email';
@@ -117,22 +111,17 @@ class _SignInScreenState extends State<SignInScreen> {
           msg = 'Invalid email address';
           break;
         case 'user-disabled':
-          msg = 'This account is disabled, please contact support';
+          msg = 'This account is disabled';
           break;
         case 'too-many-requests':
-          msg =
-              'Too many login attempts. Please try again in a few minutes or reset your password';
-          break;
-        case 'invalid-credential':
-          msg = 'Email or password is incorrect';
+          msg = 'Too many attempts, please try again later';
           break;
         default:
-          msg = 'Login error occurred: ${e.message}';
+          msg = 'Login error: ${e.message}';
       }
-
       _showErrorSnackBar(msg);
     } catch (e) {
-      _showErrorSnackBar('Unexpected error occurred, please try again');
+      _showErrorSnackBar('Unexpected error: $e');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -176,12 +165,10 @@ class _SignInScreenState extends State<SignInScreen> {
                       TextFormField(
                         controller: _emailCtrl,
                         validator: (v) {
-                          if (v == null || v.isEmpty) {
+                          if (v == null || v.isEmpty)
                             return 'Please enter email';
-                          }
-                          if (!v.contains('@') || !v.contains('.')) {
-                            return 'Invalid email address';
-                          }
+                          if (!v.contains('@') || !v.contains('.'))
+                            return 'Invalid email';
                           return null;
                         },
                         decoration: _input('Email', 'Enter Email'),
@@ -195,12 +182,10 @@ class _SignInScreenState extends State<SignInScreen> {
                         obscureText: true,
                         obscuringCharacter: '*',
                         validator: (v) {
-                          if (v == null || v.isEmpty) {
+                          if (v == null || v.isEmpty)
                             return 'Please enter password';
-                          }
-                          if (v.length < 6) {
+                          if (v.length < 6)
                             return 'Password must be at least 6 characters';
-                          }
                           return null;
                         },
                         decoration: _input('Password', 'Enter Password'),
@@ -215,9 +200,9 @@ class _SignInScreenState extends State<SignInScreen> {
                             children: [
                               Checkbox(
                                 value: rememberPassword,
-                                onChanged: (v) => setState(
-                                  () => rememberPassword = v ?? false,
-                                ),
+                                onChanged: (v) {
+                                  setState(() => rememberPassword = v ?? false);
+                                },
                                 activeColor: green,
                               ),
                               const Text(
@@ -247,6 +232,7 @@ class _SignInScreenState extends State<SignInScreen> {
                       ),
                       const SizedBox(height: 25),
 
+                      // Sign in
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton(
@@ -274,7 +260,7 @@ class _SignInScreenState extends State<SignInScreen> {
                       ),
                       const SizedBox(height: 25),
 
-                      // Don't have account
+                      // Sign up
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
@@ -301,7 +287,6 @@ class _SignInScreenState extends State<SignInScreen> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 20),
                     ],
                   ),
                 ),

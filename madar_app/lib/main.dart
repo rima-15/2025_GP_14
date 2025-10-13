@@ -4,6 +4,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 import 'package:madar_app/theme/theme.dart';
 import 'package:madar_app/screens/welcome_page.dart';
+import 'package:firebase_core/firebase_core.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -13,12 +14,12 @@ Future<void> main() async {
 
   // 2) Init Firebase
   await Firebase.initializeApp();
-
   runApp(const MadarApp());
 }
 
 class MadarApp extends StatelessWidget {
-  const MadarApp({super.key});
+  final Widget startScreen;
+  const MadarApp({super.key, required this.startScreen});
 
   @override
   Widget build(BuildContext context) {
@@ -26,7 +27,7 @@ class MadarApp extends StatelessWidget {
       title: 'Madar',
       theme: buildAppTheme(),
       debugShowCheckedModeBanner: false,
-      home: const WelcomeScreen(),
+      home: startScreen,
     );
   }
 }

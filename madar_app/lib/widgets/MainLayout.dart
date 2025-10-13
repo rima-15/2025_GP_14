@@ -85,7 +85,6 @@ class _MainLayoutState
       centerTitle: true,
       automaticallyImplyLeading: false,
 
-      // leading (الجهة اليسار)
       leading: index == 0
           ? IconButton(
               icon: const Icon(
@@ -93,8 +92,7 @@ class _MainLayoutState
                     .notifications_outlined,
                 color: kGreen,
               ),
-              onPressed:
-                  () {}, // الإشعارات فقط في Home
+              onPressed: () {},
             )
           : null,
 
@@ -116,7 +114,6 @@ class _MainLayoutState
               ),
             ),
 
-      // actions (يمين)
       actions: [
         IconButton(
           icon: const Icon(
@@ -182,7 +179,6 @@ class _MainLayoutState
     );
   }
 
-  // -------------------------- 🔹 Bottom Navigation 🔹 --------------------------
   Widget _buildBottomBar() {
     return CurvedNavigationBar(
       index: _index,

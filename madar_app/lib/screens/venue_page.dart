@@ -193,7 +193,6 @@ class VenuePage
 
           const SizedBox(height: 16),
 
-          // الخريطة (Placeholder)
           const Padding(
             padding:
                 EdgeInsets.symmetric(

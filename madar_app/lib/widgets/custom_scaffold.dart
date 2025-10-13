@@ -1,4 +1,3 @@
-// lib/widgets/custom_scaffold.dart
 import 'package:flutter/material.dart';
 
 const kGreen = Color(0xFF787E65);

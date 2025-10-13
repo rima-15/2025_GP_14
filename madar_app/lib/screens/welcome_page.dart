@@ -1,4 +1,3 @@
-// lib/screens/welcome_page.dart
 import 'package:flutter/material.dart';
 import 'package:madar_app/widgets/custom_scaffold.dart';
 import 'package:madar_app/screens/signin_page.dart';

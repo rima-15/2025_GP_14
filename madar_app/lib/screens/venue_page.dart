@@ -101,50 +101,258 @@ class _VenuePageState extends State<VenuePage> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          widget.name,
-          overflow: TextOverflow.ellipsis,
+          name,
+          style: const TextStyle(
+            color: kGreen,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-              ? Center(child: Text(_error!, textAlign: TextAlign.center))
-              : ListView(
-                  padding: const EdgeInsets.all(16),
-                  children: [
-                    if (widget.image != null)
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: Image.network(
-                          widget.image!,
-                          height: 200,
-                          width: double.infinity,
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                    if (widget.image != null) const SizedBox(height: 16),
+      body: ListView(
+        padding: const EdgeInsets.only(
+          bottom: 24,
+        ),
+        children: [
+          // صورة المكان
+          Image.asset(
+            image,
+            height: 200,
+            width: double.infinity,
+            fit: BoxFit.cover,
+          ),
 
-                    // Description (clamped ~2.5 lines -> use maxLines: 3 with ellipsis)
-                    if (_summary != null && _summary!.isNotEmpty)
-                      Text(
-                        _summary!,
-                        style: const TextStyle(fontSize: 16, height: 1.15),
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-
-                    if (_address != null && _address!.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      Text(
-                        _address!,
-                        style: TextStyle(fontSize: 14, color: Colors.grey[700]),
-                      ),
-                    ],
-
-                    const SizedBox(height: 16),
-                    _buildHoursCard(),
-                  ],
+          // الوصف
+          Padding(
+            padding:
+                const EdgeInsets.all(
+                  16,
                 ),
+            child: Text(
+              description,
+              style: const TextStyle(
+                color: Colors.black87,
+                height: 1.4,
+              ),
+            ),
+          ),
+
+          // أوقات العمل
+          // أوقات العمل
+          Card(
+            margin:
+                const EdgeInsets.symmetric(
+                  horizontal: 16,
+                ),
+            shape: RoundedRectangleBorder(
+              borderRadius:
+                  BorderRadius.circular(
+                    12,
+                  ),
+            ),
+            color: Colors
+                .white, // نخلي الخلفية بيضاء وواضحة
+            shadowColor: Colors.black
+                .withOpacity(0.05),
+            elevation: 3,
+            child: Theme(
+              data: Theme.of(context)
+                  .copyWith(
+                    dividerColor: Colors
+                        .transparent, // نخفي الخط اللي يفصل
+                    splashColor: Colors
+                        .transparent,
+                    highlightColor:
+                        Colors
+                            .transparent,
+                  ),
+              child: ExpansionTile(
+                leading: const Icon(
+                  Icons.schedule,
+                  color:
+                      kGreen, // نفس لون الثيم الأخضر
+                ),
+                title: const Text(
+                  "Open · 10 AM – 12 AM",
+                  style: TextStyle(
+                    fontWeight:
+                        FontWeight.w600,
+                    color:
+                        Colors.black87,
+                  ),
+                ),
+                iconColor: kGreen,
+                collapsedIconColor:
+                    kGreen,
+                childrenPadding:
+                    const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 4,
+                    ),
+                children: const [
+                  ListTile(
+                    dense: true,
+                    visualDensity:
+                        VisualDensity(
+                          vertical: -3,
+                        ),
+                    title: Text(
+                      "Sun – Wed",
+                      style: TextStyle(
+                        color: Colors
+                            .black87,
+                      ),
+                    ),
+                    trailing: Text(
+                      "10 AM – 12 AM",
+                      style: TextStyle(
+                        color: Colors
+                            .black54,
+                      ),
+                    ),
+                  ),
+                  ListTile(
+                    dense: true,
+                    visualDensity:
+                        VisualDensity(
+                          vertical: -3,
+                        ),
+                    title: Text(
+                      "Thu – Fri",
+                      style: TextStyle(
+                        color: Colors
+                            .black87,
+                      ),
+                    ),
+                    trailing: Text(
+                      "10 AM – 1 AM",
+                      style: TextStyle(
+                        color: Colors
+                            .black54,
+                      ),
+                    ),
+                  ),
+                  ListTile(
+                    dense: true,
+                    visualDensity:
+                        VisualDensity(
+                          vertical: -3,
+                        ),
+                    title: Text(
+                      "Sat",
+                      style: TextStyle(
+                        color: Colors
+                            .black87,
+                      ),
+                    ),
+                    trailing: Text(
+                      "10 AM – 12 AM",
+                      style: TextStyle(
+                        color: Colors
+                            .black54,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          const Padding(
+            padding:
+                EdgeInsets.symmetric(
+                  horizontal: 16,
+                ),
+            child: Text(
+              "Floor Map",
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight:
+                    FontWeight.w700,
+              ),
+            ),
+          ),
+          Padding(
+            padding:
+                const EdgeInsets.all(
+                  16,
+                ),
+            child: Container(
+              height: 150,
+              decoration: BoxDecoration(
+                color: const Color(
+                  0xFFEDEFE3,
+                ),
+                borderRadius:
+                    BorderRadius.circular(
+                      12,
+                    ),
+              ),
+              child: const Center(
+                child: Icon(
+                  Icons.map_outlined,
+                  size: 48,
+                  color: Colors.black45,
+                ),
+              ),
+            ),
+          ),
+
+          // كاتيجوريز
+          const Padding(
+            padding:
+                EdgeInsets.symmetric(
+                  horizontal: 16,
+                ),
+            child: Text(
+              "Explore Categories",
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight:
+                    FontWeight.w700,
+              ),
+            ),
+          ),
+          SizedBox(
+            height: 200,
+            child: ListView(
+              scrollDirection:
+                  Axis.horizontal,
+              padding:
+                  const EdgeInsets.all(
+                    16,
+                  ),
+              children: [
+                _categoryCard(
+                  context,
+                  "Shops",
+                  "120 places",
+                  "images/Shops.png",
+                ),
+                const SizedBox(
+                  width: 12,
+                ),
+                _categoryCard(
+                  context,
+                  "Cafes",
+                  "25 places",
+                  "images/Cafes.jpg",
+                ),
+                const SizedBox(
+                  width: 12,
+                ),
+                _categoryCard(
+                  context,
+                  "Restaurants",
+                  "40 places",
+                  "images/restaurants.jpeg",
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 

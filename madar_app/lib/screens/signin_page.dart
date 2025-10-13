@@ -4,6 +4,7 @@ import 'package:madar_app/screens/signup_page.dart';
 import 'package:madar_app/screens/forgot_password_page.dart';
 import 'package:madar_app/widgets/MainLayout.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // ✅ جديد
 
 class SignInScreen
     extends StatefulWidget {
@@ -22,20 +23,55 @@ class _SignInScreenState
       TextEditingController();
   final _passCtrl =
       TextEditingController();
-  bool rememberPassword = true;
+  bool rememberPassword =
+      false; // يبدأ False
   bool _loading = false;
   final Color green = const Color(
     0xFF787E65,
   );
 
   @override
-  void dispose() {
-    _emailCtrl.dispose();
-    _passCtrl.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    _checkAutoLogin(); // ✅ تسجيل دخول تلقائي لو Remember Me مفعّل
   }
 
-  // Show error messages
+  // ✅ تحقق إذا المستخدم مفعّل "Remember Me" و Logged In
+  Future<void> _checkAutoLogin() async {
+    final prefs =
+        await SharedPreferences.getInstance();
+    final remember =
+        prefs.getBool('remember_me') ??
+        false;
+    final currentUser = FirebaseAuth
+        .instance
+        .currentUser;
+
+    if (remember &&
+        currentUser != null) {
+      // المستخدم مفعّل Remember Me وموجود في Firebase
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              const MainLayout(),
+        ),
+      );
+    }
+  }
+
+  // ✅ حفظ حالة Remember Me بعد تسجيل الدخول
+  Future<void> _saveRememberMe(
+    bool value,
+  ) async {
+    final prefs =
+        await SharedPreferences.getInstance();
+    await prefs.setBool(
+      'remember_me',
+      value,
+    );
+  }
+
   void _showErrorSnackBar(
     String message,
   ) {
@@ -48,34 +84,6 @@ class _SignInScreenState
         backgroundColor: Colors.red,
         behavior:
             SnackBarBehavior.floating,
-        duration: const Duration(
-          seconds: 4,
-        ),
-        action: SnackBarAction(
-          label: '',
-          textColor: Colors.white,
-          onPressed: () {},
-        ),
-      ),
-    );
-  }
-
-  // Show success messages
-  void _showSuccessSnackBar(
-    String message,
-  ) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: green,
-        behavior:
-            SnackBarBehavior.floating,
-        duration: const Duration(
-          seconds: 4,
-        ),
       ),
     );
   }
@@ -85,13 +93,6 @@ class _SignInScreenState
         .validate()) {
       _showErrorSnackBar(
         'Please fill all fields correctly',
-      );
-      return;
-    }
-
-    if (!rememberPassword) {
-      _showErrorSnackBar(
-        'Please agree to remember password',
       );
       return;
     }
@@ -110,19 +111,16 @@ class _SignInScreenState
       final user = cred.user!;
       await user.reload();
 
-      // Check email verification
       if (!user.emailVerified) {
         try {
           await user
               .sendEmailVerification();
-        } catch (e) {
-          // Ignore error if verification email fails to send
-        }
+        } catch (_) {}
         await FirebaseAuth.instance
             .signOut();
 
         _showErrorSnackBar(
-          'Email not verified!\nPlease check your email and verify your account',
+          'Email not verified! Please verify your email first.',
         );
         setState(
           () => _loading = false,
@@ -130,7 +128,11 @@ class _SignInScreenState
         return;
       }
 
-      // Sign in successfully
+      // ✅ إذا فعّل Remember Me نحفظ حالته
+      await _saveRememberMe(
+        rememberPassword,
+      );
+
       if (mounted) {
         Navigator.pushReplacement(
           context,
@@ -143,8 +145,7 @@ class _SignInScreenState
     } on FirebaseAuthException catch (
       e
     ) {
-      String msg = '';
-
+      String msg;
       switch (e.code) {
         case 'user-not-found':
           msg =
@@ -158,25 +159,20 @@ class _SignInScreenState
           break;
         case 'user-disabled':
           msg =
-              'This account is disabled, please contact support';
+              'This account is disabled';
           break;
         case 'too-many-requests':
           msg =
-              'Too many login attempts. Please try again in a few minutes or reset your password';
-          break;
-        case 'invalid-credential':
-          msg =
-              'Email or password is incorrect';
+              'Too many attempts, please try again later';
           break;
         default:
           msg =
-              'Login error occurred: ${e.message}';
+              'Login error: ${e.message}';
       }
-
       _showErrorSnackBar(msg);
     } catch (e) {
       _showErrorSnackBar(
-        'Unexpected error occurred, please try again',
+        'Unexpected error: $e',
       );
     } finally {
       if (mounted)
@@ -249,17 +245,15 @@ class _SignInScreenState
                         validator: (v) {
                           if (v ==
                                   null ||
-                              v.isEmpty) {
+                              v.isEmpty)
                             return 'Please enter email';
-                          }
                           if (!v.contains(
                                 '@',
                               ) ||
                               !v.contains(
                                 '.',
-                              )) {
-                            return 'Invalid email address';
-                          }
+                              ))
+                            return 'Invalid email';
                           return null;
                         },
                         decoration: _input(
@@ -285,13 +279,11 @@ class _SignInScreenState
                         validator: (v) {
                           if (v ==
                                   null ||
-                              v.isEmpty) {
+                              v.isEmpty)
                             return 'Please enter password';
-                          }
                           if (v.length <
-                              6) {
+                              6)
                             return 'Password must be at least 6 characters';
-                          }
                           return null;
                         },
                         decoration: _input(
@@ -314,11 +306,13 @@ class _SignInScreenState
                               Checkbox(
                                 value:
                                     rememberPassword,
-                                onChanged: (v) => setState(
-                                  () => rememberPassword =
-                                      v ??
-                                      false,
-                                ),
+                                onChanged: (v) {
+                                  setState(
+                                    () => rememberPassword =
+                                        v ??
+                                        false,
+                                  );
+                                },
                                 activeColor:
                                     green,
                               ),
@@ -357,6 +351,7 @@ class _SignInScreenState
                         height: 25,
                       ),
 
+                      // Sign in
                       SizedBox(
                         width: double
                             .infinity,
@@ -404,7 +399,7 @@ class _SignInScreenState
                         height: 25,
                       ),
 
-                      // Don't have account
+                      // Sign up
                       Row(
                         mainAxisAlignment:
                             MainAxisAlignment
@@ -438,9 +433,6 @@ class _SignInScreenState
                             ),
                           ),
                         ],
-                      ),
-                      const SizedBox(
-                        height: 20,
                       ),
                     ],
                   ),

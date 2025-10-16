@@ -35,6 +35,29 @@ class _SignUpScreenState extends State<SignUpScreen> {
     super.dispose();
   }
 
+  //error messages style
+  void _showErrorMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
+          ),
+        ),
+        backgroundColor: Colors.redAccent.shade700,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        duration: const Duration(seconds: 4),
+        elevation: 6,
+      ),
+    );
+  }
+
   String? _validatePhone(String? v) {
     if (v == null || v.isEmpty) return 'Enter phone number';
     if (!RegExp(r'^\d{9}$').hasMatch(v)) {
@@ -88,11 +111,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
       // email and phone already in use
       if (emailExists && phoneExists) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Both email and phone number are already in use'),
-            ),
-          );
+          _showErrorMessage('Both email and phone number are already in use');
         }
         return;
       }
@@ -104,9 +123,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
         }
 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Phone number is already in use')),
-          );
+          _showErrorMessage('Phone number is already in use');
         }
         return;
       }
@@ -114,9 +131,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
       // email in use
       if (emailExists) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Email is already in use')),
-          );
+          _showErrorMessage('Email is already in use');
         }
         return;
       }
@@ -165,9 +180,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
       if (e.code == 'weak-password') msg = 'Password is too weak';
 
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(msg)));
+        _showErrorMessage(msg);
       }
     } on FirebaseException catch (e) {
       String msg = 'Something went wrong';
@@ -175,9 +188,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
       if (e.code == 'unavailable') msg = 'Service unavailable';
 
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(msg)));
+        _showErrorMessage(msg);
       }
 
       try {
@@ -185,9 +196,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
       } catch (_) {}
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('An unexpected error occurred')),
-        );
+        _showErrorMessage('An unexpected error occurred');
       }
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -257,7 +266,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                       ),
                       const SizedBox(height: 25),
 
-                      // Email
+                      // Email (محسّن للتحقق من الصيغة)
                       TextFormField(
                         controller: _emailCtrl,
                         decoration: InputDecoration(
@@ -267,9 +276,18 @@ class _SignUpScreenState extends State<SignUpScreen> {
                             borderRadius: BorderRadius.circular(10),
                           ),
                         ),
-                        validator: (v) =>
-                            v == null || v.isEmpty ? 'Enter Email' : null,
                         keyboardType: TextInputType.emailAddress,
+                        validator: (v) {
+                          if (v == null || v.trim().isEmpty)
+                            return 'Enter Email';
+                          final email = v.trim();
+                          final emailRegex = RegExp(
+                            r"^[\w\.\-]+@[a-zA-Z0-9\-]+\.[a-zA-Z]{2,}$",
+                          );
+                          if (!emailRegex.hasMatch(email))
+                            return 'Invalid email format';
+                          return null;
+                        },
                       ),
                       const SizedBox(height: 25),
 
@@ -305,27 +323,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
                           ),
                         ),
                         validator: _validatePassword,
-                      ),
-                      const SizedBox(height: 25),
-
-                      // Agree to terms
-                      Row(
-                        children: [
-                          Checkbox(
-                            value: agreePersonalData,
-                            onChanged: (v) =>
-                                setState(() => agreePersonalData = v ?? false),
-                            activeColor: const Color(0xFF787E65),
-                          ),
-                          const Text('I agree to the processing of '),
-                          Text(
-                            'Personal data',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: const Color(0xFF787E65),
-                            ),
-                          ),
-                        ],
                       ),
                       const SizedBox(height: 25),
 

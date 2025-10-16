@@ -16,10 +16,10 @@ import 'package:flutter/foundation.dart'
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 1) Load .env BEFORE anything reads dotenv.get(...)
+  // 1) Load environment variables
   await dotenv.load(fileName: ".env");
 
-  // 2) Init Firebase
+  // 2) Initialize Firebase
   await Firebase.initializeApp();
 
   // 3) DEV-ONLY AUTO LOGIN (anonymous)
@@ -59,13 +59,10 @@ Future<void> main() async {
   final remember = prefs.getBool('remember_me') ?? false;
   final user = FirebaseAuth.instance.currentUser;
 
-  // نحدد الصفحة اللي يبدأ منها التطبيق
   Widget startScreen;
-  if (remember && user != null) {
-    // المستخدم مفعّل "Remember Me" وموجود في Firebase
+  if (user != null) {
     startScreen = const MainLayout();
   } else {
-    // المستخدم مو مفعّل remember أو ما سجّل دخول
     startScreen = const WelcomeScreen();
   }
 

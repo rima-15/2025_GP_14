@@ -5,6 +5,10 @@ import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:madar_app/screens/venue_page.dart';
 
+// ADDED: Firestore + Storage
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart' as storage;
+
 /// ------------------ Categories & curated names ------------------
 
 enum VenueCategory { malls, stadiums, airports }
@@ -36,28 +40,9 @@ const Map<VenueCategory, List<String>> _curatedNames = {
 };
 
 /// OPTIONALLY pin correct Google place_ids here once you confirm them.
-/// When present, we use the ID directly and skip fuzzy matching.
 const Map<String, String> _knownPlaceIds = {
-  // Stadiums (examples; fill in real IDs when you resolve them)
-  // 'Al -Awwal Park': 'ChIJxxxxxxxxxxxxxxx',
-  // 'KINGDOM ARENA': 'ChIJxxxxxxxxxxxxxxx',
-  // 'King Fahd Stadium': 'ChIJxxxxxxxxxxxxxxx',
-  // 'Prince Faisal Bin Fahd Stadium': 'ChIJxxxxxxxxxxxxxxx',
-
-  // Airport
-  // 'King Khalid International Airport': 'ChIJxxxxxxxxxxxxxxx',
-
-  // Malls
+  // Example:
   // 'Solitaire': 'ChIJxxxxxxxxxxxxxxx',
-  // 'VIA Riyadh': 'ChIJxxxxxxxxxxxxxxx',
-  // 'Cenomi Al Nakheel Mall': 'ChIJxxxxxxxxxxxxxxx',
-  // 'Cenomi The View Mall': 'ChIJxxxxxxxxxxxxxxx',
-  // 'Riyadh Gallery Mall': 'ChIJxxxxxxxxxxxxxxx',
-  // 'Granada Mall': 'ChIJxxxxxxxxxxxxxxx',
-  // 'Riyadh Park': 'ChIJxxxxxxxxxxxxxxx',
-  // 'Panorama Mall': 'ChIJxxxxxxxxxxxxxxx',
-  // 'Hayat Mall': 'ChIJxxxxxxxxxxxxxxx',
-  // 'Roshn Front - Shopping Area': 'ChIJxxxxxxxxxxxxxxx',
 };
 
 /// ------------------ Screen ------------------
@@ -104,10 +89,6 @@ class HomePageState extends State<HomePage> {
     });
 
     try {
-      if (_svc.apiKey.isEmpty) {
-        throw Exception('Missing GOOGLE_API_KEY in .env');
-      }
-
       // get device location (fallback Riyadh)
       try {
         final enabled = await Geolocator.isLocationServiceEnabled();
@@ -136,6 +117,48 @@ class HomePageState extends State<HomePage> {
     }
   }
 
+  // Kick off ratings fetch in the background (non-blocking)
+  Future<void> _kickOffRatings(List<VenueData> items) async {
+    if (_svc.apiKey.isEmpty) return; // no key → skip quietly
+    for (final v in items) {
+      if (v.placeId == null || v.placeId!.isEmpty) continue;
+      _fetchRating(v);
+    }
+  }
+
+  // Fetch a single rating with a tight timeout, then update state
+  Future<void> _fetchRating(VenueData v) async {
+    try {
+      final details = await _svc
+          .details(v.placeId!)
+          .timeout(const Duration(seconds: 6));
+      if (details == null) return;
+      final r = (details['rating'] ?? 0).toDouble();
+
+      if (!mounted) return;
+      setState(() {
+        v.rating = r; // only rating (no reviews)
+      });
+    } catch (_) {}
+  }
+
+  // DO NOT call Storage here (keeps UI fast).
+  // This is a cheap, synchronous pick from doc fields.
+  String? _cheapPrimaryUrl(Map<String, dynamic> d) {
+    final coverUrl = (d['coverUrl'] as String?)?.trim();
+    if (coverUrl != null && coverUrl.isNotEmpty) return coverUrl;
+
+    final photoUrlGoogle = (d['photoUrl_google'] as String?)?.trim();
+    if (photoUrlGoogle != null && photoUrlGoogle.isNotEmpty) {
+      return photoUrlGoogle;
+    }
+
+    final legacy = (d['photoUrl'] as String?)?.trim();
+    if (legacy != null && legacy.isNotEmpty) return legacy;
+
+    return null;
+  }
+
   Future<void> _loadVenues() async {
     final myToken = ++_loadToken;
     if (_isLoadingNow) return;
@@ -144,102 +167,82 @@ class HomePageState extends State<HomePage> {
     try {
       final tab = filters[selectedFilterIndex];
 
-      // helper: resolve a list of names under a category into VenueData
-      Future<List<VenueData>> resolveList(
-        VenueCategory cat,
-        List<String> names,
-      ) async {
-        final futures = names.map((name) async {
-          // 1) use pinned ID if available
-          final pinned = _knownPlaceIds[name];
-          final pid = (pinned != null && pinned.isNotEmpty)
-              ? pinned
-              : await _svc.findPlaceIdStrict(
-                  name,
-                  expectCategory: cat,
-                  biasLat: _riyadhLat,
-                  biasLng: _riyadhLng,
-                );
-          if (pid == null) return null;
+      // 1) read from Firestore
+      final col = FirebaseFirestore.instance.collection('venues');
 
-          // 2) details (essentials)
-          final d = await _svc.details(pid);
-          if (d == null) return null;
-
-          final loc =
-              (d['geometry']?['location'] ?? {}) as Map<String, dynamic>;
-          final photos = (d['photos'] as List?)?.cast<Map<String, dynamic>>();
-          final photoRef = (photos != null && photos.isNotEmpty)
-              ? photos.first['photo_reference'] as String?
-              : null;
-
-          return VenueData(
-            placeId: pid,
-            name: d['name'] as String?,
-            address: d['formatted_address'] as String?,
-            lat: (loc['lat'] as num?)?.toDouble(),
-            lng: (loc['lng'] as num?)?.toDouble(),
-            rating: (d['rating'] ?? 0).toDouble(),
-            reviews: d['user_ratings_total'] as int? ?? 0,
-            photoUrl: photoRef == null ? null : _svc.photoUrl(photoRef),
-            category: cat,
-          );
-        }).toList();
-
-        final results = await Future.wait(futures);
-        return results.whereType<VenueData>().toList();
-      }
-
-      // decide which categories to load
-      List<Future<List<VenueData>>> tasks;
-      if (tab == 'All') {
-        tasks = [
-          resolveList(VenueCategory.malls, _curatedNames[VenueCategory.malls]!),
-          resolveList(
-            VenueCategory.stadiums,
-            _curatedNames[VenueCategory.stadiums]!,
-          ),
-          resolveList(
-            VenueCategory.airports,
-            _curatedNames[VenueCategory.airports]!,
-          ),
-        ];
-      } else if (tab == 'Malls') {
-        tasks = [
-          resolveList(VenueCategory.malls, _curatedNames[VenueCategory.malls]!),
-        ];
+      Query<Map<String, dynamic>> q = col;
+      if (tab == 'Malls') {
+        q = q.where('category', isEqualTo: 'malls');
       } else if (tab == 'Stadiums') {
-        tasks = [
-          resolveList(
-            VenueCategory.stadiums,
-            _curatedNames[VenueCategory.stadiums]!,
-          ),
-        ];
-      } else {
-        tasks = [
-          resolveList(
-            VenueCategory.airports,
-            _curatedNames[VenueCategory.airports]!,
-          ),
-        ];
+        q = q.where('category', isEqualTo: 'stadiums');
+      } else if (tab == 'Airports') {
+        q = q.where('category', isEqualTo: 'airports');
       }
 
-      final groups = await Future.wait(tasks);
-      var items = <VenueData>[for (final g in groups) ...g];
+      final snap = await q.get();
+      debugPrint('venues fetched: ${snap.docs.length} (tab=$tab)');
 
-      // text filter (local)
+      var items = <VenueData>[];
+
+      // 2) Build items from Firestore ONLY (no Storage awaits here)
+      for (final doc in snap.docs) {
+        final d = doc.data();
+
+        final String? name = (d['name'] as String?)?.trim();
+        final String? address = (d['address'] as String?)?.trim();
+        final String? categoryStr = (d['category'] as String?)?.trim();
+        final String? explicitPlaceId = (d['placeId'] as String?)?.trim();
+
+        final loc = (d['location'] as Map<String, dynamic>?) ?? const {};
+        final double? lat = (loc['lat'] as num?)?.toDouble();
+        final double? lng = (loc['lng'] as num?)?.toDouble();
+
+        final VenueCategory cat = () {
+          if (categoryStr == 'stadiums') return VenueCategory.stadiums;
+          if (categoryStr == 'airports') return VenueCategory.airports;
+          return VenueCategory.malls;
+        }();
+
+        // keep coverPath as-is (for lazy image fetch in card)
+        final String? coverPath = (d['coverPath'] as String?)?.trim();
+
+        // quick URL if any (will be used until coverPath resolves)
+        final String? cheapUrl = _cheapPrimaryUrl(d);
+
+        // prefer doc.placeId; fallback to pinned map if needed
+        String? placeId = explicitPlaceId;
+        if ((placeId == null || placeId.isEmpty) && name != null) {
+          placeId = _knownPlaceIds[name];
+        }
+
+        items.add(
+          VenueData(
+            placeId: placeId,
+            name: name,
+            address: address,
+            lat: lat,
+            lng: lng,
+            rating: 0, // temp — updated asynchronously
+            photoUrl: cheapUrl, // quick URL shown immediately
+            coverPath: coverPath, // try downloadURL lazily in card
+            category: cat,
+          ),
+        );
+      }
+
+      // 3) local search filter
       if (_query.isNotEmpty) {
-        final q = _query.toLowerCase();
+        final ql = _query.toLowerCase();
         items = items
             .where(
               (v) =>
-                  (v.name ?? '').toLowerCase().contains(q) ||
-                  (v.address ?? '').toLowerCase().contains(q),
+                  (v.name ?? '').toLowerCase().contains(ql) ||
+                  (v.address ?? '').toLowerCase().contains(ql),
             )
             .toList();
       }
 
-      // distance + sort (local)
+      // 4) sort by distance
       for (final v in items) {
         if (v.lat != null && v.lng != null) {
           v.distanceMeters = Geolocator.distanceBetween(
@@ -257,12 +260,16 @@ class HomePageState extends State<HomePage> {
             (a.distanceMeters ?? 1e12).compareTo(b.distanceMeters ?? 1e12),
       );
 
+      // 5) show list immediately
       if (mounted && myToken == _loadToken) {
         setState(() {
           _venues = items;
           _loading = false;
         });
       }
+
+      // 6) fetch ONLY ratings in background
+      _kickOffRatings(items);
     } catch (e) {
       if (mounted && myToken == _loadToken) {
         setState(() {
@@ -373,17 +380,39 @@ class HomePageState extends State<HomePage> {
 
   void _openVenue(VenueData v) {
     if (v.placeId == null) return;
+
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => VenuePage(
           placeId: v.placeId!,
           name: v.name ?? '',
-          image: v.photoUrl, // null -> placeholder in VenuePage
+          image: v.photoUrl,
           description: v.address ?? '',
+          // eventBased: v.category == VenueCategory.stadiums, // enable if your VenuePage has this param
         ),
       ),
     );
+  }
+
+  // Lazy image resolver for each card:
+  // - First use v.photoUrl if already present (coverUrl/photoUrl_google/photoUrl)
+  // - Else, try to resolve coverPath → downloadURL with short timeout
+  Future<String?> _imageUrlFor(VenueData v) async {
+    if (v.photoUrl != null && v.photoUrl!.isNotEmpty) return v.photoUrl;
+    if (v.coverPath == null || v.coverPath!.isEmpty) return null;
+
+    try {
+      final ref = storage.FirebaseStorage.instance.ref(v.coverPath!);
+      final url = await ref.getDownloadURL().timeout(
+        const Duration(seconds: 3),
+      ); // short timeout
+      // cache for later paints
+      v.photoUrl = url;
+      return url;
+    } catch (_) {
+      return null; // fallback handled by widget
+    }
   }
 
   Widget _buildVenueCard(VenueData v) {
@@ -411,23 +440,38 @@ class HomePageState extends State<HomePage> {
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
-              child: v.photoUrl == null
-                  ? Container(
-                      width: 100,
-                      height: 100,
-                      color: Colors.grey[200],
-                      child: const Icon(
-                        Icons.location_city,
-                        size: 40,
-                        color: Colors.grey,
-                      ),
-                    )
-                  : Image.network(
-                      v.photoUrl!,
-                      width: 100,
-                      height: 100,
+              child: SizedBox(
+                width: 100,
+                height: 100,
+                child: FutureBuilder<String?>(
+                  future: _imageUrlFor(v),
+                  builder: (context, snap) {
+                    final url = snap.data ?? v.photoUrl;
+                    if (url == null || url.isEmpty) {
+                      return Container(
+                        color: Colors.grey[200],
+                        child: const Icon(
+                          Icons.location_city,
+                          size: 40,
+                          color: Colors.grey,
+                        ),
+                      );
+                    }
+                    return Image.network(
+                      url,
                       fit: BoxFit.cover,
-                    ),
+                      errorBuilder: (_, __, ___) => Container(
+                        color: Colors.grey[200],
+                        child: const Icon(
+                          Icons.broken_image,
+                          size: 40,
+                          color: Colors.grey,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
             ),
             Expanded(
               child: Padding(
@@ -491,9 +535,9 @@ class VenueData {
   final String? address;
   final double? lat;
   final double? lng;
-  final double? rating;
-  final int? reviews;
-  final String? photoUrl;
+  double? rating; // <- mutable so background rating can update
+  String? photoUrl; // may be set later (cached)
+  final String? coverPath; // Storage path (lazy-resolved)
   final VenueCategory category;
 
   double? distanceMeters;
@@ -505,8 +549,8 @@ class VenueData {
     this.lat,
     this.lng,
     this.rating,
-    this.reviews,
     this.photoUrl,
+    this.coverPath,
     required this.category,
     this.distanceMeters,
   });
@@ -521,76 +565,16 @@ class _PlacesSvc {
   Uri _uri(String path, Map<String, String> q) =>
       Uri.https('maps.googleapis.com', path, {...q, 'key': apiKey});
 
-  /// Stricter Find Place: tight Riyadh bias, fetch types, prefer expected category.
-  Future<String?> findPlaceIdStrict(
-    String text, {
-    VenueCategory? expectCategory,
-    double biasLat = _riyadhLat,
-    double biasLng = _riyadhLng,
-  }) async {
-    final uri = _uri('/maps/api/place/findplacefromtext/json', {
-      'input': text,
-      'inputtype': 'textquery',
-      'fields': 'place_id,name,types,geometry',
-      'locationbias': 'circle:20000@$biasLat,$biasLng', // tighten around Riyadh
-      'region': 'sa',
-      'language': 'en',
-    });
-
-    final r = await http.get(uri).timeout(const Duration(seconds: 10));
-    final j = jsonDecode(r.body) as Map<String, dynamic>;
-    if (j['status'] != 'OK') return null;
-
-    final candidates = (j['candidates'] as List).cast<Map<String, dynamic>>();
-    if (candidates.isEmpty) return null;
-
-    int score(Map<String, dynamic> c) {
-      final name = (c['name'] ?? '').toString().toLowerCase();
-      final types = ((c['types'] as List?)?.cast<String>() ?? const [])
-          .map((e) => e.toLowerCase())
-          .toSet();
-      int s = 0;
-      // prefer expected google type
-      if (expectCategory == VenueCategory.stadiums && types.contains('stadium'))
-        s += 100;
-      if (expectCategory == VenueCategory.airports && types.contains('airport'))
-        s += 100;
-      if (expectCategory == VenueCategory.malls &&
-          types.contains('shopping_mall'))
-        s += 100;
-      // Name tokens to help disambiguate common cases
-      if (name.contains('awwal')) s += 10;
-      if (name.contains('kingdom arena')) s += 10;
-      if (name.contains('king fahd')) s += 10;
-      if (name.contains('riyadh park')) s += 5;
-      return s;
-    }
-
-    candidates.sort((b, a) => score(a) - score(b));
-    return candidates.first['place_id'] as String?;
-  }
-
-  /// Details (Essentials fields only)
+  /// Details (only rating) — used only to fetch rating quickly
   Future<Map<String, dynamic>?> details(String placeId) async {
+    if (apiKey.isEmpty) return null;
     final uri = _uri('/maps/api/place/details/json', {
       'place_id': placeId,
-      'fields': [
-        'name',
-        'formatted_address',
-        'geometry',
-        'rating',
-        'user_ratings_total',
-        'opening_hours',
-        'photos',
-        'website',
-      ].join(','),
+      'fields': ['rating', 'user_ratings_total'].join(','),
     });
     final r = await http.get(uri).timeout(const Duration(seconds: 10));
     final j = jsonDecode(r.body) as Map<String, dynamic>;
     if (j['status'] != 'OK') return null;
     return j['result'] as Map<String, dynamic>;
   }
-
-  String photoUrl(String photoRef) =>
-      'https://maps.googleapis.com/maps/api/place/photo?maxwidth=600&photo_reference=$photoRef&key=$apiKey';
 }

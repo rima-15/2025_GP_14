@@ -3,23 +3,33 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
+import 'package:flutter/gestures.dart'; // less and more in descreption
+import 'category_page.dart';
 
-import 'category_page.dart'; // keep your existing page
+// ADDED: Storage + cache for coverPath header
+import 'package:firebase_storage/firebase_storage.dart' as storage;
+import 'package:cached_network_image/cached_network_image.dart';
 
 const kGreen = Color(0xFF787E65);
 
 class VenuePage extends StatefulWidget {
   final String placeId; // required for details
   final String name; // title
-  final String? image; // can be asset path or http url
-  final String description; // fallback description
+  final String description; // fallback description (from DB ONLY)
+  final String? dbAddress; // from DB ONLY
+  final String? coverPath; // Storage path
+
+  // ADDED: if Home already resolved the URL, pass it to show image instantly
+  final String? initialCoverUrl;
 
   const VenuePage({
     super.key,
     required this.placeId,
     required this.name,
-    this.image,
     required this.description,
+    this.dbAddress,
+    this.coverPath,
+    this.initialCoverUrl,
   });
 
   @override
@@ -30,29 +40,46 @@ class _VenuePageState extends State<VenuePage> {
   bool _loading = true;
   String? _error;
 
-  // Details data
+  // Details data (address seeded from DB; never overwritten by API)
   String? _address;
-  String? _editorial;
 
   // Hours-related
   bool? _openNow;
-  List<String> _weekdayText =
-      const []; // Google’s weekday_text (Mon..Sun usually)
-  List<dynamic> _periods = const []; // structured hours for precise calc
-  int? _utcOffsetMinutes; // minutes from Google
-
-  // Business & types
-  String?
-  _businessStatus; // OPERATIONAL, CLOSED_TEMPORARILY, CLOSED_PERMANENTLY
+  List<String> _weekdayText = const [];
+  List<dynamic> _periods = const [];
+  int? _utcOffsetMinutes;
+  String? _businessStatus;
   List<String> _types = const [];
+
+  // ADDED: storage + tiny URL cache (static to persist across page instances)
+  static final storage.FirebaseStorage _coversStorage =
+      storage.FirebaseStorage.instanceFor(
+        bucket: 'gs://madar-database.firebasestorage.app',
+      );
+  static final Map<String, String> _urlCache = {}; // coverPath -> url
+
+  // ADDED: cache hours per placeId to avoid re-calls when revisiting
+  static final Map<String, Map<String, dynamic>> _hoursCache = {};
+
+  // ADDED: expand/collapse for description
+  bool _descExpanded = false;
 
   @override
   void initState() {
     super.initState();
-    _fetchDetails();
+    _address = widget.dbAddress; // seed from DB (do not override)
+    _loadHours(); // API only for opening hours (+status/types)
   }
 
-  Future<void> _fetchDetails() async {
+  Future<void> _loadHours() async {
+    // if cached, use it instantly
+    final cached = _hoursCache[widget.placeId];
+    if (cached != null) {
+      _applyHours(cached);
+      setState(() => _loading = false);
+      return;
+    }
+
     try {
       final key = dotenv.maybeGet('GOOGLE_API_KEY') ?? '';
       if (key.isEmpty) {
@@ -64,14 +91,11 @@ class _VenuePageState extends State<VenuePage> {
         {
           'place_id': widget.placeId,
           'fields': [
-            'formatted_address',
-            'editorial_summary',
-            'name',
+            'opening_hours',
+            'current_opening_hours',
+            'utc_offset',
             'types',
             'business_status',
-            'utc_offset', // ✅ correct field
-            'opening_hours',
-            'current_opening_hours', // preferred
           ].join(','),
           'key': key,
         },
@@ -86,45 +110,67 @@ class _VenuePageState extends State<VenuePage> {
       }
 
       final res = (j['result'] as Map<String, dynamic>?) ?? {};
-
-      // Prefer current_opening_hours when available
-      final currentOpening =
-          (res['current_opening_hours'] as Map<String, dynamic>?) ?? {};
-      final opening = currentOpening.isNotEmpty
-          ? currentOpening
-          : (res['opening_hours'] as Map<String, dynamic>?) ?? {};
-
-      final editorial =
-          (res['editorial_summary'] as Map<String, dynamic>?)?['overview']
-              as String?;
-      final weekdayText =
-          (opening['weekday_text'] as List?)?.cast<String>() ?? const [];
-      final periods = (opening['periods'] as List?) ?? const [];
-      final openNow = opening['open_now'] as bool?;
-      final utcOffset = res['utc_offset'] as int?;
-      final types = (res['types'] as List?)?.cast<String>() ?? const [];
-      final businessStatus = res['business_status'] as String?;
-
-      setState(() {
-        _address = res['formatted_address'] as String?;
-        _editorial = editorial;
-        _openNow = openNow;
-        _weekdayText = weekdayText;
-        _periods = periods;
-        _utcOffsetMinutes = utcOffset;
-        _types = types;
-        _businessStatus = businessStatus;
-        _loading = false;
-      });
+      _hoursCache[widget.placeId] = res; // cache for next visits
+      _applyHours(res);
     } catch (e) {
       setState(() {
         _error = e.toString();
+      });
+    } finally {
+      setState(() {
         _loading = false;
       });
     }
   }
 
-  // ---------- Helpers: type detection & special cases ----------
+  void _applyHours(Map<String, dynamic> res) {
+    final currentOpening =
+        (res['current_opening_hours'] as Map<String, dynamic>?) ?? {};
+    final opening = currentOpening.isNotEmpty
+        ? currentOpening
+        : (res['opening_hours'] as Map<String, dynamic>?) ?? {};
+
+    final weekdayText =
+        (opening['weekday_text'] as List?)?.cast<String>() ?? const [];
+    final periods = (opening['periods'] as List?) ?? const [];
+    final openNow = opening['open_now'] as bool?;
+    final utcOffset = res['utc_offset'] as int?;
+    final types = (res['types'] as List?)?.cast<String>() ?? const [];
+    final businessStatus = res['business_status'] as String?;
+
+    setState(() {
+      _openNow = openNow;
+      _weekdayText = weekdayText;
+      _periods = periods;
+      _utcOffsetMinutes = utcOffset;
+      _types = types;
+      _businessStatus = businessStatus;
+    });
+  }
+
+  // ---------- Helpers: image from Storage coverPath ----------
+  Future<String?> _resolveCoverUrl() async {
+    // prefer handed-in URL from Home for instant paint
+    if ((widget.initialCoverUrl ?? '').isNotEmpty)
+      return widget.initialCoverUrl;
+
+    final p = widget.coverPath;
+    if (p == null || p.isEmpty) return null;
+    if (_urlCache.containsKey(p)) return _urlCache[p];
+    try {
+      final ref = _coversStorage.ref(p);
+      final url = await ref.getDownloadURL().timeout(
+        const Duration(seconds: 8),
+      );
+      _urlCache[p] = url;
+      // Warm bytes
+      // ignore: unused_result
+      CachedNetworkImageProvider(url).resolve(const ImageConfiguration());
+      return url;
+    } catch (_) {
+      return null;
+    }
+  }
 
   bool get _isAirport {
     if (_types.any((t) => t.toLowerCase() == 'airport')) return true;
@@ -136,7 +182,7 @@ class _VenuePageState extends State<VenuePage> {
     return _types.any((t) => t.toLowerCase() == 'stadium') ||
         widget.name.toLowerCase().contains('stadium') ||
         widget.name.toLowerCase().contains('arena') ||
-        widget.name.toLowerCase().contains('park'); // e.g., Al-Awwal Park
+        widget.name.toLowerCase().contains('park');
   }
 
   bool get _isTempClosed => _businessStatus == 'CLOSED_TEMPORARILY';
@@ -146,22 +192,13 @@ class _VenuePageState extends State<VenuePage> {
       (_weekdayText.isNotEmpty && _weekdayText.length >= 1) ||
       (_periods.isNotEmpty);
 
-  bool get _looks24h =>
-      _weekdayText.any((l) => l.toLowerCase().contains('open 24 hours'));
-
-  // Use Google offset when present; otherwise device zone offset (minutes)
   int get _effectiveOffsetMinutes =>
       _utcOffsetMinutes ?? DateTime.now().timeZoneOffset.inMinutes;
 
-  // ---------- Time math using periods + UTC offset ----------
-
-  /// Converts Google "day" (0=Sunday..6=Saturday) + "HHMM" to local DateTime.
   DateTime _toLocalDateTime(int targetDay, String hhmm) {
     final offset = Duration(minutes: _effectiveOffsetMinutes);
     final nowLocal = DateTime.now().toUtc().add(offset);
-
-    // Find date of the next targetDay relative to local today (0=Sun..6=Sat)
-    final todayIdx = (nowLocal.weekday % 7); // Sun=0 .. Sat=6
+    final todayIdx = (nowLocal.weekday % 7);
     int diff = (targetDay - todayIdx);
     if (diff < 0) diff += 7;
     final date = DateTime(
@@ -169,15 +206,11 @@ class _VenuePageState extends State<VenuePage> {
       nowLocal.month,
       nowLocal.day,
     ).add(Duration(days: diff));
-
-    // Parse HHMM (24h)
     final hh = int.parse(hhmm.substring(0, 2));
     final mm = int.parse(hhmm.substring(2, 4));
-
     return DateTime(date.year, date.month, date.day, hh, mm);
   }
 
-  // earliest opening window that starts "today" (local)
   DateTime? _firstOpenToday(List<_OpenWindow> windows, DateTime nowLocal) {
     DateTime? first;
     for (final w in windows) {
@@ -192,94 +225,64 @@ class _VenuePageState extends State<VenuePage> {
     return first;
   }
 
-  /// Returns precise status text like:
-  /// - "Open · Closes 2:00 AM"
-  /// - "Closed · Opens 9:00 AM"
-  /// Falls back to weekday_text when periods not available.
   String _preciseStatusNow() {
-    // Handle business_status quickly
     if (_isTempClosed) return 'Temporarily closed';
     if (_isPermClosed) return 'Permanently closed';
+    if (_isAirport && !_hasAnyHours) return 'Open 24 hours';
+    if (_isStadium && !_hasAnyHours) return 'Hours vary by event';
 
-    // Airports: if no hours at all, treat as open 24h (no dropdown)
-    if (_isAirport && !_hasAnyHours) {
-      return 'Open 24 hours';
-    }
-    // Stadiums: if no hours, event-based (no dropdown)
-    if (_isStadium && !_hasAnyHours) {
-      return 'Hours vary by event';
-    }
-
-    // If periods exist, use them for accurate next open/close
     if (_periods.isNotEmpty) {
       final offset = Duration(minutes: _effectiveOffsetMinutes);
       final nowLocal = DateTime.now().toUtc().add(offset);
 
-      // Build windows (open, close)
       final windows = <_OpenWindow>[];
       for (final p in _periods) {
         final m = p as Map<String, dynamic>;
-
         final open = (m['open'] ?? {}) as Map<String, dynamic>;
         final close = (m['close'] ?? {}) as Map<String, dynamic>;
-
         if (!open.containsKey('day') || !open.containsKey('time')) continue;
 
         final openDT = _toLocalDateTime(
           (open['day'] as num).toInt(),
           (open['time'] as String),
         );
-        DateTime? closeDT;
+        DateTime closeDT;
         if (close.containsKey('day') && close.containsKey('time')) {
           closeDT = _toLocalDateTime(
             (close['day'] as num).toInt(),
             (close['time'] as String),
           );
-          // overnight close rolls to the next day
-          if (!closeDT.isAfter(openDT)) {
+          if (!closeDT.isAfter(openDT))
             closeDT = closeDT.add(const Duration(days: 1));
-          }
         } else {
-          // No close → treat as 24h window from open to next day
           closeDT = openDT.add(const Duration(days: 1));
         }
-
-        // duplicate 1 extra week forward to cover wrap-around
         for (int k = 0; k < 2; k++) {
           windows.add(
             _OpenWindow(
               openDT: openDT.add(Duration(days: 7 * k)),
-              closeDT: closeDT!.add(Duration(days: 7 * k)),
+              closeDT: closeDT.add(Duration(days: 7 * k)),
             ),
           );
         }
       }
 
       windows.sort((a, b) => a.openDT.compareTo(b.openDT));
-
-      // ---- pre-check: before today's first opening? → Closed · Opens HH:MM
       final firstToday = _firstOpenToday(windows, nowLocal);
       if (firstToday != null && nowLocal.isBefore(firstToday)) {
         return 'Closed · Opens ${_formatClock(firstToday)}';
       }
-
-      // Determine if currently open and what closes next
       for (final w in windows) {
         if (nowLocal.isBefore(w.openDT)) {
-          // Not yet open → next open is w.openDT
           return 'Closed · Opens ${_formatClock(w.openDT)}';
         }
         if (nowLocal.isAfter(w.openDT) && nowLocal.isBefore(w.closeDT)) {
-          // Currently open → show close time
           return 'Open · Closes ${_formatClock(w.closeDT)}';
         }
       }
-
-      // No future window matched: consider closed without known next open
       return 'Closed';
     }
 
-    // Fallback to weekday_text + open_now heuristic
     return _statusFromWeekdayTextFallback();
   }
 
@@ -290,9 +293,6 @@ class _VenuePageState extends State<VenuePage> {
     return '$hour:$min $ampm';
   }
 
-  // ---------- Fallback when periods/offset not available ----------
-
-  /// "9:00 AM – 11:00 PM" → ["9:00 AM","11:00 PM"]
   List<String>? _splitRange(String s) {
     final m = RegExp(
       r'(\d{1,2}:\d{2}(?:\s?[AP]M)?)\s*[–-]\s*(\d{1,2}:\d{2}\s?[AP]M)',
@@ -300,8 +300,6 @@ class _VenuePageState extends State<VenuePage> {
     if (m == null) return null;
     var start = m.group(1)!.trim();
     var end = m.group(2)!.trim();
-
-    // If start misses AM/PM but end has it, copy it.
     final meridiem = RegExp(r'([AP]M)').firstMatch(end)?.group(1);
     if (meridiem != null && !RegExp(r'[AP]M').hasMatch(start)) {
       start = '$start $meridiem';
@@ -323,7 +321,7 @@ class _VenuePageState extends State<VenuePage> {
     if (_weekdayText.isEmpty) return 'Hours unavailable';
 
     final now = DateTime.now();
-    final today = now.weekday % 7; // 0 Sun..6 Sat
+    final today = now.weekday % 7;
     const labelsSunFirst = [
       'Sunday',
       'Monday',
@@ -387,13 +385,9 @@ class _VenuePageState extends State<VenuePage> {
     return null;
   }
 
-  // ---------- UI ----------
-
   @override
   Widget build(BuildContext context) {
-    final summary = (_editorial?.trim().isNotEmpty == true)
-        ? _editorial!.trim()
-        : widget.description.trim();
+    final summary = widget.description.trim(); // DB-only description
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8F8F3),
@@ -418,25 +412,30 @@ class _VenuePageState extends State<VenuePage> {
           : ListView(
               padding: const EdgeInsets.only(bottom: 24),
               children: [
-                if (widget.image != null && widget.image!.isNotEmpty)
-                  _buildHeaderImage(widget.image!),
+                if ((widget.coverPath ?? '').isNotEmpty ||
+                    (widget.initialCoverUrl ?? '').isNotEmpty)
+                  _buildHeaderCover(),
 
-                // Summary (≈2.5 lines → 3 with tight line height)
+                // Summary (inline "More / Show less")
                 Padding(
                   padding: const EdgeInsets.all(16),
-                  child: Text(
-                    summary,
+                  child: _ExpandableText(
+                    text: summary,
+                    maxLines: 3, // keep your intended collapsed height
                     style: const TextStyle(
                       color: Colors.black87,
                       height: 1.25,
                       fontSize: 16,
                     ),
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
+                    linkStyle: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color:
+                          kGreen, // matches your palette; change if you prefer
+                    ),
                   ),
                 ),
 
-                if (_address?.isNotEmpty == true)
+                if ((_address ?? '').isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     child: Text(
@@ -455,7 +454,7 @@ class _VenuePageState extends State<VenuePage> {
 
                 const SizedBox(height: 16),
 
-                // Floor map (your placeholder section)
+                // Floor Map (keep your placeholder section)
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 16),
                   child: Text(
@@ -495,14 +494,24 @@ class _VenuePageState extends State<VenuePage> {
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.all(16),
                     children: [
-                      _categoryCard(context, "Shops", "—", "images/Shops.png"),
+                      _categoryCard(
+                        context,
+                        "Shops",
+                        "120 places",
+                        "images/Shops.png",
+                      ),
                       const SizedBox(width: 12),
-                      _categoryCard(context, "Cafes", "—", "images/Cafes.jpg"),
+                      _categoryCard(
+                        context,
+                        "Cafes",
+                        "25 places",
+                        "images/Cafes.jpg",
+                      ),
                       const SizedBox(width: 12),
                       _categoryCard(
                         context,
                         "Restaurants",
-                        "—",
+                        "40 places",
                         "images/restaurants.jpeg",
                       ),
                     ],
@@ -513,22 +522,54 @@ class _VenuePageState extends State<VenuePage> {
     );
   }
 
-  Widget _buildHeaderImage(String src) {
-    final isHttp = src.startsWith('http');
+  // Header: steady loader -> image; if truly absent, show NA icon
+  Widget _buildHeaderCover() {
     const h = 200.0;
-    return isHttp
-        ? Image.network(
-            src,
+    return FutureBuilder<String?>(
+      future: _resolveCoverUrl(),
+      builder: (context, snap) {
+        final url = snap.data ?? widget.initialCoverUrl;
+        if (url == null || url.isEmpty) {
+          return SizedBox(
             height: h,
             width: double.infinity,
-            fit: BoxFit.cover,
-          )
-        : Image.asset(
-            src,
-            height: h,
-            width: double.infinity,
-            fit: BoxFit.cover,
+            child: Container(
+              color: const Color(0xFFEDEFE3),
+              alignment: Alignment.center,
+              child: const Icon(
+                Icons.image_not_supported_outlined,
+                color: Colors.black45,
+                size: 40,
+              ),
+            ),
           );
+        }
+        return SizedBox(
+          height: h,
+          width: double.infinity,
+          child: CachedNetworkImage(
+            imageUrl: url,
+            fit: BoxFit.cover,
+            alignment: Alignment.center,
+            placeholder: (_, __) => Container(
+              color: const Color(0xFFEDEFE3),
+              alignment: Alignment.center,
+              child: const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+            errorWidget: (_, __, ___) => Container(
+              color: const Color(0xFFEDEFE3),
+              alignment: Alignment.center,
+              child: const Icon(Icons.broken_image, color: Colors.black45),
+            ),
+            fadeInDuration: const Duration(milliseconds: 120),
+          ),
+        );
+      },
+    );
   }
 
   Widget _hoursCard() {
@@ -542,7 +583,6 @@ class _VenuePageState extends State<VenuePage> {
 
     final statusText = _preciseStatusNow();
 
-    // No dropdown for: Temporarily/Permanently Closed, 24h, event-based, or if no lines exist.
     final noDropdown =
         _isTempClosed ||
         _isPermClosed ||
@@ -550,7 +590,6 @@ class _VenuePageState extends State<VenuePage> {
         statusText == 'Hours vary by event' ||
         sunFirst.isEmpty;
 
-    // Build a title where only "Open"/"Closed"/"Temporarily closed"/"Permanently closed" is colored
     final statusTitle = _statusTitleRich(statusText);
 
     if (noDropdown) {
@@ -581,7 +620,7 @@ class _VenuePageState extends State<VenuePage> {
         ),
         child: ExpansionTile(
           leading: const Icon(Icons.schedule, color: kGreen),
-          title: statusTitle, // colored keyword only
+          title: statusTitle,
           iconColor: kGreen,
           collapsedIconColor: kGreen,
           childrenPadding: const EdgeInsets.symmetric(
@@ -616,29 +655,25 @@ class _VenuePageState extends State<VenuePage> {
     );
   }
 
-  // Renders "Open · Closes 2:00 AM" with only "Open" green (or "Closed" red)
   Widget _statusTitleRich(String statusText) {
-    // By default we split a colored "keyword" from a neutral "rest".
-    // For special phrases we color the whole thing.
     String leading;
     String trailing = '';
     Color? color;
 
-    // ---- special full-phrase coloring ----
     if (statusText == 'Open 24 hours') {
       leading = statusText;
-      color = Colors.green[800]; // all green ✅
+      color = Colors.green[800];
     } else if (statusText == 'Hours vary by event') {
       leading = statusText;
-      color = const Color.fromARGB(255, 239, 139, 0); // orange / dark yellow ✅
+      color = const Color.fromARGB(255, 239, 139, 0);
     } else if (statusText.startsWith('Open')) {
       leading = 'Open';
       trailing = statusText.substring('Open'.length);
-      color = Colors.green[800]; // only "Open" green
+      color = Colors.green[800];
     } else if (statusText.startsWith('Closed')) {
       leading = 'Closed';
       trailing = statusText.substring('Closed'.length);
-      color = Colors.red[700]; // only "Closed" red
+      color = Colors.red[700];
     } else if (statusText.startsWith('Temporarily closed')) {
       leading = 'Temporarily closed';
       trailing = statusText.substring('Temporarily closed'.length);
@@ -648,7 +683,6 @@ class _VenuePageState extends State<VenuePage> {
       trailing = statusText.substring('Permanently closed'.length);
       color = Colors.red[700];
     } else {
-      // neutral fallbacks ("Hours unavailable", etc.)
       leading = statusText;
     }
 
@@ -662,14 +696,9 @@ class _VenuePageState extends State<VenuePage> {
               color: color ?? Colors.black87,
             ),
           ),
-          if (trailing.isNotEmpty)
-            const TextSpan(
-              text: '', // spacer handled by the dot in the string itself
-            ),
-          if (trailing.isNotEmpty)
-            const TextSpan(text: ''), // keep structure identical
-          if (trailing.isNotEmpty)
-            const TextSpan(), // (no visible effect; preserves your design)
+          if (trailing.isNotEmpty) const TextSpan(text: ''),
+          if (trailing.isNotEmpty) const TextSpan(text: ''),
+          if (trailing.isNotEmpty) const TextSpan(),
           if (trailing.isNotEmpty)
             TextSpan(
               text: trailing,
@@ -683,7 +712,6 @@ class _VenuePageState extends State<VenuePage> {
     );
   }
 
-  // same card widget you had
   static Widget _categoryCard(
     BuildContext context,
     String title,
@@ -747,9 +775,132 @@ class _VenuePageState extends State<VenuePage> {
   }
 }
 
-// Simple window model for precise time calc
 class _OpenWindow {
   final DateTime openDT;
   final DateTime closeDT;
   _OpenWindow({required this.openDT, required this.closeDT});
+}
+
+// ---- Inline expandable text ("… More" / "Show less") ----
+class _ExpandableText extends StatefulWidget {
+  final String text;
+  final int maxLines; // collapsed
+  final TextStyle? style;
+  final TextStyle? linkStyle;
+
+  const _ExpandableText({
+    required this.text,
+    this.maxLines = 3,
+    this.style,
+    this.linkStyle,
+  });
+
+  @override
+  State<_ExpandableText> createState() => _ExpandableTextState();
+}
+
+class _ExpandableTextState extends State<_ExpandableText> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final base =
+        widget.style ??
+        const TextStyle(color: Colors.black87, height: 1.25, fontSize: 16);
+    final link =
+        widget.linkStyle ??
+        const TextStyle(fontWeight: FontWeight.w600, color: kGreen);
+
+    // If expanded -> simple full paragraph
+    if (_expanded) {
+      return RichText(
+        text: TextSpan(
+          style: base,
+          children: [
+            TextSpan(text: widget.text),
+            const TextSpan(text: '  '),
+            TextSpan(
+              text: 'show less',
+              style: link,
+              recognizer: (TapGestureRecognizer()
+                ..onTap = () {
+                  setState(() => _expanded = false);
+                }),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Collapsed: measure if it actually overflows
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final tp = TextPainter(
+          text: TextSpan(text: widget.text, style: base),
+          maxLines: widget.maxLines,
+          textDirection: TextDirection.ltr,
+          ellipsis: '…',
+        )..layout(maxWidth: constraints.maxWidth);
+
+        final overflows = tp.didExceedMaxLines;
+
+        if (!overflows) {
+          // no overflow -> render normally
+          return Text(widget.text, style: base);
+        }
+
+        // We need to find how much text fits, then append " … More"
+        final more = ' more';
+        final ellipsis = '…';
+        final linkSpan = TextSpan(text: more, style: link);
+        final testPainter = TextPainter(
+          textDirection: TextDirection.ltr,
+          maxLines: widget.maxLines,
+          ellipsis: ellipsis,
+        );
+
+        // Binary search the cut point
+        int low = 0, high = widget.text.length, cut = 0;
+        while (low <= high) {
+          final mid = (low + high) >> 1;
+          final candidate = widget.text.substring(0, mid);
+          testPainter.text = TextSpan(
+            style: base,
+            children: [
+              TextSpan(text: candidate),
+              TextSpan(text: ' $ellipsis'),
+              linkSpan,
+            ],
+          );
+          testPainter.layout(maxWidth: constraints.maxWidth);
+          if (testPainter.didExceedMaxLines) {
+            high = mid - 1;
+          } else {
+            cut = mid;
+            low = mid + 1;
+          }
+        }
+
+        final visibleText = widget.text.substring(0, cut).trimRight();
+
+        return RichText(
+          text: TextSpan(
+            style: base,
+            children: [
+              TextSpan(text: visibleText),
+              const TextSpan(text: ' … '),
+              TextSpan(
+                text: 'more',
+                style: link,
+                recognizer: (TapGestureRecognizer()
+                  ..onTap = () {
+                    setState(() => _expanded = true);
+                  }),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
 }

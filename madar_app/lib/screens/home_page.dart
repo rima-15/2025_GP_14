@@ -9,41 +9,16 @@ import 'package:madar_app/screens/venue_page.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart' as storage;
 
-/// ------------------ Categories & curated names ------------------
+//Debuging
+import 'package:flutter/foundation.dart'; // kDebugMode
 
-enum VenueCategory { malls, stadiums, airports }
+// ADDED: on-device HTTP image cache with placeholders/error widgets
+import 'package:cached_network_image/cached_network_image.dart';
+
+/// ------------------ Categories & curated names ------------------
 
 const double _riyadhLat = 24.7136;
 const double _riyadhLng = 46.6753;
-
-/// ONLY these venues will be shown, grouped by tabs.
-const Map<VenueCategory, List<String>> _curatedNames = {
-  VenueCategory.airports: ['King Khalid International Airport'],
-  VenueCategory.stadiums: [
-    'King Fahd Stadium',
-    'KINGDOM ARENA',
-    'Al -Awwal Park', // keep exactly this (not Gate 11)
-    'Prince Faisal Bin Fahd Stadium',
-  ],
-  VenueCategory.malls: [
-    'Solitaire',
-    'VIA Riyadh',
-    'Cenomi Al Nakheel Mall',
-    'Cenomi The View Mall',
-    'Riyadh Gallery Mall',
-    'Granada Mall',
-    'Riyadh Park',
-    'Panorama Mall',
-    'Hayat Mall',
-    'Roshn Front - Shopping Area',
-  ],
-};
-
-/// OPTIONALLY pin correct Google place_ids here once you confirm them.
-const Map<String, String> _knownPlaceIds = {
-  // Example:
-  // 'Solitaire': 'ChIJxxxxxxxxxxxxxxx',
-};
 
 /// ------------------ Screen ------------------
 
@@ -54,6 +29,11 @@ class HomePage extends StatefulWidget {
 }
 
 class HomePageState extends State<HomePage> {
+  // firebase storage
+  final storage.FirebaseStorage _coversStorage =
+      storage.FirebaseStorage.instanceFor(
+        bucket: 'gs://madar-database.firebasestorage.app',
+      );
   final Color activeColor = const Color(0xFF787E65);
   final List<String> filters = const ['All', 'Malls', 'Stadiums', 'Airports'];
 
@@ -62,6 +42,8 @@ class HomePageState extends State<HomePage> {
 
   bool _loading = true;
   String? _error;
+
+  // NOTE: live list rendered after local filtering
   List<VenueData> _venues = [];
 
   // Location (fallback Riyadh center)
@@ -75,6 +57,16 @@ class HomePageState extends State<HomePage> {
   // Concurrency guard
   int _loadToken = 0;
   bool _isLoadingNow = false;
+
+  // Simple in-memory cache for resolved {storage path -> downloadURL}
+  final Map<String, String> _imageCache = {};
+
+  // ADDED: Cache Firestore results per tab so we don’t re-fetch on tab switch
+  // keys: 'All' | 'Malls' | 'Stadiums' | 'Airports'
+  final Map<String, List<VenueData>> _tabCache = {};
+
+  // ADDED: cache for ratings already fetched (placeId -> rating)
+  final Map<String, double> _ratingCache = {};
 
   @override
   void initState() {
@@ -107,7 +99,8 @@ class HomePageState extends State<HomePage> {
         }
       } catch (_) {}
 
-      await _loadVenues();
+      await _ensureTabLoaded(); // will serve from cache if present
+      _applyLocalFilterAndSort(); // render
     } catch (e) {
       setState(() {
         _error = e.toString();
@@ -117,56 +110,21 @@ class HomePageState extends State<HomePage> {
     }
   }
 
-  // Kick off ratings fetch in the background (non-blocking)
-  Future<void> _kickOffRatings(List<VenueData> items) async {
-    if (_svc.apiKey.isEmpty) return; // no key → skip quietly
-    for (final v in items) {
-      if (v.placeId == null || v.placeId!.isEmpty) continue;
-      _fetchRating(v);
-    }
+  /// Ensures the current tab’s data exists in cache. Fetches ONCE per tab.
+  Future<void> _ensureTabLoaded() async {
+    final tab = filters[selectedFilterIndex];
+    if (_tabCache.containsKey(tab)) return; // already have it
+
+    await _loadTab(tab); // fetch Firestore once
   }
 
-  // Fetch a single rating with a tight timeout, then update state
-  Future<void> _fetchRating(VenueData v) async {
-    try {
-      final details = await _svc
-          .details(v.placeId!)
-          .timeout(const Duration(seconds: 6));
-      if (details == null) return;
-      final r = (details['rating'] ?? 0).toDouble();
-
-      if (!mounted) return;
-      setState(() {
-        v.rating = r; // only rating (no reviews)
-      });
-    } catch (_) {}
-  }
-
-  // DO NOT call Storage here (keeps UI fast).
-  // This is a cheap, synchronous pick from doc fields.
-  String? _cheapPrimaryUrl(Map<String, dynamic> d) {
-    final coverUrl = (d['coverUrl'] as String?)?.trim();
-    if (coverUrl != null && coverUrl.isNotEmpty) return coverUrl;
-
-    final photoUrlGoogle = (d['photoUrl_google'] as String?)?.trim();
-    if (photoUrlGoogle != null && photoUrlGoogle.isNotEmpty) {
-      return photoUrlGoogle;
-    }
-
-    final legacy = (d['photoUrl'] as String?)?.trim();
-    if (legacy != null && legacy.isNotEmpty) return legacy;
-
-    return null;
-  }
-
-  Future<void> _loadVenues() async {
+  /// Fetch Firestore for a tab and populate cache (no Storage awaits here)
+  Future<void> _loadTab(String tab) async {
     final myToken = ++_loadToken;
     if (_isLoadingNow) return;
     _isLoadingNow = true;
 
     try {
-      final tab = filters[selectedFilterIndex];
-
       // 1) read from Firestore
       final col = FirebaseFirestore.instance.collection('venues');
 
@@ -182,7 +140,7 @@ class HomePageState extends State<HomePage> {
       final snap = await q.get();
       debugPrint('venues fetched: ${snap.docs.length} (tab=$tab)');
 
-      var items = <VenueData>[];
+      final items = <VenueData>[];
 
       // 2) Build items from Firestore ONLY (no Storage awaits here)
       for (final doc in snap.docs) {
@@ -190,6 +148,7 @@ class HomePageState extends State<HomePage> {
 
         final String? name = (d['name'] as String?)?.trim();
         final String? address = (d['address'] as String?)?.trim();
+        final String? description = (d['description'] as String?)?.trim();
         final String? categoryStr = (d['category'] as String?)?.trim();
         final String? explicitPlaceId = (d['placeId'] as String?)?.trim();
 
@@ -197,90 +156,149 @@ class HomePageState extends State<HomePage> {
         final double? lat = (loc['lat'] as num?)?.toDouble();
         final double? lng = (loc['lng'] as num?)?.toDouble();
 
-        final VenueCategory cat = () {
-          if (categoryStr == 'stadiums') return VenueCategory.stadiums;
-          if (categoryStr == 'airports') return VenueCategory.airports;
-          return VenueCategory.malls;
-        }();
+        final String? coverPath = (d['coverPath'] as String?);
+        final String? thumbPath = (d['thumbPath'] as String?);
 
-        // keep coverPath as-is (for lazy image fetch in card)
-        final String? coverPath = (d['coverPath'] as String?)?.trim();
+        // prefer doc.placeId (DB is source of truth)
+        final String? placeId = explicitPlaceId;
 
-        // quick URL if any (will be used until coverPath resolves)
-        final String? cheapUrl = _cheapPrimaryUrl(d);
-
-        // prefer doc.placeId; fallback to pinned map if needed
-        String? placeId = explicitPlaceId;
-        if ((placeId == null || placeId.isEmpty) && name != null) {
-          placeId = _knownPlaceIds[name];
+        // distance (for sort; null -> far away)
+        double? dist;
+        if (lat != null && lng != null) {
+          dist = Geolocator.distanceBetween(baseLat, baseLng, lat, lng);
+        } else {
+          dist = 1e12;
         }
+
+        // re-use cached rating if we already fetched it
+        final double? rating = (placeId != null) ? _ratingCache[placeId] : null;
 
         items.add(
           VenueData(
             placeId: placeId,
             name: name,
             address: address,
+            description: description, // keep, passed to VenuePage
             lat: lat,
             lng: lng,
-            rating: 0, // temp — updated asynchronously
-            photoUrl: cheapUrl, // quick URL shown immediately
-            coverPath: coverPath, // try downloadURL lazily in card
-            category: cat,
+            rating: rating ?? 0, // temp — updated asynchronously
+            coverPath: coverPath,
+            thumbPath: thumbPath,
+            category: categoryStr,
+            distanceMeters: dist,
           ),
         );
       }
 
-      // 3) local search filter
-      if (_query.isNotEmpty) {
-        final ql = _query.toLowerCase();
-        items = items
-            .where(
-              (v) =>
-                  (v.name ?? '').toLowerCase().contains(ql) ||
-                  (v.address ?? '').toLowerCase().contains(ql),
-            )
-            .toList();
-      }
-
-      // 4) sort by distance
-      for (final v in items) {
-        if (v.lat != null && v.lng != null) {
-          v.distanceMeters = Geolocator.distanceBetween(
-            baseLat,
-            baseLng,
-            v.lat!,
-            v.lng!,
-          );
-        } else {
-          v.distanceMeters = 1e12;
-        }
-      }
+      // 3) sort by distance once
       items.sort(
         (a, b) =>
             (a.distanceMeters ?? 1e12).compareTo(b.distanceMeters ?? 1e12),
       );
 
-      // 5) show list immediately
+      // 4) cache for the tab; show immediately
       if (mounted && myToken == _loadToken) {
+        _tabCache[tab] = items;
         setState(() {
-          _venues = items;
           _loading = false;
         });
       }
 
-      // 6) fetch ONLY ratings in background
+      // 5) fetch ONLY ratings in background (skip if cached)
       _kickOffRatings(items);
+
+      // 6) pre-resolve & warm cover URLs (thumb or cover)
+      _prefetchCoverUrls(items);
     } catch (e) {
-      if (mounted && myToken == _loadToken) {
+      if (mounted) {
         setState(() {
           _error = e.toString();
           _loading = false;
-          _venues = [];
         });
       }
     } finally {
       _isLoadingNow = false;
     }
+  }
+
+  // Kick off ratings fetch in the background (non-blocking)
+  Future<void> _kickOffRatings(List<VenueData> items) async {
+    if (_svc.apiKey.isEmpty) return; // no key → skip quietly
+    for (final v in items) {
+      final pid = v.placeId;
+      if (pid == null || pid.isEmpty) continue;
+      if (_ratingCache.containsKey(pid)) continue; // already have
+      _fetchRating(v);
+    }
+  }
+
+  // Warm the in-memory + disk image cache without blocking UI
+  Future<void> _prefetchCoverUrls(List<VenueData> items) async {
+    for (final v in items) {
+      final p = (v.thumbPath?.isNotEmpty == true) ? v.thumbPath : v.coverPath;
+      if (p == null || p.isEmpty) continue;
+      if (_imageCache.containsKey(p)) continue;
+
+      try {
+        final ref = _coversStorage.ref(p);
+        final url = await ref.getDownloadURL().timeout(
+          const Duration(seconds: 8),
+        );
+        _imageCache[p] = url;
+
+        // Warm image bytes cache
+        // ignore: unused_result
+        CachedNetworkImageProvider(url).resolve(const ImageConfiguration());
+      } catch (_) {
+        // ignore; card will still try lazily on demand
+      }
+    }
+  }
+
+  // Fetch a single rating with a tight timeout, then update state & cache
+  Future<void> _fetchRating(VenueData v) async {
+    try {
+      final details = await _svc
+          .details(v.placeId!)
+          .timeout(const Duration(seconds: 6));
+      if (details == null) return;
+      final r = (details['rating'] ?? 0).toDouble();
+
+      _ratingCache[v.placeId!] = r;
+
+      if (!mounted) return;
+
+      // update whatever tab list contains this venue (minimal repaint)
+      final tab = filters[selectedFilterIndex];
+      final list = _tabCache[tab];
+      if (list != null) {
+        for (final it in list) {
+          if (it.placeId == v.placeId) {
+            it.rating = r;
+            break;
+          }
+        }
+      }
+      _applyLocalFilterAndSort(); // refresh visible list
+    } catch (_) {}
+  }
+
+  // Apply local search (by NAME ONLY) + keep already-computed distance order
+  void _applyLocalFilterAndSort() {
+    final tab = filters[selectedFilterIndex];
+    final base = _tabCache[tab] ?? [];
+    List<VenueData> out = base;
+
+    if (_query.isNotEmpty) {
+      final ql = _query.toLowerCase();
+      out = base
+          .where((v) => (v.name ?? '').toLowerCase().contains(ql))
+          .toList();
+    }
+
+    setState(() {
+      _venues = out;
+    });
   }
 
   @override
@@ -315,9 +333,9 @@ class HomePageState extends State<HomePage> {
         ],
       ),
       child: TextField(
-        onChanged: (q) async {
-          setState(() => _query = q);
-          await _loadVenues();
+        onChanged: (q) {
+          _query = q;
+          _applyLocalFilterAndSort(); // local only (name-based)
         },
         decoration: const InputDecoration(
           hintText: 'Search for a venue ...',
@@ -341,7 +359,8 @@ class HomePageState extends State<HomePage> {
           return GestureDetector(
             onTap: () async {
               setState(() => selectedFilterIndex = index);
-              await _loadVenues();
+              await _ensureTabLoaded(); // fetch once; otherwise cached
+              _applyLocalFilterAndSort();
             },
             child: Container(
               margin: const EdgeInsets.only(right: 12),
@@ -378,8 +397,25 @@ class HomePageState extends State<HomePage> {
     );
   }
 
-  void _openVenue(VenueData v) {
+  void _openVenue(VenueData v) async {
     if (v.placeId == null) return;
+
+    // Pass pre-resolved image URL so VenuePage shows instantly (no re-resolve)
+    final String? path = (v.thumbPath?.isNotEmpty == true)
+        ? v.thumbPath
+        : v.coverPath;
+    String? coverUrl = (path != null) ? _imageCache[path] : null;
+
+    // If somehow not warmed yet, resolve once now (short timeout)
+    if (coverUrl == null && path != null && path.isNotEmpty) {
+      try {
+        final ref = _coversStorage.ref(path);
+        coverUrl = await ref.getDownloadURL().timeout(
+          const Duration(seconds: 5),
+        );
+        _imageCache[path] = coverUrl!;
+      } catch (_) {}
+    }
 
     Navigator.push(
       context,
@@ -387,31 +423,51 @@ class HomePageState extends State<HomePage> {
         builder: (_) => VenuePage(
           placeId: v.placeId!,
           name: v.name ?? '',
-          image: v.photoUrl,
-          description: v.address ?? '',
-          // eventBased: v.category == VenueCategory.stadiums, // enable if your VenuePage has this param
+          description: v.description ?? '',
+          dbAddress: v.address,
+          coverPath: v.coverPath,
+          // ADDED: hand-off the final URL (faster first paint)
+          initialCoverUrl: coverUrl,
         ),
       ),
     );
   }
 
-  // Lazy image resolver for each card:
-  // - First use v.photoUrl if already present (coverUrl/photoUrl_google/photoUrl)
-  // - Else, try to resolve coverPath → downloadURL with short timeout
+  // Lazy image resolver for each card (prefers small thumb if present)
   Future<String?> _imageUrlFor(VenueData v) async {
-    if (v.photoUrl != null && v.photoUrl!.isNotEmpty) return v.photoUrl;
-    if (v.coverPath == null || v.coverPath!.isEmpty) return null;
+    final String? storagePath = (v.thumbPath?.isNotEmpty == true)
+        ? v.thumbPath
+        : v.coverPath;
+
+    if (storagePath == null || storagePath.isEmpty) {
+      if (kDebugMode) debugPrint('COVER: ${v.name} has no coverPath.');
+      return null;
+    }
+
+    final cached = _imageCache[storagePath];
+    if (cached != null) {
+      return cached;
+    }
+
+    Future<String?> _try(Duration t) async {
+      final ref = _coversStorage.ref(storagePath);
+      final url = await ref.getDownloadURL().timeout(t);
+      _imageCache[storagePath] = url;
+
+      // Warm bytes
+      // ignore: unused_result
+      CachedNetworkImageProvider(url).resolve(const ImageConfiguration());
+      return url;
+    }
 
     try {
-      final ref = storage.FirebaseStorage.instance.ref(v.coverPath!);
-      final url = await ref.getDownloadURL().timeout(
-        const Duration(seconds: 3),
-      ); // short timeout
-      // cache for later paints
-      v.photoUrl = url;
-      return url;
+      return await _try(const Duration(seconds: 5));
     } catch (_) {
-      return null; // fallback handled by widget
+      try {
+        return await _try(const Duration(seconds: 3));
+      } catch (_) {
+        return null;
+      }
     }
   }
 
@@ -446,21 +502,33 @@ class HomePageState extends State<HomePage> {
                 child: FutureBuilder<String?>(
                   future: _imageUrlFor(v),
                   builder: (context, snap) {
-                    final url = snap.data ?? v.photoUrl;
+                    final url = snap.data;
+                    // Show steady loader first (no “no image” flash)
                     if (url == null || url.isEmpty) {
                       return Container(
                         color: Colors.grey[200],
-                        child: const Icon(
-                          Icons.location_city,
-                          size: 40,
-                          color: Colors.grey,
+                        alignment: Alignment.center,
+                        child: const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
                         ),
                       );
                     }
-                    return Image.network(
-                      url,
+
+                    return CachedNetworkImage(
+                      imageUrl: url,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
+                      placeholder: (_, __) => Container(
+                        color: Colors.grey[200],
+                        alignment: Alignment.center,
+                        child: const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
+                      errorWidget: (_, __, ___) => Container(
                         color: Colors.grey[200],
                         child: const Icon(
                           Icons.broken_image,
@@ -468,6 +536,9 @@ class HomePageState extends State<HomePage> {
                           color: Colors.grey,
                         ),
                       ),
+                      fadeInDuration: const Duration(milliseconds: 120),
+                      memCacheWidth: 300,
+                      memCacheHeight: 300,
                     );
                   },
                 ),
@@ -533,12 +604,15 @@ class VenueData {
   final String? placeId;
   final String? name;
   final String? address;
+  final String? description; // ADDED (DB text used in VenuePage)
   final double? lat;
   final double? lng;
   double? rating; // <- mutable so background rating can update
-  String? photoUrl; // may be set later (cached)
+
   final String? coverPath; // Storage path (lazy-resolved)
-  final VenueCategory category;
+  final String? thumbPath; // optional small image for lists (faster)
+
+  final String? category;
 
   double? distanceMeters;
 
@@ -546,12 +620,13 @@ class VenueData {
     this.placeId,
     this.name,
     this.address,
+    this.description,
     this.lat,
     this.lng,
     this.rating,
-    this.photoUrl,
     this.coverPath,
-    required this.category,
+    this.thumbPath,
+    this.category,
     this.distanceMeters,
   });
 }

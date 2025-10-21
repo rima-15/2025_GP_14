@@ -21,38 +21,53 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     super.dispose();
   }
 
-  // Show error messages
-  void _showErrorSnackBar(String message) {
+  // 🔴 ستايل موحد لرسائل الأخطاء
+  void _showErrorMessage(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 4),
-        action: SnackBarAction(
-          label: '',
-          textColor: Colors.white,
-          onPressed: () {},
+        content: Text(
+          message,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
+          ),
         ),
+        backgroundColor: Colors.redAccent.shade700,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        duration: const Duration(seconds: 4),
+        elevation: 6,
       ),
     );
   }
 
-  // Show success messages
-  void _showSuccessSnackBar(String message) {
+  // 🟢 ستايل موحد لرسائل النجاح
+  void _showSuccessMessage(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.green,
+        content: Text(
+          message,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
+          ),
+        ),
+        backgroundColor: Colors.green.shade600,
         behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 5),
+        margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        duration: const Duration(seconds: 4),
+        elevation: 6,
       ),
     );
   }
 
-  // Send password reset email
+  // 🔐 إرسال رابط إعادة تعيين كلمة المرور
   Future<void> _sendPasswordResetEmail() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -61,24 +76,19 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     try {
       final email = _emailCtrl.text.trim();
 
-      // Send password reset email
       await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
 
       if (mounted) {
-        _showSuccessSnackBar(
+        _showSuccessMessage(
           'Password reset link sent!\nPlease check your email: $email',
         );
 
-        // Wait 2 seconds then go back to sign in
         await Future.delayed(const Duration(seconds: 2));
 
-        if (mounted) {
-          Navigator.pop(context);
-        }
+        if (mounted) Navigator.pop(context);
       }
     } on FirebaseAuthException catch (e) {
-      String msg = '';
-
+      String msg;
       switch (e.code) {
         case 'user-not-found':
           msg = 'No account found with this email';
@@ -92,10 +102,9 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         default:
           msg = 'Error occurred: ${e.message}';
       }
-
-      _showErrorSnackBar(msg);
+      _showErrorMessage(msg);
     } catch (e) {
-      _showErrorSnackBar('Unexpected error occurred, please try again');
+      _showErrorMessage('Unexpected error occurred, please try again');
     } finally {
       if (mounted) setState(() => _loading = false);
     }

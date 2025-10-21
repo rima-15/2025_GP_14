@@ -4,7 +4,6 @@ import 'package:madar_app/screens/signup_page.dart';
 import 'package:madar_app/screens/forgot_password_page.dart';
 import 'package:madar_app/widgets/MainLayout.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:shared_preferences/shared_preferences.dart'; // ✅ جديد
 
 class SignInScreen
     extends StatefulWidget {
@@ -23,56 +22,20 @@ class _SignInScreenState
       TextEditingController();
   final _passCtrl =
       TextEditingController();
-  bool rememberPassword =
-      false; // يبدأ False
   bool _loading = false;
   final Color green = const Color(
     0xFF787E65,
   );
 
   @override
-  void initState() {
-    super.initState();
-    _checkAutoLogin(); // ✅ تسجيل دخول تلقائي لو Remember Me مفعّل
+  void dispose() {
+    _emailCtrl.dispose();
+    _passCtrl.dispose();
+    super.dispose();
   }
 
-  // ✅ تحقق إذا المستخدم مفعّل "Remember Me" و Logged In
-  Future<void> _checkAutoLogin() async {
-    final prefs =
-        await SharedPreferences.getInstance();
-    final remember =
-        prefs.getBool('remember_me') ??
-        false;
-    final currentUser = FirebaseAuth
-        .instance
-        .currentUser;
-
-    if (remember &&
-        currentUser != null) {
-      // المستخدم مفعّل Remember Me وموجود في Firebase
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) =>
-              const MainLayout(),
-        ),
-      );
-    }
-  }
-
-  // ✅ حفظ حالة Remember Me بعد تسجيل الدخول
-  Future<void> _saveRememberMe(
-    bool value,
-  ) async {
-    final prefs =
-        await SharedPreferences.getInstance();
-    await prefs.setBool(
-      'remember_me',
-      value,
-    );
-  }
-
-  void _showErrorSnackBar(
+  // error message
+  void _showErrorMessage(
     String message,
   ) {
     if (!mounted) return;
@@ -80,10 +43,31 @@ class _SignInScreenState
       context,
     ).showSnackBar(
       SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
+        content: Text(
+          message,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
+          ),
+        ),
+        backgroundColor:
+            Colors.redAccent.shade700,
         behavior:
             SnackBarBehavior.floating,
+        margin:
+            const EdgeInsets.symmetric(
+              horizontal: 20,
+              vertical: 10,
+            ),
+        shape: RoundedRectangleBorder(
+          borderRadius:
+              BorderRadius.circular(12),
+        ),
+        duration: const Duration(
+          seconds: 4,
+        ),
+        elevation: 6,
       ),
     );
   }
@@ -91,7 +75,7 @@ class _SignInScreenState
   Future<void> _signIn() async {
     if (!_formSignInKey.currentState!
         .validate()) {
-      _showErrorSnackBar(
+      _showErrorMessage(
         'Please fill all fields correctly',
       );
       return;
@@ -119,7 +103,7 @@ class _SignInScreenState
         await FirebaseAuth.instance
             .signOut();
 
-        _showErrorSnackBar(
+        _showErrorMessage(
           'Email not verified! Please verify your email first.',
         );
         setState(
@@ -127,11 +111,6 @@ class _SignInScreenState
         );
         return;
       }
-
-      // ✅ إذا فعّل Remember Me نحفظ حالته
-      await _saveRememberMe(
-        rememberPassword,
-      );
 
       if (mounted) {
         Navigator.pushReplacement(
@@ -148,11 +127,10 @@ class _SignInScreenState
       String msg;
       switch (e.code) {
         case 'user-not-found':
-          msg =
-              'No account found with this email';
-          break;
         case 'wrong-password':
-          msg = 'Wrong password';
+        case 'invalid-credential':
+          msg =
+              'Email or password is incorrect';
           break;
         case 'invalid-email':
           msg = 'Invalid email address';
@@ -169,9 +147,9 @@ class _SignInScreenState
           msg =
               'Login error: ${e.message}';
       }
-      _showErrorSnackBar(msg);
+      _showErrorMessage(msg);
     } catch (e) {
-      _showErrorSnackBar(
+      _showErrorMessage(
         'Unexpected error: $e',
       );
     } finally {
@@ -245,15 +223,17 @@ class _SignInScreenState
                         validator: (v) {
                           if (v ==
                                   null ||
-                              v.isEmpty)
+                              v.isEmpty) {
                             return 'Please enter email';
+                          }
                           if (!v.contains(
                                 '@',
                               ) ||
                               !v.contains(
                                 '.',
-                              ))
+                              )) {
                             return 'Invalid email';
+                          }
                           return null;
                         },
                         decoration: _input(
@@ -279,11 +259,13 @@ class _SignInScreenState
                         validator: (v) {
                           if (v ==
                                   null ||
-                              v.isEmpty)
+                              v.isEmpty) {
                             return 'Please enter password';
+                          }
                           if (v.length <
-                              6)
+                              6) {
                             return 'Password must be at least 6 characters';
+                          }
                           return null;
                         },
                         decoration: _input(
@@ -295,63 +277,40 @@ class _SignInScreenState
                         height: 25,
                       ),
 
-                      // Remember + Forgot
-                      Row(
-                        mainAxisAlignment:
-                            MainAxisAlignment
-                                .spaceBetween,
-                        children: [
-                          Row(
-                            children: [
-                              Checkbox(
-                                value:
-                                    rememberPassword,
-                                onChanged: (v) {
-                                  setState(
-                                    () => rememberPassword =
-                                        v ??
-                                        false,
-                                  );
-                                },
-                                activeColor:
-                                    green,
+                      // Forgot password
+                      Align(
+                        alignment: Alignment
+                            .centerRight,
+                        child: GestureDetector(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder:
+                                    (
+                                      _,
+                                    ) =>
+                                        const ForgotPasswordScreen(),
                               ),
-                              const Text(
-                                'Remember me',
-                                style: TextStyle(
-                                  color:
-                                      Colors.black45,
-                                ),
-                              ),
-                            ],
-                          ),
-                          GestureDetector(
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) =>
-                                      const ForgotPasswordScreen(),
-                                ),
-                              );
-                            },
-                            child: Text(
-                              'Forget password?',
-                              style: TextStyle(
-                                fontWeight:
-                                    FontWeight.bold,
-                                color:
-                                    green,
-                              ),
+                            );
+                          },
+                          child: Text(
+                            'Forget password?',
+                            style: TextStyle(
+                              fontWeight:
+                                  FontWeight
+                                      .bold,
+                              color:
+                                  green,
                             ),
                           ),
-                        ],
+                        ),
                       ),
                       const SizedBox(
                         height: 25,
                       ),
 
-                      // Sign in
+                      // Sign in button
                       SizedBox(
                         width: double
                             .infinity,
@@ -399,7 +358,7 @@ class _SignInScreenState
                         height: 25,
                       ),
 
-                      // Sign up
+                      // Sign up link
                       Row(
                         mainAxisAlignment:
                             MainAxisAlignment

@@ -3,27 +3,19 @@ import 'directions_page.dart';
 
 const kGreen = Color(0xFF787E65);
 
-class CategoryPage
-    extends StatefulWidget {
+class CategoryPage extends StatefulWidget {
   final String categoryName;
-  const CategoryPage({
-    super.key,
-    required this.categoryName,
-  });
+  const CategoryPage({super.key, required this.categoryName});
 
   @override
-  State<CategoryPage> createState() =>
-      _CategoryPageState();
+  State<CategoryPage> createState() => _CategoryPageState();
 }
 
-class _CategoryPageState
-    extends State<CategoryPage> {
-  final TextEditingController
-  _searchCtrl = TextEditingController();
+class _CategoryPageState extends State<CategoryPage> {
+  final TextEditingController _searchCtrl = TextEditingController();
   String _query = '';
 
-  final List<ShopItem>
-  _allShops = const [
+  final List<ShopItem> _allShops = const [
     ShopItem(
       name: '1886',
       description:
@@ -39,16 +31,13 @@ class _CategoryPageState
   ];
 
   List<ShopItem> get _filtered {
-    if (_query.trim().isEmpty)
+    if (_query.trim().isEmpty) {
       return _allShops;
+    }
     final q = _query.toLowerCase();
     return _allShops.where((s) {
-      return s.name
-              .toLowerCase()
-              .contains(q) ||
-          s.description
-              .toLowerCase()
-              .contains(q);
+      return s.name.toLowerCase().contains(q) ||
+          s.description.toLowerCase().contains(q);
     }).toList();
   }
 
@@ -61,90 +50,55 @@ class _CategoryPageState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(
-        0xFFF8F8F3,
-      ),
+      backgroundColor: const Color(0xFFF8F8F3),
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
         centerTitle: true,
         leading: IconButton(
-          icon: const Icon(
-            Icons.arrow_back_ios_new,
-            color: kGreen,
-          ),
-          onPressed: () =>
-              Navigator.pop(context),
+          icon: const Icon(Icons.arrow_back_ios_new, color: kGreen),
+          onPressed: () => Navigator.pop(context),
         ),
         title: Text(
           widget.categoryName,
-          style: const TextStyle(
-            color: kGreen,
-            fontWeight: FontWeight.w600,
-          ),
+          style: const TextStyle(color: kGreen, fontWeight: FontWeight.w600),
         ),
       ),
       body: Column(
         children: [
           Container(
-            margin:
-                const EdgeInsets.all(
-                  16,
-                ),
+            margin: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius:
-                  BorderRadius.circular(
-                    12,
-                  ),
+              borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.grey
-                      .withOpacity(
-                        0.10,
-                      ),
+                  color: Colors.grey.withOpacity(0.10),
                   spreadRadius: 1,
                   blurRadius: 4,
-                  offset: const Offset(
-                    0,
-                    2,
-                  ),
+                  offset: const Offset(0, 2),
                 ),
               ],
             ),
             child: TextField(
               controller: _searchCtrl,
-              onChanged: (v) =>
-                  setState(
-                    () => _query = v,
-                  ),
+              onChanged: (v) => setState(() => _query = v),
               decoration: InputDecoration(
-                hintText:
-                    'Search in ${widget.categoryName}...',
-                prefixIcon: const Icon(
-                  Icons.search,
-                  color: Colors.grey,
+                hintText: 'Search in ${widget.categoryName}...',
+                prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 16,
                 ),
-                border:
-                    InputBorder.none,
-                contentPadding:
-                    const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 16,
-                    ),
               ),
             ),
           ),
 
           Expanded(
             child: ListView.builder(
-              itemCount:
-                  _filtered.length,
-              itemBuilder:
-                  (context, i) =>
-                      _shopCard(
-                        _filtered[i],
-                      ),
+              itemCount: _filtered.length,
+              itemBuilder: (context, i) => _shopCard(_filtered[i]),
             ),
           ),
         ],
@@ -154,35 +108,25 @@ class _CategoryPageState
 
   Widget _shopCard(ShopItem s) {
     return Container(
-      margin:
-          const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 8,
-          ),
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius:
-            BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black
-                .withOpacity(0.05),
+            color: Colors.black.withOpacity(0.05),
             blurRadius: 6,
             offset: const Offset(0, 3),
           ),
         ],
       ),
       child: InkWell(
-        borderRadius:
-            BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(12),
         onTap: () {},
         child: Row(
           children: [
             ClipRRect(
-              borderRadius:
-                  BorderRadius.circular(
-                    8,
-                  ),
+              borderRadius: BorderRadius.circular(8),
               child: Image.asset(
                 s.imagePath,
                 width: 100,
@@ -193,44 +137,26 @@ class _CategoryPageState
 
             Expanded(
               child: Padding(
-                padding:
-                    const EdgeInsets.all(
-                      12,
-                    ),
+                padding: const EdgeInsets.all(12),
                 child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment
-                          .start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       s.name,
                       maxLines: 1,
-                      overflow:
-                          TextOverflow
-                              .ellipsis,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         fontSize: 16,
-                        fontWeight:
-                            FontWeight
-                                .w600,
-                        color: Colors
-                            .black87,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.black87,
                       ),
                     ),
-                    const SizedBox(
-                      height: 6,
-                    ),
+                    const SizedBox(height: 6),
                     Text(
                       s.description,
                       maxLines: 2,
-                      overflow:
-                          TextOverflow
-                              .ellipsis,
-                      style:
-                          const TextStyle(
-                            color: Colors
-                                .black54,
-                          ),
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.black54),
                     ),
                   ],
                 ),
@@ -238,25 +164,14 @@ class _CategoryPageState
             ),
 
             Padding(
-              padding:
-                  const EdgeInsets.only(
-                    right: 6,
-                  ),
+              padding: const EdgeInsets.only(right: 6),
               child: IconButton(
-                icon: const Icon(
-                  Icons.north_east,
-                  color: kGreen,
-                  size: 20,
-                ),
+                icon: const Icon(Icons.north_east, color: kGreen, size: 20),
                 onPressed: () {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) =>
-                          DirectionsPage(
-                            placeName:
-                                s.name,
-                          ),
+                      builder: (_) => DirectionsPage(placeName: s.name),
                     ),
                   );
                 },

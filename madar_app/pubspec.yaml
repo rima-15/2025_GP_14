@@ -33,6 +33,7 @@ dependencies:
   curved_navigation_bar: ^1.0.6 
   cached_network_image: ^3.4.0
   
+  
   #by Mona for firebase
   firebase_core: ^3.6.0
   firebase_auth: ^5.3.0

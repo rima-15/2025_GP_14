@@ -2,11 +2,15 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:http/http.dart' as http;
-import 'package:flutter/gestures.dart'; // less and more in descreption
 import 'category_page.dart';
+import 'package:http/http.dart' as http;
+import 'package:flutter/gestures.dart'; // less and more in description
 
-// ADDED: Storage + cache for coverPath header
+// Imports for venue url generation
+import 'dart:io' show Platform;
+import 'package:url_launcher/url_launcher.dart';
+
+// Storage + cache
 import 'package:firebase_storage/firebase_storage.dart' as storage;
 import 'package:cached_network_image/cached_network_image.dart';
 
@@ -14,12 +18,16 @@ const kGreen = Color(0xFF787E65);
 
 class VenuePage extends StatefulWidget {
   final String placeId; // required for details
-  final String name; // title
-  final String description; // fallback description (from DB ONLY)
-  final String? dbAddress; // from DB ONLY
-  final String? coverPath; // Storage path
+  final String name;
+  final String description;
+  final String? dbAddress;
+  final double? lat;
+  final double? lng;
 
-  // ADDED: if Home already resolved the URL, pass it to show image instantly
+  // NEW: all storage image paths (first = cover)
+  final List<String> imagePaths;
+
+  // if Home already resolved the first URL, use it for instant paint
   final String? initialCoverUrl;
 
   const VenuePage({
@@ -28,8 +36,10 @@ class VenuePage extends StatefulWidget {
     required this.name,
     required this.description,
     this.dbAddress,
-    this.coverPath,
+    this.imagePaths = const [],
     this.initialCoverUrl,
+    this.lat, // NEW
+    this.lng,
   });
 
   @override
@@ -40,7 +50,7 @@ class _VenuePageState extends State<VenuePage> {
   bool _loading = true;
   String? _error;
 
-  // Details data (address seeded from DB; never overwritten by API)
+  // address seeded from DB; never overwritten by API
   String? _address;
 
   // Hours-related
@@ -51,28 +61,38 @@ class _VenuePageState extends State<VenuePage> {
   String? _businessStatus;
   List<String> _types = const [];
 
-  // ADDED: storage + tiny URL cache (static to persist across page instances)
+  // storage + tiny URL cache (static across instances)
   static final storage.FirebaseStorage _coversStorage =
       storage.FirebaseStorage.instanceFor(
         bucket: 'gs://madar-database.firebasestorage.app',
       );
-  static final Map<String, String> _urlCache = {}; // coverPath -> url
+  static final Map<String, String> _urlCache = {}; // path -> url
 
-  // ADDED: cache hours per placeId to avoid re-calls when revisiting
+  // hours cache
   static final Map<String, Map<String, dynamic>> _hoursCache = {};
 
-  // ADDED: expand/collapse for description
+  // description expand
   bool _descExpanded = false;
+
+  // carousel
+  late final PageController _pageCtrl = PageController();
+  int _pageIndex = 0;
+
+  @override
+  void dispose() {
+    _pageCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
     super.initState();
-    _address = widget.dbAddress; // seed from DB (do not override)
-    _loadHours(); // API only for opening hours (+status/types)
+    _address = widget.dbAddress;
+    _loadHours();
+    _prefetchAllVenueImages();
   }
 
   Future<void> _loadHours() async {
-    // if cached, use it instantly
     final cached = _hoursCache[widget.placeId];
     if (cached != null) {
       _applyHours(cached);
@@ -110,16 +130,30 @@ class _VenuePageState extends State<VenuePage> {
       }
 
       final res = (j['result'] as Map<String, dynamic>?) ?? {};
-      _hoursCache[widget.placeId] = res; // cache for next visits
+      _hoursCache[widget.placeId] = res;
       _applyHours(res);
     } catch (e) {
-      setState(() {
-        _error = e.toString();
-      });
+      setState(() => _error = e.toString());
     } finally {
-      setState(() {
-        _loading = false;
-      });
+      setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _prefetchAllVenueImages() async {
+    for (final p in widget.imagePaths) {
+      if (p.isEmpty) continue;
+      try {
+        final url =
+            _urlCache[p] ??
+            await _coversStorage
+                .ref(p)
+                .getDownloadURL()
+                .timeout(const Duration(seconds: 8));
+        _urlCache[p] = url;
+
+        final provider = CachedNetworkImageProvider(url, cacheKey: p);
+        provider.resolve(const ImageConfiguration()); // warms memory
+      } catch (_) {}
     }
   }
 
@@ -148,28 +182,40 @@ class _VenuePageState extends State<VenuePage> {
     });
   }
 
-  // ---------- Helpers: image from Storage coverPath ----------
-  Future<String?> _resolveCoverUrl() async {
-    // prefer handed-in URL from Home for instant paint
-    if ((widget.initialCoverUrl ?? '').isNotEmpty)
-      return widget.initialCoverUrl;
-
-    final p = widget.coverPath;
-    if (p == null || p.isEmpty) return null;
-    if (_urlCache.containsKey(p)) return _urlCache[p];
+  // ---------- Helpers for Storage paths ----------
+  Future<String?> _imageUrlForPath(
+    String path, {
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
+    if (path.isEmpty) return null;
+    if (_urlCache.containsKey(path)) return _urlCache[path];
     try {
-      final ref = _coversStorage.ref(p);
-      final url = await ref.getDownloadURL().timeout(
-        const Duration(seconds: 8),
-      );
-      _urlCache[p] = url;
-      // Warm bytes
+      final ref = _coversStorage.ref(path);
+      final url = await ref.getDownloadURL().timeout(timeout);
+      _urlCache[path] = url;
+      // warm bytes
       // ignore: unused_result
       CachedNetworkImageProvider(url).resolve(const ImageConfiguration());
       return url;
     } catch (_) {
       return null;
     }
+  }
+
+  Widget _noImageHeader(double h) {
+    return SizedBox(
+      height: h,
+      width: double.infinity,
+      child: Container(
+        color: const Color(0xFFEDEFE3),
+        alignment: Alignment.center,
+        child: const Icon(
+          Icons.image_not_supported_outlined,
+          color: Colors.black45,
+          size: 40,
+        ),
+      ),
+    );
   }
 
   bool get _isAirport {
@@ -284,6 +330,95 @@ class _VenuePageState extends State<VenuePage> {
     }
 
     return _statusFromWeekdayTextFallback();
+  }
+  // ---------- Helpers for address as link ----------
+
+  // open address as link in google map
+  Future<void> _openInMaps() async {
+    final id = widget.placeId;
+    final hasLL = widget.lat != null && widget.lng != null;
+    final lat = widget.lat?.toStringAsFixed(6);
+    final lng = widget.lng?.toStringAsFixed(6);
+
+    // ANDROID — place sheet (no directions)
+    final Uri androidGeo = hasLL
+        ? Uri.parse('geo:$lat,$lng?q=place_id:$id&z=17')
+        : Uri.parse('geo:0,0?q=place_id:$id');
+
+    // iOS — Google Maps app if present
+    final Uri iosGmm = hasLL
+        ? Uri.parse('comgooglemaps://?q=place_id:$id&center=$lat,$lng&zoom=17')
+        : Uri.parse('comgooglemaps://?q=place_id:$id');
+
+    // Web fallback (place page; centered & zoom-hinted)
+    final Uri web = hasLL
+        ? Uri.https('www.google.com', '/maps/search/', {
+            'api': '1',
+            'query_place_id': id,
+            'query': '$lat,$lng',
+            'll': '$lat,$lng',
+            'z': '17',
+          })
+        : Uri.https('www.google.com', '/maps/search/', {
+            'api': '1',
+            'query_place_id': id,
+          });
+
+    if (Platform.isAndroid && await canLaunchUrl(androidGeo)) {
+      await launchUrl(androidGeo, mode: LaunchMode.externalApplication);
+      return;
+    }
+    if (Platform.isIOS && await canLaunchUrl(iosGmm)) {
+      await launchUrl(iosGmm, mode: LaunchMode.externalApplication);
+      return;
+    }
+    await launchUrl(web, mode: LaunchMode.externalApplication);
+  }
+
+  Uri _mapsPlaceUri(String placeId) => Uri.parse(
+    'https://www.google.com/maps/search/?api=1&query_place_id=$placeId',
+  );
+
+  Widget _addressRow() {
+    final addr = (_address ?? '').trim();
+    if (addr.isEmpty) return const SizedBox.shrink();
+
+    // We’ll render text that wraps to multiple lines,
+    // and put the icon at the end using a WidgetSpan.
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Text.rich(
+        TextSpan(
+          style: const TextStyle(
+            fontSize: 14,
+            color: Colors.black54,
+            height: 1.35,
+          ),
+          children: [
+            TextSpan(text: addr),
+            const WidgetSpan(child: SizedBox(width: 8)), // nice breathing room
+            WidgetSpan(
+              alignment: PlaceholderAlignment.middle,
+              child: InkWell(
+                onTap: _openInMaps,
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 2), // optically align
+                  // The diamond arrow = Material icon "assistant_direction"
+                  child: Icon(
+                    Icons.assistant_direction,
+                    color: kGreen, // green INSIDE the diamond
+                    size: 20, // no colored circle behind it
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        softWrap: true, // <— wrap to new lines as needed
+        maxLines: null, // <— no truncation
+      ),
+    );
   }
 
   String _formatClock(DateTime dtLocal) {
@@ -412,16 +547,18 @@ class _VenuePageState extends State<VenuePage> {
           : ListView(
               padding: const EdgeInsets.only(bottom: 24),
               children: [
-                if ((widget.coverPath ?? '').isNotEmpty ||
-                    (widget.initialCoverUrl ?? '').isNotEmpty)
-                  _buildHeaderCover(),
+                // Header (carousel with dots inside image)
+                if (widget.imagePaths.isNotEmpty)
+                  _buildHeaderCarousel()
+                else
+                  _noImageHeader(200),
 
-                // Summary (inline "More / Show less")
+                // Summary
                 Padding(
                   padding: const EdgeInsets.all(16),
                   child: _ExpandableText(
                     text: summary,
-                    maxLines: 3, // keep your intended collapsed height
+                    maxLines: 3,
                     style: const TextStyle(
                       color: Colors.black87,
                       height: 1.25,
@@ -429,24 +566,12 @@ class _VenuePageState extends State<VenuePage> {
                     ),
                     linkStyle: const TextStyle(
                       fontWeight: FontWeight.w600,
-                      color:
-                          kGreen, // matches your palette; change if you prefer
+                      color: kGreen,
                     ),
                   ),
                 ),
 
-                if ((_address ?? '').isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Text(
-                      _address!,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        color: Colors.black54,
-                      ),
-                    ),
-                  ),
-
+                _addressRow(),
                 const SizedBox(height: 12),
 
                 // Opening hours card
@@ -454,7 +579,7 @@ class _VenuePageState extends State<VenuePage> {
 
                 const SizedBox(height: 16),
 
-                // Floor Map (keep your placeholder section)
+                // Floor Map (placeholder)
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 16),
                   child: Text(
@@ -522,62 +647,120 @@ class _VenuePageState extends State<VenuePage> {
     );
   }
 
-  // Header: steady loader -> image; if truly absent, show NA icon
-  Widget _buildHeaderCover() {
-    const h = 200.0;
-    return FutureBuilder<String?>(
-      future: _resolveCoverUrl(),
-      builder: (context, snap) {
-        final url = snap.data ?? widget.initialCoverUrl;
-        if (url == null || url.isEmpty) {
-          return SizedBox(
-            height: h,
-            width: double.infinity,
-            child: Container(
-              color: const Color(0xFFEDEFE3),
-              alignment: Alignment.center,
-              child: const Icon(
-                Icons.image_not_supported_outlined,
-                color: Colors.black45,
-                size: 40,
-              ),
-            ),
-          );
-        }
-        return SizedBox(
-          height: h,
-          width: double.infinity,
-          child: CachedNetworkImage(
-            imageUrl: url,
-            fit: BoxFit.cover,
-            alignment: Alignment.center,
-            placeholder: (_, __) => Container(
-              color: const Color(0xFFEDEFE3),
-              alignment: Alignment.center,
-              child: const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            ),
-            errorWidget: (_, __, ___) => Container(
-              color: const Color(0xFFEDEFE3),
-              alignment: Alignment.center,
-              child: const Icon(Icons.broken_image, color: Colors.black45),
-            ),
-            fadeInDuration: const Duration(milliseconds: 120),
+  // ----- Header carousel with dots overlay -----
+  Widget _buildHeaderCarousel() {
+    const double h = 200.0;
+
+    return SizedBox(
+      height: h,
+      width: double.infinity,
+      child: Stack(
+        children: [
+          PageView.builder(
+            controller: _pageCtrl,
+            itemCount: widget.imagePaths.length,
+            onPageChanged: (i) => setState(() => _pageIndex = i),
+            itemBuilder: (context, index) {
+              final path = widget.imagePaths[index];
+
+              // first image: use handed-in URL if available
+              if (index == 0 && (widget.initialCoverUrl ?? '').isNotEmpty) {
+                return CachedNetworkImage(
+                  imageUrl: widget.initialCoverUrl!,
+                  fit: BoxFit.cover,
+                  placeholder: (_, __) => Container(
+                    color: const Color(0xFFEDEFE3),
+                    alignment: Alignment.center,
+                    child: const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                  errorWidget: (_, __, ___) => _noImageHeader(h),
+                  fadeInDuration: const Duration(milliseconds: 120),
+                );
+              }
+
+              return FutureBuilder<String?>(
+                future: _imageUrlForPath(path),
+                builder: (context, snap) {
+                  if (snap.connectionState == ConnectionState.waiting) {
+                    return Container(
+                      color: const Color(0xFFEDEFE3),
+                      alignment: Alignment.center,
+                      child: const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    );
+                  }
+                  final url = snap.data;
+                  if (snap.hasError || url == null || url.isEmpty) {
+                    return _noImageHeader(h);
+                  }
+                  return CachedNetworkImage(
+                    imageUrl: url,
+                    fit: BoxFit.cover,
+                    placeholder: (_, __) => Container(
+                      color: const Color(0xFFEDEFE3),
+                      alignment: Alignment.center,
+                      child: const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    ),
+                    errorWidget: (_, __, ___) => _noImageHeader(h),
+                    fadeInDuration: const Duration(milliseconds: 120),
+                  );
+                },
+              );
+            },
           ),
-        );
-      },
+
+          // Dots overlay
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 10,
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.25),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: List.generate(widget.imagePaths.length, (i) {
+                    final bool active = i == _pageIndex;
+                    return AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      margin: const EdgeInsets.symmetric(horizontal: 3),
+                      width: active ? 8 : 6,
+                      height: active ? 8 : 6,
+                      decoration: BoxDecoration(
+                        color: active ? Colors.white : Colors.white70,
+                        shape: BoxShape.circle,
+                      ),
+                    );
+                  }),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _hoursCard() {
-    // Build Sunday-first order from Google’s weekday_text (usually Mon..Sun)
+    // Sunday-first order
     List<String> sunFirst = _weekdayText;
     if (_weekdayText.length == 7 &&
         _weekdayText.first.toLowerCase().startsWith('monday')) {
-      // rotate to Sunday-first
       sunFirst = [_weekdayText[6], ..._weekdayText.take(6)];
     }
 
@@ -696,9 +879,6 @@ class _VenuePageState extends State<VenuePage> {
               color: color ?? Colors.black87,
             ),
           ),
-          if (trailing.isNotEmpty) const TextSpan(text: ''),
-          if (trailing.isNotEmpty) const TextSpan(text: ''),
-          if (trailing.isNotEmpty) const TextSpan(),
           if (trailing.isNotEmpty)
             TextSpan(
               text: trailing,
@@ -811,7 +991,7 @@ class _ExpandableTextState extends State<_ExpandableText> {
         widget.linkStyle ??
         const TextStyle(fontWeight: FontWeight.w600, color: kGreen);
 
-    // If expanded -> simple full paragraph
+    // expanded -> full paragraph
     if (_expanded) {
       return RichText(
         text: TextSpan(
@@ -832,7 +1012,7 @@ class _ExpandableTextState extends State<_ExpandableText> {
       );
     }
 
-    // Collapsed: measure if it actually overflows
+    // collapsed: measure overflow
     return LayoutBuilder(
       builder: (context, constraints) {
         final tp = TextPainter(
@@ -845,11 +1025,9 @@ class _ExpandableTextState extends State<_ExpandableText> {
         final overflows = tp.didExceedMaxLines;
 
         if (!overflows) {
-          // no overflow -> render normally
           return Text(widget.text, style: base);
         }
 
-        // We need to find how much text fits, then append " … More"
         final more = ' more';
         final ellipsis = '…';
         final linkSpan = TextSpan(text: more, style: link);
@@ -859,7 +1037,7 @@ class _ExpandableTextState extends State<_ExpandableText> {
           ellipsis: ellipsis,
         );
 
-        // Binary search the cut point
+        // binary search cut point
         int low = 0, high = widget.text.length, cut = 0;
         while (low <= high) {
           final mid = (low + high) >> 1;

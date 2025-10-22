@@ -25,6 +25,8 @@ class CategoryPage extends StatefulWidget {
 
 class _CategoryPageState extends State<CategoryPage> {
   final TextEditingController _searchCtrl = TextEditingController();
+  final Map<String, double?> _ratingCache = {};
+
   late String _apiKey;
   String _query = '';
 
@@ -111,13 +113,22 @@ class _CategoryPageState extends State<CategoryPage> {
                   .collection('places')
                   .where('venue_ID', isEqualTo: widget.venueId)
                   .where('category_ID', isEqualTo: widget.categoryId)
+                  .orderBy('placeName') // 🔹 يرتب أبجدياً
                   .snapshots(),
+
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
                 }
                 if (snapshot.hasError) {
-                  return Center(child: Text('Error: ${snapshot.error}'));
+                  //return Center(child: Text('Error: ${snapshot.error}'));
+                  return const Center(
+                    child: Text(
+                      'Something went wrong. Please try again later.',
+                      style: TextStyle(color: Colors.black54),
+                      textAlign: TextAlign.center,
+                    ),
+                  );
                 }
 
                 final docs = snapshot.data?.docs ?? [];
@@ -132,11 +143,8 @@ class _CategoryPageState extends State<CategoryPage> {
                   final name = (data['placeName'] ?? '')
                       .toString()
                       .toLowerCase();
-                  final desc = (data['placeDescription'] ?? '')
-                      .toString()
-                      .toLowerCase();
                   final q = _query.toLowerCase();
-                  return name.contains(q) || desc.contains(q);
+                  return name.contains(q); // 🔹 يبحث فقط بالاسم
                 }).toList();
 
                 if (filteredDocs.isEmpty) {
@@ -246,7 +254,13 @@ class _CategoryPageState extends State<CategoryPage> {
 
                     // التقييم - المميزة الجديدة
                     FutureBuilder<double?>(
-                      future: _getLiveRating(name),
+                      future: _ratingCache[name] != null
+                          ? Future.value(_ratingCache[name])
+                          : _getLiveRating(name).then((r) {
+                              _ratingCache[name] = r;
+                              return r;
+                            }),
+
                       builder: (context, snap) {
                         if (!snap.hasData) {
                           return const SizedBox.shrink();

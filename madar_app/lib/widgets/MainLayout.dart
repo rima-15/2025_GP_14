@@ -8,6 +8,7 @@ import 'package:madar_app/screens/track_page.dart';
 import 'package:madar_app/screens/signin_page.dart';
 import 'package:madar_app/screens/profile_page.dart';
 import 'package:madar_app/screens/settings_page.dart';
+import 'package:madar_app/screens/help_page.dart';
 
 const kGreen = Color(0xFF787E65);
 
@@ -31,8 +32,7 @@ class _MainLayoutState extends State<MainLayout> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
 
   // User data
-  String _userName = '';
-  String _userEmail = '';
+  String _firstName = '';
 
   @override
   void initState() {
@@ -48,12 +48,10 @@ class _MainLayoutState extends State<MainLayout> {
             .collection('users')
             .doc(user.uid)
             .get();
-        if (doc.exists) {
+        if (doc.exists && mounted) {
           final data = doc.data()!;
           setState(() {
-            _userName = '${data['firstName'] ?? ''} ${data['lastName'] ?? ''}'
-                .trim();
-            _userEmail = data['email'] ?? user.email ?? '';
+            _firstName = data['firstName'] ?? '';
           });
         }
       } catch (e) {
@@ -73,7 +71,7 @@ class _MainLayoutState extends State<MainLayout> {
     }
   }
 
-  void _openMenu() => _scaffoldKey.currentState?.openEndDrawer();
+  void _openMenu() => _scaffoldKey.currentState?.openDrawer();
 
   @override
   Widget build(BuildContext context) {
@@ -82,7 +80,7 @@ class _MainLayoutState extends State<MainLayout> {
       extendBody: true,
       appBar: _buildAppBar(_index),
       body: pages[_index],
-      endDrawer: _buildDrawer(context),
+      drawer: _buildDrawer(context),
       bottomNavigationBar: _buildBottomBar(),
       backgroundColor: const Color(0xFFF8F8F3),
     );
@@ -102,6 +100,7 @@ class _MainLayoutState extends State<MainLayout> {
       leading: IconButton(
         icon: const Icon(Icons.menu, color: kGreen),
         onPressed: _openMenu,
+        padding: const EdgeInsets.only(left: 16), // Add padding from edge
       ),
 
       // Title/Logo in center
@@ -127,6 +126,9 @@ class _MainLayoutState extends State<MainLayout> {
               IconButton(
                 icon: const Icon(Icons.notifications_outlined, color: kGreen),
                 onPressed: () {},
+                padding: const EdgeInsets.only(
+                  right: 16,
+                ), // Add padding from edge
               ),
             ]
           : null,
@@ -140,10 +142,10 @@ class _MainLayoutState extends State<MainLayout> {
         color: Colors.white,
         child: Column(
           children: [
-            // Header with logo and user info
+            // Header with logo and greeting
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(24, 60, 24, 24),
+              padding: const EdgeInsets.fromLTRB(24, 60, 24, 28),
               decoration: const BoxDecoration(color: kGreen),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -151,43 +153,19 @@ class _MainLayoutState extends State<MainLayout> {
                   // Logo
                   Image.asset(
                     'images/MadarLogoVersion2.png',
-                    height: 50,
+                    height: 45,
                     fit: BoxFit.contain,
                   ),
                   const SizedBox(height: 20),
 
-                  // User avatar
-                  Container(
-                    width: 60,
-                    height: 60,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 2),
-                    ),
-                    child: const Icon(Icons.person, color: kGreen, size: 32),
-                  ),
-                  const SizedBox(height: 12),
-
-                  // User name
+                  // Greeting
                   Text(
-                    _userName.isEmpty ? 'User' : _userName,
+                    'Hello, ${_firstName.isEmpty ? 'User' : _firstName}',
                     style: const TextStyle(
                       color: Colors.white,
-                      fontSize: 18,
+                      fontSize: 22,
                       fontWeight: FontWeight.bold,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-
-                  // User email
-                  Text(
-                    _userEmail,
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.9),
-                      fontSize: 13,
+                      height: 1.2,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -198,38 +176,63 @@ class _MainLayoutState extends State<MainLayout> {
 
             // Menu items
             Expanded(
-              child: ListView(
-                padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Column(
                 children: [
-                  _buildMenuItem(
-                    icon: Icons.person_outline,
-                    title: 'Profile',
-                    onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => const ProfilePage()),
-                      ).then((_) => _loadUserData());
-                    },
+                  ListView(
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    children: [
+                      _buildMenuItem(
+                        icon: Icons.person_outline,
+                        title: 'Profile',
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const ProfilePage(),
+                            ),
+                          ).then((_) => _loadUserData());
+                        },
+                      ),
+                      _buildMenuItem(
+                        icon: Icons.settings_outlined,
+                        title: 'Settings',
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const SettingsPage(),
+                            ),
+                          );
+                        },
+                      ),
+                      _buildMenuItem(
+                        icon: Icons.help_outline,
+                        title: 'Help',
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const HelpPage()),
+                          );
+                        },
+                      ),
+                    ],
                   ),
-                  _buildMenuItem(
-                    icon: Icons.settings_outlined,
-                    title: 'Settings',
-                    onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => const SettingsPage()),
-                      );
-                    },
-                  ),
-                  const Divider(height: 32, thickness: 1),
+
+                  const Spacer(),
+
+                  // Log out at the bottom
+                  const Divider(height: 1, thickness: 1),
                   _buildMenuItem(
                     icon: Icons.logout,
                     title: 'Log out',
                     onTap: () => _logout(context),
                     isDestructive: true,
                   ),
+                  const SizedBox(height: 16),
                 ],
               ),
             ),

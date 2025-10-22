@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:madar_app/screens/welcome_page.dart';
+import 'package:madar_app/screens/check_email_page.dart';
 
 const kGreen = Color(0xFF787E65);
 
@@ -21,13 +23,27 @@ class _ProfilePageState extends State<ProfilePage> {
 
   bool _loading = true;
   bool _saving = false;
+  bool _hasChanges = false;
+  String _originalFirstName = '';
+  String _originalLastName = '';
   String _originalEmail = '';
   String _originalPhone = '';
+
+  // Error borders
+  bool _emailError = false;
+  bool _phoneError = false;
+  String _errorMessage = '';
 
   @override
   void initState() {
     super.initState();
     _loadUserData();
+
+    // Listen for changes to enable/disable save button
+    _firstNameCtrl.addListener(_checkChanges);
+    _lastNameCtrl.addListener(_checkChanges);
+    _emailCtrl.addListener(_checkChanges);
+    _phoneCtrl.addListener(_checkChanges);
   }
 
   @override
@@ -37,6 +53,18 @@ class _ProfilePageState extends State<ProfilePage> {
     _emailCtrl.dispose();
     _phoneCtrl.dispose();
     super.dispose();
+  }
+
+  void _checkChanges() {
+    final hasChanges =
+        _firstNameCtrl.text != _originalFirstName ||
+        _lastNameCtrl.text != _originalLastName ||
+        _emailCtrl.text != _originalEmail ||
+        _phoneCtrl.text != _originalPhone;
+
+    if (hasChanges != _hasChanges) {
+      setState(() => _hasChanges = hasChanges);
+    }
   }
 
   Future<void> _loadUserData() async {
@@ -54,17 +82,18 @@ class _ProfilePageState extends State<ProfilePage> {
       if (doc.exists && mounted) {
         final data = doc.data()!;
         setState(() {
-          _firstNameCtrl.text = data['firstName'] ?? '';
-          _lastNameCtrl.text = data['lastName'] ?? '';
-          _emailCtrl.text = data['email'] ?? '';
+          _originalFirstName = data['firstName'] ?? '';
+          _originalLastName = data['lastName'] ?? '';
           _originalEmail = data['email'] ?? '';
-
-          // Extract phone without +966
           final fullPhone = data['phone'] ?? '';
-          _phoneCtrl.text = fullPhone.startsWith('+966')
+          _originalPhone = fullPhone.startsWith('+966')
               ? fullPhone.substring(4)
               : fullPhone;
-          _originalPhone = fullPhone;
+
+          _firstNameCtrl.text = _originalFirstName;
+          _lastNameCtrl.text = _originalLastName;
+          _emailCtrl.text = _originalEmail;
+          _phoneCtrl.text = _originalPhone;
 
           _loading = false;
         });
@@ -79,23 +108,22 @@ class _ProfilePageState extends State<ProfilePage> {
 
   void _showError(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          message,
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        backgroundColor: Colors.redAccent.shade700,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      ),
-    );
+    setState(() {
+      _errorMessage = message;
+      _emailError = message.toLowerCase().contains('email');
+      _phoneError = message.toLowerCase().contains('phone');
+    });
   }
 
-  void _showSuccess(String message) {
+  void _clearErrors() {
+    setState(() {
+      _errorMessage = '';
+      _emailError = false;
+      _phoneError = false;
+    });
+  }
+
+  void _showSuccessSnackbar(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -106,9 +134,10 @@ class _ProfilePageState extends State<ProfilePage> {
             fontWeight: FontWeight.w600,
           ),
         ),
-        backgroundColor: Colors.green.shade600,
+        backgroundColor: const Color(0xFF9FA88A).withOpacity(0.9),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        duration: const Duration(seconds: 4),
       ),
     );
   }
@@ -119,15 +148,28 @@ class _ProfilePageState extends State<ProfilePage> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    setState(() => _saving = true);
+    setState(() {
+      _saving = true;
+      _clearErrors();
+    });
 
     try {
       final newEmail = _emailCtrl.text.trim();
       final newPhone = '+966${_phoneCtrl.text}';
-      final batch = FirebaseFirestore.instance.batch();
+      final oldPhone = '+966$_originalPhone';
+      final emailChanged = newEmail != _originalEmail;
+
+      // Validate email format first
+      if (!RegExp(
+        r'^[\w\.\-]+@[a-zA-Z0-9\-]+\.[a-zA-Z]{2,}$',
+      ).hasMatch(newEmail)) {
+        _showError('Invalid email');
+        setState(() => _saving = false);
+        return;
+      }
 
       // Check if phone changed and if new phone exists
-      if (newPhone != _originalPhone) {
+      if (newPhone != oldPhone) {
         final phoneDoc = await FirebaseFirestore.instance
             .collection('phoneNumbers')
             .doc(newPhone)
@@ -140,7 +182,37 @@ class _ProfilePageState extends State<ProfilePage> {
         }
       }
 
-      // Update user document
+      // If email changed, send verification FIRST (before updating Firestore)
+      if (emailChanged) {
+        try {
+          await user.verifyBeforeUpdateEmail(newEmail);
+        } on FirebaseAuthException catch (e) {
+          String msg = 'Failed to send verification email';
+          if (e.code == 'email-already-in-use') {
+            msg = 'Email already in use';
+          } else if (e.code == 'invalid-email') {
+            msg = 'Invalid email';
+          } else if (e.code == 'requires-recent-login') {
+            msg = 'Please sign out and sign in again to change your email';
+          }
+          _showError(msg);
+          setState(() => _saving = false);
+          return;
+        }
+
+        // Navigate to Check Email page (like sign up)
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => CheckEmailPage(email: newEmail)),
+          );
+        }
+        return; // Don't continue to update Firestore yet
+      }
+
+      // Now update Firestore (only if email didn't change)
+      final batch = FirebaseFirestore.instance.batch();
+
       final userRef = FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid);
@@ -152,16 +224,14 @@ class _ProfilePageState extends State<ProfilePage> {
       });
 
       // Update phone collection if changed
-      if (newPhone != _originalPhone) {
-        // Delete old phone entry
-        if (_originalPhone.isNotEmpty) {
+      if (newPhone != oldPhone) {
+        if (oldPhone.isNotEmpty) {
           final oldPhoneRef = FirebaseFirestore.instance
               .collection('phoneNumbers')
-              .doc(_originalPhone);
+              .doc(oldPhone);
           batch.delete(oldPhoneRef);
         }
 
-        // Add new phone entry
         final newPhoneRef = FirebaseFirestore.instance
             .collection('phoneNumbers')
             .doc(newPhone);
@@ -173,40 +243,118 @@ class _ProfilePageState extends State<ProfilePage> {
 
       await batch.commit();
 
-      // If email changed, update Firebase Auth and send verification
-      if (newEmail != _originalEmail) {
-        await user.verifyBeforeUpdateEmail(newEmail);
-
-        if (mounted) {
-          _showSuccess(
-            'Profile updated! Please verify your new email address before it takes effect.',
-          );
-        }
-      } else {
-        if (mounted) {
-          _showSuccess('Profile updated successfully!');
-        }
-      }
-
-      // Reload data
+      // Update original values
+      _originalFirstName = _firstNameCtrl.text.trim();
+      _originalLastName = _lastNameCtrl.text.trim();
       _originalEmail = newEmail;
-      _originalPhone = newPhone;
+      _originalPhone = _phoneCtrl.text;
 
-      setState(() => _saving = false);
+      if (mounted) {
+        _showSuccessSnackbar('Profile updated successfully!');
+
+        setState(() {
+          _saving = false;
+          _hasChanges = false;
+        });
+      }
     } on FirebaseAuthException catch (e) {
       String msg = 'Failed to update profile';
       if (e.code == 'requires-recent-login') {
-        msg = 'Please sign in again to change your email';
+        msg = 'Please sign out and sign in again to change your email';
       } else if (e.code == 'email-already-in-use') {
         msg = 'Email already in use';
       } else if (e.code == 'invalid-email') {
-        msg = 'Invalid email address';
+        msg = 'Invalid email';
       }
       _showError(msg);
       setState(() => _saving = false);
     } catch (e) {
       _showError('An error occurred. Please try again.');
       setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _deleteAccount() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Delete Account',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        content: const Text(
+          'Are you sure you want to delete your account? This action cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(
+                color: Colors.black54,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      // Get phone before deleting
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      final phone = doc.data()?['phone'];
+
+      // Delete user data from Firestore
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .delete();
+
+      // Delete phone number entry
+      if (phone != null) {
+        await FirebaseFirestore.instance
+            .collection('phoneNumbers')
+            .doc(phone)
+            .delete();
+      }
+
+      // Delete Firebase Auth account
+      await user.delete();
+
+      if (mounted) {
+        // Navigate to Welcome page (not Sign In)
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const WelcomeScreen()),
+          (route) => false,
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'requires-recent-login') {
+        _showError('Please sign in again to delete your account');
+      } else {
+        _showError('Failed to delete account');
+      }
+    } catch (e) {
+      _showError('An error occurred');
     }
   }
 
@@ -248,25 +396,29 @@ class _ProfilePageState extends State<ProfilePage> {
                     ),
                     const SizedBox(height: 32),
 
-                    // First Name
-                    _buildTextField(
-                      controller: _firstNameCtrl,
-                      label: 'First Name',
-                      hint: 'Enter first name',
-                      icon: Icons.person_outline,
-                      validator: (v) =>
-                          v == null || v.isEmpty ? 'Required' : null,
-                    ),
-                    const SizedBox(height: 20),
-
-                    // Last Name
-                    _buildTextField(
-                      controller: _lastNameCtrl,
-                      label: 'Last Name',
-                      hint: 'Enter last name',
-                      icon: Icons.person_outline,
-                      validator: (v) =>
-                          v == null || v.isEmpty ? 'Required' : null,
+                    // First Name and Last Name in one row
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildTextField(
+                            controller: _firstNameCtrl,
+                            label: 'First Name',
+                            hint: 'Enter first name',
+                            validator: (v) =>
+                                v == null || v.isEmpty ? 'Required' : null,
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: _buildTextField(
+                            controller: _lastNameCtrl,
+                            label: 'Last Name',
+                            hint: 'Enter last name',
+                            validator: (v) =>
+                                v == null || v.isEmpty ? 'Required' : null,
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 20),
 
@@ -275,8 +427,9 @@ class _ProfilePageState extends State<ProfilePage> {
                       controller: _emailCtrl,
                       label: 'Email',
                       hint: 'Enter email',
-                      icon: Icons.email_outlined,
                       keyboardType: TextInputType.emailAddress,
+                      hasError: _emailError,
+                      errorText: _emailError ? _errorMessage : null,
                       validator: (v) {
                         if (v == null || v.trim().isEmpty) return 'Required';
                         if (!RegExp(
@@ -294,9 +447,10 @@ class _ProfilePageState extends State<ProfilePage> {
                       controller: _phoneCtrl,
                       label: 'Phone Number',
                       hint: 'Enter 9 digits',
-                      icon: Icons.phone_outlined,
                       keyboardType: TextInputType.phone,
                       prefixText: '+966 ',
+                      hasError: _phoneError,
+                      errorText: _phoneError ? _errorMessage : null,
                       inputFormatters: [
                         FilteringTextInputFormatter.digitsOnly,
                         LengthLimitingTextInputFormatter(9),
@@ -316,7 +470,6 @@ class _ProfilePageState extends State<ProfilePage> {
                       controller: TextEditingController(text: '••••••••'),
                       label: 'Password',
                       hint: '',
-                      icon: Icons.lock_outline,
                       enabled: false,
                       obscureText: true,
                     ),
@@ -326,7 +479,9 @@ class _ProfilePageState extends State<ProfilePage> {
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: _saving ? null : _saveChanges,
+                        onPressed: (_saving || !_hasChanges)
+                            ? null
+                            : _saveChanges,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: kGreen,
                           foregroundColor: Colors.white,
@@ -335,6 +490,7 @@ class _ProfilePageState extends State<ProfilePage> {
                             borderRadius: BorderRadius.circular(12),
                           ),
                           elevation: 0,
+                          disabledBackgroundColor: Colors.grey[300],
                         ),
                         child: _saving
                             ? const SizedBox(
@@ -354,6 +510,26 @@ class _ProfilePageState extends State<ProfilePage> {
                               ),
                       ),
                     ),
+                    const SizedBox(height: 16),
+
+                    // Delete account button
+                    InkWell(
+                      onTap: _deleteAccount,
+                      splashColor: Colors.transparent,
+                      highlightColor: Colors.transparent,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        alignment: Alignment.center,
+                        child: const Text(
+                          'Delete Account',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.red,
+                          ),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -365,53 +541,85 @@ class _ProfilePageState extends State<ProfilePage> {
     required TextEditingController controller,
     required String label,
     required String hint,
-    required IconData icon,
     String? Function(String?)? validator,
     TextInputType? keyboardType,
     bool enabled = true,
     bool obscureText = false,
     String? prefixText,
     List<TextInputFormatter>? inputFormatters,
+    bool hasError = false,
+    String? errorText,
   }) {
-    return TextFormField(
-      controller: controller,
-      enabled: enabled,
-      obscureText: obscureText,
-      keyboardType: keyboardType,
-      inputFormatters: inputFormatters,
-      validator: validator,
-      style: TextStyle(
-        color: enabled ? Colors.black87 : Colors.grey,
-        fontWeight: FontWeight.w500,
-      ),
-      decoration: InputDecoration(
-        labelText: label,
-        hintText: hint,
-        prefixText: prefixText,
-        prefixIcon: Icon(icon, color: enabled ? kGreen : Colors.grey),
-        filled: true,
-        fillColor: enabled ? Colors.white : Colors.grey[100],
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextFormField(
+          controller: controller,
+          enabled: enabled,
+          obscureText: obscureText,
+          keyboardType: keyboardType,
+          inputFormatters: inputFormatters,
+          validator: validator,
+          onChanged: (_) {
+            if (hasError) _clearErrors();
+          },
+          style: TextStyle(
+            color: enabled ? Colors.black87 : Colors.grey,
+            fontWeight: FontWeight.w500,
+          ),
+          decoration: InputDecoration(
+            labelText: label,
+            hintText: hint,
+            prefixText: prefixText,
+            filled: true,
+            fillColor: enabled ? Colors.white : Colors.grey[100],
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                color: hasError ? Colors.red : Colors.black12,
+                width: hasError ? 2 : 1,
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(
+                color: hasError ? Colors.red : kGreen,
+                width: 2,
+              ),
+            ),
+            errorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Colors.red, width: 2),
+            ),
+            focusedErrorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Colors.red, width: 2),
+            ),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 16,
+            ),
+            errorStyle: const TextStyle(height: 0),
+          ),
         ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Colors.black12, width: 1),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: kGreen, width: 2),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Colors.red, width: 1),
-        ),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 16,
-        ),
-      ),
+        // Show error message below field
+        if (hasError && errorText != null && errorText.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(left: 16, top: 6),
+            child: Text(
+              errorText,
+              style: TextStyle(
+                color: Colors.red.shade700,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

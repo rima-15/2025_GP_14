@@ -23,7 +23,7 @@ Future<void> main() async {
   await Firebase.initializeApp();
 
   // 3) DEV-ONLY AUTO LOGIN (anonymous)
-  final enableDevAutoLogin =
+  /* final enableDevAutoLogin =
       kDebugMode &&
       (dotenv.maybeGet('DEV_AUTO_LOGIN')?.toLowerCase() == 'true');
 
@@ -35,7 +35,7 @@ Future<void> main() async {
     } catch (e) {
       debugPrint('Anonymous sign-in failed: $e');
     }
-  }
+  }*/
 
   // 4) Run the venue seeder (debug only, guarded by .env flag)
   final devSeedRaw = dotenv.maybeGet('DEV_SEED');

@@ -1,6 +1,7 @@
-// lib/screens/venue_page.dart
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'category_page.dart';
 import 'package:http/http.dart' as http;
@@ -605,7 +606,7 @@ class _VenuePageState extends State<VenuePage> {
                   ),
                 ),
 
-                // Explore categories (your exact UI)
+                // 🔹 Explore Categories (dynamic from Firestore)
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 16),
                   child: Text(
@@ -615,31 +616,54 @@ class _VenuePageState extends State<VenuePage> {
                 ),
                 SizedBox(
                   height: 200,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      _categoryCard(
-                        context,
-                        "Shops",
-                        "120 places",
-                        "images/Shops.png",
-                      ),
-                      const SizedBox(width: 12),
-                      _categoryCard(
-                        context,
-                        "Cafes",
-                        "25 places",
-                        "images/Cafes.jpg",
-                      ),
-                      const SizedBox(width: 12),
-                      _categoryCard(
-                        context,
-                        "Restaurants",
-                        "40 places",
-                        "images/restaurants.jpeg",
-                      ),
-                    ],
+                  child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                    stream: FirebaseFirestore.instance
+                        .collection('venues')
+                        .doc(widget.placeId)
+                        .collection('categories')
+                        .snapshots(),
+
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      if (snapshot.hasError) {
+                        return Center(child: Text('Error: ${snapshot.error}'));
+                      }
+
+                      final docs = snapshot.data?.docs ?? [];
+                      if (docs.isEmpty) {
+                        return const Center(
+                          child: Text('No categories found.'),
+                        );
+                      }
+
+                      return ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.all(16),
+                        itemCount: docs.length,
+                        separatorBuilder: (_, __) => const SizedBox(width: 12),
+                        itemBuilder: (context, i) {
+                          final categoryId = docs[i]
+                              .id; // 👈 هذا هو الـ ID الحقيقي (مثل solitaireshops)
+                          final data = docs[i].data();
+                          final name = data['categoryName'] ?? 'Unnamed';
+                          final count = data['placesCount'] ?? 0;
+                          final image =
+                              data['categoryImage'] ?? 'images/default.jpg';
+
+                          return _categoryCard(
+                            context,
+                            name,
+                            '$count places',
+                            image,
+                            widget.placeId,
+                            categoryId,
+                            _imageUrlForCategory, // 🔹 أرسل الدالة هنا
+                          );
+                        },
+                      );
+                    },
                   ),
                 ),
               ],
@@ -892,17 +916,43 @@ class _VenuePageState extends State<VenuePage> {
     );
   }
 
+  // 🔹 تحميل صورة الكاتيقوري من Firebase Storage بنفس طريقة HomePage
+  Future<String?> _imageUrlForCategory(String path) async {
+    if (path.isEmpty) return null;
+    if (_urlCache.containsKey(path)) return _urlCache[path];
+    try {
+      final ref = _coversStorage.ref(path);
+      final url = await ref.getDownloadURL().timeout(
+        const Duration(seconds: 8),
+      );
+      _urlCache[path] = url;
+      CachedNetworkImageProvider(url).resolve(const ImageConfiguration());
+      return url;
+    } catch (_) {
+      return null;
+    }
+  }
+
   static Widget _categoryCard(
     BuildContext context,
     String title,
     String subtitle,
-    String image,
+    String imagePath, // 🔹 Storage path
+    String venueId,
+    String categoryId,
+    Future<String?> Function(String) getUrlFor, // 🔹 دالة تحميل الصورة
   ) {
     return GestureDetector(
       onTap: () {
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (_) => CategoryPage(categoryName: title)),
+          MaterialPageRoute(
+            builder: (_) => CategoryPage(
+              categoryName: title,
+              venueId: venueId,
+              categoryId: categoryId,
+            ),
+          ),
         );
       },
       child: Container(
@@ -925,11 +975,39 @@ class _VenuePageState extends State<VenuePage> {
               borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(14),
               ),
-              child: Image.asset(
-                image,
-                height: 100,
-                width: 140,
-                fit: BoxFit.cover,
+              child: FutureBuilder<String?>(
+                future: getUrlFor(imagePath),
+                builder: (context, snap) {
+                  if (snap.connectionState == ConnectionState.waiting) {
+                    return Container(
+                      height: 100,
+                      width: 140,
+                      color: Colors.grey[200],
+                      alignment: Alignment.center,
+                      child: const CircularProgressIndicator(strokeWidth: 2),
+                    );
+                  }
+                  if (snap.hasError ||
+                      snap.data == null ||
+                      snap.data!.isEmpty) {
+                    return Container(
+                      height: 100,
+                      width: 140,
+                      color: Colors.grey[200],
+                      alignment: Alignment.center,
+                      child: const Icon(
+                        Icons.image_not_supported,
+                        color: Colors.grey,
+                      ),
+                    );
+                  }
+                  return CachedNetworkImage(
+                    imageUrl: snap.data!,
+                    height: 100,
+                    width: 140,
+                    fit: BoxFit.cover,
+                  );
+                },
               ),
             ),
             Padding(

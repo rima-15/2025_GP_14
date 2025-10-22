@@ -659,7 +659,8 @@ class _VenuePageState extends State<VenuePage> {
                             image,
                             widget.placeId,
                             categoryId,
-                            _imageUrlForCategory, // 🔹 أرسل الدالة هنا
+                            _imageUrlForCategory,
+                            // 🔹 أرسل الدالة هنا
                           );
                         },
                       );

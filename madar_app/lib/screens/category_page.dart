@@ -3,20 +3,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'directions_page.dart'; // تأكد من استيراد صفحة التوجيهات
+import 'directions_page.dart';
+import 'package:firebase_storage/firebase_storage.dart' as storage;
 
 const kGreen = Color(0xFF787E65);
 
 class CategoryPage extends StatefulWidget {
   final String categoryName;
   final String venueId;
-  final String categoryId; // 👈 أضف هذا
+  final String categoryId;
 
   const CategoryPage({
     super.key,
     required this.categoryName,
     required this.venueId,
-    required this.categoryId, // 👈
+    required this.categoryId,
   });
 
   @override
@@ -29,6 +30,21 @@ class _CategoryPageState extends State<CategoryPage> {
 
   late String _apiKey;
   String _query = '';
+
+  // ✅ الدالة الصحيحة لجلب رابط الصورة من Firebase Storage
+  Future<String?> _getDownloadUrl(String path) async {
+    try {
+      final ref = storage.FirebaseStorage.instanceFor(
+        bucket: 'gs://madar-database.firebasestorage.app',
+      ).ref(path);
+
+      final url = await ref.getDownloadURL();
+      return url;
+    } catch (e) {
+      debugPrint('⚠️ Image load error: $e');
+      return null;
+    }
+  }
 
   @override
   void initState() {
@@ -76,7 +92,7 @@ class _CategoryPageState extends State<CategoryPage> {
       ),
       body: Column(
         children: [
-          // Search Bar - تم إضافته من النسخة القديمة
+          // 🔍 شريط البحث
           Container(
             margin: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -106,22 +122,20 @@ class _CategoryPageState extends State<CategoryPage> {
             ),
           ),
 
-          // List with Firebase Stream
+          // 🔹 عرض القائمة
           Expanded(
             child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: FirebaseFirestore.instance
                   .collection('places')
                   .where('venue_ID', isEqualTo: widget.venueId)
                   .where('category_ID', isEqualTo: widget.categoryId)
-                  .orderBy('placeName') // 🔹 يرتب أبجدياً
+                  .orderBy('placeName')
                   .snapshots(),
-
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
                 }
                 if (snapshot.hasError) {
-                  //return Center(child: Text('Error: ${snapshot.error}'));
                   return const Center(
                     child: Text(
                       'Something went wrong. Please try again later.',
@@ -136,7 +150,6 @@ class _CategoryPageState extends State<CategoryPage> {
                   return const Center(child: Text('No places found.'));
                 }
 
-                // تطبيق الفلترة بناء على البحث
                 final filteredDocs = docs.where((doc) {
                   if (_query.trim().isEmpty) return true;
                   final data = doc.data();
@@ -144,7 +157,7 @@ class _CategoryPageState extends State<CategoryPage> {
                       .toString()
                       .toLowerCase();
                   final q = _query.toLowerCase();
-                  return name.contains(q); // 🔹 يبحث فقط بالاسم
+                  return name.contains(q);
                 }).toList();
 
                 if (filteredDocs.isEmpty) {
@@ -182,16 +195,12 @@ class _CategoryPageState extends State<CategoryPage> {
           ),
         ],
       ),
-      // InkWell للضغط - تم إضافته من النسخة القديمة
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: () {
-          // يمكنك إضافة Navigation لصفحة تفاصيل المكان هنا
-          // Navigator.push(context, MaterialPageRoute(builder: (_) => PlaceDetailsPage(...)));
-        },
+        onTap: () {},
         child: Row(
           children: [
-            // صورة المكان
+            // 🖼 صورة المكان
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: img.isEmpty
@@ -204,33 +213,50 @@ class _CategoryPageState extends State<CategoryPage> {
                         color: Colors.grey,
                       ),
                     )
-                  : Image.network(
-                      img,
-                      width: 100,
-                      height: 100,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        return Container(
+                  : FutureBuilder<String?>(
+                      future: _getDownloadUrl(img),
+                      builder: (context, snap) {
+                        if (snap.connectionState == ConnectionState.waiting) {
+                          return Container(
+                            width: 100,
+                            height: 100,
+                            color: Colors.grey[200],
+                            alignment: Alignment.center,
+                            child: const CircularProgressIndicator(
+                              strokeWidth: 2,
+                            ),
+                          );
+                        }
+                        if (!snap.hasData ||
+                            snap.data == null ||
+                            snap.data!.isEmpty) {
+                          return Container(
+                            width: 100,
+                            height: 100,
+                            color: Colors.grey[200],
+                            child: const Icon(
+                              Icons.image_not_supported,
+                              color: Colors.grey,
+                            ),
+                          );
+                        }
+                        return Image.network(
+                          snap.data!,
                           width: 100,
                           height: 100,
-                          color: Colors.grey[200],
-                          child: const Icon(
-                            Icons.image_not_supported,
-                            color: Colors.grey,
-                          ),
+                          fit: BoxFit.cover,
                         );
                       },
                     ),
             ),
 
-            // محتوى الكارد
+            // 📄 محتوى الكارد
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.all(12),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // اسم المكان
                     Text(
                       name,
                       maxLines: 1,
@@ -242,8 +268,6 @@ class _CategoryPageState extends State<CategoryPage> {
                       ),
                     ),
                     const SizedBox(height: 6),
-
-                    // الوصف
                     Text(
                       desc,
                       maxLines: 2,
@@ -252,7 +276,7 @@ class _CategoryPageState extends State<CategoryPage> {
                     ),
                     const SizedBox(height: 8),
 
-                    // التقييم - المميزة الجديدة
+                    // ⭐ التقييم
                     FutureBuilder<double?>(
                       future: _ratingCache[name] != null
                           ? Future.value(_ratingCache[name])
@@ -260,14 +284,10 @@ class _CategoryPageState extends State<CategoryPage> {
                               _ratingCache[name] = r;
                               return r;
                             }),
-
                       builder: (context, snap) {
-                        if (!snap.hasData) {
-                          return const SizedBox.shrink();
-                        }
+                        if (!snap.hasData) return const SizedBox.shrink();
                         final r = snap.data ?? 0.0;
                         if (r == 0.0) return const SizedBox.shrink();
-
                         return Row(
                           children: [
                             const Icon(
@@ -292,7 +312,7 @@ class _CategoryPageState extends State<CategoryPage> {
               ),
             ),
 
-            // زر التوجيهات - تم إضافته من النسخة القديمة
+            // 🧭 زر الاتجاهات
             Padding(
               padding: const EdgeInsets.only(right: 6),
               child: IconButton(

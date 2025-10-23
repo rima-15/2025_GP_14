@@ -13,6 +13,8 @@ import 'package:madar_app/dev/seed_venues.dart'; // to save venue info in databa
 import 'package:flutter/foundation.dart'
     show kDebugMode; // for debug-only logic
 
+//import 'categorytoarray.dart';
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -21,6 +23,9 @@ Future<void> main() async {
 
   // 2) Initialize Firebase
   await Firebase.initializeApp();
+  //await migrateCategories();
+
+  //print('✅ Migration finished');
 
   // 3) DEV-ONLY AUTO LOGIN (anonymous)
   /* final enableDevAutoLogin =

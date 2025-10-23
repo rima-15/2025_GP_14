@@ -128,7 +128,7 @@ class _CategoryPageState extends State<CategoryPage> {
               stream: FirebaseFirestore.instance
                   .collection('places')
                   .where('venue_ID', isEqualTo: widget.venueId)
-                  .where('category_ID', isEqualTo: widget.categoryId)
+                  .where('category_IDs', arrayContains: widget.categoryId)
                   .orderBy('placeName')
                   .snapshots(),
               builder: (context, snapshot) {

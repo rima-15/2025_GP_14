@@ -648,14 +648,14 @@ class _VenuePageState extends State<VenuePage> {
                               .id; // 👈 هذا هو الـ ID الحقيقي (مثل solitaireshops)
                           final data = docs[i].data();
                           final name = data['categoryName'] ?? 'Unnamed';
-                          final count = data['placesCount'] ?? 0;
+                          //final count = data['placesCount'] ?? 0;
                           final image =
                               data['categoryImage'] ?? 'images/default.jpg';
 
                           return _categoryCard(
                             context,
                             name,
-                            '$count places',
+                            //'$count places',
                             image,
                             widget.placeId,
                             categoryId,
@@ -937,7 +937,7 @@ class _VenuePageState extends State<VenuePage> {
   static Widget _categoryCard(
     BuildContext context,
     String title,
-    String subtitle,
+    //String subtitle,
     String imagePath, // 🔹 Storage path
     String venueId,
     String categoryId,
@@ -1020,10 +1020,10 @@ class _VenuePageState extends State<VenuePage> {
                     title,
                     style: const TextStyle(fontWeight: FontWeight.w600),
                   ),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(color: Colors.black54, fontSize: 12),
-                  ),
+                  // Text(
+                  // subtitle,
+                  // style: const TextStyle(color: Colors.black54, fontSize: 12),
+                  //),
                 ],
               ),
             ),

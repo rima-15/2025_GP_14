@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'directions_page.dart';
 import 'package:firebase_storage/firebase_storage.dart' as storage;
+import 'package:flutter/services.dart' show rootBundle;
 
 const kGreen = Color(0xFF787E65);
 
@@ -58,18 +59,69 @@ class _CategoryPageState extends State<CategoryPage> {
     super.dispose();
   }
 
-  Future<double?> _getLiveRating(String placeName) async {
-    final uri = Uri.https(
-      'maps.googleapis.com',
-      '/maps/api/place/textsearch/json',
-      {'query': placeName, 'key': _apiKey},
-    );
+  Future<double?> _getLiveRating(String docId) async {
+    final bool isSolitaire = widget.venueId == "ChIJcYTQDwDjLj4RZEiboV6gZzM";
+    Uri uri;
+
+    if (isSolitaire) {
+      // ✅ نقرأ المركز من ملف solitaire.json
+      try {
+        final jsonStr = await rootBundle.loadString(
+          'assets/venues/solitaire.json',
+        );
+        final data = json.decode(jsonStr);
+        final lat = data['center']['lat'];
+        final lng = data['center']['lng'];
+
+        uri = Uri.https(
+          'maps.googleapis.com',
+          '/maps/api/place/nearbysearch/json',
+          {
+            'location': '$lat,$lng',
+            'radius': '150',
+            'keyword': docId, // نبحث بالـ Document ID
+            'key': _apiKey,
+          },
+        );
+      } catch (e) {
+        debugPrint("⚠️ Error loading solitaire.json: $e");
+        return null;
+      }
+    } else {
+      // ✅ باقي الفنيوز نجيب الـ lat/lng من Firestore
+      final venueSnap = await FirebaseFirestore.instance
+          .collection('venues')
+          .doc(widget.venueId)
+          .get();
+
+      if (!venueSnap.exists) return null;
+      final lat = venueSnap.data()?['latitude'];
+      final lng = venueSnap.data()?['longitude'];
+
+      if (lat == null || lng == null) return null;
+
+      uri = Uri.https(
+        'maps.googleapis.com',
+        '/maps/api/place/nearbysearch/json',
+        {
+          'location': '$lat,$lng',
+          'radius': '150',
+          'keyword': docId,
+          'key': _apiKey,
+        },
+      );
+    }
+
+    // ✅ الطلب من Google API
     final r = await http.get(uri);
     if (r.statusCode != 200) return null;
+
     final j = json.decode(r.body);
     if (j['status'] != 'OK') return null;
+
     final results = j['results'] as List?;
     if (results == null || results.isEmpty) return null;
+
     return (results.first['rating'] ?? 0).toDouble();
   }
 
@@ -167,7 +219,7 @@ class _CategoryPageState extends State<CategoryPage> {
                 return ListView.builder(
                   itemCount: filteredDocs.length,
                   itemBuilder: (context, i) =>
-                      _placeCard(filteredDocs[i].data()),
+                      _placeCard(filteredDocs[i].data(), filteredDocs[i].id),
                 );
               },
             ),
@@ -177,7 +229,7 @@ class _CategoryPageState extends State<CategoryPage> {
     );
   }
 
-  Widget _placeCard(Map<String, dynamic> data) {
+  Widget _placeCard(Map<String, dynamic> data, String originalId) {
     final name = data['placeName'] ?? '';
     final desc = data['placeDescription'] ?? '';
     final img = data['placeImage'] ?? '';
@@ -278,12 +330,13 @@ class _CategoryPageState extends State<CategoryPage> {
 
                     // ⭐ التقييم
                     FutureBuilder<double?>(
-                      future: _ratingCache[name] != null
-                          ? Future.value(_ratingCache[name])
-                          : _getLiveRating(name).then((r) {
-                              _ratingCache[name] = r;
+                      future: _ratingCache[originalId] != null
+                          ? Future.value(_ratingCache[originalId])
+                          : _getLiveRating(originalId).then((r) {
+                              _ratingCache[originalId] = r;
                               return r;
                             }),
+
                       builder: (context, snap) {
                         if (!snap.hasData) return const SizedBox.shrink();
                         final r = snap.data ?? 0.0;

@@ -3,20 +3,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'directions_page.dart'; // تأكد من استيراد صفحة التوجيهات
+import 'directions_page.dart';
+import 'package:firebase_storage/firebase_storage.dart' as storage;
+import 'package:flutter/services.dart' show rootBundle;
 
 const kGreen = Color(0xFF787E65);
 
 class CategoryPage extends StatefulWidget {
   final String categoryName;
   final String venueId;
-  final String categoryId; // 👈 أضف هذا
+  final String categoryId;
 
   const CategoryPage({
     super.key,
     required this.categoryName,
     required this.venueId,
-    required this.categoryId, // 👈
+    required this.categoryId,
   });
 
   @override
@@ -25,8 +27,25 @@ class CategoryPage extends StatefulWidget {
 
 class _CategoryPageState extends State<CategoryPage> {
   final TextEditingController _searchCtrl = TextEditingController();
+  final Map<String, double?> _ratingCache = {};
+
   late String _apiKey;
   String _query = '';
+
+  // ✅ الدالة الصحيحة لجلب رابط الصورة من Firebase Storage
+  Future<String?> _getDownloadUrl(String path) async {
+    try {
+      final ref = storage.FirebaseStorage.instanceFor(
+        bucket: 'gs://madar-database.firebasestorage.app',
+      ).ref(path);
+
+      final url = await ref.getDownloadURL();
+      return url;
+    } catch (e) {
+      debugPrint('⚠️ Image load error: $e');
+      return null;
+    }
+  }
 
   @override
   void initState() {
@@ -40,18 +59,69 @@ class _CategoryPageState extends State<CategoryPage> {
     super.dispose();
   }
 
-  Future<double?> _getLiveRating(String placeName) async {
-    final uri = Uri.https(
-      'maps.googleapis.com',
-      '/maps/api/place/textsearch/json',
-      {'query': placeName, 'key': _apiKey},
-    );
+  Future<double?> _getLiveRating(String docId) async {
+    final bool isSolitaire = widget.venueId == "ChIJcYTQDwDjLj4RZEiboV6gZzM";
+    Uri uri;
+
+    if (isSolitaire) {
+      // ✅ نقرأ المركز من ملف solitaire.json
+      try {
+        final jsonStr = await rootBundle.loadString(
+          'assets/venues/solitaire.json',
+        );
+        final data = json.decode(jsonStr);
+        final lat = data['center']['lat'];
+        final lng = data['center']['lng'];
+
+        uri = Uri.https(
+          'maps.googleapis.com',
+          '/maps/api/place/nearbysearch/json',
+          {
+            'location': '$lat,$lng',
+            'radius': '150',
+            'keyword': docId, // نبحث بالـ Document ID
+            'key': _apiKey,
+          },
+        );
+      } catch (e) {
+        debugPrint("⚠️ Error loading solitaire.json: $e");
+        return null;
+      }
+    } else {
+      // ✅ باقي الفنيوز نجيب الـ lat/lng من Firestore
+      final venueSnap = await FirebaseFirestore.instance
+          .collection('venues')
+          .doc(widget.venueId)
+          .get();
+
+      if (!venueSnap.exists) return null;
+      final lat = venueSnap.data()?['latitude'];
+      final lng = venueSnap.data()?['longitude'];
+
+      if (lat == null || lng == null) return null;
+
+      uri = Uri.https(
+        'maps.googleapis.com',
+        '/maps/api/place/nearbysearch/json',
+        {
+          'location': '$lat,$lng',
+          'radius': '150',
+          'keyword': docId,
+          'key': _apiKey,
+        },
+      );
+    }
+
+    // ✅ الطلب من Google API
     final r = await http.get(uri);
     if (r.statusCode != 200) return null;
+
     final j = json.decode(r.body);
     if (j['status'] != 'OK') return null;
+
     final results = j['results'] as List?;
     if (results == null || results.isEmpty) return null;
+
     return (results.first['rating'] ?? 0).toDouble();
   }
 
@@ -74,7 +144,7 @@ class _CategoryPageState extends State<CategoryPage> {
       ),
       body: Column(
         children: [
-          // Search Bar - تم إضافته من النسخة القديمة
+          // 🔍 شريط البحث
           Container(
             margin: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -104,20 +174,27 @@ class _CategoryPageState extends State<CategoryPage> {
             ),
           ),
 
-          // List with Firebase Stream
+          // 🔹 عرض القائمة
           Expanded(
             child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: FirebaseFirestore.instance
                   .collection('places')
                   .where('venue_ID', isEqualTo: widget.venueId)
-                  .where('category_ID', isEqualTo: widget.categoryId)
+                  .where('category_IDs', arrayContains: widget.categoryId)
+                  .orderBy('placeName')
                   .snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
                 }
                 if (snapshot.hasError) {
-                  return Center(child: Text('Error: ${snapshot.error}'));
+                  return const Center(
+                    child: Text(
+                      'Something went wrong. Please try again later.',
+                      style: TextStyle(color: Colors.black54),
+                      textAlign: TextAlign.center,
+                    ),
+                  );
                 }
 
                 final docs = snapshot.data?.docs ?? [];
@@ -125,18 +202,14 @@ class _CategoryPageState extends State<CategoryPage> {
                   return const Center(child: Text('No places found.'));
                 }
 
-                // تطبيق الفلترة بناء على البحث
                 final filteredDocs = docs.where((doc) {
                   if (_query.trim().isEmpty) return true;
                   final data = doc.data();
                   final name = (data['placeName'] ?? '')
                       .toString()
                       .toLowerCase();
-                  final desc = (data['placeDescription'] ?? '')
-                      .toString()
-                      .toLowerCase();
                   final q = _query.toLowerCase();
-                  return name.contains(q) || desc.contains(q);
+                  return name.contains(q);
                 }).toList();
 
                 if (filteredDocs.isEmpty) {
@@ -146,7 +219,7 @@ class _CategoryPageState extends State<CategoryPage> {
                 return ListView.builder(
                   itemCount: filteredDocs.length,
                   itemBuilder: (context, i) =>
-                      _placeCard(filteredDocs[i].data()),
+                      _placeCard(filteredDocs[i].data(), filteredDocs[i].id),
                 );
               },
             ),
@@ -156,7 +229,7 @@ class _CategoryPageState extends State<CategoryPage> {
     );
   }
 
-  Widget _placeCard(Map<String, dynamic> data) {
+  Widget _placeCard(Map<String, dynamic> data, String originalId) {
     final name = data['placeName'] ?? '';
     final desc = data['placeDescription'] ?? '';
     final img = data['placeImage'] ?? '';
@@ -174,16 +247,12 @@ class _CategoryPageState extends State<CategoryPage> {
           ),
         ],
       ),
-      // InkWell للضغط - تم إضافته من النسخة القديمة
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: () {
-          // يمكنك إضافة Navigation لصفحة تفاصيل المكان هنا
-          // Navigator.push(context, MaterialPageRoute(builder: (_) => PlaceDetailsPage(...)));
-        },
+        onTap: () {},
         child: Row(
           children: [
-            // صورة المكان
+            // 🖼 صورة المكان
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: img.isEmpty
@@ -196,33 +265,50 @@ class _CategoryPageState extends State<CategoryPage> {
                         color: Colors.grey,
                       ),
                     )
-                  : Image.network(
-                      img,
-                      width: 100,
-                      height: 100,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        return Container(
+                  : FutureBuilder<String?>(
+                      future: _getDownloadUrl(img),
+                      builder: (context, snap) {
+                        if (snap.connectionState == ConnectionState.waiting) {
+                          return Container(
+                            width: 100,
+                            height: 100,
+                            color: Colors.grey[200],
+                            alignment: Alignment.center,
+                            child: const CircularProgressIndicator(
+                              strokeWidth: 2,
+                            ),
+                          );
+                        }
+                        if (!snap.hasData ||
+                            snap.data == null ||
+                            snap.data!.isEmpty) {
+                          return Container(
+                            width: 100,
+                            height: 100,
+                            color: Colors.grey[200],
+                            child: const Icon(
+                              Icons.image_not_supported,
+                              color: Colors.grey,
+                            ),
+                          );
+                        }
+                        return Image.network(
+                          snap.data!,
                           width: 100,
                           height: 100,
-                          color: Colors.grey[200],
-                          child: const Icon(
-                            Icons.image_not_supported,
-                            color: Colors.grey,
-                          ),
+                          fit: BoxFit.cover,
                         );
                       },
                     ),
             ),
 
-            // محتوى الكارد
+            // 📄 محتوى الكارد
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.all(12),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // اسم المكان
                     Text(
                       name,
                       maxLines: 1,
@@ -234,8 +320,6 @@ class _CategoryPageState extends State<CategoryPage> {
                       ),
                     ),
                     const SizedBox(height: 6),
-
-                    // الوصف
                     Text(
                       desc,
                       maxLines: 2,
@@ -244,16 +328,19 @@ class _CategoryPageState extends State<CategoryPage> {
                     ),
                     const SizedBox(height: 8),
 
-                    // التقييم - المميزة الجديدة
+                    // ⭐ التقييم
                     FutureBuilder<double?>(
-                      future: _getLiveRating(name),
+                      future: _ratingCache[originalId] != null
+                          ? Future.value(_ratingCache[originalId])
+                          : _getLiveRating(originalId).then((r) {
+                              _ratingCache[originalId] = r;
+                              return r;
+                            }),
+
                       builder: (context, snap) {
-                        if (!snap.hasData) {
-                          return const SizedBox.shrink();
-                        }
+                        if (!snap.hasData) return const SizedBox.shrink();
                         final r = snap.data ?? 0.0;
                         if (r == 0.0) return const SizedBox.shrink();
-
                         return Row(
                           children: [
                             const Icon(
@@ -278,7 +365,7 @@ class _CategoryPageState extends State<CategoryPage> {
               ),
             ),
 
-            // زر التوجيهات - تم إضافته من النسخة القديمة
+            // 🧭 زر الاتجاهات
             Padding(
               padding: const EdgeInsets.only(right: 6),
               child: IconButton(

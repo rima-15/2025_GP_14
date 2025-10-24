@@ -1,14 +1,17 @@
-import 'dart:convert';
+import 'dart:convert'; // (kept) even though no longer needed after caching
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:http/http.dart' as http;
+import 'package:http/http.dart' as http; // (kept)
 import 'package:madar_app/screens/venue_page.dart';
 import 'package:madar_app/api/data_fetcher.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart' as storage;
 import 'package:flutter/foundation.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+
+// 🔹 NEW: monthly cache service
+import 'package:madar_app/api/venue_cache_service.dart';
 
 const double _riyadhLat = 24.7136;
 const double _riyadhLng = 46.6753;
@@ -34,8 +37,15 @@ class HomePageState extends State<HomePage> {
 
   List<VenueData> _venues = [];
   double baseLat = _riyadhLat, baseLng = _riyadhLng;
-  late final _PlacesSvc _svc = _PlacesSvc(
-    dotenv.maybeGet('GOOGLE_API_KEY') ?? '',
+
+  // (kept) legacy helper, not used for calls anymore
+  // late final _PlacesSvc _svc = _PlacesSvc(
+  //   dotenv.maybeGet('GOOGLE_API_KEY') ?? '',
+  // );
+
+  // 👇 NEW: single cache service instance for the page
+  late final VenueCacheService _cache = VenueCacheService(
+    FirebaseFirestore.instance,
   );
 
   int _loadToken = 0;
@@ -58,6 +68,7 @@ class HomePageState extends State<HomePage> {
     });
 
     try {
+      // try get current location
       try {
         final enabled = await Geolocator.isLocationServiceEnabled();
         var perm = await Geolocator.checkPermission();
@@ -184,7 +195,7 @@ class HomePageState extends State<HomePage> {
   }
 
   Future<void> _kickOffRatings(List<VenueData> items) async {
-    if (_svc.apiKey.isEmpty) return;
+    // 🔹 Now we use the monthly cache service; no direct Google calls here.
     for (final v in items) {
       final pid = v.placeId;
       if (pid == null || pid.isEmpty) continue;
@@ -213,11 +224,12 @@ class HomePageState extends State<HomePage> {
 
   Future<void> _fetchRating(VenueData v) async {
     try {
-      final details = await _svc
-          .details(v.placeId!)
-          .timeout(const Duration(seconds: 6));
-      if (details == null) return;
-      final r = (details['rating'] ?? 0).toDouble();
+      // 👇 NEW: go through the shared monthly cache
+      final meta = await _cache
+          .getMonthlyMeta(v.placeId!)
+          .timeout(const Duration(seconds: 8));
+
+      final r = (meta.rating ?? 0).toDouble();
       _ratingCache[v.placeId!] = r;
 
       if (!mounted) return;
@@ -574,24 +586,4 @@ class VenueData {
     this.distanceMeters,
     this.imagePaths = const [],
   });
-}
-
-class _PlacesSvc {
-  final String apiKey;
-  _PlacesSvc(this.apiKey);
-
-  Uri _uri(String path, Map<String, String> q) =>
-      Uri.https('maps.googleapis.com', path, {...q, 'key': apiKey});
-
-  Future<Map<String, dynamic>?> details(String placeId) async {
-    if (apiKey.isEmpty) return null;
-    final uri = _uri('/maps/api/place/details/json', {
-      'place_id': placeId,
-      'fields': 'rating,user_ratings_total',
-    });
-    final r = await http.get(uri).timeout(const Duration(seconds: 10));
-    final j = jsonDecode(r.body) as Map<String, dynamic>;
-    if (j['status'] != 'OK') return null;
-    return j['result'] as Map<String, dynamic>;
-  }
 }

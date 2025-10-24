@@ -1,19 +1,15 @@
-import 'dart:convert';
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'category_page.dart';
-import 'package:http/http.dart' as http;
 import 'package:flutter/gestures.dart'; // less and more in description
-
-// Imports for venue url generation
-import 'dart:io' show Platform;
 import 'package:url_launcher/url_launcher.dart';
-
-// Storage + cache
 import 'package:firebase_storage/firebase_storage.dart' as storage;
 import 'package:cached_network_image/cached_network_image.dart';
+
+// ✅ NEW: monthly cache service
+import 'package:madar_app/api/venue_cache_service.dart';
+
+import 'category_page.dart';
 
 const kGreen = Color(0xFF787E65);
 
@@ -58,9 +54,9 @@ class _VenuePageState extends State<VenuePage> {
   bool? _openNow;
   List<String> _weekdayText = const [];
   List<dynamic> _periods = const [];
-  int? _utcOffsetMinutes;
-  String? _businessStatus;
-  List<String> _types = const [];
+  int? _utcOffsetMinutes; // may be null; we fallback to device TZ
+  String? _businessStatus; // may be null if not cached
+  List<String> _types = const []; // may be empty
 
   // storage + tiny URL cache (static across instances)
   static final storage.FirebaseStorage _coversStorage =
@@ -69,7 +65,7 @@ class _VenuePageState extends State<VenuePage> {
       );
   static final Map<String, String> _urlCache = {}; // path -> url
 
-  // hours cache
+  // hours memory cache (per app session)
   static final Map<String, Map<String, dynamic>> _hoursCache = {};
 
   // description expand
@@ -78,6 +74,11 @@ class _VenuePageState extends State<VenuePage> {
   // carousel
   late final PageController _pageCtrl = PageController();
   int _pageIndex = 0;
+
+  // 👇 NEW: monthly cache service
+  late final VenueCacheService _cache = VenueCacheService(
+    FirebaseFirestore.instance,
+  );
 
   @override
   void dispose() {
@@ -94,6 +95,7 @@ class _VenuePageState extends State<VenuePage> {
   }
 
   Future<void> _loadHours() async {
+    // First, try the in-memory cache to avoid duplicate work in the same session
     final cached = _hoursCache[widget.placeId];
     if (cached != null) {
       _applyHours(cached);
@@ -102,37 +104,20 @@ class _VenuePageState extends State<VenuePage> {
     }
 
     try {
-      final key = dotenv.maybeGet('GOOGLE_API_KEY') ?? '';
-      if (key.isEmpty) {
-        throw Exception('Missing GOOGLE_API_KEY in .env');
-      }
-      final uri = Uri.https(
-        'maps.googleapis.com',
-        '/maps/api/place/details/json',
-        {
-          'place_id': widget.placeId,
-          'fields': [
-            'opening_hours',
-            'current_opening_hours',
-            'utc_offset',
-            'types',
-            'business_status',
-          ].join(','),
-          'key': key,
-        },
-      );
+      // ✅ Use Firestore monthly cache (this will call Google only if stale >30d)
+      final meta = await _cache
+          .getMonthlyMeta(widget.placeId)
+          .timeout(const Duration(seconds: 10));
 
-      final r = await http.get(uri).timeout(const Duration(seconds: 10));
-      final j = jsonDecode(r.body) as Map<String, dynamic>;
-      if (j['status'] != 'OK') {
-        throw Exception(
-          'Details error: ${j['status']} ${j['error_message'] ?? ''}',
-        );
+      // Build a minimal "result-like" map for our existing _applyHours()
+      final resultLike = <String, dynamic>{};
+      if (meta.openingHours != null) {
+        // Prefer current_opening_hours shape if present
+        resultLike['current_opening_hours'] = meta.openingHours;
       }
 
-      final res = (j['result'] as Map<String, dynamic>?) ?? {};
-      _hoursCache[widget.placeId] = res;
-      _applyHours(res);
+      _hoursCache[widget.placeId] = resultLike;
+      _applyHours(resultLike);
     } catch (e) {
       setState(() => _error = e.toString());
     } finally {
@@ -159,6 +144,7 @@ class _VenuePageState extends State<VenuePage> {
   }
 
   void _applyHours(Map<String, dynamic> res) {
+    // NOTE: with monthly cache we may only have current_opening_hours.
     final currentOpening =
         (res['current_opening_hours'] as Map<String, dynamic>?) ?? {};
     final opening = currentOpening.isNotEmpty
@@ -169,7 +155,9 @@ class _VenuePageState extends State<VenuePage> {
         (opening['weekday_text'] as List?)?.cast<String>() ?? const [];
     final periods = (opening['periods'] as List?) ?? const [];
     final openNow = opening['open_now'] as bool?;
-    final utcOffset = res['utc_offset'] as int?;
+
+    // These are usually not cached to save quota; leave nulls/fallbacks
+    final utcOffset = res['utc_offset'] as int?; // may be null
     final types = (res['types'] as List?)?.cast<String>() ?? const [];
     final businessStatus = res['business_status'] as String?;
 
@@ -299,8 +287,9 @@ class _VenuePageState extends State<VenuePage> {
             (close['day'] as num).toInt(),
             (close['time'] as String),
           );
-          if (!closeDT.isAfter(openDT))
+          if (!closeDT.isAfter(openDT)) {
             closeDT = closeDT.add(const Duration(days: 1));
+          }
         } else {
           closeDT = openDT.add(const Duration(days: 1));
         }
@@ -332,9 +321,8 @@ class _VenuePageState extends State<VenuePage> {
 
     return _statusFromWeekdayTextFallback();
   }
-  // ---------- Helpers for address as link ----------
 
-  // open address as link in google map
+  // ---------- Helpers for address as link ----------
   Future<void> _openInMaps() async {
     final id = widget.placeId;
     final hasLL = widget.lat != null && widget.lng != null;
@@ -622,7 +610,6 @@ class _VenuePageState extends State<VenuePage> {
                         .doc(widget.placeId)
                         .collection('categories')
                         .snapshots(),
-
                     builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting) {
                         return const Center(child: CircularProgressIndicator());
@@ -644,23 +631,19 @@ class _VenuePageState extends State<VenuePage> {
                         itemCount: docs.length,
                         separatorBuilder: (_, __) => const SizedBox(width: 12),
                         itemBuilder: (context, i) {
-                          final categoryId = docs[i]
-                              .id; // 👈 هذا هو الـ ID الحقيقي (مثل solitaireshops)
+                          final categoryId = docs[i].id; // 👈 true ID
                           final data = docs[i].data();
                           final name = data['categoryName'] ?? 'Unnamed';
-                          //final count = data['placesCount'] ?? 0;
                           final image =
                               data['categoryImage'] ?? 'images/default.jpg';
 
                           return _categoryCard(
                             context,
                             name,
-                            //'$count places',
                             image,
                             widget.placeId,
                             categoryId,
                             _imageUrlForCategory,
-                            // 🔹 أرسل الدالة هنا
                           );
                         },
                       );
@@ -937,7 +920,6 @@ class _VenuePageState extends State<VenuePage> {
   static Widget _categoryCard(
     BuildContext context,
     String title,
-    //String subtitle,
     String imagePath, // 🔹 Storage path
     String venueId,
     String categoryId,
@@ -1013,18 +995,9 @@ class _VenuePageState extends State<VenuePage> {
             ),
             Padding(
               padding: const EdgeInsets.all(8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  // Text(
-                  // subtitle,
-                  // style: const TextStyle(color: Colors.black54, fontSize: 12),
-                  //),
-                ],
+              child: Text(
+                title,
+                style: const TextStyle(fontWeight: FontWeight.w600),
               ),
             ),
           ],

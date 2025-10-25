@@ -1,20 +1,23 @@
-import 'dart:convert'; // (kept) even though no longer needed after caching
+// ✅ NEW HOME PAGE - Following EXACTLY the reference image
+// Large cards with image, name overlay, stars, and distance
+
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:http/http.dart' as http; // (kept)
+import 'package:http/http.dart' as http;
 import 'package:madar_app/screens/venue_page.dart';
 import 'package:madar_app/api/data_fetcher.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart' as storage;
 import 'package:flutter/foundation.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-
-// 🔹 NEW: monthly cache service
 import 'package:madar_app/api/venue_cache_service.dart';
 
 const double _riyadhLat = 24.7136;
 const double _riyadhLng = 46.6753;
+
+const Color kPrimaryGreen = Color(0xFF777D63);
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -27,7 +30,7 @@ class HomePageState extends State<HomePage> {
       storage.FirebaseStorage.instanceFor(
         bucket: 'gs://madar-database.firebasestorage.app',
       );
-  final Color activeColor = const Color(0xFF787E65);
+
   final List<String> filters = const ['All', 'Malls', 'Stadiums', 'Airports'];
 
   int selectedFilterIndex = 0;
@@ -38,12 +41,6 @@ class HomePageState extends State<HomePage> {
   List<VenueData> _venues = [];
   double baseLat = _riyadhLat, baseLng = _riyadhLng;
 
-  // (kept) legacy helper, not used for calls anymore
-  // late final _PlacesSvc _svc = _PlacesSvc(
-  //   dotenv.maybeGet('GOOGLE_API_KEY') ?? '',
-  // );
-
-  // 👇 NEW: single cache service instance for the page
   late final VenueCacheService _cache = VenueCacheService(
     FirebaseFirestore.instance,
   );
@@ -68,7 +65,6 @@ class HomePageState extends State<HomePage> {
     });
 
     try {
-      // try get current location
       try {
         final enabled = await Geolocator.isLocationServiceEnabled();
         var perm = await Geolocator.checkPermission();
@@ -195,7 +191,6 @@ class HomePageState extends State<HomePage> {
   }
 
   Future<void> _kickOffRatings(List<VenueData> items) async {
-    // 🔹 Now we use the monthly cache service; no direct Google calls here.
     for (final v in items) {
       final pid = v.placeId;
       if (pid == null || pid.isEmpty) continue;
@@ -224,7 +219,6 @@ class HomePageState extends State<HomePage> {
 
   Future<void> _fetchRating(VenueData v) async {
     try {
-      // 👇 NEW: go through the shared monthly cache
       final meta = await _cache
           .getMonthlyMeta(v.placeId!)
           .timeout(const Duration(seconds: 8));
@@ -263,57 +257,70 @@ class HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F8F3),
-      body: SafeArea(
-        child: Column(
-          children: [
-            _buildSearchBar(),
-            _buildFilterTabs(),
-            Expanded(
-              child: _loading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _error != null
-                  ? Center(child: Text('Error: $_error'))
-                  : _buildVenueList(),
-            ),
-          ],
-        ),
+      backgroundColor: Colors.white,
+      body: Column(
+        children: [
+          const SizedBox(height: 8),
+          // ✅ Search bar
+          _buildSearchBar(),
+          const SizedBox(height: 12),
+          // ✅ Filter pills
+          _buildFilterTabs(),
+          const SizedBox(height: 16),
+          // ✅ Venue cards
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _error != null
+                ? Center(child: Text('Error: $_error'))
+                : _buildVenueList(),
+          ),
+        ],
       ),
     );
   }
 
+  // ✅ Search bar
   Widget _buildSearchBar() => Container(
-    margin: const EdgeInsets.all(16),
+    margin: const EdgeInsets.symmetric(horizontal: 16),
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
     decoration: BoxDecoration(
       color: Colors.white,
-      borderRadius: BorderRadius.circular(12),
-      boxShadow: [
-        BoxShadow(
-          color: Colors.grey.withOpacity(0.1),
-          blurRadius: 4,
-          offset: const Offset(0, 2),
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: Colors.grey.shade300, width: 1),
+    ),
+    child: Row(
+      children: [
+        Icon(Icons.search, color: Colors.grey.shade600, size: 22),
+        const SizedBox(width: 8),
+        Expanded(
+          child: TextField(
+            onChanged: (q) {
+              _query = q;
+              _applyLocalFilterAndSort();
+            },
+            decoration: const InputDecoration(
+              hintText: 'Search',
+              hintStyle: TextStyle(color: Color(0xFF9E9E9E)),
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              isDense: true,
+              contentPadding: EdgeInsets.zero,
+            ),
+            style: const TextStyle(fontSize: 15),
+          ),
         ),
       ],
     ),
-    child: TextField(
-      onChanged: (q) {
-        _query = q;
-        _applyLocalFilterAndSort();
-      },
-      decoration: const InputDecoration(
-        hintText: 'Search for a venue ...',
-        prefixIcon: Icon(Icons.search, color: Colors.grey),
-        border: InputBorder.none,
-        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      ),
-    ),
   );
 
-  Widget _buildFilterTabs() => Container(
-    height: 35,
-    margin: const EdgeInsets.symmetric(horizontal: 16),
+  // ✅ Filter pills
+  Widget _buildFilterTabs() => SizedBox(
+    height: 40,
     child: ListView.builder(
       scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       itemCount: filters.length,
       itemBuilder: (context, index) {
         final isSelected = selectedFilterIndex == index;
@@ -324,18 +331,23 @@ class HomePageState extends State<HomePage> {
             _applyLocalFilterAndSort();
           },
           child: Container(
-            margin: const EdgeInsets.only(right: 12),
-            padding: const EdgeInsets.symmetric(horizontal: 20),
+            margin: const EdgeInsets.only(right: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
             decoration: BoxDecoration(
-              color: isSelected ? activeColor : Colors.grey[200],
-              borderRadius: BorderRadius.circular(25),
+              color: isSelected ? kPrimaryGreen : Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: isSelected ? kPrimaryGreen : Colors.grey.shade400,
+                width: 1,
+              ),
             ),
             child: Center(
               child: Text(
                 filters[index],
                 style: TextStyle(
-                  color: isSelected ? Colors.white : Colors.grey[700],
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                  color: isSelected ? Colors.white : Colors.grey.shade600,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ),
@@ -347,9 +359,10 @@ class HomePageState extends State<HomePage> {
 
   Widget _buildVenueList() {
     if (_venues.isEmpty) {
-      return const Center(child: Text('No items.'));
+      return const Center(child: Text('No venues found'));
     }
     return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       itemCount: _venues.length,
       itemBuilder: (context, index) => _buildVenueCard(_venues[index]),
     );
@@ -407,6 +420,7 @@ class HomePageState extends State<HomePage> {
             imagePaths: v.imagePaths,
             lat: v.lat,
             lng: v.lng,
+            venueType: v.category,
           ),
         ),
       );
@@ -442,120 +456,145 @@ class HomePageState extends State<HomePage> {
     }
   }
 
+  // ✅ Large venue card with image, name overlay, stars, distance
   Widget _buildVenueCard(VenueData v) {
     final distanceText = (v.distanceMeters ?? 0) < 1000
         ? '${(v.distanceMeters ?? 0).round()} m'
         : '${((v.distanceMeters ?? 0) / 1000).toStringAsFixed(1)} km';
 
-    return InkWell(
-      onTap: () {
-        debugPrint('📍 Venue tapped: ${v.name}');
-        _openVenue(v);
-      },
-      borderRadius: BorderRadius.circular(12),
+    return GestureDetector(
+      onTap: () => _openVenue(v),
       child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        margin: const EdgeInsets.only(bottom: 16),
+        height: 200,
         decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: Colors.grey.withOpacity(0.1),
-              blurRadius: 4,
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 8,
               offset: const Offset(0, 2),
             ),
           ],
         ),
-        child: Row(
+        child: Stack(
           children: [
+            // ✅ Background image
             ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: SizedBox(
-                width: 100,
-                height: 100,
-                child: FutureBuilder<String?>(
-                  future: _imageUrlFor(v),
-                  builder: (context, snap) {
-                    if (snap.connectionState == ConnectionState.waiting) {
-                      return Container(
-                        color: Colors.grey[200],
-                        alignment: Alignment.center,
-                        child: const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      );
-                    }
-                    if (snap.hasError ||
-                        (snap.data == null) ||
-                        snap.data!.isEmpty) {
-                      return Container(
-                        color: const Color(0xFFEDEFE3),
-                        alignment: Alignment.center,
-                        child: const Icon(
-                          Icons.image_not_supported_outlined,
-                          color: Colors.black45,
-                          size: 40,
-                        ),
-                      );
-                    }
-                    final url = snap.data!;
-                    return CachedNetworkImage(imageUrl: url, fit: BoxFit.cover);
-                  },
+              borderRadius: BorderRadius.circular(16),
+              child: FutureBuilder<String?>(
+                future: _imageUrlFor(v),
+                builder: (context, snap) {
+                  if (snap.connectionState == ConnectionState.waiting) {
+                    return Container(
+                      color: Colors.grey.shade200,
+                      child: const Center(
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    );
+                  }
+                  if (snap.hasError ||
+                      snap.data == null ||
+                      snap.data!.isEmpty) {
+                    return Container(
+                      color: Colors.grey.shade200,
+                      child: Icon(
+                        Icons.image_not_supported,
+                        color: Colors.grey.shade400,
+                        size: 48,
+                      ),
+                    );
+                  }
+                  return CachedNetworkImage(
+                    imageUrl: snap.data!,
+                    width: double.infinity,
+                    height: double.infinity,
+                    fit: BoxFit.cover,
+                  );
+                },
+              ),
+            ),
+            // ✅ Gradient overlay for text readability
+            Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.transparent, Colors.black.withOpacity(0.7)],
                 ),
               ),
             ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      v.name ?? 'Unnamed',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.black87,
+            // ✅ Content overlay
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 16,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Venue name
+                  Text(
+                    v.name ?? 'Unnamed',
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 8),
+                  // ✅ Star rating
+                  Row(
+                    children: [
+                      _buildStars(v.rating ?? 0),
+                      const Spacer(),
+                      // Distance
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.location_on,
+                            color: Colors.white,
+                            size: 16,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            distanceText,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              color: Colors.white,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      v.address ?? '',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Icon(Icons.star, color: Colors.amber[700], size: 18),
-                        const SizedBox(width: 4),
-                        Text(
-                          (v.rating ?? 0).toStringAsFixed(1),
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey[700],
-                          ),
-                        ),
-                        const Spacer(),
-                        Text(
-                          distanceText,
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey[500],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+                    ],
+                  ),
+                ],
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  // ✅ Star rating widget - filled based on actual rating
+  Widget _buildStars(double rating) {
+    return Row(
+      children: List.generate(5, (index) {
+        if (rating >= index + 1) {
+          // Full star
+          return const Icon(Icons.star, color: kPrimaryGreen, size: 20);
+        } else if (rating > index && rating < index + 1) {
+          // Half star
+          return const Icon(Icons.star_half, color: kPrimaryGreen, size: 20);
+        } else {
+          // Empty star
+          return Icon(Icons.star_border, color: Colors.grey.shade400, size: 20);
+        }
+      }),
     );
   }
 }

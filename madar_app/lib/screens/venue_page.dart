@@ -1,34 +1,26 @@
 import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/gestures.dart'; // less and more in description
+import 'package:flutter/gestures.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:firebase_storage/firebase_storage.dart' as storage;
 import 'package:cached_network_image/cached_network_image.dart';
-
-// ✅ NEW: monthly cache service
 import 'package:madar_app/api/venue_cache_service.dart';
-
 import 'category_page.dart';
 
-// Font style
-import 'package:google_fonts/google_fonts.dart';
-
-const kGreen = Color(0xFF787E65);
+// ✅ ONLY your color
+const Color kPrimaryGreen = Color(0xFF777D63);
 
 class VenuePage extends StatefulWidget {
-  final String placeId; // required for details
+  final String placeId;
   final String name;
   final String description;
   final String? dbAddress;
   final double? lat;
   final double? lng;
-
-  // NEW: all storage image paths (first = cover)
   final List<String> imagePaths;
-
-  // if Home already resolved the first URL, use it for instant paint
   final String? initialCoverUrl;
+  final String? venueType; // Add this to get venue type
 
   const VenuePage({
     super.key,
@@ -38,8 +30,9 @@ class VenuePage extends StatefulWidget {
     this.dbAddress,
     this.imagePaths = const [],
     this.initialCoverUrl,
-    this.lat, // NEW
+    this.lat,
     this.lng,
+    this.venueType,
   });
 
   @override
@@ -49,51 +42,27 @@ class VenuePage extends StatefulWidget {
 class _VenuePageState extends State<VenuePage> {
   bool _loading = true;
   String? _error;
-
-  // address seeded from DB; never overwritten by API
   String? _address;
+  bool _aboutExpanded = false;
+  bool _hoursExpanded = false;
 
-  TextStyle get _link => GoogleFonts.openSans(
-    fontSize: 14,
-    fontWeight: FontWeight.w600,
-    color: kGreen,
-  );
-
-  // Hours-related
   bool? _openNow;
   List<String> _weekdayText = const [];
   List<dynamic> _periods = const [];
-  int? _utcOffsetMinutes; // may be null; we fallback to device TZ
-  String? _businessStatus; // may be null if not cached
-  List<String> _types = const []; // may be empty
+  int? _utcOffsetMinutes;
+  String? _businessStatus;
+  List<String> _types = const [];
 
-  // storage + tiny URL cache (static across instances)
   static final storage.FirebaseStorage _coversStorage =
       storage.FirebaseStorage.instanceFor(
         bucket: 'gs://madar-database.firebasestorage.app',
       );
-  static final Map<String, String> _urlCache = {}; // path -> url
-
-  // hours memory cache (per app session)
+  static final Map<String, String> _urlCache = {};
   static final Map<String, Map<String, dynamic>> _hoursCache = {};
 
-  // description expand
-  bool _descExpanded = false;
-
-  // carousel
-  late final PageController _pageCtrl = PageController();
-  int _pageIndex = 0;
-
-  // 👇 NEW: monthly cache service
   late final VenueCacheService _cache = VenueCacheService(
     FirebaseFirestore.instance,
   );
-
-  @override
-  void dispose() {
-    _pageCtrl.dispose();
-    super.dispose();
-  }
 
   @override
   void initState() {
@@ -104,7 +73,6 @@ class _VenuePageState extends State<VenuePage> {
   }
 
   Future<void> _loadHours() async {
-    // First, try the in-memory cache to avoid duplicate work in the same session
     final cached = _hoursCache[widget.placeId];
     if (cached != null) {
       _applyHours(cached);
@@ -113,16 +81,16 @@ class _VenuePageState extends State<VenuePage> {
     }
 
     try {
-      // ✅ Use Firestore monthly cache (this will call Google only if stale >30d)
       final meta = await _cache
           .getMonthlyMeta(widget.placeId)
           .timeout(const Duration(seconds: 10));
 
-      // Build a minimal "result-like" map for our existing _applyHours()
       final resultLike = <String, dynamic>{};
       if (meta.openingHours != null) {
-        // Prefer current_opening_hours shape if present
         resultLike['current_opening_hours'] = meta.openingHours;
+      }
+      if (meta.rating != null) {
+        resultLike['rating'] = meta.rating;
       }
 
       _hoursCache[widget.placeId] = resultLike;
@@ -145,15 +113,13 @@ class _VenuePageState extends State<VenuePage> {
                 .getDownloadURL()
                 .timeout(const Duration(seconds: 8));
         _urlCache[p] = url;
-
         final provider = CachedNetworkImageProvider(url, cacheKey: p);
-        provider.resolve(const ImageConfiguration()); // warms memory
+        provider.resolve(const ImageConfiguration());
       } catch (_) {}
     }
   }
 
   void _applyHours(Map<String, dynamic> res) {
-    // NOTE: with monthly cache we may only have current_opening_hours.
     final currentOpening =
         (res['current_opening_hours'] as Map<String, dynamic>?) ?? {};
     final opening = currentOpening.isNotEmpty
@@ -164,9 +130,7 @@ class _VenuePageState extends State<VenuePage> {
         (opening['weekday_text'] as List?)?.cast<String>() ?? const [];
     final periods = (opening['periods'] as List?) ?? const [];
     final openNow = opening['open_now'] as bool?;
-
-    // These are usually not cached to save quota; leave nulls/fallbacks
-    final utcOffset = res['utc_offset'] as int?; // may be null
+    final utcOffset = res['utc_offset'] as int?;
     final types = (res['types'] as List?)?.cast<String>() ?? const [];
     final businessStatus = res['business_status'] as String?;
 
@@ -180,7 +144,6 @@ class _VenuePageState extends State<VenuePage> {
     });
   }
 
-  // ---------- Helpers for Storage paths ----------
   Future<String?> _imageUrlForPath(
     String path, {
     Duration timeout = const Duration(seconds: 8),
@@ -191,8 +154,6 @@ class _VenuePageState extends State<VenuePage> {
       final ref = _coversStorage.ref(path);
       final url = await ref.getDownloadURL().timeout(timeout);
       _urlCache[path] = url;
-      // warm bytes
-      // ignore: unused_result
       CachedNetworkImageProvider(url).resolve(const ImageConfiguration());
       return url;
     } catch (_) {
@@ -200,155 +161,20 @@ class _VenuePageState extends State<VenuePage> {
     }
   }
 
-  Widget _noImageHeader(double h) {
-    return SizedBox(
-      height: h,
-      width: double.infinity,
-      child: Container(
-        color: const Color(0xFFEDEFE3),
-        alignment: Alignment.center,
-        child: const Icon(
-          Icons.image_not_supported_outlined,
-          color: Colors.black45,
-          size: 40,
-        ),
-      ),
-    );
-  }
-
-  bool get _isAirport {
-    if (_types.any((t) => t.toLowerCase() == 'airport')) return true;
-    final n = widget.name.toLowerCase();
-    return n.contains('airport');
-  }
-
-  bool get _isStadium {
-    return _types.any((t) => t.toLowerCase() == 'stadium') ||
-        widget.name.toLowerCase().contains('stadium') ||
-        widget.name.toLowerCase().contains('arena') ||
-        widget.name.toLowerCase().contains('park');
-  }
-
-  bool get _isTempClosed => _businessStatus == 'CLOSED_TEMPORARILY';
-  bool get _isPermClosed => _businessStatus == 'CLOSED_PERMANENTLY';
-
-  bool get _hasAnyHours =>
-      (_weekdayText.isNotEmpty && _weekdayText.length >= 1) ||
-      (_periods.isNotEmpty);
-
-  int get _effectiveOffsetMinutes =>
-      _utcOffsetMinutes ?? DateTime.now().timeZoneOffset.inMinutes;
-
-  DateTime _toLocalDateTime(int targetDay, String hhmm) {
-    final offset = Duration(minutes: _effectiveOffsetMinutes);
-    final nowLocal = DateTime.now().toUtc().add(offset);
-    final todayIdx = (nowLocal.weekday % 7);
-    int diff = (targetDay - todayIdx);
-    if (diff < 0) diff += 7;
-    final date = DateTime(
-      nowLocal.year,
-      nowLocal.month,
-      nowLocal.day,
-    ).add(Duration(days: diff));
-    final hh = int.parse(hhmm.substring(0, 2));
-    final mm = int.parse(hhmm.substring(2, 4));
-    return DateTime(date.year, date.month, date.day, hh, mm);
-  }
-
-  DateTime? _firstOpenToday(List<_OpenWindow> windows, DateTime nowLocal) {
-    DateTime? first;
-    for (final w in windows) {
-      final isSameDay =
-          w.openDT.year == nowLocal.year &&
-          w.openDT.month == nowLocal.month &&
-          w.openDT.day == nowLocal.day;
-      if (isSameDay) {
-        if (first == null || w.openDT.isBefore(first)) first = w.openDT;
-      }
-    }
-    return first;
-  }
-
-  String _preciseStatusNow() {
-    if (_isTempClosed) return 'Temporarily closed';
-    if (_isPermClosed) return 'Permanently closed';
-    if (_isAirport && !_hasAnyHours) return 'Open 24 hours';
-    if (_isStadium && !_hasAnyHours) return 'Hours vary by event';
-
-    if (_periods.isNotEmpty) {
-      final offset = Duration(minutes: _effectiveOffsetMinutes);
-      final nowLocal = DateTime.now().toUtc().add(offset);
-
-      final windows = <_OpenWindow>[];
-      for (final p in _periods) {
-        final m = p as Map<String, dynamic>;
-        final open = (m['open'] ?? {}) as Map<String, dynamic>;
-        final close = (m['close'] ?? {}) as Map<String, dynamic>;
-        if (!open.containsKey('day') || !open.containsKey('time')) continue;
-
-        final openDT = _toLocalDateTime(
-          (open['day'] as num).toInt(),
-          (open['time'] as String),
-        );
-        DateTime closeDT;
-        if (close.containsKey('day') && close.containsKey('time')) {
-          closeDT = _toLocalDateTime(
-            (close['day'] as num).toInt(),
-            (close['time'] as String),
-          );
-          if (!closeDT.isAfter(openDT)) {
-            closeDT = closeDT.add(const Duration(days: 1));
-          }
-        } else {
-          closeDT = openDT.add(const Duration(days: 1));
-        }
-        for (int k = 0; k < 2; k++) {
-          windows.add(
-            _OpenWindow(
-              openDT: openDT.add(Duration(days: 7 * k)),
-              closeDT: closeDT.add(Duration(days: 7 * k)),
-            ),
-          );
-        }
-      }
-
-      windows.sort((a, b) => a.openDT.compareTo(b.openDT));
-      final firstToday = _firstOpenToday(windows, nowLocal);
-      if (firstToday != null && nowLocal.isBefore(firstToday)) {
-        return 'Closed · Opens ${_formatClock(firstToday)}';
-      }
-      for (final w in windows) {
-        if (nowLocal.isBefore(w.openDT)) {
-          return 'Closed · Opens ${_formatClock(w.openDT)}';
-        }
-        if (nowLocal.isAfter(w.openDT) && nowLocal.isBefore(w.closeDT)) {
-          return 'Open · Closes ${_formatClock(w.closeDT)}';
-        }
-      }
-      return 'Closed';
-    }
-
-    return _statusFromWeekdayTextFallback();
-  }
-
-  // ---------- Helpers for address as link ----------
   Future<void> _openInMaps() async {
     final id = widget.placeId;
     final hasLL = widget.lat != null && widget.lng != null;
     final lat = widget.lat?.toStringAsFixed(6);
     final lng = widget.lng?.toStringAsFixed(6);
 
-    // ANDROID — place sheet (no directions)
     final Uri androidGeo = hasLL
         ? Uri.parse('geo:$lat,$lng?q=place_id:$id&z=17')
         : Uri.parse('geo:0,0?q=place_id:$id');
 
-    // iOS — Google Maps app if present
     final Uri iosGmm = hasLL
         ? Uri.parse('comgooglemaps://?q=place_id:$id&center=$lat,$lng&zoom=17')
         : Uri.parse('comgooglemaps://?q=place_id:$id');
 
-    // Web fallback (place page; centered & zoom-hinted)
     final Uri web = hasLL
         ? Uri.https('www.google.com', '/maps/search/', {
             'api': '1',
@@ -373,86 +199,74 @@ class _VenuePageState extends State<VenuePage> {
     await launchUrl(web, mode: LaunchMode.externalApplication);
   }
 
-  Uri _mapsPlaceUri(String placeId) => Uri.parse(
-    'https://www.google.com/maps/search/?api=1&query_place_id=$placeId',
-  );
+  // Helper to get venue type display name
+  String _getVenueTypeDisplay() {
+    if (widget.venueType == null || widget.venueType!.isEmpty) {
+      return 'Venue';
+    }
 
-  Widget _addressRow() {
-    final addr = (_address ?? '').trim();
-    if (addr.isEmpty) return const SizedBox.shrink();
+    final type = widget.venueType!.toLowerCase();
+    if (type == 'malls' || type == 'mall') {
+      return 'Shopping mall';
+    } else if (type == 'stadiums' || type == 'stadium') {
+      return 'Stadium';
+    } else if (type == 'airports' || type == 'airport') {
+      return 'Airport';
+    }
 
-    // We’ll render text that wraps to multiple lines,
-    // and put the icon at the end using a WidgetSpan.
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Text.rich(
-        TextSpan(
-          style: const TextStyle(
-            fontSize: 14,
-            color: Colors.black54,
-            height: 1.35,
-          ),
-          children: [
-            TextSpan(text: addr),
-            const WidgetSpan(child: SizedBox(width: 8)), // nice breathing room
-            WidgetSpan(
-              alignment: PlaceholderAlignment.middle,
-              child: InkWell(
-                onTap: _openInMaps,
-                borderRadius: BorderRadius.circular(8),
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 2), // optically align
-                  // The diamond arrow = Material icon "assistant_direction"
-                  child: Icon(
-                    Icons.assistant_direction,
-                    color: kGreen, // green INSIDE the diamond
-                    size: 20, // no colored circle behind it
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-        softWrap: true, // <— wrap to new lines as needed
-        maxLines: null, // <— no truncation
-      ),
+    // Capitalize first letter as fallback
+    return widget.venueType![0].toUpperCase() + widget.venueType!.substring(1);
+  }
+
+  // Helper to determine if open 24 hours
+  bool _isOpen24Hours() {
+    if (_weekdayText.isEmpty) return false;
+    return _weekdayText.every(
+      (line) =>
+          line.toLowerCase().contains('24') ||
+          line.toLowerCase().contains('open 24'),
     );
   }
 
-  String _formatClock(DateTime dtLocal) {
-    final hour = dtLocal.hour % 12 == 0 ? 12 : dtLocal.hour % 12;
-    final min = dtLocal.minute.toString().padLeft(2, '0');
-    final ampm = dtLocal.hour < 12 ? 'AM' : 'PM';
-    return '$hour:$min $ampm';
+  // Helper to check if temporarily closed
+  bool _isTemporarilyClosed() {
+    return _businessStatus?.toLowerCase() == 'closed_temporarily';
   }
 
-  List<String>? _splitRange(String s) {
-    final m = RegExp(
-      r'(\d{1,2}:\d{2}(?:\s?[AP]M)?)\s*[–-]\s*(\d{1,2}:\d{2}\s?[AP]M)',
-    ).firstMatch(s);
-    if (m == null) return null;
-    var start = m.group(1)!.trim();
-    var end = m.group(2)!.trim();
-    final meridiem = RegExp(r'([AP]M)').firstMatch(end)?.group(1);
-    if (meridiem != null && !RegExp(r'[AP]M').hasMatch(start)) {
-      start = '$start $meridiem';
+  // Helper to check if hours vary
+  bool _hasVaryingHours() {
+    if (_weekdayText.isEmpty) return false;
+    return _weekdayText.any(
+      (line) =>
+          line.toLowerCase().contains('vary') ||
+          line.toLowerCase().contains('event'),
+    );
+  }
+
+  String _getOpeningStatus() {
+    if (_isTemporarilyClosed()) {
+      return 'Temporarily Closed';
     }
-    return [start, end];
+    if (_isOpen24Hours()) {
+      return 'Open 24 Hours';
+    }
+    if (_hasVaryingHours()) {
+      return 'Hours Vary';
+    }
+    if (_openNow == true) {
+      return 'Open';
+    } else if (_openNow == false) {
+      return 'Closed';
+    }
+    return '';
   }
 
-  String _normalizeRangeText(String range) {
-    final parts = _splitRange(range);
-    if (parts == null) return range;
-    return '${parts[0]} – ${parts[1]}';
-  }
+  String _getOpeningTime() {
+    if (_isTemporarilyClosed() || _isOpen24Hours() || _hasVaryingHours()) {
+      return '';
+    }
 
-  String _statusFromWeekdayTextFallback() {
-    if (_isTempClosed) return 'Temporarily closed';
-    if (_isPermClosed) return 'Permanently closed';
-    if (_isAirport && !_hasAnyHours) return 'Open 24 hours';
-    if (_isStadium && !_hasAnyHours) return 'Hours vary by event';
-    if (_weekdayText.isEmpty) return 'Hours unavailable';
-
+    if (_weekdayText.isEmpty) return '';
     final now = DateTime.now();
     final today = now.weekday % 7;
     const labelsSunFirst = [
@@ -469,213 +283,393 @@ class _VenuePageState extends State<VenuePage> {
       (l) => l.toLowerCase().startsWith(labelsSunFirst[today].toLowerCase()),
       orElse: () => '',
     );
+
+    if (line.isEmpty) return '';
+
     final timePart = line.contains(':')
         ? line.split(':').sublist(1).join(':').trim()
         : '';
+
     if (timePart.isEmpty || timePart.toLowerCase() == 'closed') {
-      final nextOpen = _nextOpenFromWeekdayText(today);
-      return nextOpen == null ? 'Closed' : 'Closed · Opens $nextOpen';
+      return '';
     }
 
-    final range = _normalizeRangeText(timePart);
-    final parts = _splitRange(range);
-
-    if (_openNow == false) {
-      final nextOpen = _nextOpenFromWeekdayText(today);
-      return nextOpen == null ? 'Closed' : 'Closed · Opens $nextOpen';
+    // If currently open, show closing time
+    if (_openNow == true) {
+      final match = RegExp(
+        r'–\s*(\d{1,2}:\d{2}\s?[AP]M)',
+        caseSensitive: false,
+      ).firstMatch(timePart);
+      if (match != null) {
+        return 'Closes at ${match.group(1)}';
+      }
+    } else {
+      // If closed, show opening time
+      final match = RegExp(
+        r'(\d{1,2}:\d{2}\s?[AP]M)',
+        caseSensitive: false,
+      ).firstMatch(timePart);
+      if (match != null) {
+        return 'Opens at ${match.group(1)}';
+      }
     }
 
-    if (parts == null) return 'Open';
-    return 'Open · Closes ${parts[1]}';
+    return '';
   }
 
-  String? _nextOpenFromWeekdayText(int todayIndex) {
-    const labels = [
-      'Sunday',
-      'Monday',
-      'Tuesday',
-      'Wednesday',
-      'Thursday',
-      'Friday',
-      'Saturday',
-    ];
-    for (int i = 0; i < 7; i++) {
-      final idx = (todayIndex + i) % 7;
-      final day = labels[idx];
-      final line = _weekdayText.firstWhere(
-        (l) => l.toLowerCase().startsWith(day.toLowerCase()),
-        orElse: () => '',
-      );
-      if (line.isEmpty) continue;
-      final timePart = line.contains(':')
-          ? line.split(':').sublist(1).join(':').trim()
-          : '';
-      if (timePart.isEmpty || timePart.toLowerCase() == 'closed') continue;
-      final parts = _splitRange(timePart);
-      if (parts == null) continue;
-      return parts[0];
+  Color _getStatusColor() {
+    if (_isTemporarilyClosed()) {
+      return Colors.red;
     }
-    return null;
+    if (_isOpen24Hours()) {
+      return Colors.green;
+    }
+    if (_hasVaryingHours()) {
+      return Colors.orange;
+    }
+    if (_openNow == true) {
+      return Colors.green;
+    } else if (_openNow == false) {
+      return Colors.red;
+    }
+    return Colors.grey;
+  }
+
+  void _showImageOverlay(int startIndex) {
+    final imagesToShow = widget.imagePaths.skip(1).toList();
+
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withOpacity(0.9),
+      builder: (context) => _ImageOverlay(
+        imagePaths: imagesToShow,
+        startIndex: startIndex,
+        getUrlFor: _imageUrlForPath,
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final summary = widget.description.trim(); // DB-only description
-
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F8F3),
+      backgroundColor: Colors
+          .grey
+          .shade100, // ✅ Light gray background to show rounded white container
+      extendBodyBehindAppBar: true, // ✅ Make body extend behind app bar
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.transparent, // ✅ Transparent app bar
         elevation: 0,
-        centerTitle: true,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: kGreen),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: Text(
-          widget.name,
-          style: const TextStyle(color: kGreen, fontWeight: FontWeight.w600),
-          overflow: TextOverflow.ellipsis,
+        leading: Container(
+          margin: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.1),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.black, size: 20),
+            onPressed: () => Navigator.pop(context),
+          ),
         ),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-          ? Center(child: Text(_error!, textAlign: TextAlign.center))
+          ? Center(child: Text(_error!))
           : ListView(
-              padding: const EdgeInsets.only(bottom: 24),
+              padding: EdgeInsets.zero,
               children: [
-                // Header (carousel with dots inside image)
+                // ✅ Hero image - SLIM height (150px from reference image)
                 if (widget.imagePaths.isNotEmpty)
-                  _buildHeaderCarousel()
+                  _buildHeroImage()
                 else
-                  _noImageHeader(200),
-
-                // Summary
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: _ExpandableText(
-                    text: summary,
-                    maxLines: 3,
-                    style: const TextStyle(
-                      color: Colors.black87,
-                      height: 1.25,
-                      fontSize: 16,
-                    ),
-                    linkStyle: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: kGreen,
-                    ),
-                  ),
-                ),
-
-                // Google Maps link
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: GestureDetector(
-                    onTap: _openInMaps,
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          'View on Google Maps',
-                          style: _link.copyWith(
-                            decoration: TextDecoration.underline,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        const Icon(Icons.open_in_new, size: 14, color: kGreen),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-
-                // Opening hours card
-                _hoursCard(),
-
-                const SizedBox(height: 16),
-
-                // Floor Map (placeholder)
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16),
-                  child: Text(
-                    "Floor Map",
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Container(
+                  Container(
                     height: 150,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFEDEFE3),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                    color: Colors.grey.shade200,
                     child: const Center(
-                      child: Icon(
-                        Icons.map_outlined,
-                        size: 48,
-                        color: Colors.black45,
+                      child: Icon(Icons.image_not_supported, size: 48),
+                    ),
+                  ),
+
+                // ✅ White content section with rounded top corners
+                Transform.translate(
+                  offset: const Offset(0, -20),
+                  child: Container(
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.only(
+                        topLeft: Radius.circular(20),
+                        topRight: Radius.circular(20),
                       ),
                     ),
-                  ),
-                ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 20),
 
-                // 🔹 Explore Categories (dynamic from Firestore)
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16),
-                  child: Text(
-                    "Explore Categories",
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                  ),
-                ),
-                SizedBox(
-                  height: 200,
-                  child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                    stream: FirebaseFirestore.instance
-                        .collection('venues')
-                        .doc(widget.placeId)
-                        .collection('categories')
-                        .snapshots(),
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-                      if (snapshot.hasError) {
-                        return Center(child: Text('Error: ${snapshot.error}'));
-                      }
+                        // ✅ Venue name and type
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                widget.name,
+                                style: const TextStyle(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.black,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                _getVenueTypeDisplay(), // ✅ Dynamic venue type
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.grey.shade600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
 
-                      final docs = snapshot.data?.docs ?? [];
-                      if (docs.isEmpty) {
-                        return const Center(
-                          child: Text('No categories found.'),
-                        );
-                      }
+                        const SizedBox(height: 20),
 
-                      return ListView.separated(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.all(16),
-                        itemCount: docs.length,
-                        separatorBuilder: (_, __) => const SizedBox(width: 12),
-                        itemBuilder: (context, i) {
-                          final categoryId = docs[i].id; // 👈 true ID
-                          final data = docs[i].data();
-                          final name = data['categoryName'] ?? 'Unnamed';
-                          final image =
-                              data['categoryImage'] ?? 'images/default.jpg';
+                        // ✅ Three action buttons - with GREEN accent color
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: _actionButton(
+                                  icon: Icons.location_on_outlined,
+                                  label: 'Location',
+                                  onTap: _openInMaps,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: _actionButton(
+                                  icon: Icons.language,
+                                  label: 'Website',
+                                  onTap: () {},
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: _actionButton(
+                                  icon: Icons.phone_outlined,
+                                  label: 'Call',
+                                  onTap: () {},
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
 
-                          return _categoryCard(
-                            context,
-                            name,
-                            image,
-                            widget.placeId,
-                            categoryId,
-                            _imageUrlForCategory,
-                          );
-                        },
-                      );
-                    },
+                        const SizedBox(height: 24),
+
+                        // ✅ Photo grid - ORIGINAL layout: large left, 2 small squares stacked right
+                        if (widget.imagePaths.length > 1)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: _buildPhotoGrid(),
+                          ),
+
+                        const SizedBox(height: 24),
+
+                        // ✅ About section - with inline expand arrow
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'About',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.grey.shade500,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              _buildExpandableText(
+                                widget.description,
+                                _aboutExpanded,
+                                () => setState(
+                                  () => _aboutExpanded = !_aboutExpanded,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        const SizedBox(height: 20),
+
+                        // ✅ Opening hours - with ALL cases + expand arrow
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Opening Hours',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.grey.shade500,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              _buildOpeningHours(),
+                            ],
+                          ),
+                        ),
+
+                        // ✅ Light divider line after opening hours
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 20,
+                          ),
+                          child: Divider(
+                            color: Colors.grey.shade200,
+                            height: 1,
+                          ),
+                        ),
+
+                        // ✅ Floor Map section - REGULAR heading
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Floor Map',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.black,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Container(
+                                height: 200,
+                                decoration: BoxDecoration(
+                                  color: Colors.grey.shade100,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Center(
+                                  child: Icon(
+                                    Icons.map_outlined,
+                                    size: 48,
+                                    color: Colors.grey.shade400,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // ✅ Light divider line after floor map
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 20,
+                          ),
+                          child: Divider(
+                            color: Colors.grey.shade200,
+                            height: 1,
+                          ),
+                        ),
+
+                        // ✅ Discover More section - REGULAR heading
+                        const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 16),
+                          child: Text(
+                            'Discover More',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.black,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+
+                        SizedBox(
+                          height: 180,
+                          child:
+                              StreamBuilder<
+                                QuerySnapshot<Map<String, dynamic>>
+                              >(
+                                stream: FirebaseFirestore.instance
+                                    .collection('venues')
+                                    .doc(widget.placeId)
+                                    .collection('categories')
+                                    .snapshots(),
+                                builder: (context, snapshot) {
+                                  if (snapshot.connectionState ==
+                                      ConnectionState.waiting) {
+                                    return const Center(
+                                      child: CircularProgressIndicator(),
+                                    );
+                                  }
+                                  if (snapshot.hasError) {
+                                    return Center(
+                                      child: Text('Error: ${snapshot.error}'),
+                                    );
+                                  }
+
+                                  final docs = snapshot.data?.docs ?? [];
+                                  if (docs.isEmpty) {
+                                    return const Center(
+                                      child: Text('No categories found.'),
+                                    );
+                                  }
+
+                                  return ListView.separated(
+                                    scrollDirection: Axis.horizontal,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                    ),
+                                    itemCount: docs.length,
+                                    separatorBuilder: (_, __) =>
+                                        const SizedBox(width: 12),
+                                    itemBuilder: (context, i) {
+                                      final categoryId = docs[i].id;
+                                      final data = docs[i].data();
+                                      final name =
+                                          data['categoryName'] ?? 'Unnamed';
+                                      final image =
+                                          data['categoryImage'] ??
+                                          'images/default.jpg';
+
+                                      return _categoryCard(
+                                        context,
+                                        name,
+                                        image,
+                                        widget.placeId,
+                                        categoryId,
+                                        _imageUrlForCategory,
+                                      );
+                                    },
+                                  );
+                                },
+                              ),
+                        ),
+
+                        const SizedBox(height: 24),
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -683,252 +677,379 @@ class _VenuePageState extends State<VenuePage> {
     );
   }
 
-  // ----- Header carousel with dots overlay -----
-  Widget _buildHeaderCarousel() {
-    const double h = 200.0;
+  // ✅ Hero image - SLIM height (150px)
+  Widget _buildHeroImage() {
+    final path = widget.imagePaths.first;
 
-    return SizedBox(
-      height: h,
-      width: double.infinity,
-      child: Stack(
-        children: [
-          PageView.builder(
-            controller: _pageCtrl,
-            itemCount: widget.imagePaths.length,
-            onPageChanged: (i) => setState(() => _pageIndex = i),
-            itemBuilder: (context, index) {
-              final path = widget.imagePaths[index];
-
-              // first image: use handed-in URL if available
-              if (index == 0 && (widget.initialCoverUrl ?? '').isNotEmpty) {
-                return CachedNetworkImage(
-                  imageUrl: widget.initialCoverUrl!,
-                  fit: BoxFit.cover,
-                  placeholder: (_, __) => Container(
-                    color: const Color(0xFFEDEFE3),
-                    alignment: Alignment.center,
-                    child: const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  ),
-                  errorWidget: (_, __, ___) => _noImageHeader(h),
-                  fadeInDuration: const Duration(milliseconds: 120),
-                );
-              }
-
-              return FutureBuilder<String?>(
-                future: _imageUrlForPath(path),
-                builder: (context, snap) {
-                  if (snap.connectionState == ConnectionState.waiting) {
-                    return Container(
-                      color: const Color(0xFFEDEFE3),
-                      alignment: Alignment.center,
-                      child: const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    );
-                  }
-                  final url = snap.data;
-                  if (snap.hasError || url == null || url.isEmpty) {
-                    return _noImageHeader(h);
-                  }
-                  return CachedNetworkImage(
-                    imageUrl: url,
-                    fit: BoxFit.cover,
-                    placeholder: (_, __) => Container(
-                      color: const Color(0xFFEDEFE3),
-                      alignment: Alignment.center,
-                      child: const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    ),
-                    errorWidget: (_, __, ___) => _noImageHeader(h),
-                    fadeInDuration: const Duration(milliseconds: 120),
-                  );
-                },
-              );
-            },
-          ),
-
-          // Dots overlay
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 10,
-            child: Center(
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.25),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: List.generate(widget.imagePaths.length, (i) {
-                    final bool active = i == _pageIndex;
-                    return AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      margin: const EdgeInsets.symmetric(horizontal: 3),
-                      width: active ? 8 : 6,
-                      height: active ? 8 : 6,
-                      decoration: BoxDecoration(
-                        color: active ? Colors.white : Colors.white70,
-                        shape: BoxShape.circle,
-                      ),
-                    );
-                  }),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _hoursCard() {
-    // Sunday-first order
-    List<String> sunFirst = _weekdayText;
-    if (_weekdayText.length == 7 &&
-        _weekdayText.first.toLowerCase().startsWith('monday')) {
-      sunFirst = [_weekdayText[6], ..._weekdayText.take(6)];
-    }
-
-    final statusText = _preciseStatusNow();
-
-    final noDropdown =
-        _isTempClosed ||
-        _isPermClosed ||
-        statusText == 'Open 24 hours' ||
-        statusText == 'Hours vary by event' ||
-        sunFirst.isEmpty;
-
-    final statusTitle = _statusTitleRich(statusText);
-
-    if (noDropdown) {
-      return Card(
-        margin: const EdgeInsets.symmetric(horizontal: 16),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        color: Colors.white,
-        shadowColor: Colors.black.withOpacity(0.05),
-        elevation: 3,
-        child: ListTile(
-          leading: const Icon(Icons.schedule, color: kGreen),
-          title: statusTitle,
-        ),
+    if (widget.initialCoverUrl != null && widget.initialCoverUrl!.isNotEmpty) {
+      return Image.network(
+        widget.initialCoverUrl!,
+        height: 150,
+        width: double.infinity,
+        fit: BoxFit.cover,
       );
     }
 
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      color: Colors.white,
-      shadowColor: Colors.black.withOpacity(0.05),
-      elevation: 3,
-      child: Theme(
-        data: Theme.of(context).copyWith(
-          dividerColor: Colors.transparent,
-          splashColor: Colors.transparent,
-          highlightColor: Colors.transparent,
+    return FutureBuilder<String?>(
+      future: _imageUrlForPath(path),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return Container(
+            height: 150,
+            color: Colors.grey.shade200,
+            child: const Center(child: CircularProgressIndicator()),
+          );
+        }
+        if (snap.hasError || snap.data == null || snap.data!.isEmpty) {
+          return Container(
+            height: 150,
+            color: Colors.grey.shade200,
+            child: const Center(
+              child: Icon(Icons.image_not_supported, size: 48),
+            ),
+          );
+        }
+        return Image.network(
+          snap.data!,
+          height: 150,
+          width: double.infinity,
+          fit: BoxFit.cover,
+        );
+      },
+    );
+  }
+
+  // ✅ Action button - with GREEN accent color
+  Widget _actionButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+        decoration: BoxDecoration(
+          color: Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(8),
         ),
-        child: ExpansionTile(
-          leading: const Icon(Icons.schedule, color: kGreen),
-          title: statusTitle,
-          iconColor: kGreen,
-          collapsedIconColor: kGreen,
-          childrenPadding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 4,
-          ),
-          children: sunFirst.map((line) {
-            final parts = line.split(':');
-            final day = parts.first;
-            final timePart = parts.length > 1
-                ? parts.sublist(1).join(':').trim()
-                : 'Closed';
-            final fixed = (timePart.toLowerCase() == 'closed')
-                ? 'Closed'
-                : _normalizeRangeText(timePart);
-            return Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(day, style: const TextStyle(fontSize: 15)),
-                  Text(
-                    fixed,
-                    style: const TextStyle(fontSize: 15, color: Colors.black87),
-                  ),
-                ],
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: kPrimaryGreen, size: 20), // ✅ GREEN color
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 13,
+                color: kPrimaryGreen, // ✅ GREEN color
+                fontWeight: FontWeight.w500,
               ),
-            );
-          }).toList(),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _statusTitleRich(String statusText) {
-    String leading;
-    String trailing = '';
-    Color? color;
+  // ✅ Photo grid - ORIGINAL: large left, 2 small squares stacked right
+  Widget _buildPhotoGrid() {
+    final images = widget.imagePaths.skip(1).toList(); // Skip cover image
 
-    if (statusText == 'Open 24 hours') {
-      leading = statusText;
-      color = Colors.green[800];
-    } else if (statusText == 'Hours vary by event') {
-      leading = statusText;
-      color = const Color.fromARGB(255, 239, 139, 0);
-    } else if (statusText.startsWith('Open')) {
-      leading = 'Open';
-      trailing = statusText.substring('Open'.length);
-      color = Colors.green[800];
-    } else if (statusText.startsWith('Closed')) {
-      leading = 'Closed';
-      trailing = statusText.substring('Closed'.length);
-      color = Colors.red[700];
-    } else if (statusText.startsWith('Temporarily closed')) {
-      leading = 'Temporarily closed';
-      trailing = statusText.substring('Temporarily closed'.length);
-      color = Colors.red[700];
-    } else if (statusText.startsWith('Permanently closed')) {
-      leading = 'Permanently closed';
-      trailing = statusText.substring('Permanently closed'.length);
-      color = Colors.red[700];
-    } else {
-      leading = statusText;
-    }
+    if (images.isEmpty) return const SizedBox.shrink();
 
-    return Text.rich(
-      TextSpan(
+    return SizedBox(
+      height: 200,
+      child: Row(
         children: [
-          TextSpan(
-            text: leading,
-            style: TextStyle(
-              fontWeight: FontWeight.w600,
-              color: color ?? Colors.black87,
+          // Large image on left
+          Expanded(flex: 2, child: _gridImage(images[0], true, 0)),
+          const SizedBox(width: 8),
+          // Two small stacked images on right
+          Expanded(
+            child: Column(
+              children: [
+                Expanded(
+                  child: images.length > 1
+                      ? _gridImage(images[1], false, 1)
+                      : Container(color: Colors.grey.shade200),
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: images.length > 2
+                      ? _gridImage(images[2], false, 2)
+                      : Container(color: Colors.grey.shade200),
+                ),
+              ],
             ),
           ),
-          if (trailing.isNotEmpty)
-            TextSpan(
-              text: trailing,
-              style: const TextStyle(
-                fontWeight: FontWeight.w600,
-                color: Colors.black87,
-              ),
-            ),
         ],
       ),
     );
   }
 
-  // 🔹 تحميل صورة الكاتيقوري من Firebase Storage بنفس طريقة HomePage
+  Widget _gridImage(String path, bool large, int index) {
+    return GestureDetector(
+      onTap: () => _showImageOverlay(index),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: FutureBuilder<String?>(
+          future: _imageUrlForPath(path),
+          builder: (context, snap) {
+            if (snap.connectionState == ConnectionState.waiting) {
+              return Container(
+                color: Colors.grey.shade200,
+                child: const Center(
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              );
+            }
+            if (snap.hasError || snap.data == null || snap.data!.isEmpty) {
+              return Container(
+                color: Colors.grey.shade200,
+                child: const Center(
+                  child: Icon(Icons.image_not_supported, size: 24),
+                ),
+              );
+            }
+            return CachedNetworkImage(
+              imageUrl: snap.data!,
+              fit: BoxFit.cover,
+              width: double.infinity,
+              height: double.infinity,
+              placeholder: (context, url) =>
+                  Container(color: Colors.grey.shade200),
+              errorWidget: (context, url, error) => Container(
+                color: Colors.grey.shade200,
+                child: const Icon(Icons.error),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  // ✅ Expandable text with INLINE arrow next to last word
+  Widget _buildExpandableText(
+    String text,
+    bool isExpanded,
+    VoidCallback onTap,
+  ) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final textSpan = TextSpan(
+          text: text,
+          style: const TextStyle(
+            fontSize: 15,
+            color: Colors.black87,
+            height: 1.5,
+          ),
+        );
+
+        final textPainter = TextPainter(
+          text: textSpan,
+          maxLines: 2,
+          textDirection: TextDirection.ltr,
+        );
+        textPainter.layout(maxWidth: constraints.maxWidth);
+        final exceeded = textPainter.didExceedMaxLines;
+
+        if (!exceeded) {
+          return Text(
+            text,
+            style: const TextStyle(
+              fontSize: 15,
+              color: Colors.black87,
+              height: 1.5,
+            ),
+          );
+        }
+
+        if (isExpanded) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                text,
+                style: const TextStyle(
+                  fontSize: 15,
+                  color: Colors.black87,
+                  height: 1.5,
+                ),
+              ),
+              GestureDetector(
+                onTap: onTap,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Icon(
+                    Icons.keyboard_arrow_up,
+                    size: 20,
+                    color: Colors.grey.shade600,
+                  ),
+                ),
+              ),
+            ],
+          );
+        }
+
+        // Not expanded - show text with inline arrow
+        return Text.rich(
+          TextSpan(
+            children: [
+              TextSpan(
+                text: text,
+                style: const TextStyle(
+                  fontSize: 15,
+                  color: Colors.black87,
+                  height: 1.5,
+                ),
+              ),
+              TextSpan(
+                text: '... ',
+                style: const TextStyle(fontSize: 15, color: Colors.black87),
+              ),
+              WidgetSpan(
+                alignment: PlaceholderAlignment.middle,
+                child: GestureDetector(
+                  onTap: onTap,
+                  child: Icon(
+                    Icons.keyboard_arrow_down,
+                    size: 18,
+                    color: Colors.grey.shade600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        );
+      },
+    );
+  }
+
+  // ✅ Opening hours with ALL cases + expand arrow
+  Widget _buildOpeningHours() {
+    final status = _getOpeningStatus();
+    final time = _getOpeningTime();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        GestureDetector(
+          onTap: () {
+            if (_weekdayText.isNotEmpty &&
+                !_isOpen24Hours() &&
+                !_isTemporarilyClosed() &&
+                !_hasVaryingHours()) {
+              setState(() => _hoursExpanded = !_hoursExpanded);
+            }
+          },
+          child: Row(
+            children: [
+              Expanded(
+                child: Row(
+                  children: [
+                    if (status.isNotEmpty)
+                      Text(
+                        status,
+                        style: TextStyle(
+                          fontSize: 15,
+                          color: _getStatusColor(),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    if (status.isNotEmpty && time.isNotEmpty)
+                      Text(
+                        ' • ',
+                        style: TextStyle(
+                          fontSize: 15,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                    if (time.isNotEmpty)
+                      Text(
+                        time,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          color: Colors.black87,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              if (_weekdayText.isNotEmpty &&
+                  !_isOpen24Hours() &&
+                  !_isTemporarilyClosed() &&
+                  !_hasVaryingHours())
+                Icon(
+                  _hoursExpanded
+                      ? Icons.keyboard_arrow_up
+                      : Icons.keyboard_arrow_down,
+                  size: 20,
+                  color: Colors.grey.shade600,
+                ),
+            ],
+          ),
+        ),
+        if (_hoursExpanded && _weekdayText.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: _weekdayText.map((line) {
+                final parts = line.split(':');
+                if (parts.length < 2) return const SizedBox.shrink();
+
+                final day = parts[0].trim();
+                final hours = parts.sublist(1).join(':').trim();
+
+                final now = DateTime.now();
+                final today = now.weekday % 7;
+                const days = [
+                  'Sunday',
+                  'Monday',
+                  'Tuesday',
+                  'Wednesday',
+                  'Thursday',
+                  'Friday',
+                  'Saturday',
+                ];
+                final isToday = day.toLowerCase() == days[today].toLowerCase();
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        day,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: isToday
+                              ? FontWeight.w600
+                              : FontWeight.normal,
+                          color: isToday ? Colors.black : Colors.grey.shade700,
+                        ),
+                      ),
+                      Text(
+                        hours,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+      ],
+    );
+  }
+
   Future<String?> _imageUrlForCategory(String path) async {
     if (path.isEmpty) return null;
     if (_urlCache.containsKey(path)) return _urlCache[path];
@@ -945,13 +1066,14 @@ class _VenuePageState extends State<VenuePage> {
     }
   }
 
+  // ✅ Simple category card - LEFT aligned text
   static Widget _categoryCard(
     BuildContext context,
     String title,
-    String imagePath, // 🔹 Storage path
+    String imagePath,
     String venueId,
     String categoryId,
-    Future<String?> Function(String) getUrlFor, // 🔹 دالة تحميل الصورة
+    Future<String?> Function(String) getUrlFor,
   ) {
     return GestureDetector(
       onTap: () {
@@ -967,55 +1089,45 @@ class _VenuePageState extends State<VenuePage> {
         );
       },
       child: Container(
-        width: 140,
+        width: 130,
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 5,
-              offset: const Offset(0, 3),
-            ),
-          ],
+          borderRadius: BorderRadius.circular(8),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             ClipRRect(
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(14),
-              ),
+              borderRadius: BorderRadius.circular(8),
               child: FutureBuilder<String?>(
                 future: getUrlFor(imagePath),
                 builder: (context, snap) {
                   if (snap.connectionState == ConnectionState.waiting) {
                     return Container(
-                      height: 100,
-                      width: 140,
-                      color: Colors.grey[200],
-                      alignment: Alignment.center,
-                      child: const CircularProgressIndicator(strokeWidth: 2),
+                      height: 130,
+                      width: 130,
+                      color: Colors.grey.shade200,
+                      child: const Center(
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
                     );
                   }
                   if (snap.hasError ||
                       snap.data == null ||
                       snap.data!.isEmpty) {
                     return Container(
-                      height: 100,
-                      width: 140,
-                      color: Colors.grey[200],
-                      alignment: Alignment.center,
-                      child: const Icon(
-                        Icons.image_not_supported,
-                        color: Colors.grey,
+                      height: 130,
+                      width: 130,
+                      color: Colors.grey.shade200,
+                      child: const Center(
+                        child: Icon(Icons.image_not_supported),
                       ),
                     );
                   }
                   return CachedNetworkImage(
                     imageUrl: snap.data!,
-                    height: 100,
-                    width: 140,
+                    height: 130,
+                    width: 130,
                     fit: BoxFit.cover,
                   );
                 },
@@ -1025,7 +1137,14 @@ class _VenuePageState extends State<VenuePage> {
               padding: const EdgeInsets.all(8),
               child: Text(
                 title,
-                style: const TextStyle(fontWeight: FontWeight.w600),
+                textAlign: TextAlign.left,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                  color: Colors.black,
+                ),
               ),
             ),
           ],
@@ -1035,130 +1154,102 @@ class _VenuePageState extends State<VenuePage> {
   }
 }
 
-class _OpenWindow {
-  final DateTime openDT;
-  final DateTime closeDT;
-  _OpenWindow({required this.openDT, required this.closeDT});
-}
+// ✅ Image overlay for fullscreen viewing
+class _ImageOverlay extends StatefulWidget {
+  final List<String> imagePaths;
+  final int startIndex;
+  final Future<String?> Function(String) getUrlFor;
 
-// ---- Inline expandable text ("… More" / "Show less") ----
-class _ExpandableText extends StatefulWidget {
-  final String text;
-  final int maxLines; // collapsed
-  final TextStyle? style;
-  final TextStyle? linkStyle;
-
-  const _ExpandableText({
-    required this.text,
-    this.maxLines = 3,
-    this.style,
-    this.linkStyle,
+  const _ImageOverlay({
+    required this.imagePaths,
+    required this.startIndex,
+    required this.getUrlFor,
   });
 
   @override
-  State<_ExpandableText> createState() => _ExpandableTextState();
+  State<_ImageOverlay> createState() => _ImageOverlayState();
 }
 
-class _ExpandableTextState extends State<_ExpandableText> {
-  bool _expanded = false;
+class _ImageOverlayState extends State<_ImageOverlay> {
+  late final PageController _pageController;
+  late int _currentIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentIndex = widget.startIndex;
+    _pageController = PageController(initialPage: widget.startIndex);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final base =
-        widget.style ??
-        const TextStyle(color: Colors.black87, height: 1.25, fontSize: 16);
-    final link =
-        widget.linkStyle ??
-        const TextStyle(fontWeight: FontWeight.w600, color: kGreen);
-
-    // expanded -> full paragraph
-    if (_expanded) {
-      return RichText(
-        text: TextSpan(
-          style: base,
-          children: [
-            TextSpan(text: widget.text),
-            const TextSpan(text: '  '),
-            TextSpan(
-              text: 'show less',
-              style: link,
-              recognizer: (TapGestureRecognizer()
-                ..onTap = () {
-                  setState(() => _expanded = false);
-                }),
-            ),
-          ],
-        ),
-      );
-    }
-
-    // collapsed: measure overflow
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final tp = TextPainter(
-          text: TextSpan(text: widget.text, style: base),
-          maxLines: widget.maxLines,
-          textDirection: TextDirection.ltr,
-          ellipsis: '…',
-        )..layout(maxWidth: constraints.maxWidth);
-
-        final overflows = tp.didExceedMaxLines;
-
-        if (!overflows) {
-          return Text(widget.text, style: base);
-        }
-
-        final more = ' more';
-        final ellipsis = '…';
-        final linkSpan = TextSpan(text: more, style: link);
-        final testPainter = TextPainter(
-          textDirection: TextDirection.ltr,
-          maxLines: widget.maxLines,
-          ellipsis: ellipsis,
-        );
-
-        // binary search cut point
-        int low = 0, high = widget.text.length, cut = 0;
-        while (low <= high) {
-          final mid = (low + high) >> 1;
-          final candidate = widget.text.substring(0, mid);
-          testPainter.text = TextSpan(
-            style: base,
-            children: [
-              TextSpan(text: candidate),
-              TextSpan(text: ' $ellipsis'),
-              linkSpan,
-            ],
-          );
-          testPainter.layout(maxWidth: constraints.maxWidth);
-          if (testPainter.didExceedMaxLines) {
-            high = mid - 1;
-          } else {
-            cut = mid;
-            low = mid + 1;
-          }
-        }
-
-        final visibleText = widget.text.substring(0, cut).trimRight();
-
-        return RichText(
-          text: TextSpan(
-            style: base,
-            children: [
-              TextSpan(text: visibleText),
-              const TextSpan(text: ' … '),
-              TextSpan(
-                text: 'more',
-                style: link,
-                recognizer: (TapGestureRecognizer()
-                  ..onTap = () {
-                    setState(() => _expanded = true);
-                  }),
-              ),
-            ],
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          PageView.builder(
+            controller: _pageController,
+            onPageChanged: (index) => setState(() => _currentIndex = index),
+            itemCount: widget.imagePaths.length,
+            itemBuilder: (context, index) {
+              return Center(
+                child: FutureBuilder<String?>(
+                  future: widget.getUrlFor(widget.imagePaths[index]),
+                  builder: (context, snap) {
+                    if (snap.connectionState == ConnectionState.waiting) {
+                      return const CircularProgressIndicator();
+                    }
+                    if (snap.hasError ||
+                        snap.data == null ||
+                        snap.data!.isEmpty) {
+                      return const Icon(
+                        Icons.error,
+                        color: Colors.white,
+                        size: 48,
+                      );
+                    }
+                    return InteractiveViewer(
+                      child: CachedNetworkImage(
+                        imageUrl: snap.data!,
+                        fit: BoxFit.contain,
+                      ),
+                    );
+                  },
+                ),
+              );
+            },
           ),
-        );
-      },
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 8,
+            right: 16,
+            child: IconButton(
+              icon: const Icon(Icons.close, color: Colors.white, size: 30),
+              onPressed: () => Navigator.pop(context),
+            ),
+          ),
+          Positioned(
+            bottom: 24,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Text(
+                '${_currentIndex + 1} / ${widget.imagePaths.length}',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

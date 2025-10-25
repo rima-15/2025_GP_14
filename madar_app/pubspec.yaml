@@ -80,6 +80,7 @@ flutter:
   #google map api key 
      - .env
      - images/
+     - assets/venues/solitaire.json
      
 flutter_native_splash:
    color: "#FFFFFF"  

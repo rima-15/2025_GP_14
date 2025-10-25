@@ -8,7 +8,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:madar_app/api/venue_cache_service.dart';
 import 'category_page.dart';
 
-// ✅ ONLY your color
+// Madar color
 const Color kPrimaryGreen = Color(0xFF777D63);
 
 class VenuePage extends StatefulWidget {
@@ -53,6 +53,10 @@ class _VenuePageState extends State<VenuePage> {
   String? _businessStatus;
   List<String> _types = const [];
 
+  // NEW: website/phone from DB
+  String? _venueWebsite;
+  String? _venuePhone;
+
   static final storage.FirebaseStorage _coversStorage =
       storage.FirebaseStorage.instanceFor(
         bucket: 'gs://madar-database.firebasestorage.app',
@@ -70,6 +74,7 @@ class _VenuePageState extends State<VenuePage> {
     _address = widget.dbAddress;
     _loadHours();
     _prefetchAllVenueImages();
+    _loadVenueContacts(); // NEW
   }
 
   Future<void> _loadHours() async {
@@ -119,6 +124,27 @@ class _VenuePageState extends State<VenuePage> {
     }
   }
 
+  // NEW: load website/phone from venues/{placeId}
+  Future<void> _loadVenueContacts() async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('venues')
+          .doc(widget.placeId)
+          .get(const GetOptions(source: Source.serverAndCache));
+      final data = doc.data();
+      if (data != null) {
+        final site = (data['venueWebsite'] ?? '').toString().trim();
+        final phone = (data['venuePhone'] ?? '').toString().trim();
+        setState(() {
+          _venueWebsite = site.isNotEmpty ? site : null;
+          _venuePhone = phone.isNotEmpty ? phone : null;
+        });
+      }
+    } catch (_) {
+      // Keep silently; buttons will just stay hidden
+    }
+  }
+
   void _applyHours(Map<String, dynamic> res) {
     final currentOpening =
         (res['current_opening_hours'] as Map<String, dynamic>?) ?? {};
@@ -164,39 +190,91 @@ class _VenuePageState extends State<VenuePage> {
   Future<void> _openInMaps() async {
     final id = widget.placeId;
     final hasLL = widget.lat != null && widget.lng != null;
-    final lat = widget.lat?.toStringAsFixed(6);
-    final lng = widget.lng?.toStringAsFixed(6);
+    final nameEnc = Uri.encodeComponent(widget.name);
+    final ll = hasLL
+        ? '${widget.lat!.toStringAsFixed(6)},${widget.lng!.toStringAsFixed(6)}'
+        : null;
 
-    final Uri androidGeo = hasLL
-        ? Uri.parse('geo:$lat,$lng?q=place_id:$id&z=17')
-        : Uri.parse('geo:0,0?q=place_id:$id');
+    // ✅ 1) Preferred: universal links that open the place details page
+    // This reliably opens the place card on old and new Android builds.
+    final Uri primary = hasLL
+        ? Uri.parse(
+            'https://www.google.com/maps/search/?api=1&query=$nameEnc&query_place_id=$id',
+          )
+        : Uri.parse(
+            'https://www.google.com/maps/search/?api=1&query_place_id=$id',
+          );
 
-    final Uri iosGmm = hasLL
-        ? Uri.parse('comgooglemaps://?q=place_id:$id&center=$lat,$lng&zoom=17')
-        : Uri.parse('comgooglemaps://?q=place_id:$id');
+    // ✅ 2) Alternate universal link that also targets the place page
+    final Uri alt = Uri.parse(
+      'https://www.google.com/maps/place/?q=place_id:$id',
+    );
 
-    final Uri web = hasLL
-        ? Uri.https('www.google.com', '/maps/search/', {
-            'api': '1',
-            'query_place_id': id,
-            'query': '$lat,$lng',
-            'll': '$lat,$lng',
-            'z': '17',
-          })
-        : Uri.https('www.google.com', '/maps/search/', {
-            'api': '1',
-            'query_place_id': id,
-          });
+    // ✅ 3) Fallback: plain geo (last resort; may not open the card)
+    final Uri geo = hasLL
+        ? Uri.parse('geo:$ll?q=$ll($nameEnc)')
+        : Uri.parse('geo:0,0?q=$nameEnc');
 
-    if (Platform.isAndroid && await canLaunchUrl(androidGeo)) {
-      await launchUrl(androidGeo, mode: LaunchMode.externalApplication);
+    // iOS branch (keep your existing handling if you want, but universal links work too)
+    if (Platform.isIOS) {
+      // Try universal link first (opens Google Maps app if installed, else Safari)
+      if (await canLaunchUrl(primary)) {
+        final ok = await launchUrl(
+          primary,
+          mode: LaunchMode.externalApplication,
+        );
+        if (ok) return;
+      }
+      // Your previous iOS scheme fallback (Google Maps app)
+      final Uri iosGmm = hasLL
+          ? Uri.parse(
+              'comgooglemaps://?q=$nameEnc&center=$ll&zoom=17&query_place_id=$id',
+            )
+          : Uri.parse('comgooglemaps://?q=$nameEnc&query_place_id=$id');
+      if (await canLaunchUrl(iosGmm)) {
+        final ok = await launchUrl(
+          iosGmm,
+          mode: LaunchMode.externalApplication,
+        );
+        if (ok) return;
+      }
+      // Final fallback: alt link
+      await launchUrl(alt, mode: LaunchMode.externalApplication);
       return;
     }
-    if (Platform.isIOS && await canLaunchUrl(iosGmm)) {
-      await launchUrl(iosGmm, mode: LaunchMode.externalApplication);
-      return;
+
+    // ✅ Android: try universal links first (best compatibility), then geo
+    for (final uri in [primary, alt, geo]) {
+      if (await canLaunchUrl(uri)) {
+        final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+        if (ok) return;
+      }
     }
-    await launchUrl(web, mode: LaunchMode.externalApplication);
+  }
+
+  // NEW: open website safely
+  Future<void> _openWebsite() async {
+    final raw = _venueWebsite?.trim();
+    if (raw == null || raw.isEmpty) return;
+    final normalized = raw.startsWith('http://') || raw.startsWith('https://')
+        ? raw
+        : 'https://$raw';
+    final uri = Uri.parse(normalized);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  // NEW: start phone call (OS will show dialer UI)
+  Future<void> _callVenue() async {
+    final raw = _venuePhone?.trim();
+    if (raw == null || raw.isEmpty) return;
+    // Keep '+' if present; remove spaces and dashes
+    final cleaned = raw.replaceAll(RegExp(r'[()\s-]'), '');
+    final uri = Uri.parse('tel:$cleaned');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
+    }
   }
 
   // Helper to get venue type display name
@@ -351,6 +429,9 @@ class _VenuePageState extends State<VenuePage> {
 
   @override
   Widget build(BuildContext context) {
+    final hasWebsite = (_venueWebsite != null && _venueWebsite!.isNotEmpty);
+    final hasPhone = (_venuePhone != null && _venuePhone!.isNotEmpty);
+
     return Scaffold(
       backgroundColor: Colors
           .grey
@@ -453,22 +534,26 @@ class _VenuePageState extends State<VenuePage> {
                                   onTap: _openInMaps,
                                 ),
                               ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: _actionButton(
-                                  icon: Icons.language,
-                                  label: 'Website',
-                                  onTap: () {},
+                              if (hasWebsite) ...[
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: _actionButton(
+                                    icon: Icons.language,
+                                    label: 'Website',
+                                    onTap: _openWebsite, // NEW
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: _actionButton(
-                                  icon: Icons.phone_outlined,
-                                  label: 'Call',
-                                  onTap: () {},
+                              ],
+                              if (hasPhone) ...[
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: _actionButton(
+                                    icon: Icons.phone_outlined,
+                                    label: 'Call',
+                                    onTap: _callVenue, // NEW
+                                  ),
                                 ),
-                              ),
+                              ],
                             ],
                           ),
                         ),
@@ -493,7 +578,7 @@ class _VenuePageState extends State<VenuePage> {
                               Text(
                                 'About',
                                 style: TextStyle(
-                                  fontSize: 12,
+                                  fontSize: 14,
                                   fontWeight: FontWeight.w600,
                                   color: Colors.grey.shade500,
                                   letterSpacing: 0.5,
@@ -522,7 +607,7 @@ class _VenuePageState extends State<VenuePage> {
                               Text(
                                 'Opening Hours',
                                 style: TextStyle(
-                                  fontSize: 12,
+                                  fontSize: 14,
                                   fontWeight: FontWeight.w600,
                                   color: Colors.grey.shade500,
                                   letterSpacing: 0.5,

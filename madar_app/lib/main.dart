@@ -10,6 +10,9 @@ import 'package:madar_app/api/seed_venues.dart'; // to save venue info in databa
 import 'package:flutter/foundation.dart'
     show kDebugMode; // for debug-only logic
 
+// NEW: contacts backfiller (adds venuePhone + venueWebsite via Places Details)
+import 'package:madar_app/api/seed_venue_contacts.dart';
+
 //import 'categorytoarray.dart';
 
 Future<void> main() async {
@@ -53,6 +56,30 @@ Future<void> main() async {
       debugPrint('VenueSeeder finished.');
     } catch (e, st) {
       debugPrint('VenueSeeder error: $e\n$st');
+    }
+  }
+
+  // NEW: Backfill phone + website ONLY (safe merge). Controlled by DEV_SEED_CONTACTS=true
+  final devSeedContactsRaw = dotenv.maybeGet('DEV_SEED_CONTACTS');
+  debugPrint(
+    'DEV_SEED_CONTACTS raw: "$devSeedContactsRaw"  kDebugMode=$kDebugMode',
+  );
+  final doSeedContacts =
+      kDebugMode && (devSeedContactsRaw?.toLowerCase() == 'true');
+
+  if (doSeedContacts) {
+    final key = dotenv.env['GOOGLE_API_KEY'] ?? '';
+    try {
+      debugPrint('Running VenueContactSeeder (onlyIfMissing=true)…');
+      // onlyIfMissing=true ensures we don’t overwrite existing values
+      await VenueContactSeeder(
+        key,
+        onlyIfMissing: true,
+        perCallDelayMs: 250,
+      ).runOnceForCollection('venues');
+      debugPrint('VenueContactSeeder finished.');
+    } catch (e, st) {
+      debugPrint('VenueContactSeeder error: $e\n$st');
     }
   }
 

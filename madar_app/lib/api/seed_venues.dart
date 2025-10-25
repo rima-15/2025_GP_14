@@ -161,8 +161,9 @@ class VenueSeeder {
       final j = jsonDecode(r.body) as Map<String, dynamic>;
       final status = j['status'] as String? ?? 'NO_STATUS';
       if (status != 'OK') {
-        if (kDebugMode)
+        if (kDebugMode) {
           print('   Places DETAILS status=$status err=${j['error_message']}');
+        }
         return null;
       }
       return j['result'] as Map<String, dynamic>?;

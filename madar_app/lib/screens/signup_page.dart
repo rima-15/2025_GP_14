@@ -278,14 +278,16 @@ class _SignUpScreenState extends State<SignUpScreen> {
                         ),
                         keyboardType: TextInputType.emailAddress,
                         validator: (v) {
-                          if (v == null || v.trim().isEmpty)
+                          if (v == null || v.trim().isEmpty) {
                             return 'Enter Email';
+                          }
                           final email = v.trim();
                           final emailRegex = RegExp(
                             r"^[\w\.\-]+@[a-zA-Z0-9\-]+\.[a-zA-Z]{2,}$",
                           );
-                          if (!emailRegex.hasMatch(email))
+                          if (!emailRegex.hasMatch(email)) {
                             return 'Invalid email format';
+                          }
                           return null;
                         },
                       ),

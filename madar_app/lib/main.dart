@@ -5,14 +5,13 @@ import 'package:madar_app/widgets/MainLayout.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:madar_app/dev/seed_venues.dart'; // to save venue info in database
+import 'package:madar_app/api/seed_venues.dart'; // to save venue info in database
 import 'package:flutter/foundation.dart'
     show
         kDebugMode; // for debug-only logic
+
+//import 'categorytoarray.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,9 +21,12 @@ Future<void> main() async {
 
   // 2) Initialize Firebase
   await Firebase.initializeApp();
+  //await migrateCategories();
+
+  //print('✅ Migration finished');
 
   // 3) DEV-ONLY AUTO LOGIN (anonymous)
-  final enableDevAutoLogin =
+  /* final enableDevAutoLogin =
       kDebugMode &&
       (dotenv
               .maybeGet(
@@ -52,7 +54,7 @@ Future<void> main() async {
         'Anonymous sign-in failed: $e',
       );
     }
-  }
+  }*/
 
   // 4) Run the venue seeder (debug only, guarded by .env flag)
   final devSeedRaw = dotenv.maybeGet(

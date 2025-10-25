@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:madar_app/screens/signin_page.dart';
 import 'package:madar_app/widgets/custom_scaffold.dart';
+// import 'package:firebase_auth/firebase_auth.dart';
 
 class CheckEmailPage extends StatelessWidget {
   final String email;

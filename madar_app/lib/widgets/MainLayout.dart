@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:curved_navigation_bar/curved_navigation_bar.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:madar_app/screens/home_page.dart';
@@ -77,11 +76,10 @@ class _MainLayoutState extends State<MainLayout> {
   Widget build(BuildContext context) {
     return Scaffold(
       key: _scaffoldKey,
-      extendBody: true,
       appBar: _buildAppBar(_index),
       body: pages[_index],
       drawer: _buildDrawer(context),
-      bottomNavigationBar: _buildBottomBar(),
+      bottomNavigationBar: _buildModernBottomBar(),
       backgroundColor: const Color(0xFFF8F8F3),
     );
   }
@@ -100,7 +98,7 @@ class _MainLayoutState extends State<MainLayout> {
       leading: IconButton(
         icon: const Icon(Icons.menu, color: kGreen),
         onPressed: _openMenu,
-        padding: const EdgeInsets.only(left: 16), // Add padding from edge
+        padding: const EdgeInsets.only(left: 16),
       ),
 
       // Title/Logo in center
@@ -126,9 +124,7 @@ class _MainLayoutState extends State<MainLayout> {
               IconButton(
                 icon: const Icon(Icons.notifications_outlined, color: kGreen),
                 onPressed: () {},
-                padding: const EdgeInsets.only(
-                  right: 16,
-                ), // Add padding from edge
+                padding: const EdgeInsets.only(right: 16),
               ),
             ]
           : null,
@@ -263,29 +259,84 @@ class _MainLayoutState extends State<MainLayout> {
     );
   }
 
-  Widget _buildBottomBar() {
-    return CurvedNavigationBar(
-      index: _index,
-      height: 60,
-      color: kGreen,
-      backgroundColor: Colors.transparent,
-      buttonBackgroundColor: Colors.white,
-      animationCurve: Curves.easeInOut,
-      animationDuration: const Duration(milliseconds: 300),
-      items: [
-        Icon(Icons.home, size: 28, color: _index == 0 ? kGreen : Colors.white),
-        Icon(
-          Icons.explore,
-          size: 28,
-          color: _index == 1 ? kGreen : Colors.white,
+  // ✅ NEW: Modern flat bottom navigation bar with filled pill background
+  Widget _buildModernBottomBar() {
+    return SafeArea(
+      top: false,
+      child: Container(
+        height: 60, // clean slim height
+        decoration: BoxDecoration(
+          color: Colors.white, // changed from beige to pure white
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 10,
+              offset: const Offset(0, -3),
+            ),
+          ],
         ),
-        Icon(
-          Icons.group_outlined,
-          size: 28,
-          color: _index == 2 ? kGreen : Colors.white,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _buildNavItem(icon: Icons.home, label: 'Home', index: 0),
+              _buildNavItem(
+                icon: Icons.explore_outlined,
+                label: 'Explore',
+                index: 1,
+              ),
+              _buildNavItem(
+                icon: Icons.group_outlined,
+                label: 'Track',
+                index: 2,
+              ),
+            ],
+          ),
         ),
-      ],
-      onTap: (i) => setState(() => _index = i),
+      ),
+    );
+  }
+
+  Widget _buildNavItem({
+    required IconData icon,
+    required String label,
+    required int index,
+  }) {
+    final isSelected = _index == index;
+
+    return InkWell(
+      onTap: () => setState(() => _index = index),
+      borderRadius: BorderRadius.circular(30),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFFE8E9E0) : Colors.transparent,
+          borderRadius: BorderRadius.circular(30),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              color: isSelected ? kGreen : Colors.grey.shade500,
+              size: 22,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: TextStyle(
+                color: isSelected ? kGreen : Colors.grey.shade500,
+                fontSize: 11,
+                height: 1.0,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+              ),
+              maxLines: 1,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

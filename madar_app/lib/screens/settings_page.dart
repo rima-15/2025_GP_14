@@ -120,7 +120,11 @@ class _SettingsPageState extends State<SettingsPage> {
               style: const TextStyle(fontSize: 13, color: Colors.black54),
             )
           : null,
-      trailing: Switch(value: value, onChanged: onChanged, activeColor: kGreen),
+      trailing: Switch(
+        value: value,
+        onChanged: onChanged,
+        //activeThumbColor: kGreen,
+      ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
     );
   }
@@ -182,7 +186,11 @@ Widget _buildSwitchTile({
             style: const TextStyle(fontSize: 13, color: Colors.black54),
           )
         : null,
-    trailing: Switch(value: value, onChanged: onChanged, activeColor: kGreen),
+    trailing: Switch(
+      value: value,
+      onChanged: onChanged,
+      //activeThumbColor: kGreen,
+    ),
     contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
   );
 }

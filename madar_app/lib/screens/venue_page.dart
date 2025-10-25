@@ -11,6 +11,9 @@ import 'package:madar_app/api/venue_cache_service.dart';
 
 import 'category_page.dart';
 
+// Font style
+import 'package:google_fonts/google_fonts.dart';
+
 const kGreen = Color(0xFF787E65);
 
 class VenuePage extends StatefulWidget {
@@ -49,6 +52,12 @@ class _VenuePageState extends State<VenuePage> {
 
   // address seeded from DB; never overwritten by API
   String? _address;
+
+  TextStyle get _link => GoogleFonts.openSans(
+    fontSize: 14,
+    fontWeight: FontWeight.w600,
+    color: kGreen,
+  );
 
   // Hours-related
   bool? _openNow;
@@ -560,7 +569,26 @@ class _VenuePageState extends State<VenuePage> {
                   ),
                 ),
 
-                _addressRow(),
+                // Google Maps link
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: GestureDetector(
+                    onTap: _openInMaps,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'View on Google Maps',
+                          style: _link.copyWith(
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.open_in_new, size: 14, color: kGreen),
+                      ],
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 12),
 
                 // Opening hours card

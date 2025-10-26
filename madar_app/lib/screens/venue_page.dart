@@ -40,6 +40,10 @@ class VenuePage extends StatefulWidget {
 }
 
 class _VenuePageState extends State<VenuePage> {
+  // --- NEW: keep header sizing and overlap consistent ---
+  static const double _headerHeight = 180; // hero image height
+  static const double _topRadius = 35; // rounded top radius & overlap
+
   bool _loading = true;
   String? _error;
   String? _address;
@@ -470,23 +474,27 @@ class _VenuePageState extends State<VenuePage> {
                 if (widget.imagePaths.isNotEmpty)
                   _buildHeroImage()
                 else
-                  Container(
-                    height: 150,
-                    color: Colors.grey.shade200,
-                    child: const Center(
-                      child: Icon(Icons.image_not_supported, size: 48),
+                  SizedBox(
+                    height: _headerHeight,
+                    child: Container(
+                      color: Colors.grey.shade200,
+                      child: const Center(
+                        child: Icon(Icons.image_not_supported, size: 48),
+                      ),
                     ),
                   ),
 
                 // ✅ White content section with rounded top corners
+                // NOTE: shift up by the same radius amount so the image and the rounded
+                // corners overlap perfectly (no white sliver).
                 Transform.translate(
-                  offset: const Offset(0, -20),
+                  offset: const Offset(0, -_topRadius),
                   child: Container(
                     decoration: const BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.only(
-                        topLeft: Radius.circular(20),
-                        topRight: Radius.circular(20),
+                        topLeft: Radius.circular(_topRadius),
+                        topRight: Radius.circular(_topRadius),
                       ),
                     ),
                     child: Column(
@@ -505,7 +513,7 @@ class _VenuePageState extends State<VenuePage> {
                                 style: const TextStyle(
                                   fontSize: 22,
                                   fontWeight: FontWeight.w700,
-                                  color: Colors.black,
+                                  color: kPrimaryGreen,
                                 ),
                               ),
                               const SizedBox(height: 4),
@@ -564,7 +572,8 @@ class _VenuePageState extends State<VenuePage> {
                         if (widget.imagePaths.length > 1)
                           Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 16),
-                            child: _buildPhotoGrid(),
+                            child:
+                                _buildPhotoStrip(), // NEW: horizontal repeating pattern
                           ),
 
                         const SizedBox(height: 24),
@@ -637,12 +646,13 @@ class _VenuePageState extends State<VenuePage> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
+                              Text(
                                 'Floor Map',
                                 style: TextStyle(
-                                  fontSize: 16,
+                                  fontSize: 14,
                                   fontWeight: FontWeight.w600,
-                                  color: Colors.black,
+                                  color: Colors.grey.shade500,
+                                  letterSpacing: 0.5,
                                 ),
                               ),
                               const SizedBox(height: 12),
@@ -677,14 +687,15 @@ class _VenuePageState extends State<VenuePage> {
                         ),
 
                         // ✅ Discover More section - REGULAR heading
-                        const Padding(
+                        Padding(
                           padding: EdgeInsets.symmetric(horizontal: 16),
                           child: Text(
                             'Discover More',
                             style: TextStyle(
-                              fontSize: 16,
+                              fontSize: 14,
                               fontWeight: FontWeight.w600,
-                              color: Colors.black,
+                              color: Colors.grey.shade500,
+                              letterSpacing: 0.5,
                             ),
                           ),
                         ),
@@ -767,11 +778,10 @@ class _VenuePageState extends State<VenuePage> {
     final path = widget.imagePaths.first;
 
     if (widget.initialCoverUrl != null && widget.initialCoverUrl!.isNotEmpty) {
-      return Image.network(
-        widget.initialCoverUrl!,
-        height: 150,
+      return SizedBox(
+        height: _headerHeight,
         width: double.infinity,
-        fit: BoxFit.cover,
+        child: Image.network(widget.initialCoverUrl!, fit: BoxFit.cover),
       );
     }
 
@@ -779,26 +789,29 @@ class _VenuePageState extends State<VenuePage> {
       future: _imageUrlForPath(path),
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
-          return Container(
-            height: 150,
-            color: Colors.grey.shade200,
-            child: const Center(child: CircularProgressIndicator()),
-          );
-        }
-        if (snap.hasError || snap.data == null || snap.data!.isEmpty) {
-          return Container(
-            height: 150,
-            color: Colors.grey.shade200,
-            child: const Center(
-              child: Icon(Icons.image_not_supported, size: 48),
+          return SizedBox(
+            height: _headerHeight,
+            child: Container(
+              color: Colors.grey.shade200,
+              child: const Center(child: CircularProgressIndicator()),
             ),
           );
         }
-        return Image.network(
-          snap.data!,
-          height: 150,
+        if (snap.hasError || snap.data == null || snap.data!.isEmpty) {
+          return SizedBox(
+            height: _headerHeight,
+            child: Container(
+              color: Colors.grey.shade200,
+              child: const Center(
+                child: Icon(Icons.image_not_supported, size: 48),
+              ),
+            ),
+          );
+        }
+        return SizedBox(
+          height: _headerHeight,
           width: double.infinity,
-          fit: BoxFit.cover,
+          child: Image.network(snap.data!, fit: BoxFit.cover),
         );
       },
     );
@@ -837,40 +850,69 @@ class _VenuePageState extends State<VenuePage> {
     );
   }
 
-  // ✅ Photo grid - ORIGINAL: large left, 2 small squares stacked right
-  Widget _buildPhotoGrid() {
-    final images = widget.imagePaths.skip(1).toList(); // Skip cover image
+  // === NEW: HORIZONTAL STRIP repeating your 3-tile pattern ===
+  Widget _buildPhotoStrip() {
+    final images = widget.imagePaths.length > 1
+        ? widget.imagePaths.sublist(1)
+        : const <String>[];
 
     if (images.isEmpty) return const SizedBox.shrink();
 
+    final width = MediaQuery.of(context).size.width - 32;
+
+    final pageCount = (images.length / 3).ceil();
+
     return SizedBox(
       height: 200,
-      child: Row(
-        children: [
-          // Large image on left
-          Expanded(flex: 2, child: _gridImage(images[0], true, 0)),
-          const SizedBox(width: 8),
-          // Two small stacked images on right
-          Expanded(
-            child: Column(
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        itemCount: pageCount,
+        physics: const BouncingScrollPhysics(),
+        itemBuilder: (context, page) {
+          final start = page * 3;
+
+          String? img0 = (start < images.length) ? images[start] : null;
+          String? img1 = (start + 1 < images.length) ? images[start + 1] : null;
+          String? img2 = (start + 2 < images.length) ? images[start + 2] : null;
+
+          return Container(
+            width: width,
+            margin: EdgeInsets.only(right: page == pageCount - 1 ? 0 : 12),
+            child: Row(
               children: [
+                Expanded(flex: 2, child: _gridImageOrBlank(img0, true, start)),
+                const SizedBox(width: 8),
                 Expanded(
-                  child: images.length > 1
-                      ? _gridImage(images[1], false, 1)
-                      : Container(color: Colors.grey.shade200),
-                ),
-                const SizedBox(height: 8),
-                Expanded(
-                  child: images.length > 2
-                      ? _gridImage(images[2], false, 2)
-                      : Container(color: Colors.grey.shade200),
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: _gridImageOrBlank(img1, false, start + 1),
+                      ),
+                      const SizedBox(height: 8),
+                      Expanded(
+                        child: _gridImageOrBlank(img2, false, start + 2),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
-          ),
-        ],
+          );
+        },
       ),
     );
+  }
+
+  Widget _gridImageOrBlank(String? path, bool large, int index) {
+    if (path == null || path.isEmpty) {
+      return Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(8),
+        ),
+      );
+    }
+    return _gridImage(path, large, index);
   }
 
   Widget _gridImage(String path, bool large, int index) {
@@ -915,61 +957,44 @@ class _VenuePageState extends State<VenuePage> {
     );
   }
 
-  // ✅ Expandable text with INLINE arrow next to last word
+  // ✅ Expandable text with INLINE arrow at end of line 2
   Widget _buildExpandableText(
     String text,
     bool isExpanded,
     VoidCallback onTap,
   ) {
+    final style = const TextStyle(
+      fontSize: 15,
+      color: Colors.black87,
+      height: 1.5,
+    );
+
     return LayoutBuilder(
       builder: (context, constraints) {
-        final textSpan = TextSpan(
-          text: text,
-          style: const TextStyle(
-            fontSize: 15,
-            color: Colors.black87,
-            height: 1.5,
-          ),
-        );
-
-        final textPainter = TextPainter(
-          text: textSpan,
+        final probe = TextPainter(
+          text: TextSpan(text: text, style: style),
           maxLines: 2,
           textDirection: TextDirection.ltr,
-        );
-        textPainter.layout(maxWidth: constraints.maxWidth);
-        final exceeded = textPainter.didExceedMaxLines;
+        )..layout(maxWidth: constraints.maxWidth);
+        final exceeded = probe.didExceedMaxLines;
 
         if (!exceeded) {
-          return Text(
-            text,
-            style: const TextStyle(
-              fontSize: 15,
-              color: Colors.black87,
-              height: 1.5,
-            ),
-          );
+          return Text(text, style: style);
         }
 
         if (isExpanded) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                text,
-                style: const TextStyle(
-                  fontSize: 15,
-                  color: Colors.black87,
-                  height: 1.5,
-                ),
-              ),
-              GestureDetector(
+              Text(text, style: style),
+              InkWell(
                 onTap: onTap,
+                borderRadius: BorderRadius.circular(8),
                 child: Padding(
-                  padding: const EdgeInsets.only(top: 4),
+                  padding: const EdgeInsets.only(top: 6, right: 8),
                   child: Icon(
                     Icons.keyboard_arrow_up,
-                    size: 20,
+                    size: 22,
                     color: Colors.grey.shade600,
                   ),
                 ),
@@ -978,37 +1003,31 @@ class _VenuePageState extends State<VenuePage> {
           );
         }
 
-        // Not expanded - show text with inline arrow
-        return Text.rich(
-          TextSpan(
-            children: [
-              TextSpan(
-                text: text,
-                style: const TextStyle(
-                  fontSize: 15,
-                  color: Colors.black87,
-                  height: 1.5,
+        // Collapsed: text ellipsizes to 2 lines; arrow sits in a narrow trailing slot
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Text(
+                text,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: style,
+              ),
+            ),
+            InkWell(
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.only(left: 6, right: 6),
+                child: Icon(
+                  Icons.keyboard_arrow_down,
+                  size: 20,
+                  color: Colors.grey.shade600,
                 ),
               ),
-              TextSpan(
-                text: '... ',
-                style: const TextStyle(fontSize: 15, color: Colors.black87),
-              ),
-              WidgetSpan(
-                alignment: PlaceholderAlignment.middle,
-                child: GestureDetector(
-                  onTap: onTap,
-                  child: Icon(
-                    Icons.keyboard_arrow_down,
-                    size: 18,
-                    color: Colors.grey.shade600,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
+            ),
+          ],
         );
       },
     );
@@ -1068,12 +1087,19 @@ class _VenuePageState extends State<VenuePage> {
                   !_isOpen24Hours() &&
                   !_isTemporarilyClosed() &&
                   !_hasVaryingHours())
-                Icon(
-                  _hoursExpanded
-                      ? Icons.keyboard_arrow_up
-                      : Icons.keyboard_arrow_down,
-                  size: 20,
-                  color: Colors.grey.shade600,
+                InkWell(
+                  onTap: () => setState(() => _hoursExpanded = !_hoursExpanded),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 8, right: 6),
+                    child: Icon(
+                      _hoursExpanded
+                          ? Icons.keyboard_arrow_up
+                          : Icons.keyboard_arrow_down,
+                      size: 22,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
                 ),
             ],
           ),
@@ -1151,7 +1177,6 @@ class _VenuePageState extends State<VenuePage> {
     }
   }
 
-  // ✅ Simple category card - LEFT aligned text
   static Widget _categoryCard(
     BuildContext context,
     String title,
@@ -1239,7 +1264,6 @@ class _VenuePageState extends State<VenuePage> {
   }
 }
 
-// ✅ Image overlay for fullscreen viewing
 class _ImageOverlay extends StatefulWidget {
   final List<String> imagePaths;
   final int startIndex;

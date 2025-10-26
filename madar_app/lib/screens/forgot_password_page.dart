@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:madar_app/widgets/custom_scaffold.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart'; // ✅ أضف هذا
 
 class ForgotPasswordScreen extends StatefulWidget {
   const ForgotPasswordScreen({super.key});
@@ -21,7 +22,6 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     super.dispose();
   }
 
-  // 🔴 ستايل موحد لرسائل الأخطاء
   void _showErrorMessage(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -44,7 +44,6 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     );
   }
 
-  // 🟢 ستايل موحد لرسائل النجاح
   void _showSuccessMessage(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -67,7 +66,6 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
     );
   }
 
-  // 🔐 إرسال رابط إعادة تعيين كلمة المرور
   Future<void> _sendPasswordResetEmail() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -75,6 +73,16 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
 
     try {
       final email = _emailCtrl.text.trim();
+
+      // ✅ تحقق من وجود المستخدم في Firestore قبل الإرسال
+      final usersRef = FirebaseFirestore.instance.collection('users');
+      final userQuery = await usersRef.where('email', isEqualTo: email).get();
+
+      if (userQuery.docs.isEmpty) {
+        _showErrorMessage('No account found with this email');
+        setState(() => _loading = false);
+        return;
+      }
 
       await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
 
@@ -149,7 +157,6 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                       ),
                       const SizedBox(height: 30),
 
-                      // Email field
                       TextFormField(
                         controller: _emailCtrl,
                         decoration: InputDecoration(
@@ -177,7 +184,6 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                       ),
                       const SizedBox(height: 30),
 
-                      // Send button
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton(
@@ -210,7 +216,6 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                       ),
                       const SizedBox(height: 20),
 
-                      // Back to sign in
                       Center(
                         child: TextButton(
                           onPressed: () => Navigator.pop(context),

@@ -7,18 +7,33 @@ import 'package:http/http.dart' as http;
 typedef PlaceDetailsFetcher =
     Future<Map<String, dynamic>> Function(String placeId);
 
-// Optional: expand later if you store more fields
+// Expanded: we may store more fields over time
 class VenueMeta {
   final double? rating;
-  final Map<String, dynamic>? openingHours;
+  final Map<String, dynamic>?
+  openingHours; // current_opening_hours OR opening_hours
+  final int? utcOffset; // minutes
+  final List<String>? types; // place types
+  final String? businessStatus; // e.g. CLOSED_TEMPORARILY
   final DateTime? lastUpdated;
-  VenueMeta({this.rating, this.openingHours, this.lastUpdated});
+
+  VenueMeta({
+    this.rating,
+    this.openingHours,
+    this.utcOffset,
+    this.types,
+    this.businessStatus,
+    this.lastUpdated,
+  });
 
   factory VenueMeta.fromMap(Map<String, dynamic> m) => VenueMeta(
     rating: (m['rating'] is num) ? (m['rating'] as num).toDouble() : null,
     openingHours: (m['openingHours'] is Map)
         ? Map<String, dynamic>.from(m['openingHours'] as Map)
         : null,
+    utcOffset: (m['utcOffset'] is num) ? (m['utcOffset'] as num).toInt() : null,
+    types: (m['types'] is List) ? (m['types'] as List).cast<String>() : null,
+    businessStatus: (m['businessStatus'] as String?),
     lastUpdated: m['lastUpdated'] is Timestamp
         ? (m['lastUpdated'] as Timestamp).toDate()
         : null,
@@ -33,8 +48,14 @@ Future<Map<String, dynamic>> defaultPlacesDetailsFetcher(String placeId) async {
   }
   final uri = Uri.https('maps.googleapis.com', '/maps/api/place/details/json', {
     'place_id': placeId,
-    'fields':
-        'rating,opening_hours,current_opening_hours,utc_offset,types,business_status',
+    'fields': [
+      'rating',
+      'opening_hours',
+      'current_opening_hours',
+      'utc_offset',
+      'types',
+      'business_status',
+    ].join(','),
     'key': key,
   });
   final r = await http.get(uri).timeout(const Duration(seconds: 10));
@@ -81,9 +102,22 @@ class VenueCacheService {
         (result['current_opening_hours'] as Map<String, dynamic>?) ??
         (result['opening_hours'] as Map<String, dynamic>?);
 
+    final int? utcOffset = (result['utc_offset'] is num)
+        ? (result['utc_offset'] as num).toInt()
+        : null;
+
+    final List<String>? types = (result['types'] is List)
+        ? (result['types'] as List).cast<String>()
+        : null;
+
+    final String? businessStatus = result['business_status'] as String?;
+
     final toStore = <String, dynamic>{
       'rating': rating,
       'openingHours': opening,
+      'utcOffset': utcOffset,
+      'types': types,
+      'businessStatus': businessStatus,
       'lastUpdated': FieldValue.serverTimestamp(),
     };
 
@@ -93,6 +127,9 @@ class VenueCacheService {
     return VenueMeta(
       rating: rating,
       openingHours: opening == null ? null : Map<String, dynamic>.from(opening),
+      utcOffset: utcOffset,
+      types: types,
+      businessStatus: businessStatus,
       lastUpdated: DateTime.now(),
     );
   }

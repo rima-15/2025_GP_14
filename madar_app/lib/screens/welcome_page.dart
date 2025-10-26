@@ -44,11 +44,11 @@ class WelcomeScreen
                     BorderRadius.only(
                       topLeft:
                           Radius.circular(
-                            40,
+                            35,
                           ),
                       topRight:
                           Radius.circular(
-                            40,
+                            35,
                           ),
                     ),
               ),

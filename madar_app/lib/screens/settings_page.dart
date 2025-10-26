@@ -173,10 +173,14 @@ class _SettingsPageState
       trailing: Switch(
         value: value,
         onChanged: onChanged,
+<<<<<<< HEAD
         thumbColor:
             MaterialStateProperty.all(
               kGreen,
             ),
+=======
+        //activeThumbColor: kGreen,
+>>>>>>> cac77d776deaea4b99c370092aa355fa102d6eaa
       ),
       contentPadding:
           const EdgeInsets.symmetric(
@@ -263,10 +267,14 @@ Widget _buildSwitchTile({
     trailing: Switch(
       value: value,
       onChanged: onChanged,
+<<<<<<< HEAD
       thumbColor:
           MaterialStateProperty.all(
             kGreen,
           ),
+=======
+      //activeThumbColor: kGreen,
+>>>>>>> cac77d776deaea4b99c370092aa355fa102d6eaa
     ),
     contentPadding:
         const EdgeInsets.symmetric(

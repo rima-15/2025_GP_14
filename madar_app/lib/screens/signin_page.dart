@@ -4,6 +4,8 @@ import 'package:madar_app/screens/signup_page.dart';
 import 'package:madar_app/screens/forgot_password_page.dart';
 import 'package:madar_app/widgets/MainLayout.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class SignInScreen
     extends StatefulWidget {
@@ -112,6 +114,46 @@ class _SignInScreenState
         return;
       }
 
+      // ✅ إذا فعّل الإيميل، نضيف بياناته لأول مرة إلى Firestore
+      final userRef = FirebaseFirestore
+          .instance
+          .collection('users')
+          .doc(user.uid);
+      final doc = await userRef.get();
+
+      if (!doc.exists) {
+        final prefs =
+            await SharedPreferences.getInstance();
+
+        await userRef.set({
+          'firstName':
+              prefs.getString(
+                'firstName',
+              ) ??
+              '',
+          'lastName':
+              prefs.getString(
+                'lastName',
+              ) ??
+              '',
+          'email':
+              prefs.getString(
+                'email',
+              ) ??
+              user.email,
+          'phone':
+              prefs.getString(
+                'phone',
+              ) ??
+              '',
+          'createdAt':
+              FieldValue.serverTimestamp(),
+        });
+
+        await prefs
+            .clear(); // نحذفها بعد الحفظ
+      }
+
       if (mounted) {
         Navigator.pushReplacement(
           context,
@@ -186,11 +228,11 @@ class _SignInScreenState
                     BorderRadius.only(
                       topLeft:
                           Radius.circular(
-                            40,
+                            35,
                           ),
                       topRight:
                           Radius.circular(
-                            40,
+                            35,
                           ),
                     ),
               ),

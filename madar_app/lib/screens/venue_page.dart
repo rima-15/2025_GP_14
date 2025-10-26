@@ -1257,96 +1257,186 @@ class _VenuePageState extends State<VenuePage> {
   // Floor map state
 
 Widget _buildFloorMapViewer() {
-  return Container(
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: Colors.grey.shade300),
-    ),
-    child: Column(
-      children: [
-        // 3D Model Viewer with HTTP context
-        Container(
-          height: 250,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.only(
-              topLeft: Radius.circular(12),
-              topRight: Radius.circular(12),
-            ),
-          ),
-          child: _buildModelViewer(),
-        ),
-        
-        // Floor selection buttons
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.grey.shade50,
-            borderRadius: BorderRadius.only(
-              bottomLeft: Radius.circular(12),
-              bottomRight: Radius.circular(12),
-            ),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _buildFloorButton('Floor 1', 'assets/maps/F1_map.glb'),
-              const SizedBox(width: 12),
-              _buildFloorButton('Floor 2', 'assets/maps/F2_map.glb'),
-            ],
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
-Widget _buildModelViewer() {
-  return ModelViewer(
-    key: ValueKey(_currentFloor),
-    src: _currentFloor,
-    alt: "3D Floor Map",
-    ar: false,
-    autoRotate: false,
-    cameraControls: true,
-    backgroundColor: Colors.white,
-    cameraOrbit: "0deg 65deg 2.5m",
-    minCameraOrbit: "auto 0deg auto",
-    maxCameraOrbit: "auto 90deg auto",
-    cameraTarget: "0m 0m 0m",
-    fieldOfView: "45deg",
-  );
-}
-
-Widget _buildFloorButton(String label, String floorAsset) {
-  bool isSelected = _currentFloor == floorAsset;
+  // Check if the venue is Solitaire
+  bool isSolitaire = widget.name.toLowerCase().contains('solitaire');
   
-  return Expanded(
-    child: ElevatedButton(
-      style: ElevatedButton.styleFrom(
-        backgroundColor: isSelected ? kPrimaryGreen : Colors.grey.shade300,
-        foregroundColor: isSelected ? Colors.white : Colors.black87,
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-        ),
-        elevation: 0,
+  if (!isSolitaire) {
+    // Return the old placeholder design for non-Solitaire venues
+    return Container(
+      height: 200,
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(8),
       ),
-      onPressed: () {
-        setState(() {
-          _currentFloor = floorAsset;
-        });
-      },
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w500,
+      child: Center(
+        child: Icon(
+          Icons.map_outlined,
+          size: 48,
+          color: Colors.grey.shade400,
         ),
       ),
-    ),
+    );
+  }
+  
+  // Return the interactive 3D map for Solitaire venue
+  return _FloorMapSection(
+    currentFloor: _currentFloor,
+    onFloorChanged: (String newFloor) {
+      // This will only update the state without rebuilding the entire page
+      _currentFloor = newFloor;
+    },
   );
 }
+
+}
+
+// Separate widget for the 3D viewer - only rebuilds when floor changes
+class _FloorMapViewer extends StatelessWidget {
+  final String currentFloor;
+
+  const _FloorMapViewer({required this.currentFloor});
+
+  @override
+  Widget build(BuildContext context) {
+    return ModelViewer(
+      key: ValueKey(currentFloor), // Forces rebuild only when floor changes
+      src: currentFloor,
+      alt: "3D Floor Map",
+      ar: false,
+      autoRotate: false,
+      cameraControls: true,
+      backgroundColor: Colors.white,
+      cameraOrbit: "0deg 65deg 2.5m",
+      minCameraOrbit: "auto 0deg auto",
+      maxCameraOrbit: "auto 90deg auto",
+      cameraTarget: "0m 0m 0m",
+      fieldOfView: "45deg",
+    );
+  }
+}
+
+// Complete floor map section as a separate widget
+class _FloorMapSection extends StatefulWidget {
+  final String currentFloor;
+  final Function(String) onFloorChanged;
+
+  const _FloorMapSection({
+    required this.currentFloor,
+    required this.onFloorChanged,
+  });
+
+  @override
+  State<_FloorMapSection> createState() => _FloorMapSectionState();
+}
+
+class _FloorMapSectionState extends State<_FloorMapSection> {
+  late String _currentFloor;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentFloor = widget.currentFloor;
+  }
+
+  @override
+  void didUpdateWidget(_FloorMapSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.currentFloor != widget.currentFloor) {
+      _currentFloor = widget.currentFloor;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+      child: Column(
+        children: [
+          Container(
+            height: 250,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(12),
+                topRight: Radius.circular(12),
+              ),
+            ),
+            child: Stack(
+              children: [
+                _FloorMapViewer(currentFloor: _currentFloor),
+                Positioned(
+                  top: 12,
+                  right: 12,
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.9),
+                      borderRadius: BorderRadius.circular(8),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.1),
+                          blurRadius: 4,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      children: [
+                        _buildFloorButton('1', 'assets/maps/F2_map.glb'),
+                        const SizedBox(height: 8),
+                        _buildFloorButton('G', 'assets/maps/F1_map.glb'),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFloorButton(String label, String floorAsset) {
+    bool isSelected = _currentFloor == floorAsset;
+    
+    return Container(
+      width: 42,
+      height: 36,
+      child: ElevatedButton(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: isSelected ? kPrimaryGreen : Colors.white,
+          foregroundColor: isSelected ? Colors.white : kPrimaryGreen,
+          padding: EdgeInsets.zero,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: BorderSide(
+              color: isSelected ? kPrimaryGreen : Colors.grey.shade300,
+              width: 1.5,
+            ),
+          ),
+          elevation: isSelected ? 2 : 0,
+          shadowColor: Colors.black.withOpacity(0.1),
+        ),
+        onPressed: () {
+          setState(() {
+            _currentFloor = floorAsset;
+          });
+          widget.onFloorChanged(floorAsset);
+        },
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _ImageOverlay extends StatefulWidget {

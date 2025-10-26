@@ -8,6 +8,8 @@ import 'package:firebase_storage/firebase_storage.dart'
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:madar_app/api/venue_cache_service.dart';
 import 'category_page.dart';
+import 'package:model_viewer_plus/model_viewer_plus.dart';
+
 
 // Madar color
 const Color kPrimaryGreen = Color(
@@ -69,12 +71,21 @@ class _VenuePageState
   String? _venueWebsite;
   String? _venuePhone;
 
+<<<<<<< HEAD
   static final storage.FirebaseStorage
   _coversStorage =
       storage
           .FirebaseStorage.instanceFor(
         bucket:
             'gs://madar-database.firebasestorage.app',
+=======
+  // 3D map 
+  String _currentFloor = 'assets/maps/F1_map.glb';
+
+  static final storage.FirebaseStorage _coversStorage =
+      storage.FirebaseStorage.instanceFor(
+        bucket: 'gs://madar-database.firebasestorage.app',
+>>>>>>> ec2731a6fa6f67d90c89054919708589ac4b9407
       );
   static final Map<String, String>
   _urlCache = {};
@@ -937,6 +948,7 @@ class _VenuePageState
 
                         // ✅ Floor Map section - REGULAR heading
                         Padding(
+<<<<<<< HEAD
                           padding:
                               const EdgeInsets.symmetric(
                                 horizontal:
@@ -990,6 +1002,26 @@ class _VenuePageState
                             ],
                           ),
                         ),
+=======
+  padding: const EdgeInsets.symmetric(horizontal: 16),
+  child: Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Text(
+        'Floor Map',
+        style: TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.w600,
+          color: Colors.black,
+        ),
+      ),
+      const SizedBox(height: 12),
+      _buildFloorMapViewer(),
+    ],
+  ),
+),
+
+>>>>>>> ec2731a6fa6f67d90c89054919708589ac4b9407
 
                         // ✅ Light divider line after floor map
                         Padding(
@@ -1901,6 +1933,99 @@ class _VenuePageState
       ),
     );
   }
+  // Floor map state
+
+Widget _buildFloorMapViewer() {
+  return Container(
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: Colors.grey.shade300),
+    ),
+    child: Column(
+      children: [
+        // 3D Model Viewer with HTTP context
+        Container(
+          height: 250,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(12),
+              topRight: Radius.circular(12),
+            ),
+          ),
+          child: _buildModelViewer(),
+        ),
+        
+        // Floor selection buttons
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade50,
+            borderRadius: BorderRadius.only(
+              bottomLeft: Radius.circular(12),
+              bottomRight: Radius.circular(12),
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _buildFloorButton('Floor 1', 'assets/maps/F1_map.glb'),
+              const SizedBox(width: 12),
+              _buildFloorButton('Floor 2', 'assets/maps/F2_map.glb'),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+Widget _buildModelViewer() {
+  return ModelViewer(
+    key: ValueKey(_currentFloor),
+    src: _currentFloor,
+    alt: "3D Floor Map",
+    ar: false,
+    autoRotate: false,
+    cameraControls: true,
+    backgroundColor: Colors.white,
+    cameraOrbit: "0deg 65deg 2.5m",
+    minCameraOrbit: "auto 0deg auto",
+    maxCameraOrbit: "auto 90deg auto",
+    cameraTarget: "0m 0m 0m",
+    fieldOfView: "45deg",
+  );
+}
+
+Widget _buildFloorButton(String label, String floorAsset) {
+  bool isSelected = _currentFloor == floorAsset;
+  
+  return Expanded(
+    child: ElevatedButton(
+      style: ElevatedButton.styleFrom(
+        backgroundColor: isSelected ? kPrimaryGreen : Colors.grey.shade300,
+        foregroundColor: isSelected ? Colors.white : Colors.black87,
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
+        elevation: 0,
+      ),
+      onPressed: () {
+        setState(() {
+          _currentFloor = floorAsset;
+        });
+      },
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+    ),
+  );
+}
 }
 
 class _ImageOverlay

@@ -7,6 +7,8 @@ import 'package:firebase_storage/firebase_storage.dart' as storage;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:madar_app/api/venue_cache_service.dart';
 import 'category_page.dart';
+import 'package:model_viewer_plus/model_viewer_plus.dart';
+
 
 // Madar color
 const Color kPrimaryGreen = Color(0xFF777D63);
@@ -60,6 +62,9 @@ class _VenuePageState extends State<VenuePage> {
   // NEW: website/phone from DB
   String? _venueWebsite;
   String? _venuePhone;
+
+  // 3D map 
+  String _currentFloor = 'assets/maps/F1_map.glb';
 
   static final storage.FirebaseStorage _coversStorage =
       storage.FirebaseStorage.instanceFor(
@@ -642,37 +647,24 @@ class _VenuePageState extends State<VenuePage> {
 
                         // ✅ Floor Map section - REGULAR heading
                         Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Floor Map',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.grey.shade500,
-                                  letterSpacing: 0.5,
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              Container(
-                                height: 200,
-                                decoration: BoxDecoration(
-                                  color: Colors.grey.shade100,
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Center(
-                                  child: Icon(
-                                    Icons.map_outlined,
-                                    size: 48,
-                                    color: Colors.grey.shade400,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+  padding: const EdgeInsets.symmetric(horizontal: 16),
+  child: Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Text(
+        'Floor Map',
+        style: TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.w600,
+          color: Colors.black,
+        ),
+      ),
+      const SizedBox(height: 12),
+      _buildFloorMapViewer(),
+    ],
+  ),
+),
+
 
                         // ✅ Light divider line after floor map
                         Padding(
@@ -1258,6 +1250,189 @@ class _VenuePageState extends State<VenuePage> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+  // Floor map state
+
+Widget _buildFloorMapViewer() {
+  // Check if the venue is Solitaire
+  bool isSolitaire = widget.name.toLowerCase().contains('solitaire');
+  
+  if (!isSolitaire) {
+    // Return the old placeholder design for non-Solitaire venues
+    return Container(
+      height: 200,
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Center(
+        child: Icon(
+          Icons.map_outlined,
+          size: 48,
+          color: Colors.grey.shade400,
+        ),
+      ),
+    );
+  }
+  
+  // Return the interactive 3D map for Solitaire venue
+  return _FloorMapSection(
+    currentFloor: _currentFloor,
+    onFloorChanged: (String newFloor) {
+      // This will only update the state without rebuilding the entire page
+      _currentFloor = newFloor;
+    },
+  );
+}
+
+}
+
+// Separate widget for the 3D viewer - only rebuilds when floor changes
+class _FloorMapViewer extends StatelessWidget {
+  final String currentFloor;
+
+  const _FloorMapViewer({required this.currentFloor});
+
+  @override
+  Widget build(BuildContext context) {
+    return ModelViewer(
+      key: ValueKey(currentFloor), // Forces rebuild only when floor changes
+      src: currentFloor,
+      alt: "3D Floor Map",
+      ar: false,
+      autoRotate: false,
+      cameraControls: true,
+      backgroundColor: Colors.white,
+      cameraOrbit: "0deg 65deg 2.5m",
+      minCameraOrbit: "auto 0deg auto",
+      maxCameraOrbit: "auto 90deg auto",
+      cameraTarget: "0m 0m 0m",
+      fieldOfView: "45deg",
+    );
+  }
+}
+
+// Complete floor map section as a separate widget
+class _FloorMapSection extends StatefulWidget {
+  final String currentFloor;
+  final Function(String) onFloorChanged;
+
+  const _FloorMapSection({
+    required this.currentFloor,
+    required this.onFloorChanged,
+  });
+
+  @override
+  State<_FloorMapSection> createState() => _FloorMapSectionState();
+}
+
+class _FloorMapSectionState extends State<_FloorMapSection> {
+  late String _currentFloor;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentFloor = widget.currentFloor;
+  }
+
+  @override
+  void didUpdateWidget(_FloorMapSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.currentFloor != widget.currentFloor) {
+      _currentFloor = widget.currentFloor;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+      child: Column(
+        children: [
+          Container(
+            height: 250,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(12),
+                topRight: Radius.circular(12),
+              ),
+            ),
+            child: Stack(
+              children: [
+                _FloorMapViewer(currentFloor: _currentFloor),
+                Positioned(
+                  top: 12,
+                  right: 12,
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.9),
+                      borderRadius: BorderRadius.circular(8),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.1),
+                          blurRadius: 4,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      children: [
+                        _buildFloorButton('1', 'assets/maps/F2_map.glb'),
+                        const SizedBox(height: 8),
+                        _buildFloorButton('G', 'assets/maps/F1_map.glb'),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFloorButton(String label, String floorAsset) {
+    bool isSelected = _currentFloor == floorAsset;
+    
+    return Container(
+      width: 42,
+      height: 36,
+      child: ElevatedButton(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: isSelected ? kPrimaryGreen : Colors.white,
+          foregroundColor: isSelected ? Colors.white : kPrimaryGreen,
+          padding: EdgeInsets.zero,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: BorderSide(
+              color: isSelected ? kPrimaryGreen : Colors.grey.shade300,
+              width: 1.5,
+            ),
+          ),
+          elevation: isSelected ? 2 : 0,
+          shadowColor: Colors.black.withOpacity(0.1),
+        ),
+        onPressed: () {
+          setState(() {
+            _currentFloor = floorAsset;
+          });
+          widget.onFloorChanged(floorAsset);
+        },
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
     );

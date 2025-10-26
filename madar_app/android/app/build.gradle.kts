@@ -24,7 +24,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.madar_app"
-        minSdk = flutter.minSdkVersion
+        minSdkVersion flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

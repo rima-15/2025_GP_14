@@ -7,7 +7,7 @@ import 'directions_page.dart';
 import 'package:firebase_storage/firebase_storage.dart' as storage;
 import 'package:flutter/services.dart' show rootBundle;
 
-const kGreen = Color(0xFF787E65);
+const kGreen = Color(0xFF777D63);
 
 class CategoryPage extends StatefulWidget {
   final String categoryName;
@@ -128,53 +128,45 @@ class _CategoryPageState extends State<CategoryPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F8F3),
+      backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
-        centerTitle: true,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: kGreen),
-          onPressed: () => Navigator.pop(context),
+        leading: Container(
+          margin: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            shape: BoxShape.circle,
+          ),
+          child: IconButton(
+            icon: const Icon(Icons.arrow_back, color: kGreen, size: 20),
+            onPressed: () => Navigator.pop(context),
+          ),
         ),
         title: Text(
           widget.categoryName,
-          style: const TextStyle(color: kGreen, fontWeight: FontWeight.w600),
+          style: const TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
+            color: kGreen,
+          ),
+        ),
+        centerTitle: true,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(height: 1, color: Colors.grey.shade200),
         ),
       ),
       body: Column(
         children: [
-          // 🔍 شريط البحث
-          Container(
-            margin: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.grey.withOpacity(0.10),
-                  spreadRadius: 1,
-                  blurRadius: 4,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: TextField(
-              controller: _searchCtrl,
-              onChanged: (v) => setState(() => _query = v),
-              decoration: InputDecoration(
-                hintText: 'Search in ${widget.categoryName}...',
-                prefixIcon: const Icon(Icons.search, color: Colors.grey),
-                border: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 16,
-                ),
-              ),
-            ),
-          ),
+          const SizedBox(height: 12),
 
-          // 🔹 عرض القائمة
+          // 🔍 Search bar - below header
+          _buildSearchBar(),
+
+          const SizedBox(height: 12),
+
+          // 🔹 عرض القائمة على شكل Grid
           Expanded(
             child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: FirebaseFirestore.instance
@@ -185,7 +177,6 @@ class _CategoryPageState extends State<CategoryPage> {
                         ? 'ChIJcYTQDwDjLj4RZEiboV6gZzM'
                         : widget.venueId,
                   )
-                  //.where('venue_ID', isEqualTo: widget.venueId)
                   .where('category_IDs', arrayContains: widget.categoryId)
                   .orderBy('placeName')
                   .snapshots(),
@@ -222,7 +213,14 @@ class _CategoryPageState extends State<CategoryPage> {
                   return const Center(child: Text('No results found.'));
                 }
 
-                return ListView.builder(
+                return GridView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
+                    childAspectRatio: 0.75, // Adjusted for better content fit
+                  ),
                   itemCount: filteredDocs.length,
                   itemBuilder: (context, i) =>
                       _placeCard(filteredDocs[i].data(), filteredDocs[i].id),
@@ -235,40 +233,73 @@ class _CategoryPageState extends State<CategoryPage> {
     );
   }
 
+  // 🔍 Search bar - exact style from home page
+  Widget _buildSearchBar() => Container(
+    margin: const EdgeInsets.symmetric(horizontal: 16),
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: Colors.grey.shade300, width: 1),
+    ),
+    child: Row(
+      children: [
+        Icon(Icons.search, color: Colors.grey.shade600, size: 22),
+        const SizedBox(width: 8),
+        Expanded(
+          child: TextField(
+            controller: _searchCtrl,
+            onChanged: (v) => setState(() => _query = v),
+            decoration: InputDecoration(
+              hintText: 'Search in ${widget.categoryName}',
+              hintStyle: const TextStyle(color: Color(0xFF9E9E9E)),
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              isDense: true,
+              contentPadding: EdgeInsets.zero,
+            ),
+            style: const TextStyle(fontSize: 15),
+          ),
+        ),
+      ],
+    ),
+  );
+
   Widget _placeCard(Map<String, dynamic> data, String originalId) {
     final name = data['placeName'] ?? '';
     final desc = data['placeDescription'] ?? '';
     final img = data['placeImage'] ?? '';
 
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 6,
-            offset: const Offset(0, 3),
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
-      child: InkWell(
+      child: ClipRRect(
         borderRadius: BorderRadius.circular(12),
-        onTap: () {},
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 🖼 صورة المكان
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
+            // 🖼 صورة المكان - Square aspect ratio
+            Expanded(
+              flex: 5,
               child: img.isEmpty
                   ? Container(
-                      width: 100,
-                      height: 100,
+                      width: double.infinity,
+                      height: double.infinity,
                       color: Colors.grey[200],
                       child: const Icon(
                         Icons.image_not_supported,
                         color: Colors.grey,
+                        size: 32,
                       ),
                     )
                   : FutureBuilder<String?>(
@@ -276,8 +307,8 @@ class _CategoryPageState extends State<CategoryPage> {
                       builder: (context, snap) {
                         if (snap.connectionState == ConnectionState.waiting) {
                           return Container(
-                            width: 100,
-                            height: 100,
+                            width: double.infinity,
+                            height: double.infinity,
                             color: Colors.grey[200],
                             alignment: Alignment.center,
                             child: const CircularProgressIndicator(
@@ -289,19 +320,20 @@ class _CategoryPageState extends State<CategoryPage> {
                             snap.data == null ||
                             snap.data!.isEmpty) {
                           return Container(
-                            width: 100,
-                            height: 100,
+                            width: double.infinity,
+                            height: double.infinity,
                             color: Colors.grey[200],
                             child: const Icon(
                               Icons.image_not_supported,
                               color: Colors.grey,
+                              size: 32,
                             ),
                           );
                         }
                         return Image.network(
                           snap.data!,
-                          width: 100,
-                          height: 100,
+                          width: double.infinity,
+                          height: double.infinity,
                           fit: BoxFit.cover,
                         );
                       },
@@ -310,31 +342,65 @@ class _CategoryPageState extends State<CategoryPage> {
 
             // 📄 محتوى الكارد
             Expanded(
+              flex: 4,
               child: Padding(
                 padding: const EdgeInsets.all(12),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.black87,
+                    // Place name with navigation arrow
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: Color.fromARGB(255, 44, 44, 44),
+                            ),
+                          ),
+                        ),
+                        // 🧭 Navigation arrow button
+                        InkWell(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => DirectionsPage(placeName: name),
+                              ),
+                            );
+                          },
+                          child: const Icon(
+                            Icons.north_east,
+                            color: kGreen,
+                            size: 20,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+
+                    // Description - flexible to prevent overflow
+                    Flexible(
+                      child: Text(
+                        desc,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.black54,
+                          height: 1.3,
+                        ),
                       ),
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      desc,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.black54),
-                    ),
-                    const SizedBox(height: 8),
 
-                    // ⭐ التقييم
+                    const SizedBox(height: 6),
+
+                    // ⭐ التقييم - Green star + number
                     FutureBuilder<double?>(
                       future: _ratingCache[originalId] != null
                           ? Future.value(_ratingCache[originalId])
@@ -342,24 +408,20 @@ class _CategoryPageState extends State<CategoryPage> {
                               _ratingCache[originalId] = r;
                               return r;
                             }),
-
                       builder: (context, snap) {
                         if (!snap.hasData) return const SizedBox.shrink();
                         final r = snap.data ?? 0.0;
                         if (r == 0.0) return const SizedBox.shrink();
                         return Row(
                           children: [
-                            const Icon(
-                              Icons.star,
-                              color: Colors.amber,
-                              size: 18,
-                            ),
+                            const Icon(Icons.star, color: kGreen, size: 16),
                             const SizedBox(width: 4),
                             Text(
                               r.toStringAsFixed(1),
                               style: const TextStyle(
-                                fontSize: 14,
-                                color: Colors.black54,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.black87,
                               ),
                             ),
                           ],
@@ -368,22 +430,6 @@ class _CategoryPageState extends State<CategoryPage> {
                     ),
                   ],
                 ),
-              ),
-            ),
-
-            // 🧭 زر الاتجاهات
-            Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: IconButton(
-                icon: const Icon(Icons.north_east, color: kGreen, size: 20),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => DirectionsPage(placeName: name),
-                    ),
-                  );
-                },
               ),
             ),
           ],

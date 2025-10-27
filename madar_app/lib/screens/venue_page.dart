@@ -536,18 +536,15 @@ class _VenuePageState extends State<VenuePage> {
         leading: Container(
           margin: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: const Color.fromARGB(129, 119, 125, 99),
             shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.1),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
           ),
           child: IconButton(
-            icon: const Icon(Icons.arrow_back, color: Colors.black, size: 20),
+            icon: const Icon(
+              Icons.arrow_back,
+              color: Color.fromARGB(255, 255, 255, 255),
+              size: 20,
+            ),
             onPressed: () => Navigator.pop(context),
           ),
         ),
@@ -735,12 +732,13 @@ class _VenuePageState extends State<VenuePage> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
+                              Text(
                                 'Floor Map',
                                 style: TextStyle(
-                                  fontSize: 16,
+                                  fontSize: 14,
                                   fontWeight: FontWeight.w600,
-                                  color: Colors.black,
+                                  color: Colors.grey.shade500,
+                                  letterSpacing: 0.5,
                                 ),
                               ),
                               const SizedBox(height: 12),
@@ -1325,8 +1323,8 @@ class _VenuePageState extends State<VenuePage> {
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   fontWeight: FontWeight.w600,
-                  fontSize: 13,
-                  color: Colors.black,
+                  fontSize: 14,
+                  color: Color.fromARGB(255, 44, 44, 44), // categories color
                 ),
               ),
             ),
@@ -1458,7 +1456,12 @@ class _FloorMapSectionState extends State<_FloorMapSection> {
                       borderRadius: BorderRadius.circular(8),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.1),
+                          color: const Color.fromARGB(
+                            255,
+                            255,
+                            255,
+                            255,
+                          ).withOpacity(0.1),
                           blurRadius: 4,
                           offset: const Offset(0, 2),
                         ),

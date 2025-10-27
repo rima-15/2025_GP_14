@@ -300,7 +300,7 @@ class HomePageState extends State<HomePage> {
               _applyLocalFilterAndSort();
             },
             decoration: const InputDecoration(
-              hintText: 'Search',
+              hintText: 'Search for a venue',
               hintStyle: TextStyle(color: Color(0xFF9E9E9E)),
               border: InputBorder.none,
               enabledBorder: InputBorder.none,

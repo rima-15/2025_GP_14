@@ -202,6 +202,9 @@ class _SignInScreenState
     }
   }
 
+  bool _obscurePassword =
+      true; //eye icon
+
   @override
   Widget build(BuildContext context) {
     return CustomScaffold(
@@ -291,11 +294,12 @@ class _SignInScreenState
                       ),
 
                       // Password
+                      // Password
                       TextFormField(
                         controller:
                             _passCtrl,
                         obscureText:
-                            true,
+                            _obscurePassword,
                         obscuringCharacter:
                             '*',
                         validator: (v) {
@@ -305,16 +309,40 @@ class _SignInScreenState
                             return 'Please enter password';
                           }
                           if (v.length <
-                              6) {
-                            return 'Password must be at least 6 characters';
+                              8) {
+                            return 'Password must be at least 8 characters';
                           }
                           return null;
                         },
-                        decoration: _input(
-                          'Password',
-                          'Enter Password',
+                        decoration: InputDecoration(
+                          labelText:
+                              'Password',
+                          hintText:
+                              'Enter Password',
+                          border: OutlineInputBorder(
+                            borderRadius:
+                                BorderRadius.circular(
+                                  10,
+                                ),
+                          ),
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _obscurePassword
+                                  ? Icons.visibility_off
+                                  : Icons.visibility,
+                              color: Colors
+                                  .grey
+                                  .shade600,
+                            ),
+                            onPressed: () =>
+                                setState(() {
+                                  _obscurePassword =
+                                      !_obscurePassword;
+                                }),
+                          ),
                         ),
                       ),
+
                       const SizedBox(
                         height: 25,
                       ),

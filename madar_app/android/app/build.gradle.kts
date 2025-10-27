@@ -22,7 +22,7 @@ android {
         jvmTarget = JavaVersion.VERSION_11.toString()
     }
 
-    defaultConfig {
+   defaultConfig {
         applicationId = "com.example.madar_app"
         minSdk = 23
         targetSdk = flutter.targetSdkVersion

@@ -9,7 +9,6 @@ import 'package:madar_app/api/venue_cache_service.dart';
 import 'category_page.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
 
-
 // Madar color
 const Color kPrimaryGreen = Color(0xFF777D63);
 
@@ -63,7 +62,7 @@ class _VenuePageState extends State<VenuePage> {
   String? _venueWebsite;
   String? _venuePhone;
 
-  // 3D map 
+  // 3D map
   String _currentFloor = 'assets/maps/F1_map.glb';
 
   static final storage.FirebaseStorage _coversStorage =
@@ -440,6 +439,15 @@ class _VenuePageState extends State<VenuePage> {
   Widget build(BuildContext context) {
     final hasWebsite = (_venueWebsite != null && _venueWebsite!.isNotEmpty);
     final hasPhone = (_venuePhone != null && _venuePhone!.isNotEmpty);
+    final bool isMall =
+        widget.venueType?.toLowerCase() == 'malls' ||
+        widget.venueType?.toLowerCase() == 'mall';
+    final bool isSolitaire = widget.name.toLowerCase().contains('solitaire');
+
+    // ✅ إذا كان مول غير سوليتير → نستخدم ID سوليتير فعلياً
+    final String effectiveVenueId = (isMall && !isSolitaire)
+        ? 'ChIJcYTQDwDjLj4RZEiboV6gZzM' // 🔗 ID سوليتير
+        : widget.placeId;
 
     return Scaffold(
       backgroundColor: Colors
@@ -647,24 +655,23 @@ class _VenuePageState extends State<VenuePage> {
 
                         // ✅ Floor Map section - REGULAR heading
                         Padding(
-  padding: const EdgeInsets.symmetric(horizontal: 16),
-  child: Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      const Text(
-        'Floor Map',
-        style: TextStyle(
-          fontSize: 16,
-          fontWeight: FontWeight.w600,
-          color: Colors.black,
-        ),
-      ),
-      const SizedBox(height: 12),
-      _buildFloorMapViewer(),
-    ],
-  ),
-),
-
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Floor Map',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.black,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              _buildFloorMapViewer(),
+                            ],
+                          ),
+                        ),
 
                         // ✅ Light divider line after floor map
                         Padding(
@@ -695,64 +702,62 @@ class _VenuePageState extends State<VenuePage> {
 
                         SizedBox(
                           height: 180,
-                          child:
-                              StreamBuilder<
-                                QuerySnapshot<Map<String, dynamic>>
-                              >(
-                                stream: FirebaseFirestore.instance
-                                    .collection('venues')
-                                    .doc(widget.placeId)
-                                    .collection('categories')
-                                    .snapshots(),
-                                builder: (context, snapshot) {
-                                  if (snapshot.connectionState ==
-                                      ConnectionState.waiting) {
-                                    return const Center(
-                                      child: CircularProgressIndicator(),
-                                    );
-                                  }
-                                  if (snapshot.hasError) {
-                                    return Center(
-                                      child: Text('Error: ${snapshot.error}'),
-                                    );
-                                  }
+                          child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                            stream: FirebaseFirestore.instance
+                                .collection('venues')
+                                .doc(effectiveVenueId)
+                                .collection('categories')
+                                .snapshots(),
+                            builder: (context, snapshot) {
+                              if (snapshot.connectionState ==
+                                  ConnectionState.waiting) {
+                                return const Center(
+                                  child: CircularProgressIndicator(),
+                                );
+                              }
+                              if (snapshot.hasError) {
+                                return Center(
+                                  child: Text('Error: ${snapshot.error}'),
+                                );
+                              }
 
-                                  final docs = snapshot.data?.docs ?? [];
-                                  if (docs.isEmpty) {
-                                    return const Center(
-                                      child: Text('No categories found.'),
-                                    );
-                                  }
+                              final docs = snapshot.data?.docs ?? [];
+                              if (docs.isEmpty) {
+                                return const Center(
+                                  child: Text('No categories found.'),
+                                );
+                              }
 
-                                  return ListView.separated(
-                                    scrollDirection: Axis.horizontal,
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                    ),
-                                    itemCount: docs.length,
-                                    separatorBuilder: (_, __) =>
-                                        const SizedBox(width: 12),
-                                    itemBuilder: (context, i) {
-                                      final categoryId = docs[i].id;
-                                      final data = docs[i].data();
-                                      final name =
-                                          data['categoryName'] ?? 'Unnamed';
-                                      final image =
-                                          data['categoryImage'] ??
-                                          'images/default.jpg';
+                              return ListView.separated(
+                                scrollDirection: Axis.horizontal,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                ),
+                                itemCount: docs.length,
+                                separatorBuilder: (_, __) =>
+                                    const SizedBox(width: 12),
+                                itemBuilder: (context, i) {
+                                  final categoryId = docs[i].id;
+                                  final data = docs[i].data();
+                                  final name =
+                                      data['categoryName'] ?? 'Unnamed';
+                                  final image =
+                                      data['categoryImage'] ??
+                                      'images/default.jpg';
 
-                                      return _categoryCard(
-                                        context,
-                                        name,
-                                        image,
-                                        widget.placeId,
-                                        categoryId,
-                                        _imageUrlForCategory,
-                                      );
-                                    },
+                                  // ✅ نمرر نفس الـ effectiveVenueId عشان CategoryPage يعرف أنه يعرض سوليتير
+                                  return _categoryCard(
+                                    context,
+                                    name,
+                                    image,
+                                    effectiveVenueId,
+                                    categoryId,
+                                    _imageUrlForCategory,
                                   );
                                 },
-                              ),
+                              );
+                            },
+                          ),
                         ),
 
                         const SizedBox(height: 24),
@@ -1256,38 +1261,37 @@ class _VenuePageState extends State<VenuePage> {
   }
   // Floor map state
 
-Widget _buildFloorMapViewer() {
-  // Check if the venue is Solitaire
-  bool isSolitaire = widget.name.toLowerCase().contains('solitaire');
-  
-  if (!isSolitaire) {
-    // Return the old placeholder design for non-Solitaire venues
-    return Container(
-      height: 200,
-      decoration: BoxDecoration(
-        color: Colors.grey.shade100,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Center(
-        child: Icon(
-          Icons.map_outlined,
-          size: 48,
-          color: Colors.grey.shade400,
+  Widget _buildFloorMapViewer() {
+    // Check if the venue is Solitaire
+    bool isSolitaire = widget.name.toLowerCase().contains('solitaire');
+
+    if (!isSolitaire) {
+      // Return the old placeholder design for non-Solitaire venues
+      return Container(
+        height: 200,
+        decoration: BoxDecoration(
+          color: Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(8),
         ),
-      ),
+        child: Center(
+          child: Icon(
+            Icons.map_outlined,
+            size: 48,
+            color: Colors.grey.shade400,
+          ),
+        ),
+      );
+    }
+
+    // Return the interactive 3D map for Solitaire venue
+    return _FloorMapSection(
+      currentFloor: _currentFloor,
+      onFloorChanged: (String newFloor) {
+        // This will only update the state without rebuilding the entire page
+        _currentFloor = newFloor;
+      },
     );
   }
-  
-  // Return the interactive 3D map for Solitaire venue
-  return _FloorMapSection(
-    currentFloor: _currentFloor,
-    onFloorChanged: (String newFloor) {
-      // This will only update the state without rebuilding the entire page
-      _currentFloor = newFloor;
-    },
-  );
-}
-
 }
 
 // Separate widget for the 3D viewer - only rebuilds when floor changes
@@ -1402,7 +1406,7 @@ class _FloorMapSectionState extends State<_FloorMapSection> {
 
   Widget _buildFloorButton(String label, String floorAsset) {
     bool isSelected = _currentFloor == floorAsset;
-    
+
     return Container(
       width: 42,
       height: 36,
@@ -1429,10 +1433,7 @@ class _FloorMapSectionState extends State<_FloorMapSection> {
         },
         child: Text(
           label,
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
         ),
       ),
     );

@@ -179,7 +179,13 @@ class _CategoryPageState extends State<CategoryPage> {
             child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: FirebaseFirestore.instance
                   .collection('places')
-                  .where('venue_ID', isEqualTo: widget.venueId)
+                  .where(
+                    'venue_ID',
+                    isEqualTo: widget.venueId == 'ChIJcYTQDwDjLj4RZEiboV6gZzM'
+                        ? 'ChIJcYTQDwDjLj4RZEiboV6gZzM'
+                        : widget.venueId,
+                  )
+                  //.where('venue_ID', isEqualTo: widget.venueId)
                   .where('category_IDs', arrayContains: widget.categoryId)
                   .orderBy('placeName')
                   .snapshots(),

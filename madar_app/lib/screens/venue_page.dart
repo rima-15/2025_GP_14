@@ -612,6 +612,22 @@ class _VenuePageState
     final hasPhone =
         (_venuePhone != null &&
         _venuePhone!.isNotEmpty);
+    final bool isMall =
+        widget.venueType
+                ?.toLowerCase() ==
+            'malls' ||
+        widget.venueType
+                ?.toLowerCase() ==
+            'mall';
+    final bool isSolitaire = widget.name
+        .toLowerCase()
+        .contains('solitaire');
+
+    // ✅ إذا كان مول غير سوليتير → نستخدم ID سوليتير فعلياً
+    final String effectiveVenueId =
+        (isMall && !isSolitaire)
+        ? 'ChIJcYTQDwDjLj4RZEiboV6gZzM' // 🔗 ID سوليتير
+        : widget.placeId;
 
     return Scaffold(
       backgroundColor: Colors
@@ -1033,7 +1049,7 @@ class _VenuePageState
                                       'venues',
                                     )
                                     .doc(
-                                      widget.placeId,
+                                      effectiveVenueId,
                                     )
                                     .collection(
                                       'categories',
@@ -1096,11 +1112,12 @@ class _VenuePageState
                                                   data['categoryImage'] ??
                                                   'images/default.jpg';
 
+                                              // ✅ نمرر نفس الـ effectiveVenueId عشان CategoryPage يعرف أنه يعرض سوليتير
                                               return _categoryCard(
                                                 context,
                                                 name,
                                                 image,
-                                                widget.placeId,
+                                                effectiveVenueId,
                                                 categoryId,
                                                 _imageUrlForCategory,
                                               );

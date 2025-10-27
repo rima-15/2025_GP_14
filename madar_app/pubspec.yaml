@@ -92,9 +92,10 @@ flutter:
      
 flutter_native_splash:
    color: "#FFFFFF"  
-   image: images/MadarLogoEnglish.png
+   image: images/Madar2-resized4.png
    android: true
    ios: true
+
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

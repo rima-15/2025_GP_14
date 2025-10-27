@@ -147,7 +147,7 @@ class MadarApp extends StatelessWidget {
       title: 'Madar',
       theme: buildAppTheme(),
       debugShowCheckedModeBanner: false,
-      home: startScreen,
+      home: WelcomeScreen(),
     );
   }
 }

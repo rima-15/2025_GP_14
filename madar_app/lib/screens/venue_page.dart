@@ -802,17 +802,58 @@ class _VenuePageState extends State<VenuePage> {
                                 );
                               }
 
+                              // ✅ Custom order: Shops → Cafes → Restaurants → (others A–Z) → Services
+                              int _priorityFor(String name) {
+                                final n = name.trim().toLowerCase();
+                                switch (n) {
+                                  case 'shops':
+                                    return 0;
+                                  case 'cafes':
+                                    return 1;
+                                  case 'restaurants':
+                                  case 'resturants': // tolerate spelling
+                                    return 2;
+                                  case 'services':
+                                    return 9999; // force last
+                                  default:
+                                    return 100; // others
+                                }
+                              }
+
+                              final sorted = [...docs];
+                              sorted.sort((a, b) {
+                                final aName =
+                                    (a.data()['categoryName'] ?? 'Unnamed')
+                                        .toString();
+                                final bName =
+                                    (b.data()['categoryName'] ?? 'Unnamed')
+                                        .toString();
+
+                                final aPri = _priorityFor(aName);
+                                final bPri = _priorityFor(bName);
+
+                                if (aPri != bPri) return aPri.compareTo(bPri);
+
+                                // If both are "others", sort alphabetically; otherwise keep original order
+                                if (aPri == 100) {
+                                  return aName.toLowerCase().compareTo(
+                                    bName.toLowerCase(),
+                                  );
+                                }
+                                return 0;
+                              });
+
                               return ListView.separated(
                                 scrollDirection: Axis.horizontal,
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 16,
                                 ),
-                                itemCount: docs.length,
+                                itemCount: sorted.length,
                                 separatorBuilder: (_, __) =>
                                     const SizedBox(width: 12),
                                 itemBuilder: (context, i) {
-                                  final categoryId = docs[i].id;
-                                  final data = docs[i].data();
+                                  final categoryId = sorted[i].id;
+                                  final data = sorted[i].data();
                                   final name =
                                       data['categoryName'] ?? 'Unnamed';
                                   final image =
@@ -1028,7 +1069,7 @@ class _VenuePageState extends State<VenuePage> {
     );
   }
 
-  // ✅ Expandable text with INLINE arrow at end of line 2
+  // ✅ Expandable text with INLINE arrow that stays in place (reverses on expand)
   Widget _buildExpandableText(
     String text,
     bool isExpanded,
@@ -1040,61 +1081,59 @@ class _VenuePageState extends State<VenuePage> {
       height: 1.5,
     );
 
+    const double _arrowSlotWidth =
+        32; // fixed trailing slot so arrow never moves
+    const EdgeInsets _arrowPad = EdgeInsets.symmetric(horizontal: 6);
+
     return LayoutBuilder(
       builder: (context, constraints) {
+        // Probe if text exceeds 2 lines
         final probe = TextPainter(
           text: TextSpan(text: text, style: style),
           maxLines: 2,
           textDirection: TextDirection.ltr,
-        )..layout(maxWidth: constraints.maxWidth);
+        )..layout(maxWidth: constraints.maxWidth - _arrowSlotWidth);
         final exceeded = probe.didExceedMaxLines;
 
+        // If content fits, just show text (no arrow)
         if (!exceeded) {
           return Text(text, style: style);
         }
 
-        if (isExpanded) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(text, style: style),
-              InkWell(
-                onTap: onTap,
-                borderRadius: BorderRadius.circular(8),
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 6, right: 8),
-                  child: Icon(
-                    Icons.keyboard_arrow_up,
-                    size: 22,
-                    color: Colors.grey.shade600,
-                  ),
-                ),
-              ),
-            ],
-          );
-        }
-
-        // Collapsed: text ellipsizes to 2 lines; arrow sits in a narrow trailing slot
+        // Use the SAME Row in both states so the arrow stays put
         return Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Text area
             Expanded(
               child: Text(
                 text,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
+                maxLines: isExpanded ? null : 2,
+                overflow: isExpanded
+                    ? TextOverflow.visible
+                    : TextOverflow.ellipsis,
                 style: style,
               ),
             ),
-            InkWell(
-              onTap: onTap,
-              borderRadius: BorderRadius.circular(8),
-              child: Padding(
-                padding: const EdgeInsets.only(left: 6, right: 6),
-                child: Icon(
-                  Icons.keyboard_arrow_down,
-                  size: 20,
-                  color: Colors.grey.shade600,
+
+            // Narrow trailing slot that always hosts the arrow (top aligned)
+            SizedBox(
+              width: _arrowSlotWidth,
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: InkWell(
+                  onTap: onTap,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: _arrowPad,
+                    child: Icon(
+                      isExpanded
+                          ? Icons.keyboard_arrow_up
+                          : Icons.keyboard_arrow_down,
+                      size: 22,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
                 ),
               ),
             ),

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 const kGreen = Color(0xFF787E65);
-const kBg = Color(0xFFF8F8F3);
+const kBg = Color.fromARGB(255, 255, 255, 255);
 
 ThemeData buildAppTheme() {
   final base = ThemeData.light();

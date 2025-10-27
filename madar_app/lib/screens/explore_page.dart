@@ -1,51 +1,36 @@
 import 'package:flutter/material.dart';
+import 'package:madar_app/screens/category_page.dart';
 
-class ExplorePage
-    extends StatelessWidget {
+class ExplorePage extends StatelessWidget {
   const ExplorePage({super.key});
 
-  static const Color green = Color(
-    0xFF787E65,
-  );
+  static const Color green = Color(0xFF787E65);
 
   @override
   Widget build(BuildContext context) {
     return Center(
       child: SingleChildScrollView(
-        padding:
-            const EdgeInsets.symmetric(
-              horizontal: 24,
-            ),
+        padding: const EdgeInsets.symmetric(horizontal: 24),
         child: Column(
-          mainAxisAlignment:
-              MainAxisAlignment.center,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
               width: 72,
               height: 72,
               decoration: BoxDecoration(
-                color: Colors.black
-                    .withOpacity(0.04),
+                color: Colors.black.withOpacity(0.04),
                 shape: BoxShape.circle,
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black
-                        .withOpacity(
-                          0.06,
-                        ),
+                    color: Colors.black.withOpacity(0.06),
                     blurRadius: 10,
-                    offset:
-                        const Offset(
-                          0,
-                          4,
-                        ),
+                    offset: const Offset(0, 4),
                   ),
                 ],
               ),
               child: const Center(
                 child: Icon(
-                  Icons
-                      .photo_camera_outlined,
+                  Icons.photo_camera_outlined,
                   size: 30,
                   color: green,
                 ),
@@ -55,22 +40,19 @@ class ExplorePage
 
             const Text(
               'Explore with AR',
-              textAlign:
-                  TextAlign.center,
+              textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 26,
                 height: 1.2,
-                fontWeight:
-                    FontWeight.w800,
-                color: Colors.black87,
+                fontWeight: FontWeight.w800,
+                color: kGreen,
               ),
             ),
             const SizedBox(height: 12),
 
             Text(
               'Point your camera at your surroundings to discover points of interest and get real-time navigation.',
-              textAlign:
-                  TextAlign.center,
+              textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 15,
                 height: 1.45,
@@ -84,40 +66,22 @@ class ExplorePage
               child: ElevatedButton(
                 onPressed: () {
                   // Navigator.push(context, MaterialPageRoute(builder: (_) => const ARCameraScreen()));
-                  ScaffoldMessenger.of(
-                    context,
-                  ).showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        'Open Camera tapped',
-                      ),
-                    ),
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Open Camera tapped')),
                   );
                 },
                 style: ElevatedButton.styleFrom(
-                  backgroundColor:
-                      green,
-                  foregroundColor:
-                      Colors.white,
-                  padding:
-                      const EdgeInsets.symmetric(
-                        vertical: 14,
-                      ),
+                  backgroundColor: green,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(
-                    borderRadius:
-                        BorderRadius.circular(
-                          14,
-                        ),
+                    borderRadius: BorderRadius.circular(14),
                   ),
                   elevation: 0,
                 ),
                 child: const Text(
                   'Open Camera',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight:
-                        FontWeight.w700,
-                  ),
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
                 ),
               ),
             ),

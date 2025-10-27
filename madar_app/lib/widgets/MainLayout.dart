@@ -80,7 +80,8 @@ class _MainLayoutState extends State<MainLayout> {
       body: pages[_index],
       drawer: _buildDrawer(context),
       bottomNavigationBar: _buildModernBottomBar(),
-      backgroundColor: const Color(0xFFF8F8F3),
+      // ⬇️ Changed: global background is pure white
+      backgroundColor: Colors.white,
     );
   }
 
@@ -127,6 +128,17 @@ class _MainLayoutState extends State<MainLayout> {
                 padding: const EdgeInsets.only(right: 16),
               ),
             ]
+          : null,
+
+      // ⬇️ NEW: light divider ONLY for Explore (1) and Track (2)
+      bottom: (index == 1 || index == 2)
+          ? PreferredSize(
+              preferredSize: const Size.fromHeight(1),
+              child: Container(
+                height: 1,
+                color: Colors.black12, // subtle divider
+              ),
+            )
           : null,
     );
   }
@@ -259,14 +271,14 @@ class _MainLayoutState extends State<MainLayout> {
     );
   }
 
-  // ✅ NEW: Modern flat bottom navigation bar with filled pill background
+  // ✅ Modern flat bottom navigation bar with filled pill background
   Widget _buildModernBottomBar() {
     return SafeArea(
       top: false,
       child: Container(
         height: 60, // clean slim height
         decoration: BoxDecoration(
-          color: Colors.white, // changed from beige to pure white
+          color: Colors.white, // pure white
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.08),

@@ -35,7 +35,6 @@ class VenueContactSeeder {
     final snap = await _fire.collection(collectionPath).get();
     if (kDebugMode) print('Found ${snap.docs.length} venues to check.');
 
-    // Batch for efficient writes; commit every ~400 writes (limit 500).
     WriteBatch batch = _fire.batch();
     int pending = 0, written = 0, skipped = 0, errors = 0;
 

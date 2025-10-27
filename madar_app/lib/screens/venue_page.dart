@@ -9,6 +9,12 @@ import 'package:madar_app/api/venue_cache_service.dart';
 import 'category_page.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
 
+// ▼▼ added for API-based opening-hours (logic only)
+import 'package:http/http.dart' as http;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'dart:convert';
+// ▲▲ added for API-based opening-hours (logic only)
+
 // Madar color
 const Color kPrimaryGreen = Color(0xFF777D63);
 
@@ -85,14 +91,56 @@ class _VenuePageState extends State<VenuePage> {
     _loadVenueContacts(); // NEW
   }
 
+  // ✅ API-first opening hours (rating stays from DB)
   Future<void> _loadHours() async {
+    // 1) Try LIVE Google Place Details API first (force API-first)
+    try {
+      final key = dotenv.env['GOOGLE_API_KEY'];
+      if (key != null && widget.placeId.isNotEmpty) {
+        final uri = Uri.parse(
+          'https://maps.googleapis.com/maps/api/place/details/json'
+          '?place_id=${Uri.encodeComponent(widget.placeId)}'
+          '&fields=business_status,current_opening_hours,opening_hours,utc_offset,types'
+          '&key=$key',
+        );
+
+        final res = await http.get(uri).timeout(const Duration(seconds: 12));
+        if (res.statusCode == 200) {
+          final data = json.decode(res.body) as Map<String, dynamic>;
+          if (data['status'] == 'OK' &&
+              data['result'] is Map<String, dynamic>) {
+            final result = Map<String, dynamic>.from(data['result'] as Map);
+
+            final normalized = <String, dynamic>{
+              'current_opening_hours': result['current_opening_hours'],
+              'opening_hours': result['opening_hours'],
+              'utc_offset': result['utc_offset'], // minutes
+              'types': (result['types'] as List?)?.cast<String>(),
+              'business_status': result['business_status'],
+              '_source': 'api',
+              '_ts': DateTime.now().millisecondsSinceEpoch,
+            };
+
+            _hoursCache[widget.placeId] = normalized;
+            _applyHours(normalized);
+            setState(() => _loading = false);
+            return; // ✅ API success → stop here
+          }
+        }
+      }
+    } catch (_) {
+      // swallow; we'll fallback below
+    }
+
+    // 2) If API not OK: use cached API data (if exists)
     final cached = _hoursCache[widget.placeId];
-    if (cached != null) {
+    if (cached != null && cached['_source'] == 'api') {
       _applyHours(cached);
       setState(() => _loading = false);
       return;
     }
 
+    // 3) Final fallback: monthly meta from DB (rating kept here)
     try {
       final meta = await _cache
           .getMonthlyMeta(widget.placeId)
@@ -103,8 +151,16 @@ class _VenuePageState extends State<VenuePage> {
         resultLike['current_opening_hours'] = meta.openingHours;
       }
       if (meta.rating != null) {
-        resultLike['rating'] = meta.rating;
+        resultLike['rating'] = meta.rating; // ✅ rating stays from DB
       }
+      if (meta.businessStatus != null) {
+        resultLike['business_status'] = meta.businessStatus;
+      }
+      if (meta.types != null) {
+        resultLike['types'] = meta.types;
+      }
+      resultLike['_source'] = 'db';
+      resultLike['_ts'] = DateTime.now().millisecondsSinceEpoch;
 
       _hoursCache[widget.placeId] = resultLike;
       _applyHours(resultLike);
@@ -153,6 +209,7 @@ class _VenuePageState extends State<VenuePage> {
     }
   }
 
+  // ✅ apply hours + airport 24h + Sunday-first
   void _applyHours(Map<String, dynamic> res) {
     final currentOpening =
         (res['current_opening_hours'] as Map<String, dynamic>?) ?? {};
@@ -160,13 +217,40 @@ class _VenuePageState extends State<VenuePage> {
         ? currentOpening
         : (res['opening_hours'] as Map<String, dynamic>?) ?? {};
 
-    final weekdayText =
+    List<String> weekdayText =
         (opening['weekday_text'] as List?)?.cast<String>() ?? const [];
     final periods = (opening['periods'] as List?) ?? const [];
     final openNow = opening['open_now'] as bool?;
     final utcOffset = res['utc_offset'] as int?;
     final types = (res['types'] as List?)?.cast<String>() ?? const [];
     final businessStatus = res['business_status'] as String?;
+
+    // If no hours but it's an airport → assume 24h (your original rule)
+    if (weekdayText.isEmpty && types.contains('airport')) {
+      weekdayText = const [
+        'Sunday: Open 24 hours',
+        'Monday: Open 24 hours',
+        'Tuesday: Open 24 hours',
+        'Wednesday: Open 24 hours',
+        'Thursday: Open 24 hours',
+        'Friday: Open 24 hours',
+        'Saturday: Open 24 hours',
+      ];
+    }
+
+    // Ensure Sunday-first order if Google returns Monday-first
+    if (weekdayText.isNotEmpty &&
+        weekdayText.first.toLowerCase().startsWith('monday')) {
+      final idxSun = weekdayText.indexWhere(
+        (l) => l.toLowerCase().startsWith('sunday'),
+      );
+      if (idxSun > 0) {
+        weekdayText = [
+          ...weekdayText.sublist(idxSun),
+          ...weekdayText.sublist(0, idxSun),
+        ];
+      }
+    }
 
     setState(() {
       _openNow = openNow;
@@ -204,7 +288,6 @@ class _VenuePageState extends State<VenuePage> {
         : null;
 
     // ✅ 1) Preferred: universal links that open the place details page
-    // This reliably opens the place card on old and new Android builds.
     final Uri primary = hasLL
         ? Uri.parse(
             'https://www.google.com/maps/search/?api=1&query=$nameEnc&query_place_id=$id',
@@ -218,14 +301,12 @@ class _VenuePageState extends State<VenuePage> {
       'https://www.google.com/maps/place/?q=place_id:$id',
     );
 
-    // ✅ 3) Fallback: plain geo (last resort; may not open the card)
+    // ✅ 3) Fallback: plain geo (last resort)
     final Uri geo = hasLL
         ? Uri.parse('geo:$ll?q=$ll($nameEnc)')
         : Uri.parse('geo:0,0?q=$nameEnc');
 
-    // iOS branch (keep your existing handling if you want, but universal links work too)
     if (Platform.isIOS) {
-      // Try universal link first (opens Google Maps app if installed, else Safari)
       if (await canLaunchUrl(primary)) {
         final ok = await launchUrl(
           primary,
@@ -233,7 +314,6 @@ class _VenuePageState extends State<VenuePage> {
         );
         if (ok) return;
       }
-      // Your previous iOS scheme fallback (Google Maps app)
       final Uri iosGmm = hasLL
           ? Uri.parse(
               'comgooglemaps://?q=$nameEnc&center=$ll&zoom=17&query_place_id=$id',
@@ -246,12 +326,10 @@ class _VenuePageState extends State<VenuePage> {
         );
         if (ok) return;
       }
-      // Final fallback: alt link
       await launchUrl(alt, mode: LaunchMode.externalApplication);
       return;
     }
 
-    // ✅ Android: try universal links first (best compatibility), then geo
     for (final uri in [primary, alt, geo]) {
       if (await canLaunchUrl(uri)) {
         final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -277,7 +355,6 @@ class _VenuePageState extends State<VenuePage> {
   Future<void> _callVenue() async {
     final raw = _venuePhone?.trim();
     if (raw == null || raw.isEmpty) return;
-    // Keep '+' if present; remove spaces and dashes
     final cleaned = raw.replaceAll(RegExp(r'[()\s-]'), '');
     final uri = Uri.parse('tel:$cleaned');
     if (await canLaunchUrl(uri)) {
@@ -300,7 +377,6 @@ class _VenuePageState extends State<VenuePage> {
       return 'Airport';
     }
 
-    // Capitalize first letter as fallback
     return widget.venueType![0].toUpperCase() + widget.venueType!.substring(1);
   }
 
@@ -344,7 +420,7 @@ class _VenuePageState extends State<VenuePage> {
     } else if (_openNow == false) {
       return 'Closed';
     }
-    return '';
+    return 'Not Available';
   }
 
   String _getOpeningTime() {
@@ -418,7 +494,7 @@ class _VenuePageState extends State<VenuePage> {
     } else if (_openNow == false) {
       return Colors.red;
     }
-    return Colors.grey;
+    return Colors.orange; // Not Available
   }
 
   void _showImageOverlay(int startIndex) {
@@ -1259,6 +1335,7 @@ class _VenuePageState extends State<VenuePage> {
       ),
     );
   }
+
   // Floor map state
 
   Widget _buildFloorMapViewer() {
@@ -1407,7 +1484,7 @@ class _FloorMapSectionState extends State<_FloorMapSection> {
   Widget _buildFloorButton(String label, String floorAsset) {
     bool isSelected = _currentFloor == floorAsset;
 
-    return Container(
+    return SizedBox(
       width: 42,
       height: 36,
       child: ElevatedButton(
@@ -1433,7 +1510,7 @@ class _FloorMapSectionState extends State<_FloorMapSection> {
         },
         child: Text(
           label,
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
         ),
       ),
     );

@@ -465,7 +465,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                             _phoneError = 'Enter phone number';
                             _isPhoneValid = false;
                           } else if (!RegExp(r'^\d{9}$').hasMatch(v)) {
-                            _phoneError = 'Enter 9 digits after +966';
+                            _phoneError = 'Enter 9 digits';
                             _isPhoneValid = false;
                           } else {
                             _phoneError = null;

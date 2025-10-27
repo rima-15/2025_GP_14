@@ -423,6 +423,20 @@ class _VenuePageState extends State<VenuePage> {
     return 'Not Available';
   }
 
+  // ====== NEW: tiny normalizer to handle unicode dashes/spaces from Google ======
+  // Normalizes unicode dashes and thin spaces Google often uses in weekday_text
+  String _normalizeHoursLine(String s) {
+    return s
+        .replaceAll(
+          RegExp(r'[\u2012\u2013\u2014\u2212\-]+'),
+          '-',
+        ) // various dashes → hyphen
+        .replaceAll(RegExp(r'[\u202F\u00A0]'), ' ') // thin/nbsp → space
+        .replaceAll(RegExp(r'\s+'), ' ') // collapse spaces
+        .trim();
+  }
+
+  // ====== REPLACED: robust parser that infers missing AM/PM on the opening time ======
   String _getOpeningTime() {
     if (_isTemporarilyClosed() || _isOpen24Hours() || _hasVaryingHours()) {
       return '';
@@ -448,7 +462,7 @@ class _VenuePageState extends State<VenuePage> {
 
     if (line.isEmpty) return '';
 
-    final timePart = line.contains(':')
+    String timePart = line.contains(':')
         ? line.split(':').sublist(1).join(':').trim()
         : '';
 
@@ -456,23 +470,48 @@ class _VenuePageState extends State<VenuePage> {
       return '';
     }
 
-    // If currently open, show closing time
-    if (_openNow == true) {
-      final match = RegExp(
-        r'–\s*(\d{1,2}:\d{2}\s?[AP]M)',
-        caseSensitive: false,
-      ).firstMatch(timePart);
-      if (match != null) {
-        return 'Closes at ${match.group(1)}';
+    // Normalize unicode punctuation/spaces to make parsing robust
+    timePart = _normalizeHoursLine(timePart);
+
+    // Try to parse "HH:MM [AM/PM]? - HH:MM AM/PM"
+    final m = RegExp(
+      r'^\s*(\d{1,2}:\d{2})\s*(?:([AP]M))?\s*-\s*(\d{1,2}:\d{2})\s*([AP]M)\s*$',
+      caseSensitive: false,
+    ).firstMatch(timePart);
+
+    if (m != null) {
+      final startTime = m.group(1)!; // e.g. "12:00"
+      final startMer =
+          (m.group(2) ?? m.group(4))!; // infer AM/PM from end if missing
+      final endTime = m.group(3)!; // e.g. "5:00"
+      final endMer = m.group(4)!; // e.g. "PM"
+
+      if (_openNow == true) {
+        // Currently open → show closing time
+        return 'Closes at $endTime $endMer';
+      } else {
+        // Currently closed → show opening time (with inferred AM/PM if needed)
+        return 'Opens at $startTime $startMer';
       }
-    } else {
-      // If closed, show opening time
-      final match = RegExp(
-        r'(\d{1,2}:\d{2}\s?[AP]M)',
+    }
+
+    // Fallbacks (keep behavior similar to your previous logic)
+    if (_openNow == true) {
+      final matchClose = RegExp(
+        r'[-–]\s*(\d{1,2}:\d{2}\s?[AP]M)',
         caseSensitive: false,
       ).firstMatch(timePart);
-      if (match != null) {
-        return 'Opens at ${match.group(1)}';
+      if (matchClose != null) return 'Closes at ${matchClose.group(1)}';
+    } else {
+      // Prefer FIRST time as opening if present, even without AM/PM
+      final matchOpenLoose = RegExp(
+        r'(\d{1,2}:\d{2})(?:\s?([AP]M))?',
+        caseSensitive: false,
+      ).firstMatch(timePart);
+      if (matchOpenLoose != null) {
+        final t = matchOpenLoose.group(1)!;
+        final mer = matchOpenLoose.group(2);
+        return 'Opens at ${mer == null ? t : '$t $mer'}';
       }
     }
 
@@ -492,7 +531,7 @@ class _VenuePageState extends State<VenuePage> {
     if (_openNow == true) {
       return Colors.green;
     } else if (_openNow == false) {
-      return Colors.red;
+      return const Color.fromRGBO(244, 67, 54, 1);
     }
     return Colors.orange; // Not Available
   }
@@ -536,15 +575,11 @@ class _VenuePageState extends State<VenuePage> {
         leading: Container(
           margin: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: const Color.fromARGB(129, 119, 125, 99),
+            color: const Color.fromARGB(145, 255, 255, 255),
             shape: BoxShape.circle,
           ),
           child: IconButton(
-            icon: const Icon(
-              Icons.arrow_back,
-              color: Color.fromARGB(255, 255, 255, 255),
-              size: 20,
-            ),
+            icon: const Icon(Icons.arrow_back, color: kGreen, size: 20),
             onPressed: () => Navigator.pop(context),
           ),
         ),
@@ -1508,9 +1543,9 @@ class _FloorMapSectionState extends State<_FloorMapSection> {
                     ),
                     child: Column(
                       children: [
-                        _buildFloorButton('1', 'assets/maps/F2_map.glb'),
+                        _buildFloorButton('F1', 'assets/maps/F2_map.glb'),
                         const SizedBox(height: 8),
-                        _buildFloorButton('G', 'assets/maps/F1_map.glb'),
+                        _buildFloorButton('GF', 'assets/maps/F1_map.glb'),
                       ],
                     ),
                   ),

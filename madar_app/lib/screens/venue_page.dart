@@ -77,6 +77,8 @@ class _VenuePageState extends State<VenuePage> {
       );
   static final Map<String, String> _urlCache = {};
   static final Map<String, Map<String, dynamic>> _hoursCache = {};
+  // NEW: Cache for venue contacts (website/phone)
+  static final Map<String, Map<String, String>> _contactsCache = {};
 
   late final VenueCacheService _cache = VenueCacheService(
     FirebaseFirestore.instance,
@@ -86,9 +88,31 @@ class _VenuePageState extends State<VenuePage> {
   void initState() {
     super.initState();
     _address = widget.dbAddress;
-    _loadHours();
+
+    // ✅ Check if we have cached data for this venue
+    final cachedHours = _hoursCache[widget.placeId];
+    final cachedContacts = _contactsCache[widget.placeId];
+
+    if (cachedHours != null) {
+      // We have cached hours data - use it immediately
+      _applyHours(cachedHours);
+      setState(() => _loading = false);
+    } else {
+      // No cache - load from API/DB
+      _loadHours();
+    }
+
+    if (cachedContacts != null) {
+      // We have cached contacts - use immediately
+      _venueWebsite = cachedContacts['website'];
+      _venuePhone = cachedContacts['phone'];
+    } else {
+      // No cache - load from DB
+      _loadVenueContacts();
+    }
+
+    // Always prefetch images (they have their own cache)
     _prefetchAllVenueImages();
-    _loadVenueContacts(); // NEW
   }
 
   // ✅ API-first opening hours (rating stays from DB)
@@ -199,6 +223,13 @@ class _VenuePageState extends State<VenuePage> {
       if (data != null) {
         final site = (data['venueWebsite'] ?? '').toString().trim();
         final phone = (data['venuePhone'] ?? '').toString().trim();
+
+        // ✅ Cache the contacts data
+        _contactsCache[widget.placeId] = {
+          'website': site.isNotEmpty ? site : '',
+          'phone': phone.isNotEmpty ? phone : '',
+        };
+
         setState(() {
           _venueWebsite = site.isNotEmpty ? site : null;
           _venuePhone = phone.isNotEmpty ? phone : null;
@@ -585,7 +616,12 @@ class _VenuePageState extends State<VenuePage> {
         ),
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? Center(
+              child: CircularProgressIndicator(
+                color: kPrimaryGreen,
+                backgroundColor: kPrimaryGreen.withOpacity(0.2),
+              ),
+            )
           : _error != null
           ? Center(child: Text(_error!))
           : ListView(
@@ -820,8 +856,13 @@ class _VenuePageState extends State<VenuePage> {
                             builder: (context, snapshot) {
                               if (snapshot.connectionState ==
                                   ConnectionState.waiting) {
-                                return const Center(
-                                  child: CircularProgressIndicator(),
+                                return Center(
+                                  child: CircularProgressIndicator(
+                                    color: kPrimaryGreen,
+                                    backgroundColor: kPrimaryGreen.withOpacity(
+                                      0.2,
+                                    ),
+                                  ),
                                 );
                               }
                               if (snapshot.hasError) {
@@ -940,7 +981,21 @@ class _VenuePageState extends State<VenuePage> {
             height: _headerHeight,
             child: Container(
               color: Colors.grey.shade200,
-              child: const Center(child: CircularProgressIndicator()),
+              child: Center(
+                child: FutureBuilder(
+                  future: Future.delayed(const Duration(milliseconds: 500)),
+                  builder: (context, delaySnap) {
+                    if (delaySnap.connectionState == ConnectionState.waiting) {
+                      return const SizedBox.shrink();
+                    }
+                    return CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: kPrimaryGreen,
+                      backgroundColor: kPrimaryGreen.withOpacity(0.2),
+                    );
+                  },
+                ),
+              ),
             ),
           );
         }
@@ -1073,8 +1128,21 @@ class _VenuePageState extends State<VenuePage> {
             if (snap.connectionState == ConnectionState.waiting) {
               return Container(
                 color: Colors.grey.shade200,
-                child: const Center(
-                  child: CircularProgressIndicator(strokeWidth: 2),
+                child: Center(
+                  child: FutureBuilder(
+                    future: Future.delayed(const Duration(milliseconds: 500)),
+                    builder: (context, delaySnap) {
+                      if (delaySnap.connectionState ==
+                          ConnectionState.waiting) {
+                        return const SizedBox.shrink();
+                      }
+                      return CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: kPrimaryGreen,
+                        backgroundColor: kPrimaryGreen.withOpacity(0.2),
+                      );
+                    },
+                  ),
                 ),
               );
             }
@@ -1362,8 +1430,23 @@ class _VenuePageState extends State<VenuePage> {
                       height: 130,
                       width: 130,
                       color: Colors.grey.shade200,
-                      child: const Center(
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                      child: Center(
+                        child: FutureBuilder(
+                          future: Future.delayed(
+                            const Duration(milliseconds: 500),
+                          ),
+                          builder: (context, delaySnap) {
+                            if (delaySnap.connectionState ==
+                                ConnectionState.waiting) {
+                              return const SizedBox.shrink();
+                            }
+                            return CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: kPrimaryGreen,
+                              backgroundColor: kPrimaryGreen.withOpacity(0.2),
+                            );
+                          },
+                        ),
                       ),
                     );
                   }
@@ -1642,7 +1725,22 @@ class _ImageOverlayState extends State<_ImageOverlay> {
                   future: widget.getUrlFor(widget.imagePaths[index]),
                   builder: (context, snap) {
                     if (snap.connectionState == ConnectionState.waiting) {
-                      return const CircularProgressIndicator();
+                      return FutureBuilder(
+                        future: Future.delayed(
+                          const Duration(milliseconds: 500),
+                        ),
+                        builder: (context, delaySnap) {
+                          if (delaySnap.connectionState ==
+                              ConnectionState.waiting) {
+                            return const SizedBox.shrink();
+                          }
+                          return CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                            backgroundColor: Colors.white.withOpacity(0.3),
+                          );
+                        },
+                      );
                     }
                     if (snap.hasError ||
                         snap.data == null ||

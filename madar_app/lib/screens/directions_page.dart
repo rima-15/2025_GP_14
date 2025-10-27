@@ -16,7 +16,8 @@ class _DirectionsPageState extends State<DirectionsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F8F3),
+      // ⬇️ Background set to white
+      backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
@@ -24,6 +25,16 @@ class _DirectionsPageState extends State<DirectionsPage> {
         leading: IconButton(
           icon: const Icon(Icons.close, color: kGreen),
           onPressed: () => Navigator.pop(context),
+        ),
+        // ⬇️ Light divider under the header
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(1),
+          child: SizedBox(
+            height: 1,
+            child: DecoratedBox(
+              decoration: BoxDecoration(color: Colors.black12),
+            ),
+          ),
         ),
       ),
       body: SafeArea(
@@ -159,7 +170,7 @@ class _DirectionsPageState extends State<DirectionsPage> {
 
             Row(
               children: [
-                // ⬇️ Replaced Image.asset(...) with a rounded square shop icon (same size/spacing)
+                // Shop placeholder icon
                 Container(
                   width: 54,
                   height: 54,

@@ -165,9 +165,12 @@ class _SignUpScreenState extends State<SignUpScreen> {
   String? _validatePassword(String? v) {
     if (v == null || v.isEmpty) return 'Enter password';
     if (v.length < 8) return 'At least 8 characters';
-    if (!RegExp(r'[a-z]').hasMatch(v)) return 'Must contain lowercase';
-    if (!RegExp(r'[A-Z]').hasMatch(v)) return 'Must contain uppercase';
+    if (!RegExp(r'[a-z]').hasMatch(v)) return 'Must contain lowercase letter';
+    if (!RegExp(r'[A-Z]').hasMatch(v)) return 'Must contain uppercase letter';
     if (!RegExp(r'[0-9]').hasMatch(v)) return 'Must contain a number';
+    if (!RegExp(r'[!@#\$%^&*(),.?":{}|<>]').hasMatch(v)) {
+      return 'Must contain a special character';
+    }
     return null;
   }
 

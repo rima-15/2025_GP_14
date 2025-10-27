@@ -135,6 +135,8 @@ class _SignInScreenState extends State<SignInScreen> {
     }
   }
 
+  bool _obscurePassword = true; //eye icon
+
   @override
   Widget build(BuildContext context) {
     return CustomScaffold(
@@ -187,21 +189,40 @@ class _SignInScreenState extends State<SignInScreen> {
                       const SizedBox(height: 25),
 
                       // Password
+                      // Password
                       TextFormField(
                         controller: _passCtrl,
-                        obscureText: true,
+                        obscureText: _obscurePassword,
                         obscuringCharacter: '*',
                         validator: (v) {
                           if (v == null || v.isEmpty) {
                             return 'Please enter password';
                           }
-                          if (v.length < 6) {
-                            return 'Password must be at least 6 characters';
+                          if (v.length < 8) {
+                            return 'Password must be at least 8 characters';
                           }
                           return null;
                         },
-                        decoration: _input('Password', 'Enter Password'),
+                        decoration: InputDecoration(
+                          labelText: 'Password',
+                          hintText: 'Enter Password',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _obscurePassword
+                                  ? Icons.visibility_off
+                                  : Icons.visibility,
+                              color: Colors.grey.shade600,
+                            ),
+                            onPressed: () => setState(() {
+                              _obscurePassword = !_obscurePassword;
+                            }),
+                          ),
+                        ),
                       ),
+
                       const SizedBox(height: 25),
 
                       // Forgot password

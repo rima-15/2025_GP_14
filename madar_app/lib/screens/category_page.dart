@@ -182,7 +182,12 @@ class _CategoryPageState extends State<CategoryPage> {
                   .snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
+                  return Center(
+                    child: CircularProgressIndicator(
+                      color: kGreen,
+                      backgroundColor: kGreen.withOpacity(0.2),
+                    ),
+                  );
                 }
                 if (snapshot.hasError) {
                   return const Center(
@@ -311,8 +316,21 @@ class _CategoryPageState extends State<CategoryPage> {
                             height: double.infinity,
                             color: Colors.grey[200],
                             alignment: Alignment.center,
-                            child: const CircularProgressIndicator(
-                              strokeWidth: 2,
+                            child: FutureBuilder(
+                              future: Future.delayed(
+                                const Duration(milliseconds: 500),
+                              ),
+                              builder: (context, delaySnap) {
+                                if (delaySnap.connectionState ==
+                                    ConnectionState.waiting) {
+                                  return const SizedBox.shrink();
+                                }
+                                return CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: kGreen,
+                                  backgroundColor: kGreen.withOpacity(0.2),
+                                );
+                              },
                             ),
                           );
                         }

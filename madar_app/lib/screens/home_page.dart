@@ -264,15 +264,25 @@ class HomePageState extends State<HomePage> {
           // ✅ Search bar
           _buildSearchBar(),
           const SizedBox(height: 12),
-          // ✅ Filter pills
+
+          // ✅ Filter tabs - NEW rounded design
           _buildFilterTabs(),
+
           const SizedBox(height: 16),
-          // ✅ Venue cards
+
+          // ✅ Main content
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator())
+                ? Center(
+                    child: CircularProgressIndicator(
+                      color: kPrimaryGreen,
+                      backgroundColor: kPrimaryGreen.withOpacity(0.2),
+                    ),
+                  )
                 : _error != null
                 ? Center(child: Text('Error: $_error'))
+                : _venues.isEmpty
+                ? const Center(child: Text('No venues'))
                 : _buildVenueList(),
           ),
         ],
@@ -280,87 +290,92 @@ class HomePageState extends State<HomePage> {
     );
   }
 
-  // ✅ Search bar
-  Widget _buildSearchBar() => Container(
-    margin: const EdgeInsets.symmetric(horizontal: 16),
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: Colors.grey.shade300, width: 1),
-    ),
-    child: Row(
-      children: [
-        Icon(Icons.search, color: Colors.grey.shade600, size: 22),
-        const SizedBox(width: 8),
-        Expanded(
-          child: TextField(
-            onChanged: (q) {
-              _query = q;
-              _applyLocalFilterAndSort();
-            },
-            decoration: const InputDecoration(
-              hintText: 'Search for a venue',
-              hintStyle: TextStyle(color: Color(0xFF9E9E9E)),
-              border: InputBorder.none,
-              enabledBorder: InputBorder.none,
-              focusedBorder: InputBorder.none,
-              isDense: true,
-              contentPadding: EdgeInsets.zero,
-            ),
-            style: const TextStyle(fontSize: 15),
-          ),
-        ),
-      ],
-    ),
-  );
-
-  // ✅ Filter pills
-  Widget _buildFilterTabs() => SizedBox(
-    height: 40,
-    child: ListView.builder(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      itemCount: filters.length,
-      itemBuilder: (context, index) {
-        final isSelected = selectedFilterIndex == index;
-        return GestureDetector(
-          onTap: () async {
-            setState(() => selectedFilterIndex = index);
-            await _ensureTabLoaded();
-            _applyLocalFilterAndSort();
-          },
-          child: Container(
-            margin: const EdgeInsets.only(right: 10),
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-            decoration: BoxDecoration(
-              color: isSelected ? kPrimaryGreen : Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: isSelected ? kPrimaryGreen : Colors.grey.shade400,
-                width: 1,
+  // ✅ NEW search bar - identical to home page
+  Widget _buildSearchBar() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey.shade300, width: 1),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.search, color: Colors.grey.shade600, size: 22),
+          const SizedBox(width: 8),
+          Expanded(
+            child: TextField(
+              onChanged: (v) => setState(() {
+                _query = v;
+                _applyLocalFilterAndSort();
+              }),
+              decoration: const InputDecoration(
+                hintText: 'Search for a place',
+                hintStyle: TextStyle(color: Color(0xFF9E9E9E)),
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.zero,
               ),
+              style: const TextStyle(fontSize: 15),
             ),
-            child: Center(
-              child: Text(
-                filters[index],
-                style: TextStyle(
-                  color: isSelected ? Colors.white : Colors.grey.shade600,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ NEW filter tabs with rounded design
+  Widget _buildFilterTabs() {
+    return Container(
+      height: 40,
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        itemCount: filters.length,
+        itemBuilder: (context, idx) {
+          final isSelected = idx == selectedFilterIndex;
+          return GestureDetector(
+            onTap: () {
+              setState(() {
+                selectedFilterIndex = idx;
+                _loading = true;
+              });
+              _ensureTabLoaded().then((_) {
+                _applyLocalFilterAndSort();
+              });
+            },
+            child: Container(
+              margin: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              decoration: BoxDecoration(
+                color: isSelected ? kPrimaryGreen : Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: isSelected ? kPrimaryGreen : Colors.grey.shade300,
+                  width: 1,
+                ),
+              ),
+              child: Center(
+                child: Text(
+                  filters[idx],
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: isSelected ? Colors.white : Colors.black87,
+                  ),
                 ),
               ),
             ),
-          ),
-        );
-      },
-    ),
-  );
+          );
+        },
+      ),
+    );
+  }
 
   Widget _buildVenueList() {
-    if (_venues.isEmpty) {
-      return const Center(child: Text('No venues found'));
-    }
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       itemCount: _venues.length,
@@ -488,8 +503,23 @@ class HomePageState extends State<HomePage> {
                   if (snap.connectionState == ConnectionState.waiting) {
                     return Container(
                       color: Colors.grey.shade200,
-                      child: const Center(
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                      child: Center(
+                        child: FutureBuilder(
+                          future: Future.delayed(
+                            const Duration(milliseconds: 500),
+                          ),
+                          builder: (context, delaySnap) {
+                            if (delaySnap.connectionState ==
+                                ConnectionState.waiting) {
+                              return const SizedBox.shrink();
+                            }
+                            return CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: kPrimaryGreen,
+                              backgroundColor: kPrimaryGreen.withOpacity(0.2),
+                            );
+                          },
+                        ),
                       ),
                     );
                   }

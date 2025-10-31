@@ -590,9 +590,9 @@ class _VenuePageState extends State<VenuePage> {
         widget.venueType?.toLowerCase() == 'mall';
     final bool isSolitaire = widget.name.toLowerCase().contains('solitaire');
 
-    // ✅ إذا كان مول غير سوليتير → نستخدم ID سوليتير فعلياً
+    //solitaire or others
     final String effectiveVenueId = (isMall && !isSolitaire)
-        ? 'ChIJcYTQDwDjLj4RZEiboV6gZzM' // 🔗 ID سوليتير
+        ? 'ChIJcYTQDwDjLj4RZEiboV6gZzM' // 🔗 ID Solitaire
         : widget.placeId;
 
     return Scaffold(
@@ -936,7 +936,7 @@ class _VenuePageState extends State<VenuePage> {
                                       data['categoryImage'] ??
                                       'images/default.jpg';
 
-                                  // ✅ نمرر نفس الـ effectiveVenueId عشان CategoryPage يعرف أنه يعرض سوليتير
+                                  //
                                   return _categoryCard(
                                     context,
                                     name,

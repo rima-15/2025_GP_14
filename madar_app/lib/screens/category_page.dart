@@ -32,7 +32,7 @@ class _CategoryPageState extends State<CategoryPage> {
   late String _apiKey;
   String _query = '';
 
-  // ✅ الدالة الصحيحة لجلب رابط الصورة من Firebase Storage
+  // Firebase Storage
   Future<String?> _getDownloadUrl(String path) async {
     try {
       final ref = storage.FirebaseStorage.instanceFor(
@@ -64,7 +64,7 @@ class _CategoryPageState extends State<CategoryPage> {
     Uri uri;
 
     if (isSolitaire) {
-      // ✅ نقرأ المركز من ملف solitaire.json
+      //solitaire.json
       try {
         final jsonStr = await rootBundle.loadString(
           'assets/venues/solitaire.json',
@@ -79,7 +79,7 @@ class _CategoryPageState extends State<CategoryPage> {
           {
             'location': '$lat,$lng',
             'radius': '150',
-            'keyword': docId, // نبحث بالـ Document ID
+            'keyword': docId, //  Document ID
             'key': _apiKey,
           },
         );
@@ -88,7 +88,7 @@ class _CategoryPageState extends State<CategoryPage> {
         return null;
       }
     } else {
-      // ✅ باقي الفنيوز نجيب الـ lat/lng من Firestore
+      // Firestore
       final venueSnap = await FirebaseFirestore.instance
           .collection('venues')
           .doc(widget.venueId)
@@ -112,7 +112,7 @@ class _CategoryPageState extends State<CategoryPage> {
       );
     }
 
-    // ✅ الطلب من Google API
+    // Google API
     final r = await http.get(uri);
     if (r.statusCode != 200) return null;
 
@@ -166,7 +166,7 @@ class _CategoryPageState extends State<CategoryPage> {
 
           const SizedBox(height: 12),
 
-          // 🔹 عرض القائمة على شكل Grid
+          // Grid
           Expanded(
             child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: FirebaseFirestore.instance
@@ -293,7 +293,7 @@ class _CategoryPageState extends State<CategoryPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 🖼 صورة المكان - Square aspect ratio
+            // Square aspect ratio
             Expanded(
               flex: 5,
               child: img.isEmpty
@@ -358,7 +358,7 @@ class _CategoryPageState extends State<CategoryPage> {
                     ),
             ),
 
-            // 📄 محتوى الكارد
+            //
             Expanded(
               flex: 4,
               child: Padding(
@@ -418,7 +418,7 @@ class _CategoryPageState extends State<CategoryPage> {
 
                     const SizedBox(height: 6),
 
-                    // ⭐ التقييم - Green star + number
+                    // - Green star + number
                     FutureBuilder<double?>(
                       future: _ratingCache[originalId] != null
                           ? Future.value(_ratingCache[originalId])

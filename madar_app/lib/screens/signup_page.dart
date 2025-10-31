@@ -16,7 +16,6 @@ class SignUpScreen extends StatefulWidget {
 
 class _SignUpScreenState extends State<SignUpScreen> {
   final _formSignupKey = GlobalKey<FormState>();
-  bool agreePersonalData = true;
 
   final _firstNameCtrl = TextEditingController();
   final _lastNameCtrl = TextEditingController();
@@ -28,7 +27,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
   final _lastNameFocus = FocusNode();
   final _emailFocus = FocusNode();
   final _phoneFocus = FocusNode();
-  final _passwordFocus = FocusNode();
+  late FocusNode _passwordFocus;
 
   bool _loading = false;
 
@@ -48,6 +47,40 @@ class _SignUpScreenState extends State<SignUpScreen> {
   String? _passwordError;
   bool _obscurePassword = true;
 
+  // Password requirements
+  bool _showPasswordRequirements = false;
+  bool _hasMinLength = false;
+  bool _hasUppercase = false;
+  bool _hasLowercase = false;
+  bool _hasNumber = false;
+  bool _hasSpecialChar = false;
+
+  // Name requirements
+  bool _showFirstNameRequirements = false;
+  bool _showLastNameRequirements = false;
+  bool _firstNameHasMinLength = false;
+  bool _firstNameStartsWithLetter = false;
+  bool _lastNameHasMinLength = false;
+  bool _lastNameStartsWithLetter = false;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _passwordFocus = FocusNode();
+    _passwordFocus.addListener(() {
+      setState(() => _showPasswordRequirements = _passwordFocus.hasFocus);
+    });
+
+    _firstNameFocus.addListener(() {
+      setState(() => _showFirstNameRequirements = _firstNameFocus.hasFocus);
+    });
+
+    _lastNameFocus.addListener(() {
+      setState(() => _showLastNameRequirements = _lastNameFocus.hasFocus);
+    });
+  }
+
   @override
   void dispose() {
     _firstNameCtrl.dispose();
@@ -64,6 +97,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
     super.dispose();
   }
 
+  /// Displays a snackbar with an error message
   void _showErrorMessage(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -84,12 +118,11 @@ class _SignUpScreenState extends State<SignUpScreen> {
     );
   }
 
-  // ✅ Sequential Validation Helper (includes password now)
+  /// Validates all previous fields before allowing the next step
   bool _validatePreviousFields(int step) {
     bool valid = true;
 
     setState(() {
-      // First Name
       if (_firstNameCtrl.text.isEmpty ||
           !_isFirstNameValid ||
           !RegExp(
@@ -100,7 +133,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
         valid = false;
       }
 
-      // Last Name
       if (step > 1 &&
           (_lastNameCtrl.text.isEmpty ||
               !_isLastNameValid ||
@@ -112,7 +144,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
         valid = false;
       }
 
-      // Email
       if (step > 2 &&
           (_emailCtrl.text.isEmpty ||
               !_isEmailValid ||
@@ -124,7 +155,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
         valid = false;
       }
 
-      // Phone
       if (step > 3 &&
           (_phoneCtrl.text.isEmpty ||
               !_isPhoneValid ||
@@ -134,7 +164,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
         valid = false;
       }
 
-      // Password
       if (step > 4 &&
           (_passCtrl.text.isEmpty ||
               !_isPasswordValid ||
@@ -162,6 +191,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
     return valid;
   }
 
+  /// Validates password strength
   String? _validatePassword(String? v) {
     if (v == null || v.isEmpty) return 'Enter password';
     if (v.length < 8) return 'At least 8 characters';
@@ -174,10 +204,10 @@ class _SignUpScreenState extends State<SignUpScreen> {
     return null;
   }
 
+  /// Handles sign-up process using Firebase Authentication and Firestore
   Future<void> _signUp() async {
     setState(() => _loading = true);
 
-    // ✅ Prevent Firebase until all fields valid
     if (_firstNameCtrl.text.isEmpty ||
         _lastNameCtrl.text.isEmpty ||
         _emailCtrl.text.isEmpty ||
@@ -228,14 +258,13 @@ class _SignUpScreenState extends State<SignUpScreen> {
       final user = cred.user!;
       await user.sendEmailVerification();
 
-      // ✅ خزّن بيانات الفورم مؤقتًا إلى SharedPreferences
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('firstName', _firstNameCtrl.text.trim());
       await prefs.setString('lastName', _lastNameCtrl.text.trim());
       await prefs.setString('email', email);
       await prefs.setString('phone', fullPhone);
 
-      await FirebaseAuth.instance.signOut();
+      //await FirebaseAuth.instance.signOut();
 
       if (mounted) {
         Navigator.pushReplacement(
@@ -250,6 +279,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
     }
   }
 
+  /// Unified input decoration for all fields
   InputDecoration _decorateField({
     required String label,
     required String hint,
@@ -258,27 +288,66 @@ class _SignUpScreenState extends State<SignUpScreen> {
     Widget? suffix,
     String? prefix,
   }) {
+    const Color mainGreen = Color(0xFF787E65);
+    final Color errorColor = Colors.redAccent.shade700;
+    const Color normalColor = Colors.grey;
+
+    final OutlineInputBorder normalBorder = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: const BorderSide(color: normalColor),
+    );
+
+    final OutlineInputBorder errorBorder = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: BorderSide(color: errorColor, width: 1.8),
+    );
+
+    final OutlineInputBorder focusedBorder = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: const BorderSide(color: mainGreen, width: 1.8),
+    );
+
     return InputDecoration(
       labelText: label,
       hintText: hint,
       prefixText: prefix,
       suffixIcon: suffix,
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
-        borderSide: BorderSide(
-          color: valid ? Colors.grey : Colors.redAccent.shade700,
-        ),
+      border: normalBorder,
+      enabledBorder: valid ? normalBorder : errorBorder,
+      focusedBorder: valid ? focusedBorder : errorBorder,
+      errorBorder: errorBorder,
+      focusedErrorBorder: errorBorder,
+      errorText: label == 'Password' ? null : error,
+      errorStyle: TextStyle(
+        color: errorColor,
+        fontSize: label == 'Password' ? 0 : 13,
       ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
-        borderSide: BorderSide(
-          color: valid ? const Color(0xFF787E65) : Colors.redAccent.shade700,
-          width: 1.8,
-        ),
+      floatingLabelStyle: TextStyle(
+        color: valid ? mainGreen : errorColor,
+        fontWeight: FontWeight.w600,
       ),
-      errorText: error,
-      errorStyle: TextStyle(color: Colors.redAccent.shade700, fontSize: 13),
+    );
+  }
+
+  /// Builds requirement list items (used for names and password)
+  Widget _buildRequirementItem(String text, bool met) {
+    return Row(
+      children: [
+        Icon(
+          met ? Icons.check_circle : Icons.circle_outlined,
+          color: met ? const Color(0xFF787E65) : Colors.grey,
+          size: 18,
+        ),
+        const SizedBox(width: 8),
+        Text(
+          text,
+          style: TextStyle(
+            color: met ? const Color(0xFF787E65) : Colors.grey,
+            fontSize: 13,
+            fontWeight: met ? FontWeight.w600 : FontWeight.w400,
+          ),
+        ),
+      ],
     );
   }
 
@@ -315,21 +384,26 @@ class _SignUpScreenState extends State<SignUpScreen> {
                       ),
                       const SizedBox(height: 40),
 
-                      // 🟢 First Name
+                      // First Name Field
                       TextFormField(
                         controller: _firstNameCtrl,
                         focusNode: _firstNameFocus,
                         autovalidateMode: AutovalidateMode.onUserInteraction,
                         onChanged: (value) {
                           setState(() {
+                            _firstNameHasMinLength = value.length >= 2;
+                            _firstNameStartsWithLetter = RegExp(
+                              r'^[A-Za-z]',
+                            ).hasMatch(value);
+
                             if (value.isEmpty) {
                               _firstNameError = 'Enter First Name';
                               _isFirstNameValid = false;
                             } else if (!RegExp(r'^[A-Za-z]').hasMatch(value)) {
-                              _firstNameError = 'Must start with a letter';
+                              _firstNameError = null;
                               _isFirstNameValid = false;
                             } else if (value.length < 2) {
-                              _firstNameError = 'At least 2 characters';
+                              _firstNameError = null;
                               _isFirstNameValid = false;
                             } else if (value.length > 20) {
                               _firstNameError =
@@ -362,9 +436,20 @@ class _SignUpScreenState extends State<SignUpScreen> {
                               : null,
                         ),
                       ),
+                      if (_showFirstNameRequirements) ...[
+                        const SizedBox(height: 10),
+                        _buildRequirementItem(
+                          'Starts with a letter',
+                          _firstNameStartsWithLetter,
+                        ),
+                        _buildRequirementItem(
+                          'Has at least 2 characters',
+                          _firstNameHasMinLength,
+                        ),
+                      ],
                       const SizedBox(height: 25),
 
-                      // 🟢 Last Name
+                      // Last Name Field
                       TextFormField(
                         controller: _lastNameCtrl,
                         focusNode: _lastNameFocus,
@@ -372,14 +457,19 @@ class _SignUpScreenState extends State<SignUpScreen> {
                         autovalidateMode: AutovalidateMode.onUserInteraction,
                         onChanged: (value) {
                           setState(() {
+                            _lastNameHasMinLength = value.length >= 2;
+                            _lastNameStartsWithLetter = RegExp(
+                              r'^[A-Za-z]',
+                            ).hasMatch(value);
+
                             if (value.isEmpty) {
                               _lastNameError = 'Enter Last Name';
                               _isLastNameValid = false;
                             } else if (!RegExp(r'^[A-Za-z]').hasMatch(value)) {
-                              _lastNameError = 'Must start with a letter';
+                              _lastNameError = null;
                               _isLastNameValid = false;
                             } else if (value.length < 2) {
-                              _lastNameError = 'At least 2 characters';
+                              _lastNameError = null;
                               _isLastNameValid = false;
                             } else if (value.length > 20) {
                               _lastNameError =
@@ -411,9 +501,20 @@ class _SignUpScreenState extends State<SignUpScreen> {
                               : null,
                         ),
                       ),
+                      if (_showLastNameRequirements) ...[
+                        const SizedBox(height: 10),
+                        _buildRequirementItem(
+                          'Starts with a letter',
+                          _lastNameStartsWithLetter,
+                        ),
+                        _buildRequirementItem(
+                          'Has at least 2 characters',
+                          _lastNameHasMinLength,
+                        ),
+                      ],
                       const SizedBox(height: 25),
 
-                      // 🟢 Email
+                      // Email Field
                       TextFormField(
                         controller: _emailCtrl,
                         focusNode: _emailFocus,
@@ -449,7 +550,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                       ),
                       const SizedBox(height: 25),
 
-                      // 🟢 Phone
+                      // Phone Field
                       TextFormField(
                         controller: _phoneCtrl,
                         focusNode: _phoneFocus,
@@ -488,7 +589,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                       ),
                       const SizedBox(height: 25),
 
-                      // 🟢 Password
+                      // Password Field
                       TextFormField(
                         controller: _passCtrl,
                         focusNode: _passwordFocus,
@@ -496,6 +597,14 @@ class _SignUpScreenState extends State<SignUpScreen> {
                         obscureText: _obscurePassword,
                         autovalidateMode: AutovalidateMode.onUserInteraction,
                         onChanged: (v) => setState(() {
+                          _hasMinLength = v.length >= 8;
+                          _hasUppercase = RegExp(r'[A-Z]').hasMatch(v);
+                          _hasLowercase = RegExp(r'[a-z]').hasMatch(v);
+                          _hasNumber = RegExp(r'[0-9]').hasMatch(v);
+                          _hasSpecialChar = RegExp(
+                            r'[!@#\$%^&*(),.?":{}|<>]',
+                          ).hasMatch(v);
+
                           final err = _validatePassword(v);
                           _passwordError = err;
                           _isPasswordValid = err == null;
@@ -528,8 +637,29 @@ class _SignUpScreenState extends State<SignUpScreen> {
                           ),
                         ),
                       ),
+                      if (_showPasswordRequirements) ...[
+                        const SizedBox(height: 10),
+                        _buildRequirementItem(
+                          'Has at least 8 characters',
+                          _hasMinLength,
+                        ),
+                        _buildRequirementItem(
+                          'Includes an uppercase letter',
+                          _hasUppercase,
+                        ),
+                        _buildRequirementItem(
+                          'Includes a lowercase letter',
+                          _hasLowercase,
+                        ),
+                        _buildRequirementItem('Includes a number', _hasNumber),
+                        _buildRequirementItem(
+                          'Includes a special character',
+                          _hasSpecialChar,
+                        ),
+                      ],
                       const SizedBox(height: 25),
 
+                      // Sign Up Button
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton(
@@ -547,6 +677,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                       ),
                       const SizedBox(height: 25),
 
+                      // Redirect to Sign In
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [

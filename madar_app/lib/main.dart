@@ -8,13 +8,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:madar_app/api/seed_venues.dart'; // to save venue info in database
 import 'package:flutter/foundation.dart'
-    show
-        kDebugMode; // for debug-only logic
+    show kDebugMode; // for debug-only logic
 
 // NEW: contacts backfiller (adds venuePhone + venueWebsite via Places Details)
 import 'package:madar_app/api/seed_venue_contacts.dart';
-
-//import 'categorytoarray.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,9 +21,6 @@ Future<void> main() async {
 
   // 2) Initialize Firebase
   await Firebase.initializeApp();
-  //await migrateCategories();
-
-  //print('✅ Migration finished');
 
   // 3) DEV-ONLY AUTO LOGIN (anonymous)
   /* final enableDevAutoLogin =
@@ -44,83 +38,50 @@ Future<void> main() async {
   }*/
 
   // 4) Run the venue seeder (debug only, guarded by .env flag)
-  final devSeedRaw = dotenv.maybeGet(
-    'DEV_SEED',
-  );
-  debugPrint(
-    'DEV_SEED raw: "$devSeedRaw"  kDebugMode=$kDebugMode',
-  );
-  final doSeed =
-      kDebugMode &&
-      (devSeedRaw?.toLowerCase() ==
-          'true');
-  debugPrint(
-    'Will run seeder? $doSeed',
-  );
+  final devSeedRaw = dotenv.maybeGet('DEV_SEED');
+  debugPrint('DEV_SEED raw: "$devSeedRaw"  kDebugMode=$kDebugMode');
+  final doSeed = kDebugMode && (devSeedRaw?.toLowerCase() == 'true');
+  debugPrint('Will run seeder? $doSeed');
 
   if (doSeed) {
-    final key =
-        dotenv.env['GOOGLE_API_KEY'] ??
-        '';
+    final key = dotenv.env['GOOGLE_API_KEY'] ?? '';
     try {
-      debugPrint(
-        'Running VenueSeeder...',
-      );
+      debugPrint('Running VenueSeeder...');
       await VenueSeeder(key).run();
-      debugPrint(
-        'VenueSeeder finished.',
-      );
+      debugPrint('VenueSeeder finished.');
     } catch (e, st) {
-      debugPrint(
-        'VenueSeeder error: $e\n$st',
-      );
+      debugPrint('VenueSeeder error: $e\n$st');
     }
   }
 
   // NEW: Backfill phone + website ONLY (safe merge). Controlled by DEV_SEED_CONTACTS=true
-  final devSeedContactsRaw = dotenv
-      .maybeGet('DEV_SEED_CONTACTS');
+  final devSeedContactsRaw = dotenv.maybeGet('DEV_SEED_CONTACTS');
   debugPrint(
     'DEV_SEED_CONTACTS raw: "$devSeedContactsRaw"  kDebugMode=$kDebugMode',
   );
   final doSeedContacts =
-      kDebugMode &&
-      (devSeedContactsRaw
-              ?.toLowerCase() ==
-          'true');
+      kDebugMode && (devSeedContactsRaw?.toLowerCase() == 'true');
 
   if (doSeedContacts) {
-    final key =
-        dotenv.env['GOOGLE_API_KEY'] ??
-        '';
+    final key = dotenv.env['GOOGLE_API_KEY'] ?? '';
     try {
-      debugPrint(
-        'Running VenueContactSeeder (onlyIfMissing=true)…',
-      );
+      debugPrint('Running VenueContactSeeder (onlyIfMissing=true)…');
       // onlyIfMissing=true ensures we don’t overwrite existing values
       await VenueContactSeeder(
         key,
         onlyIfMissing: true,
         perCallDelayMs: 250,
       ).runOnceForCollection('venues');
-      debugPrint(
-        'VenueContactSeeder finished.',
-      );
+      debugPrint('VenueContactSeeder finished.');
     } catch (e, st) {
-      debugPrint(
-        'VenueContactSeeder error: $e\n$st',
-      );
+      debugPrint('VenueContactSeeder error: $e\n$st');
     }
   }
 
   // ✅ تحقق من حالة المستخدم و "Remember Me"
-  final prefs =
-      await SharedPreferences.getInstance();
-  final remember =
-      prefs.getBool('remember_me') ??
-      false;
-  final user =
-      FirebaseAuth.instance.currentUser;
+  final prefs = await SharedPreferences.getInstance();
+  final remember = prefs.getBool('remember_me') ?? false;
+  final user = FirebaseAuth.instance.currentUser;
 
   Widget startScreen;
   if (user != null) {
@@ -129,17 +90,12 @@ Future<void> main() async {
     startScreen = const WelcomeScreen();
   }
 
-  runApp(
-    MadarApp(startScreen: startScreen),
-  );
+  runApp(MadarApp(startScreen: startScreen));
 }
 
 class MadarApp extends StatelessWidget {
   final Widget startScreen;
-  const MadarApp({
-    super.key,
-    required this.startScreen,
-  });
+  const MadarApp({super.key, required this.startScreen});
 
   @override
   Widget build(BuildContext context) {

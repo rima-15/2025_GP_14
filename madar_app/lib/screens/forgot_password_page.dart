@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:madar_app/widgets/custom_scaffold.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:madar_app/widgets/app_widgets.dart';
 
 class ForgotPasswordScreen extends StatefulWidget {
   const ForgotPasswordScreen({super.key});
@@ -13,57 +14,12 @@ class ForgotPasswordScreen extends StatefulWidget {
 class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailCtrl = TextEditingController();
-  final Color green = const Color(0xFF787E65);
   bool _loading = false;
 
   @override
   void dispose() {
     _emailCtrl.dispose();
     super.dispose();
-  }
-
-  void _showErrorMessage(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          message,
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w600,
-            fontSize: 14,
-          ),
-        ),
-        backgroundColor: Colors.redAccent.shade700,
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        duration: const Duration(seconds: 4),
-        elevation: 6,
-      ),
-    );
-  }
-
-  void _showSuccessMessage(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          message,
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w600,
-            fontSize: 14,
-          ),
-        ),
-        backgroundColor: Colors.green.shade600,
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        duration: const Duration(seconds: 4),
-        elevation: 6,
-      ),
-    );
   }
 
   Future<void> _sendPasswordResetEmail() async {
@@ -79,7 +35,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
       final userQuery = await usersRef.where('email', isEqualTo: email).get();
 
       if (userQuery.docs.isEmpty) {
-        _showErrorMessage('No account found with this email');
+        SnackbarHelper.showError(context, 'No account found with this email');
         setState(() => _loading = false);
         return;
       }
@@ -87,7 +43,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
       await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
 
       if (mounted) {
-        _showSuccessMessage(
+        SnackbarHelper.showSuccess(
+          context,
           'Password reset link sent!\nPlease check your email: $email',
         );
 
@@ -110,9 +67,12 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         default:
           msg = 'Error occurred: ${e.message}';
       }
-      _showErrorMessage(msg);
+      SnackbarHelper.showError(context, msg);
     } catch (e) {
-      _showErrorMessage('Unexpected error occurred, please try again');
+      SnackbarHelper.showError(
+        context,
+        'Unexpected error occurred, please try again',
+      );
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -147,7 +107,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                         style: TextStyle(
                           fontSize: 28,
                           fontWeight: FontWeight.w900,
-                          color: green,
+                          color: AppColors.kGreen,
                         ),
                       ),
                       const SizedBox(height: 10),
@@ -156,21 +116,10 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                         style: TextStyle(color: Colors.grey[700], fontSize: 15),
                       ),
                       const SizedBox(height: 30),
-
-                      TextFormField(
+                      StyledTextField(
                         controller: _emailCtrl,
-                        decoration: InputDecoration(
-                          labelText: "Email",
-                          hintText: "Enter your email",
-                          prefixIcon: const Icon(Icons.email_outlined),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderSide: const BorderSide(color: Colors.black12),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                        ),
+                        label: 'Email',
+                        hint: 'Enter your email',
                         keyboardType: TextInputType.emailAddress,
                         validator: (v) {
                           if (v == null || v.trim().isEmpty) {
@@ -188,7 +137,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                         width: double.infinity,
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: green,
+                            backgroundColor: AppColors.kGreen,
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(vertical: 14),
                             shape: RoundedRectangleBorder(
@@ -222,7 +171,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                           child: Text(
                             'Back to Sign In',
                             style: TextStyle(
-                              color: green,
+                              color: AppColors.kGreen,
                               fontWeight: FontWeight.bold,
                             ),
                           ),

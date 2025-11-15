@@ -6,6 +6,7 @@ import 'package:madar_app/widgets/MainLayout.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:madar_app/widgets/app_widgets.dart';
 
 class SignInScreen extends StatefulWidget {
   const SignInScreen({super.key});
@@ -19,7 +20,6 @@ class _SignInScreenState extends State<SignInScreen> {
   final _emailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   bool _loading = false;
-  final Color green = const Color(0xFF787E65);
 
   @override
   void dispose() {
@@ -28,32 +28,9 @@ class _SignInScreenState extends State<SignInScreen> {
     super.dispose();
   }
 
-  // error message
-  void _showErrorMessage(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          message,
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w600,
-            fontSize: 14,
-          ),
-        ),
-        backgroundColor: Colors.redAccent.shade700,
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        duration: const Duration(seconds: 4),
-        elevation: 6,
-      ),
-    );
-  }
-
   Future<void> _signIn() async {
     if (!_formSignInKey.currentState!.validate()) {
-      _showErrorMessage('Please fill all fields correctly');
+      SnackbarHelper.showError(context, 'Please fill all fields correctly');
       return;
     }
 
@@ -74,7 +51,8 @@ class _SignInScreenState extends State<SignInScreen> {
         } catch (_) {}
         await FirebaseAuth.instance.signOut();
 
-        _showErrorMessage(
+        SnackbarHelper.showError(
+          context,
           'Email not verified! Please verify your email first.',
         );
         setState(() => _loading = false);
@@ -127,9 +105,9 @@ class _SignInScreenState extends State<SignInScreen> {
         default:
           msg = 'Login error: ${e.message}';
       }
-      _showErrorMessage(msg);
+      SnackbarHelper.showError(context, msg);
     } catch (e) {
-      _showErrorMessage('Unexpected error: $e');
+      SnackbarHelper.showError(context, 'Unexpected error: $e');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -166,14 +144,17 @@ class _SignInScreenState extends State<SignInScreen> {
                         style: TextStyle(
                           fontSize: 30,
                           fontWeight: FontWeight.w900,
-                          color: green,
+                          color: AppColors.kGreen,
                         ),
                       ),
                       const SizedBox(height: 40),
 
                       // Email
-                      TextFormField(
+                      StyledTextField(
                         controller: _emailCtrl,
+                        label: 'Email',
+                        hint: 'Enter Email',
+                        keyboardType: TextInputType.emailAddress,
                         validator: (v) {
                           if (v == null || v.isEmpty) {
                             return 'Please enter email';
@@ -183,16 +164,27 @@ class _SignInScreenState extends State<SignInScreen> {
                           }
                           return null;
                         },
-                        decoration: _input('Email', 'Enter Email'),
-                        keyboardType: TextInputType.emailAddress,
                       ),
                       const SizedBox(height: 25),
 
                       // Password
-                      TextFormField(
+                      StyledTextField(
                         controller: _passCtrl,
+                        label: 'Password',
+                        hint: 'Enter Password',
                         obscureText: _obscurePassword,
                         obscuringCharacter: '*',
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            _obscurePassword
+                                ? Icons.visibility_off
+                                : Icons.visibility,
+                            color: Colors.grey.shade600,
+                          ),
+                          onPressed: () => setState(() {
+                            _obscurePassword = !_obscurePassword;
+                          }),
+                        ),
                         validator: (v) {
                           if (v == null || v.isEmpty) {
                             return 'Please enter password';
@@ -202,24 +194,6 @@ class _SignInScreenState extends State<SignInScreen> {
                           }
                           return null;
                         },
-                        decoration: InputDecoration(
-                          labelText: 'Password',
-                          hintText: 'Enter Password',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                              _obscurePassword
-                                  ? Icons.visibility_off
-                                  : Icons.visibility,
-                              color: Colors.grey.shade600,
-                            ),
-                            onPressed: () => setState(() {
-                              _obscurePassword = !_obscurePassword;
-                            }),
-                          ),
-                        ),
                       ),
 
                       const SizedBox(height: 25),
@@ -240,7 +214,7 @@ class _SignInScreenState extends State<SignInScreen> {
                             'Forget password?',
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
-                              color: green,
+                              color: AppColors.kGreen,
                             ),
                           ),
                         ),
@@ -252,7 +226,7 @@ class _SignInScreenState extends State<SignInScreen> {
                         width: double.infinity,
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: green,
+                            backgroundColor: AppColors.kGreen,
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(vertical: 14),
                             shape: RoundedRectangleBorder(
@@ -296,7 +270,7 @@ class _SignInScreenState extends State<SignInScreen> {
                               'Sign up',
                               style: TextStyle(
                                 fontWeight: FontWeight.bold,
-                                color: green,
+                                color: AppColors.kGreen,
                               ),
                             ),
                           ),
@@ -309,22 +283,6 @@ class _SignInScreenState extends State<SignInScreen> {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  InputDecoration _input(String label, String hint) {
-    return InputDecoration(
-      label: Text(label),
-      hintText: hint,
-      hintStyle: const TextStyle(color: Colors.black26),
-      border: OutlineInputBorder(
-        borderSide: const BorderSide(color: Colors.black12),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderSide: const BorderSide(color: Colors.black12),
-        borderRadius: BorderRadius.circular(10),
       ),
     );
   }

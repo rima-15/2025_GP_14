@@ -8,8 +8,7 @@ import 'package:madar_app/screens/signin_page.dart';
 import 'package:madar_app/screens/profile_page.dart';
 import 'package:madar_app/screens/settings_page.dart';
 import 'package:madar_app/screens/help_page.dart';
-
-const kGreen = Color(0xFF787E65);
+import 'package:madar_app/widgets/app_widgets.dart';
 
 class MainLayout extends StatefulWidget {
   const MainLayout({super.key});
@@ -60,6 +59,17 @@ class _MainLayoutState extends State<MainLayout> {
   }
 
   Future<void> _logout(BuildContext context) async {
+    // Show confirmation dialog
+    final confirmed = await ConfirmationDialog.showPositiveConfirmation(
+      context,
+      title: 'Log out',
+      message: 'Are you sure you want to log out?',
+      confirmText: 'Log out',
+    );
+
+    if (!confirmed) return;
+
+    // Proceed with logout
     await FirebaseAuth.instance.signOut();
     if (context.mounted) {
       Navigator.pushAndRemoveUntil(
@@ -80,7 +90,6 @@ class _MainLayoutState extends State<MainLayout> {
       body: pages[_index],
       drawer: _buildDrawer(context),
       bottomNavigationBar: _buildModernBottomBar(),
-      // ⬇️ Changed: global background is pure white
       backgroundColor: Colors.white,
     );
   }
@@ -97,7 +106,7 @@ class _MainLayoutState extends State<MainLayout> {
 
       // Hamburger menu on the LEFT
       leading: IconButton(
-        icon: const Icon(Icons.menu, color: kGreen),
+        icon: const Icon(Icons.menu, color: AppColors.kGreen),
         onPressed: _openMenu,
         padding: const EdgeInsets.only(left: 16),
       ),
@@ -107,14 +116,14 @@ class _MainLayoutState extends State<MainLayout> {
           ? SizedBox(
               height: 50,
               child: Image.asset(
-                'images/MadarLogoEnglish.png',
+                'images/Madar2-resized4.png',
                 fit: BoxFit.contain,
               ),
             )
           : Text(
               titles[index],
               style: const TextStyle(
-                color: kGreen,
+                color: AppColors.kGreen,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -123,21 +132,21 @@ class _MainLayoutState extends State<MainLayout> {
       actions: index == 0
           ? [
               IconButton(
-                icon: const Icon(Icons.notifications_outlined, color: kGreen),
+                icon: const Icon(
+                  Icons.notifications_outlined,
+                  color: AppColors.kGreen,
+                ),
                 onPressed: () {},
                 padding: const EdgeInsets.only(right: 16),
               ),
             ]
           : null,
 
-      // ⬇️ NEW: light divider ONLY for Explore (1) and Track (2)
+      // Light divider ONLY for Explore (1) and Track (2)
       bottom: (index == 1 || index == 2)
           ? PreferredSize(
               preferredSize: const Size.fromHeight(1),
-              child: Container(
-                height: 1,
-                color: Colors.black12, // subtle divider
-              ),
+              child: Container(height: 1, color: Colors.black12),
             )
           : null,
     );
@@ -154,7 +163,7 @@ class _MainLayoutState extends State<MainLayout> {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.fromLTRB(24, 60, 24, 28),
-              decoration: const BoxDecoration(color: kGreen),
+              decoration: const BoxDecoration(color: AppColors.kGreen),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -218,7 +227,7 @@ class _MainLayoutState extends State<MainLayout> {
                       ),
                       _buildMenuItem(
                         icon: Icons.help_outline,
-                        title: 'Help',
+                        title: 'Help & Support',
                         onTap: () {
                           Navigator.pop(context);
                           Navigator.push(
@@ -257,11 +266,15 @@ class _MainLayoutState extends State<MainLayout> {
     bool isDestructive = false,
   }) {
     return ListTile(
-      leading: Icon(icon, color: isDestructive ? Colors.red : kGreen, size: 24),
+      leading: Icon(
+        icon,
+        color: isDestructive ? AppColors.kError : AppColors.kGreen,
+        size: 24,
+      ),
       title: Text(
         title,
         style: TextStyle(
-          color: isDestructive ? Colors.red : Colors.black87,
+          color: isDestructive ? AppColors.kError : Colors.black87,
           fontSize: 16,
           fontWeight: FontWeight.w500,
         ),
@@ -276,9 +289,9 @@ class _MainLayoutState extends State<MainLayout> {
     return SafeArea(
       top: false,
       child: Container(
-        height: 60, // clean slim height
+        height: 60,
         decoration: BoxDecoration(
-          color: Colors.white, // pure white
+          color: Colors.white,
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.08),
@@ -332,14 +345,14 @@ class _MainLayoutState extends State<MainLayout> {
           children: [
             Icon(
               icon,
-              color: isSelected ? kGreen : Colors.grey.shade500,
+              color: isSelected ? AppColors.kGreen : Colors.grey.shade500,
               size: 22,
             ),
             const SizedBox(height: 2),
             Text(
               label,
               style: TextStyle(
-                color: isSelected ? kGreen : Colors.grey.shade500,
+                color: isSelected ? AppColors.kGreen : Colors.grey.shade500,
                 fontSize: 11,
                 height: 1.0,
                 fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,

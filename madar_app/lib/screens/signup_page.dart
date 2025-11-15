@@ -6,6 +6,7 @@ import 'package:madar_app/widgets/custom_scaffold.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'check_email_page.dart';
+import 'package:madar_app/widgets/app_widgets.dart';
 
 class SignUpScreen extends StatefulWidget {
   const SignUpScreen({super.key});
@@ -95,27 +96,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
     _phoneFocus.dispose();
     _passwordFocus.dispose();
     super.dispose();
-  }
-
-  /// Displays a snackbar with an error message
-  void _showErrorMessage(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          message,
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        backgroundColor: Colors.redAccent.shade700,
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        duration: const Duration(seconds: 3),
-      ),
-    );
   }
 
   /// Validates all previous fields before allowing the next step
@@ -218,7 +198,10 @@ class _SignUpScreenState extends State<SignUpScreen> {
         !_isEmailValid ||
         !_isPhoneValid ||
         !_isPasswordValid) {
-      _showErrorMessage('Please fill all fields correctly before signing up');
+      SnackbarHelper.showError(
+        context,
+        'Please fill all fields correctly before signing up',
+      );
       _validatePreviousFields(5);
       setState(() => _loading = false);
       return;
@@ -237,15 +220,18 @@ class _SignUpScreenState extends State<SignUpScreen> {
               .isNotEmpty;
 
       if (emailExists && phoneExists) {
-        _showErrorMessage('Both email and phone number are already in use');
+        SnackbarHelper.showError(
+          context,
+          'Both email and phone number are already in use',
+        );
         setState(() => _loading = false);
         return;
       } else if (emailExists) {
-        _showErrorMessage('Email is already in use');
+        SnackbarHelper.showError(context, 'Email is already in use');
         setState(() => _loading = false);
         return;
       } else if (phoneExists) {
-        _showErrorMessage('Phone number is already in use');
+        SnackbarHelper.showError(context, 'Phone number is already in use');
         setState(() => _loading = false);
         return;
       }
@@ -273,7 +259,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
         );
       }
     } catch (e) {
-      _showErrorMessage('Error: ${e.toString()}');
+      SnackbarHelper.showError(context, 'Error: ${e.toString()}');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -289,7 +275,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
     String? prefix,
   }) {
     const Color mainGreen = Color(0xFF787E65);
-    final Color errorColor = Colors.redAccent.shade700;
+    //final Color errorColor = Colors.redAccent.shade700; //red
+    final Color kError = Color(0xFFC62828);
     const Color normalColor = Colors.grey;
 
     final OutlineInputBorder normalBorder = OutlineInputBorder(
@@ -299,7 +286,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
     final OutlineInputBorder errorBorder = OutlineInputBorder(
       borderRadius: BorderRadius.circular(10),
-      borderSide: BorderSide(color: errorColor, width: 1.8),
+      borderSide: BorderSide(color: kError, width: 1.8),
     );
 
     final OutlineInputBorder focusedBorder = OutlineInputBorder(
@@ -319,12 +306,12 @@ class _SignUpScreenState extends State<SignUpScreen> {
       focusedErrorBorder: errorBorder,
       errorText: label == 'Password' ? null : error,
       errorStyle: TextStyle(
-        color: errorColor,
+        color: kError,
         fontSize: label == 'Password' ? 0 : 13,
       ),
       floatingLabelStyle: TextStyle(
-        color: valid ? mainGreen : errorColor,
-        fontWeight: FontWeight.w600,
+        color: valid ? mainGreen : kError,
+        fontWeight: FontWeight.w400,
       ),
     );
   }

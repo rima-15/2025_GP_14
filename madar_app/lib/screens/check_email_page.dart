@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:madar_app/screens/signin_page.dart';
 import 'package:madar_app/widgets/custom_scaffold.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:madar_app/widgets/app_widgets.dart';
 
 class CheckEmailPage extends StatefulWidget {
   final String email;
@@ -28,14 +29,9 @@ class _CheckEmailPageState extends State<CheckEmailPage> {
 
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Unable to resend. Please sign up again or sign in first.',
-              style: TextStyle(color: Colors.white),
-            ),
-            backgroundColor: Colors.redAccent,
-          ),
+        SnackbarHelper.showError(
+          context,
+          'Unable to resend. Please sign up again or sign in first.',
         );
         setState(() => _sending = false);
         return;
@@ -43,16 +39,9 @@ class _CheckEmailPageState extends State<CheckEmailPage> {
 
       await user.sendEmailVerification();
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Verification email has been resent.',
-            style: TextStyle(color: Colors.white),
-          ),
-          backgroundColor: Colors.green,
-          behavior: SnackBarBehavior.floating,
-          duration: Duration(seconds: 3),
-        ),
+      SnackbarHelper.showSuccess(
+        context,
+        'Verification email has been resent.',
       );
 
       // Start a 30-second cooldown after resending
@@ -74,15 +63,9 @@ class _CheckEmailPageState extends State<CheckEmailPage> {
         }
       });
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Failed to resend verification email: $e',
-            style: const TextStyle(color: Colors.white),
-          ),
-          backgroundColor: Colors.redAccent.shade700,
-          behavior: SnackBarBehavior.floating,
-        ),
+      SnackbarHelper.showError(
+        context,
+        'Failed to resend verification email: $e',
       );
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -120,8 +103,6 @@ class _CheckEmailPageState extends State<CheckEmailPage> {
 
   @override
   Widget build(BuildContext context) {
-    const green = Color(0xFF787E65);
-
     return CustomScaffold(
       showLogo: true,
       child: Column(
@@ -141,14 +122,18 @@ class _CheckEmailPageState extends State<CheckEmailPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  const Icon(Icons.email_outlined, size: 90, color: green),
+                  const Icon(
+                    Icons.email_outlined,
+                    size: 90,
+                    color: AppColors.kGreen,
+                  ),
                   const SizedBox(height: 24),
                   const Text(
                     'Verify Email',
                     style: TextStyle(
                       fontSize: 28,
                       fontWeight: FontWeight.w900,
-                      color: green,
+                      color: AppColors.kGreen,
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -183,7 +168,7 @@ class _CheckEmailPageState extends State<CheckEmailPage> {
                           ? null
                           : _resendVerificationEmail,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: green,
+                        backgroundColor: AppColors.kGreen,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                       ),
                       icon: _sending
@@ -213,7 +198,7 @@ class _CheckEmailPageState extends State<CheckEmailPage> {
                     width: double.infinity,
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: green,
+                        backgroundColor: AppColors.kGreen,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                       ),
                       onPressed: () async {

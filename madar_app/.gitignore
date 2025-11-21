@@ -44,16 +44,5 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
-#  Ignore Unity exported library (too heavy for GitHub)
+# Unity + Flutter heavy folders
 android/unityLibrary/
-android/launcher/build/
-android/app/build/
-build/
-
-# Ignore .aar and .jar Unity libraries
-*.aar
-*.jar
-
-#  Ignore Gradle caches
-.gradle/
-**/gradle/

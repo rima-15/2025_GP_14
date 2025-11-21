@@ -23,3 +23,8 @@ plugins {
 }
 
 include(":app")
+include(":unityLibrary")
+include(":unityLibrary:xrmanifest.androidlib")
+include(":unityLibrary:FirebaseApp.androidlib")
+
+

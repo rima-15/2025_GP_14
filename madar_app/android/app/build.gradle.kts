@@ -11,7 +11,7 @@ plugins {
 android {
     namespace = "com.example.madar_app"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = "27.0.12077973"
+    ndkVersion = "27.2.12479018"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -24,7 +24,7 @@ android {
 
    defaultConfig {
         applicationId = "com.example.madar_app"
-        minSdk = flutter.minSdkVersion
+        minSdk = 24
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
@@ -41,4 +41,8 @@ flutter {
     source = "../.."
 }
 
+dependencies {
+    implementation(project(":unityLibrary"))
+
+}
 

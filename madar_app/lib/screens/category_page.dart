@@ -11,6 +11,7 @@ import 'package:flutter/services.dart'
 import 'package:madar_app/screens/unity_page.dart';
 import 'package:permission_handler/permission_handler.dart'; // ✅ NEW
 
+// here
 const kGreen = Color(0xFF777D63);
 
 class CategoryPage
@@ -88,7 +89,7 @@ class _CategoryPageState
     Uri uri;
 
     if (isSolitaire) {
-      //solitaire.json
+      // solitaire.json
       try {
         final jsonStr = await rootBundle
             .loadString(
@@ -109,7 +110,7 @@ class _CategoryPageState
             'location': '$lat,$lng',
             'radius': '150',
             'keyword':
-                docId, //  Document ID
+                docId, // Document ID
             'key': _apiKey,
           },
         );
@@ -170,9 +171,10 @@ class _CategoryPageState
         .toDouble();
   }
 
-  // ✅ NEW: ask for camera permission then open Unity in Navigation mode
-  Future<void>
-  _openNavigationAR() async {
+  // ✅ تعديل مهم: الآن تستقبل placeId وترسله لصفحة Unity
+  Future<void> _openNavigationAR(
+    String placeId,
+  ) async {
     final status = await Permission
         .camera
         .request();
@@ -182,10 +184,11 @@ class _CategoryPageState
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) =>
-              const UnityCameraPage(
-                isNavigation: true,
-              ),
+          builder: (_) => UnityCameraPage(
+            isNavigation: true,
+            destinationPlaceId:
+                placeId, // 👈 نمرر الـ placeId لليونتي
+          ),
         ),
       );
     } else if (status
@@ -214,7 +217,7 @@ class _CategoryPageState
       );
     }
   }
-  // ✅ END NEW
+  // ✅ END
 
   @override
   Widget build(BuildContext context) {
@@ -402,7 +405,7 @@ class _CategoryPageState
                             filteredDocs[i]
                                 .data(),
                             filteredDocs[i]
-                                .id,
+                                .id, // 👈 هذا هو originalId = placeId
                           ),
                     );
                   },
@@ -607,7 +610,6 @@ class _CategoryPageState
                     ),
             ),
 
-            //
             Expanded(
               flex: 4,
               child: Padding(
@@ -651,8 +653,10 @@ class _CategoryPageState
                         // 🧭 Navigation arrow button
                         InkWell(
                           onTap: () {
-                            // ✅ نفتح يونتي بمود Navigation بعد طلب صلاحية الكاميرا
-                            _openNavigationAR();
+                            // ✅ نفتح يونتي بمود Navigation ونرسل placeId (doc.id)
+                            _openNavigationAR(
+                              originalId,
+                            );
                           },
                           child: const Icon(
                             Icons

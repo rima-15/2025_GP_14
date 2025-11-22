@@ -9,6 +9,7 @@ import 'package:firebase_storage/firebase_storage.dart'
 import 'package:flutter/services.dart'
     show rootBundle;
 import 'package:madar_app/screens/unity_page.dart';
+import 'package:permission_handler/permission_handler.dart'; // ✅ NEW
 
 const kGreen = Color(0xFF777D63);
 
@@ -169,6 +170,52 @@ class _CategoryPageState
         .toDouble();
   }
 
+  // ✅ NEW: ask for camera permission then open Unity in Navigation mode
+  Future<void>
+  _openNavigationAR() async {
+    final status = await Permission
+        .camera
+        .request();
+
+    if (status.isGranted) {
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              const UnityCameraPage(
+                isNavigation: true,
+              ),
+        ),
+      );
+    } else if (status
+        .isPermanentlyDenied) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Camera permission is permanently denied. Please enable it from Settings.',
+          ),
+        ),
+      );
+      openAppSettings();
+    } else {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Camera permission is required to use AR.',
+          ),
+        ),
+      );
+    }
+  }
+  // ✅ END NEW
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -180,10 +227,11 @@ class _CategoryPageState
           margin: const EdgeInsets.all(
             8,
           ),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            shape: BoxShape.circle,
-          ),
+          decoration:
+              const BoxDecoration(
+                color: Colors.white,
+                shape: BoxShape.circle,
+              ),
           child: IconButton(
             icon: const Icon(
               Icons.arrow_back,
@@ -341,7 +389,7 @@ class _CategoryPageState
                         mainAxisSpacing:
                             12,
                         childAspectRatio:
-                            0.75, // Adjusted for better content fit
+                            0.75,
                       ),
                       itemCount:
                           filteredDocs
@@ -603,16 +651,8 @@ class _CategoryPageState
                         // 🧭 Navigation arrow button
                         InkWell(
                           onTap: () {
-                            // نفتح يونتي على نفس المشهد لكن بمود "Navigation"
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const UnityCameraPage(
-                                  isNavigation:
-                                      true,
-                                ),
-                              ),
-                            );
+                            // ✅ نفتح يونتي بمود Navigation بعد طلب صلاحية الكاميرا
+                            _openNavigationAR();
                           },
                           child: const Icon(
                             Icons
@@ -668,13 +708,15 @@ class _CategoryPageState
                             }),
                       builder: (context, snap) {
                         if (!snap
-                            .hasData)
+                            .hasData) {
                           return const SizedBox.shrink();
+                        }
                         final r =
                             snap.data ??
                             0.0;
-                        if (r == 0.0)
+                        if (r == 0.0) {
                           return const SizedBox.shrink();
+                        }
                         return Row(
                           children: [
                             const Icon(

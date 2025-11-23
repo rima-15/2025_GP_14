@@ -1,7 +1,11 @@
 plugins {
     id("com.android.application")
     id("kotlin-android")
+
+    // The Flutter Gradle Plugin must be applied after Android + Kotlin plugins
     id("dev.flutter.flutter-gradle-plugin")
+
+    // 🔹 Added by Mona
     id("com.google.gms.google-services")
 }
 
@@ -9,6 +13,15 @@ android {
     namespace = "com.example.madar_app"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = "27.2.12479018"
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+    }
+
+    kotlinOptions {
+        jvmTarget = JavaVersion.VERSION_11.toString()
+    }
 
     defaultConfig {
         applicationId = "com.example.madar_app"
@@ -20,17 +33,9 @@ android {
 
     buildTypes {
         release {
+            // ⛔ مؤقت — يفضل لاحقًا توقيع ريليس حقيقي
             signingConfig = signingConfigs.getByName("debug")
         }
-    }
-
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_11.toString()
-    }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
     }
 }
 
@@ -40,10 +45,4 @@ flutter {
 
 dependencies {
     implementation(project(":unityLibrary"))
-
-    // ========== Firebase Android (Flutter) ==========
-    implementation(platform("com.google.firebase:firebase-bom:33.6.0"))
-    implementation("com.google.firebase:firebase-firestore")
-    implementation("com.google.firebase:firebase-auth")
-    implementation("com.google.firebase:firebase-analytics")
 }

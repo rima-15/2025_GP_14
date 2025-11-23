@@ -9,6 +9,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:madar_app/screens/unity_page.dart';
 import 'package:permission_handler/permission_handler.dart'; // ✅ NEW
 
+// here
 const kGreen = Color(0xFF777D63);
 
 class CategoryPage extends StatefulWidget {
@@ -66,7 +67,7 @@ class _CategoryPageState extends State<CategoryPage> {
     Uri uri;
 
     if (isSolitaire) {
-      //solitaire.json
+      // solitaire.json
       try {
         final jsonStr = await rootBundle.loadString(
           'assets/venues/solitaire.json',
@@ -81,7 +82,7 @@ class _CategoryPageState extends State<CategoryPage> {
           {
             'location': '$lat,$lng',
             'radius': '150',
-            'keyword': docId, //  Document ID
+            'keyword': docId, // Document ID
             'key': _apiKey,
           },
         );
@@ -127,8 +128,8 @@ class _CategoryPageState extends State<CategoryPage> {
     return (results.first['rating'] ?? 0).toDouble();
   }
 
-  // ✅ NEW: ask for camera permission then open Unity in Navigation mode
-  Future<void> _openNavigationAR() async {
+  // ✅ تعديل مهم: الآن تستقبل placeId وترسله لصفحة Unity
+  Future<void> _openNavigationAR(String placeId) async {
     final status = await Permission.camera.request();
 
     if (status.isGranted) {
@@ -136,7 +137,10 @@ class _CategoryPageState extends State<CategoryPage> {
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => const UnityCameraPage(isNavigation: true),
+          builder: (_) => UnityCameraPage(
+            isNavigation: true,
+            destinationPlaceId: placeId, // 👈 نمرر الـ placeId لليونتي
+          ),
         ),
       );
     } else if (status.isPermanentlyDenied) {
@@ -158,7 +162,7 @@ class _CategoryPageState extends State<CategoryPage> {
       );
     }
   }
-  // ✅ END NEW
+  // ✅ END
 
   @override
   Widget build(BuildContext context) {
@@ -262,8 +266,10 @@ class _CategoryPageState extends State<CategoryPage> {
                     childAspectRatio: 0.75,
                   ),
                   itemCount: filteredDocs.length,
-                  itemBuilder: (context, i) =>
-                      _placeCard(filteredDocs[i].data(), filteredDocs[i].id),
+                  itemBuilder: (context, i) => _placeCard(
+                    filteredDocs[i].data(),
+                    filteredDocs[i].id, // 👈 هذا هو originalId = placeId
+                  ),
                 );
               },
             ),
@@ -393,7 +399,6 @@ class _CategoryPageState extends State<CategoryPage> {
                     ),
             ),
 
-            //
             Expanded(
               flex: 4,
               child: Padding(
@@ -420,8 +425,8 @@ class _CategoryPageState extends State<CategoryPage> {
                         // 🧭 Navigation arrow button
                         InkWell(
                           onTap: () {
-                            // ✅ نفتح يونتي بمود Navigation بعد طلب صلاحية الكاميرا
-                            _openNavigationAR();
+                            // ✅ نفتح يونتي بمود Navigation ونرسل placeId (doc.id)
+                            _openNavigationAR(originalId);
                           },
                           child: const Icon(
                             Icons.north_east,

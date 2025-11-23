@@ -5,13 +5,22 @@ class UnityCameraPage extends StatefulWidget {
   /// false = EXPLORE   ,  true = NAVIGATION
   final bool isNavigation;
 
-  const UnityCameraPage({super.key, this.isNavigation = false});
+  /// 📌 جديد — placeId اللي نرسله ليونتي
+  final String? destinationPlaceId;
+
+  const UnityCameraPage({
+    super.key,
+    this.isNavigation = false,
+    this.destinationPlaceId,
+  });
 
   @override
   State<UnityCameraPage> createState() => _UnityCameraPageState();
 }
 
 class _UnityCameraPageState extends State<UnityCameraPage> {
+  bool _sentDestination = false; // نتأكد ما نكرر الإرسال
+
   @override
   void initState() {
     super.initState();
@@ -19,10 +28,37 @@ class _UnityCameraPageState extends State<UnityCameraPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Future.delayed(const Duration(milliseconds: 800), () {
         final mode = widget.isNavigation ? "NAVIGATION" : "EXPLORE";
-        debugPrint("Flutter: sending mode to Unity => $mode");
-        sendToUnity("FlutterListener", "OnFlutterMessage", mode);
+        debugPrint("Flutter ➜ Unity | sending mode = $mode");
+
+        sendToUnity(
+          "FlutterListener", // GameObject
+          "OnFlutterMessage", // Method inside Unity
+          mode, // Parameter
+        );
       });
     });
+  }
+
+  void _handleUnityMessage(String msg) {
+    debugPrint("From Unity: $msg");
+
+    // 🚩 Unity يخبرنا أن المشهد جاهز
+    if (msg == "scene_loaded" &&
+        widget.isNavigation &&
+        widget.destinationPlaceId != null &&
+        !_sentDestination) {
+      _sentDestination = true;
+
+      sendToUnity(
+        "SharedPOIManager", // نفس اللي فيه JumpToPOIByPlaceId
+        "JumpToPOIByPlaceId", // الميثود
+        widget.destinationPlaceId!, // placeId من Flutter
+      );
+
+      debugPrint(
+        "🚀 Flutter ➜ Unity | sent placeId (${widget.destinationPlaceId}) for navigation",
+      );
+    }
   }
 
   @override
@@ -30,19 +66,13 @@ class _UnityCameraPageState extends State<UnityCameraPage> {
     return Scaffold(
       body: Stack(
         children: [
-          EmbedUnity(
-            onMessageFromUnity: (String data) {
-              debugPrint('From Unity: $data');
-            },
-          ),
+          EmbedUnity(onMessageFromUnity: _handleUnityMessage),
 
           Positioned(
             top: MediaQuery.of(context).padding.top + 12,
             left: 16,
             child: GestureDetector(
-              onTap: () {
-                Navigator.pop(context);
-              },
+              onTap: () => Navigator.pop(context),
               child: Container(
                 width: 44,
                 height: 44,

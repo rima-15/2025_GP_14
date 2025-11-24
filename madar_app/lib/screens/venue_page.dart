@@ -1598,15 +1598,7 @@ class _VenuePageState extends State<VenuePage>
     }
 
     // Return the interactive 3D map for venues with maps
-    return _FloorMapSection(
-      currentFloor: _currentFloor,
-      venueMaps: _venueMaps,
-      onFloorChanged: (String newFloor) {
-        setState(() {
-          _currentFloor = newFloor;
-        });
-      },
-    );
+    return _FloorMapSection(venueMaps: _venueMaps, initialFloor: _currentFloor);
   }
 }
 
@@ -1661,14 +1653,12 @@ class _FloorMapViewer extends StatelessWidget {
 
 // Complete floor map section as a separate widget
 class _FloorMapSection extends StatefulWidget {
-  final String currentFloor;
   final List<Map<String, String>> venueMaps;
-  final Function(String) onFloorChanged;
+  final String initialFloor;
 
   const _FloorMapSection({
-    required this.currentFloor,
     required this.venueMaps,
-    required this.onFloorChanged,
+    required this.initialFloor,
   });
 
   @override
@@ -1681,15 +1671,7 @@ class _FloorMapSectionState extends State<_FloorMapSection> {
   @override
   void initState() {
     super.initState();
-    _currentFloor = widget.currentFloor;
-  }
-
-  @override
-  void didUpdateWidget(_FloorMapSection oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.currentFloor != widget.currentFloor) {
-      _currentFloor = widget.currentFloor;
-    }
+    _currentFloor = widget.initialFloor;
   }
 
   @override
@@ -1773,11 +1755,9 @@ class _FloorMapSectionState extends State<_FloorMapSection> {
           shadowColor: Colors.black.withOpacity(0.1),
         ),
         onPressed: () {
-          String newFloor = 'assets/maps/$fileName';
           setState(() {
-            _currentFloor = newFloor;
+            _currentFloor = 'assets/maps/$fileName';
           });
-          widget.onFloorChanged(newFloor);
         },
         child: Text(
           label,

@@ -46,7 +46,11 @@ class VenuePage extends StatefulWidget {
   State<VenuePage> createState() => _VenuePageState();
 }
 
-class _VenuePageState extends State<VenuePage> {
+class _VenuePageState extends State<VenuePage>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true; // ✅ Keep state alive when navigating away
+
   // --- NEW: keep header sizing and overlap consistent ---
   static const double _headerHeight = 180; // hero image height
   static const double _topRadius = 35; // rounded top radius & overlap
@@ -69,7 +73,9 @@ class _VenuePageState extends State<VenuePage> {
   String? _venuePhone;
 
   // 3D map
-  String _currentFloor = 'assets/maps/F1_map.glb';
+  String _currentFloor = '';
+  List<Map<String, String>> _venueMaps = []; // Store {floorNumber, fileName}
+  bool _mapsLoading = false;
 
   static final storage.FirebaseStorage _coversStorage =
       storage.FirebaseStorage.instanceFor(
@@ -113,6 +119,8 @@ class _VenuePageState extends State<VenuePage> {
 
     // Always prefetch images (they have their own cache)
     _prefetchAllVenueImages();
+
+    _loadVenueMaps();
   }
 
   // ✅ API-first opening hours (rating stays from DB)
@@ -237,6 +245,53 @@ class _VenuePageState extends State<VenuePage> {
       }
     } catch (_) {
       // Keep silently; buttons will just stay hidden
+    }
+  }
+
+  Future<void> _loadVenueMaps() async {
+    setState(() => _mapsLoading = true);
+
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('venues')
+          .doc(widget.placeId)
+          .get(const GetOptions(source: Source.serverAndCache));
+
+      final data = doc.data();
+
+      if (data != null && data['map'] is List) {
+        final maps = (data['map'] as List).cast<Map<String, dynamic>>();
+
+        final convertedMaps = maps.map((map) {
+          final floorNumber = (map['floorNumber'] ?? '').toString();
+          final fileName = (map['fileName'] ?? '').toString();
+
+          return {'floorNumber': floorNumber, 'fileName': fileName};
+        }).toList();
+
+        setState(() {
+          _venueMaps = convertedMaps;
+        });
+
+        // Load the first map if available
+        if (convertedMaps.isNotEmpty) {
+          final firstMap = convertedMaps.first;
+          final firstFileName = firstMap['fileName'];
+          if (firstFileName != null && firstFileName.isNotEmpty) {
+            _currentFloor = 'assets/maps/$firstFileName';
+          }
+        }
+      } else {
+        setState(() {
+          _venueMaps = [];
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _venueMaps = [];
+      });
+    } finally {
+      setState(() => _mapsLoading = false);
     }
   }
 
@@ -583,6 +638,7 @@ class _VenuePageState extends State<VenuePage> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // ✅ Required for AutomaticKeepAliveClientMixin
     final hasWebsite = (_venueWebsite != null && _venueWebsite!.isNotEmpty);
     final hasPhone = (_venuePhone != null && _venuePhone!.isNotEmpty);
     final bool isMall =
@@ -1494,11 +1550,8 @@ class _VenuePageState extends State<VenuePage> {
   // Floor map state
 
   Widget _buildFloorMapViewer() {
-    // Check if the venue is Solitaire
-    bool isSolitaire = widget.name.toLowerCase().contains('solitaire');
-
-    if (!isSolitaire) {
-      // Return the old placeholder design for non-Solitaire venues
+    // Show loading while fetching maps
+    if (_mapsLoading) {
       return Container(
         height: 200,
         decoration: BoxDecoration(
@@ -1506,21 +1559,52 @@ class _VenuePageState extends State<VenuePage> {
           borderRadius: BorderRadius.circular(8),
         ),
         child: Center(
-          child: Icon(
-            Icons.map_outlined,
-            size: 48,
-            color: Colors.grey.shade400,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(
+                color: kPrimaryGreen,
+                backgroundColor: kPrimaryGreen.withOpacity(0.2),
+              ),
+              SizedBox(height: 8),
+              Text('Loading maps...'),
+            ],
           ),
         ),
       );
     }
 
-    // Return the interactive 3D map for Solitaire venue
+    // Check if venue has maps
+    final hasMaps = _venueMaps.isNotEmpty;
+
+    if (!hasMaps) {
+      return Container(
+        height: 200,
+        decoration: BoxDecoration(
+          color: Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.map_outlined, size: 48, color: Colors.grey.shade400),
+              SizedBox(height: 8),
+              Text('No floor maps available'),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Return the interactive 3D map for venues with maps
     return _FloorMapSection(
       currentFloor: _currentFloor,
+      venueMaps: _venueMaps,
       onFloorChanged: (String newFloor) {
-        // This will only update the state without rebuilding the entire page
-        _currentFloor = newFloor;
+        setState(() {
+          _currentFloor = newFloor;
+        });
       },
     );
   }
@@ -1534,19 +1618,43 @@ class _FloorMapViewer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ModelViewer(
-      key: ValueKey(currentFloor), // Forces rebuild only when floor changes
-      src: currentFloor,
-      alt: "3D Floor Map",
-      ar: false,
-      autoRotate: false,
-      cameraControls: true,
-      backgroundColor: Colors.white,
-      cameraOrbit: "0deg 65deg 2.5m",
-      minCameraOrbit: "auto 0deg auto",
-      maxCameraOrbit: "auto 90deg auto",
-      cameraTarget: "0m 0m 0m",
-      fieldOfView: "45deg",
+    if (currentFloor.isEmpty) {
+      return _buildError('No map selected');
+    }
+
+    try {
+      return ModelViewer(
+        key: ValueKey(currentFloor),
+        src: currentFloor,
+        alt: "3D Floor Map",
+        ar: false,
+        autoRotate: false,
+        cameraControls: true,
+        backgroundColor: Colors.white,
+        cameraOrbit: "0deg 65deg 2.5m",
+        minCameraOrbit: "auto 0deg auto",
+        maxCameraOrbit: "auto 90deg auto",
+        cameraTarget: "0m 0m 0m",
+        fieldOfView: "45deg",
+      );
+    } catch (e) {
+      return _buildError('Failed to load 3D map');
+    }
+  }
+
+  Widget _buildError(String message) {
+    return Container(
+      color: Colors.grey.shade100,
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.error_outline, size: 48, color: Colors.red),
+            SizedBox(height: 8),
+            Text(message),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -1554,10 +1662,12 @@ class _FloorMapViewer extends StatelessWidget {
 // Complete floor map section as a separate widget
 class _FloorMapSection extends StatefulWidget {
   final String currentFloor;
+  final List<Map<String, String>> venueMaps;
   final Function(String) onFloorChanged;
 
   const _FloorMapSection({
     required this.currentFloor,
+    required this.venueMaps,
     required this.onFloorChanged,
   });
 
@@ -1603,36 +1713,35 @@ class _FloorMapSectionState extends State<_FloorMapSection> {
             child: Stack(
               children: [
                 _FloorMapViewer(currentFloor: _currentFloor),
-                Positioned(
-                  top: 12,
-                  right: 12,
-                  child: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.9),
-                      borderRadius: BorderRadius.circular(8),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color.fromARGB(
-                            255,
-                            255,
-                            255,
-                            255,
-                          ).withOpacity(0.1),
-                          blurRadius: 4,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      children: [
-                        _buildFloorButton('F1', 'assets/maps/F2_map.glb'),
-                        const SizedBox(height: 8),
-                        _buildFloorButton('GF', 'assets/maps/F1_map.glb'),
-                      ],
+                if (widget.venueMaps.length > 1)
+                  Positioned(
+                    top: 12,
+                    right: 12,
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.9),
+                        borderRadius: BorderRadius.circular(8),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.1),
+                            blurRadius: 4,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        children: widget.venueMaps.map((map) {
+                          final floorNumber = map['floorNumber'] ?? '';
+                          final fileName = map['fileName'] ?? '';
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: _buildFloorButton(floorNumber, fileName),
+                          );
+                        }).toList(),
+                      ),
                     ),
                   ),
-                ),
               ],
             ),
           ),
@@ -1641,8 +1750,9 @@ class _FloorMapSectionState extends State<_FloorMapSection> {
     );
   }
 
-  Widget _buildFloorButton(String label, String floorAsset) {
-    bool isSelected = _currentFloor == floorAsset;
+  Widget _buildFloorButton(String label, String fileName) {
+    String fullPath = 'assets/maps/$fileName';
+    bool isSelected = _currentFloor == fullPath;
 
     return SizedBox(
       width: 42,
@@ -1663,10 +1773,11 @@ class _FloorMapSectionState extends State<_FloorMapSection> {
           shadowColor: Colors.black.withOpacity(0.1),
         ),
         onPressed: () {
+          String newFloor = 'assets/maps/$fileName';
           setState(() {
-            _currentFloor = floorAsset;
+            _currentFloor = newFloor;
           });
-          widget.onFloorChanged(floorAsset);
+          widget.onFloorChanged(newFloor);
         },
         child: Text(
           label,

@@ -259,7 +259,18 @@ class _SignUpScreenState extends State<SignUpScreen> {
         );
       }
     } catch (e) {
-      SnackbarHelper.showError(context, 'Error: ${e.toString()}');
+      if (e is FirebaseAuthException) {
+        if (e.code == 'email-already-in-use') {
+          SnackbarHelper.showError(context, 'Email is already in use');
+        } else {
+          SnackbarHelper.showError(
+            context,
+            e.message ?? 'Something went wrong',
+          );
+        }
+      } else {
+        SnackbarHelper.showError(context, 'Something went wrong');
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }

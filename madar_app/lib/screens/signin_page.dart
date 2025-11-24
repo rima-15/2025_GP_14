@@ -7,6 +7,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
+import 'check_email_page.dart';
 
 class SignInScreen extends StatefulWidget {
   const SignInScreen({super.key});
@@ -57,15 +58,28 @@ class _SignInScreenState extends State<SignInScreen> {
       await user.reload();
 
       if (!user.emailVerified) {
-        try {
-          await user.sendEmailVerification();
-        } catch (_) {}
-        await FirebaseAuth.instance.signOut();
-
+        // Show friendly message (without sending a new verification email)
         SnackbarHelper.showError(
           context,
-          'Email not verified! Please verify your email first.',
+          'Your email isn’t verified. Check your email or request a new one',
         );
+
+        // Wait a bit so user can read the message
+        await Future.delayed(const Duration(seconds: 4));
+
+        // Force sign out so user doesn't enter unverified
+        //await FirebaseAuth.instance.signOut();
+
+        // Navigate to the Check Email screen (no email sent automatically)
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => CheckEmailPage(email: _emailCtrl.text.trim()),
+            ),
+          );
+        }
+
         setState(() => _loading = false);
         return;
       }

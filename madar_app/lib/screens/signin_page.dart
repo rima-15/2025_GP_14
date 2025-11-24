@@ -19,18 +19,29 @@ class _SignInScreenState extends State<SignInScreen> {
   final _formSignInKey = GlobalKey<FormState>();
   final _emailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
+  final _emailFocus = FocusNode();
+  final _passFocus = FocusNode();
   bool _loading = false;
 
   @override
   void dispose() {
     _emailCtrl.dispose();
     _passCtrl.dispose();
+    _emailFocus.dispose();
+    _passFocus.dispose();
     super.dispose();
   }
 
   Future<void> _signIn() async {
     if (!_formSignInKey.currentState!.validate()) {
-      SnackbarHelper.showError(context, 'Please fill all fields correctly');
+      // Focus the first invalid field
+      if (_emailCtrl.text.isEmpty ||
+          !_emailCtrl.text.contains('@') ||
+          !_emailCtrl.text.contains('.')) {
+        _emailFocus.requestFocus();
+      } else if (_passCtrl.text.isEmpty) {
+        _passFocus.requestFocus();
+      }
       return;
     }
 
@@ -80,7 +91,7 @@ class _SignInScreenState extends State<SignInScreen> {
       }
 
       if (mounted) {
-        Navigator.pushReplacement(
+        await Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (_) => const MainLayout()),
         );
@@ -152,6 +163,7 @@ class _SignInScreenState extends State<SignInScreen> {
                       // Email
                       StyledTextField(
                         controller: _emailCtrl,
+                        focusNode: _emailFocus,
                         label: 'Email',
                         hint: 'Enter Email',
                         keyboardType: TextInputType.emailAddress,
@@ -170,10 +182,10 @@ class _SignInScreenState extends State<SignInScreen> {
                       // Password
                       StyledTextField(
                         controller: _passCtrl,
+                        focusNode: _passFocus,
                         label: 'Password',
                         hint: 'Enter Password',
                         obscureText: _obscurePassword,
-                        obscuringCharacter: '*',
                         suffixIcon: IconButton(
                           icon: Icon(
                             _obscurePassword
@@ -189,9 +201,7 @@ class _SignInScreenState extends State<SignInScreen> {
                           if (v == null || v.isEmpty) {
                             return 'Please enter password';
                           }
-                          if (v.length < 8) {
-                            return 'Password must be at least 8 characters';
-                          }
+
                           return null;
                         },
                       ),
@@ -235,8 +245,19 @@ class _SignInScreenState extends State<SignInScreen> {
                           ),
                           onPressed: _loading ? null : _signIn,
                           child: _loading
-                              ? const CircularProgressIndicator(
-                                  color: Colors.white,
+                              ? LayoutBuilder(
+                                  builder: (context, constraints) {
+                                    final size = (constraints.maxHeight * 0.6)
+                                        .clamp(16.0, 24.0); // Between 16-24
+                                    return SizedBox(
+                                      width: size,
+                                      height: size,
+                                      child: CircularProgressIndicator(
+                                        color: Colors.white,
+                                        strokeWidth: 2.5,
+                                      ),
+                                    );
+                                  },
                                 )
                               : const Text(
                                   'Sign in',

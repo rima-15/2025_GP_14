@@ -271,6 +271,7 @@ class StyledTextField extends StatelessWidget {
   final bool obscureText; // ADD THIS
   final Widget? suffixIcon; // ADD THIS
   final String? obscuringCharacter; // ADD THIS
+  final FocusNode? focusNode; // ADD THIS FOR AUTO-FOCUS
 
   const StyledTextField({
     super.key,
@@ -285,12 +286,14 @@ class StyledTextField extends StatelessWidget {
     this.obscureText = false, // ADD THIS
     this.suffixIcon, // ADD THIS
     this.obscuringCharacter, // ADD THIS
+    this.focusNode, // ADD THIS FOR AUTO-FOCUS
   });
 
   @override
   Widget build(BuildContext context) {
     return TextFormField(
       controller: controller,
+      focusNode: focusNode, // ADD THIS FOR AUTO-FOCUS
       enabled: enabled,
       keyboardType: keyboardType,
       inputFormatters: inputFormatters,

@@ -14,16 +14,22 @@ class ForgotPasswordScreen extends StatefulWidget {
 class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailCtrl = TextEditingController();
+  final _emailFocus = FocusNode();
   bool _loading = false;
 
   @override
   void dispose() {
     _emailCtrl.dispose();
+    _emailFocus.dispose();
     super.dispose();
   }
 
   Future<void> _sendPasswordResetEmail() async {
-    if (!_formKey.currentState!.validate()) return;
+    if (!_formKey.currentState!.validate()) {
+      // Focus email field if validation fails
+      _emailFocus.requestFocus();
+      return;
+    }
 
     setState(() => _loading = true);
 
@@ -73,9 +79,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         context,
         'Unexpected error occurred, please try again',
       );
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
+    } finally {}
   }
 
   @override
@@ -118,6 +122,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                       const SizedBox(height: 30),
                       StyledTextField(
                         controller: _emailCtrl,
+                        focusNode: _emailFocus,
                         label: 'Email',
                         hint: 'Enter your email',
                         keyboardType: TextInputType.emailAddress,
@@ -146,13 +151,19 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                           ),
                           onPressed: _loading ? null : _sendPasswordResetEmail,
                           child: _loading
-                              ? const SizedBox(
-                                  height: 20,
-                                  width: 20,
-                                  child: CircularProgressIndicator(
-                                    color: Colors.white,
-                                    strokeWidth: 2,
-                                  ),
+                              ? LayoutBuilder(
+                                  builder: (context, constraints) {
+                                    final size = (constraints.maxHeight * 0.6)
+                                        .clamp(16.0, 24.0); // Between 16-24
+                                    return SizedBox(
+                                      width: size,
+                                      height: size,
+                                      child: CircularProgressIndicator(
+                                        color: Colors.white,
+                                        strokeWidth: 2.5,
+                                      ),
+                                    );
+                                  },
                                 )
                               : const Text(
                                   "Send reset link",

@@ -178,7 +178,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
     if (!RegExp(r'[a-z]').hasMatch(v)) return 'Must contain lowercase letter';
     if (!RegExp(r'[A-Z]').hasMatch(v)) return 'Must contain uppercase letter';
     if (!RegExp(r'[0-9]').hasMatch(v)) return 'Must contain a number';
-    if (!RegExp(r'[!@#\$%^&*(),.?":{}|<>]').hasMatch(v)) {
+    if (!RegExp(r'[^A-Za-z0-9 ]').hasMatch(v)) {
       return 'Must contain a special character';
     }
     return null;
@@ -253,7 +253,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
       //await FirebaseAuth.instance.signOut();
 
       if (mounted) {
-        Navigator.pushReplacement(
+        await Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (_) => CheckEmailPage(email: email)),
         );
@@ -286,12 +286,17 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
     final OutlineInputBorder errorBorder = OutlineInputBorder(
       borderRadius: BorderRadius.circular(10),
-      borderSide: BorderSide(color: kError, width: 1.8),
+      borderSide: BorderSide(color: kError, width: 1),
     );
 
     final OutlineInputBorder focusedBorder = OutlineInputBorder(
       borderRadius: BorderRadius.circular(10),
       borderSide: const BorderSide(color: mainGreen, width: 1.8),
+    );
+
+    final OutlineInputBorder focusedErrorBorder = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: BorderSide(color: kError, width: 1.8),
     );
 
     return InputDecoration(
@@ -301,7 +306,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
       suffixIcon: suffix,
       border: normalBorder,
       enabledBorder: valid ? normalBorder : errorBorder,
-      focusedBorder: valid ? focusedBorder : errorBorder,
+      focusedBorder: valid ? focusedBorder : focusedErrorBorder,
       errorBorder: errorBorder,
       focusedErrorBorder: errorBorder,
       errorText: label == 'Password' ? null : error,
@@ -589,7 +594,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                           _hasLowercase = RegExp(r'[a-z]').hasMatch(v);
                           _hasNumber = RegExp(r'[0-9]').hasMatch(v);
                           _hasSpecialChar = RegExp(
-                            r'[!@#\$%^&*(),.?":{}|<>]',
+                            r'[^A-Za-z0-9 ]',
                           ).hasMatch(v);
 
                           final err = _validatePassword(v);
@@ -604,21 +609,35 @@ class _SignUpScreenState extends State<SignUpScreen> {
                           suffix: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              IconButton(
-                                icon: Icon(
-                                  _obscurePassword
-                                      ? Icons.visibility_off
-                                      : Icons.visibility,
-                                  color: Colors.grey.shade600,
-                                ),
-                                onPressed: () => setState(
-                                  () => _obscurePassword = !_obscurePassword,
+                              Padding(
+                                padding: const EdgeInsets.only(
+                                  right: 4,
+                                ), // Add spacing to push it left
+                                child: IconButton(
+                                  icon: Icon(
+                                    _obscurePassword
+                                        ? Icons.visibility_off
+                                        : Icons.visibility,
+                                    color: Colors.grey.shade600,
+                                  ),
+                                  onPressed: () => setState(
+                                    () => _obscurePassword = !_obscurePassword,
+                                  ),
+                                  padding: EdgeInsets
+                                      .zero, // Remove default IconButton padding
+                                  constraints:
+                                      const BoxConstraints(), // Remove minimum size constraints
                                 ),
                               ),
                               if (_isPasswordValid && _passCtrl.text.isNotEmpty)
-                                const Icon(
-                                  Icons.check_circle,
-                                  color: Color(0xFF787E65),
+                                const Padding(
+                                  padding: EdgeInsets.only(
+                                    right: 12,
+                                  ), // Match the default suffix icon padding
+                                  child: Icon(
+                                    Icons.check_circle,
+                                    color: Color(0xFF787E65),
+                                  ),
                                 ),
                             ],
                           ),
@@ -651,15 +670,36 @@ class _SignUpScreenState extends State<SignUpScreen> {
                         width: double.infinity,
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF787E65),
+                            backgroundColor: AppColors.kGreen,
+                            foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(vertical: 14),
-                          ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ), // add general method
                           onPressed: _loading ? null : _signUp,
                           child: _loading
-                              ? const CircularProgressIndicator(
-                                  color: Colors.white,
+                              ? LayoutBuilder(
+                                  builder: (context, constraints) {
+                                    final size = (constraints.maxHeight * 0.6)
+                                        .clamp(16.0, 24.0); // Between 16-24
+                                    return SizedBox(
+                                      width: size,
+                                      height: size,
+                                      child: CircularProgressIndicator(
+                                        color: Colors.white,
+                                        strokeWidth: 2.5,
+                                      ),
+                                    );
+                                  },
                                 )
-                              : const Text('Sign up'),
+                              : const Text(
+                                  'Sign up',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
                         ),
                       ),
                       const SizedBox(height: 25),

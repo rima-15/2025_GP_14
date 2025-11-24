@@ -73,29 +73,6 @@ class _CheckEmailPageState extends State<CheckEmailPage> {
   }
 
   @override
-  void initState() {
-    super.initState();
-
-    // Disable resend button for the first 60 seconds when the page opens
-    setState(() {
-      _sentRecently = true;
-      _countdown = 60;
-    });
-
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (_countdown > 1) {
-        setState(() => _countdown--);
-      } else {
-        timer.cancel();
-        setState(() {
-          _sentRecently = false;
-          _countdown = 0;
-        });
-      }
-    });
-  }
-
-  @override
   void dispose() {
     _timer?.cancel();
     super.dispose();

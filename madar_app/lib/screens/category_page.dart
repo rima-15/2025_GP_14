@@ -6,10 +6,8 @@ import 'dart:convert';
 import 'directions_page.dart';
 import 'package:firebase_storage/firebase_storage.dart' as storage;
 import 'package:flutter/services.dart' show rootBundle;
-import 'package:madar_app/screens/unity_page.dart';
-import 'package:permission_handler/permission_handler.dart'; // ✅ NEW
+import 'package:cached_network_image/cached_network_image.dart';
 
-// here
 const kGreen = Color(0xFF777D63);
 
 class CategoryPage extends StatefulWidget {
@@ -28,21 +26,46 @@ class CategoryPage extends StatefulWidget {
   State<CategoryPage> createState() => _CategoryPageState();
 }
 
-class _CategoryPageState extends State<CategoryPage> {
+class _CategoryPageState extends State<CategoryPage>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true; // ✅ Keep state alive when navigating away
+
   final TextEditingController _searchCtrl = TextEditingController();
-  final Map<String, double?> _ratingCache = {};
+
+  // ✅ Static caches persist across navigation (keyed by category)
+  static final Map<String, Map<String, double?>> _staticRatingCache = {};
+  static final Map<String, Map<String, String>> _staticImageUrlCache = {};
+
+  // ✅ Get instance caches for this category
+  Map<String, double?> get _ratingCache {
+    final key = '${widget.venueId}_${widget.categoryId}';
+    return _staticRatingCache.putIfAbsent(key, () => {});
+  }
+
+  Map<String, String> get _imageUrlCache {
+    final key = '${widget.venueId}_${widget.categoryId}';
+    return _staticImageUrlCache.putIfAbsent(key, () => {});
+  }
 
   late String _apiKey;
   String _query = '';
 
   // Firebase Storage
   Future<String?> _getDownloadUrl(String path) async {
+    // ✅ Check cache first
+    if (_imageUrlCache.containsKey(path)) {
+      return _imageUrlCache[path];
+    }
+
     try {
       final ref = storage.FirebaseStorage.instanceFor(
         bucket: 'gs://madar-database.firebasestorage.app',
       ).ref(path);
 
       final url = await ref.getDownloadURL();
+      // ✅ Cache the URL
+      _imageUrlCache[path] = url;
       return url;
     } catch (e) {
       debugPrint('⚠️ Image load error: $e');
@@ -58,7 +81,11 @@ class _CategoryPageState extends State<CategoryPage> {
 
   @override
   void dispose() {
+    if (mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+    }
     _searchCtrl.dispose();
+
     super.dispose();
   }
 
@@ -67,7 +94,7 @@ class _CategoryPageState extends State<CategoryPage> {
     Uri uri;
 
     if (isSolitaire) {
-      // solitaire.json
+      //solitaire.json
       try {
         final jsonStr = await rootBundle.loadString(
           'assets/venues/solitaire.json',
@@ -82,7 +109,7 @@ class _CategoryPageState extends State<CategoryPage> {
           {
             'location': '$lat,$lng',
             'radius': '150',
-            'keyword': docId, // Document ID
+            'keyword': docId, //  Document ID
             'key': _apiKey,
           },
         );
@@ -128,44 +155,9 @@ class _CategoryPageState extends State<CategoryPage> {
     return (results.first['rating'] ?? 0).toDouble();
   }
 
-  // ✅ تعديل مهم: الآن تستقبل placeId وترسله لصفحة Unity
-  Future<void> _openNavigationAR(String placeId) async {
-    final status = await Permission.camera.request();
-
-    if (status.isGranted) {
-      if (!mounted) return;
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => UnityCameraPage(
-            isNavigation: true,
-            destinationPlaceId: placeId, // 👈 نمرر الـ placeId لليونتي
-          ),
-        ),
-      );
-    } else if (status.isPermanentlyDenied) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Camera permission is permanently denied. Please enable it from Settings.',
-          ),
-        ),
-      );
-      openAppSettings();
-    } else {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Camera permission is required to use AR.'),
-        ),
-      );
-    }
-  }
-  // ✅ END
-
   @override
   Widget build(BuildContext context) {
+    super.build(context); // ✅ Required for AutomaticKeepAliveClientMixin
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
@@ -173,7 +165,7 @@ class _CategoryPageState extends State<CategoryPage> {
         elevation: 0,
         leading: Container(
           margin: const EdgeInsets.all(8),
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
             color: Colors.white,
             shape: BoxShape.circle,
           ),
@@ -254,7 +246,9 @@ class _CategoryPageState extends State<CategoryPage> {
                 }).toList();
 
                 if (filteredDocs.isEmpty) {
-                  return const Center(child: Text('No results found.'));
+                  return const Center(
+                    child: Text('No results found. Try again'),
+                  );
                 }
 
                 return GridView.builder(
@@ -263,13 +257,11 @@ class _CategoryPageState extends State<CategoryPage> {
                     crossAxisCount: 2,
                     crossAxisSpacing: 12,
                     mainAxisSpacing: 12,
-                    childAspectRatio: 0.75,
+                    childAspectRatio: 0.75, // Adjusted for better content fit
                   ),
                   itemCount: filteredDocs.length,
-                  itemBuilder: (context, i) => _placeCard(
-                    filteredDocs[i].data(),
-                    filteredDocs[i].id, // 👈 هذا هو originalId = placeId
-                  ),
+                  itemBuilder: (context, i) =>
+                      _placeCard(filteredDocs[i].data(), filteredDocs[i].id),
                 );
               },
             ),
@@ -348,57 +340,10 @@ class _CategoryPageState extends State<CategoryPage> {
                         size: 32,
                       ),
                     )
-                  : FutureBuilder<String?>(
-                      future: _getDownloadUrl(img),
-                      builder: (context, snap) {
-                        if (snap.connectionState == ConnectionState.waiting) {
-                          return Container(
-                            width: double.infinity,
-                            height: double.infinity,
-                            color: Colors.grey[200],
-                            alignment: Alignment.center,
-                            child: FutureBuilder(
-                              future: Future.delayed(
-                                const Duration(milliseconds: 500),
-                              ),
-                              builder: (context, delaySnap) {
-                                if (delaySnap.connectionState ==
-                                    ConnectionState.waiting) {
-                                  return const SizedBox.shrink();
-                                }
-                                return CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: kGreen,
-                                  backgroundColor: kGreen.withOpacity(0.2),
-                                );
-                              },
-                            ),
-                          );
-                        }
-                        if (!snap.hasData ||
-                            snap.data == null ||
-                            snap.data!.isEmpty) {
-                          return Container(
-                            width: double.infinity,
-                            height: double.infinity,
-                            color: Colors.grey[200],
-                            child: const Icon(
-                              Icons.image_not_supported,
-                              color: Colors.grey,
-                              size: 32,
-                            ),
-                          );
-                        }
-                        return Image.network(
-                          snap.data!,
-                          width: double.infinity,
-                          height: double.infinity,
-                          fit: BoxFit.cover,
-                        );
-                      },
-                    ),
+                  : _buildPlaceImage(img),
             ),
 
+            //
             Expanded(
               flex: 4,
               child: Padding(
@@ -425,8 +370,12 @@ class _CategoryPageState extends State<CategoryPage> {
                         // 🧭 Navigation arrow button
                         InkWell(
                           onTap: () {
-                            // ✅ نفتح يونتي بمود Navigation ونرسل placeId (doc.id)
-                            _openNavigationAR(originalId);
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => DirectionsPage(placeName: name),
+                              ),
+                            );
                           },
                           child: const Icon(
                             Icons.north_east,
@@ -463,13 +412,9 @@ class _CategoryPageState extends State<CategoryPage> {
                               return r;
                             }),
                       builder: (context, snap) {
-                        if (!snap.hasData) {
-                          return const SizedBox.shrink();
-                        }
+                        if (!snap.hasData) return const SizedBox.shrink();
                         final r = snap.data ?? 0.0;
-                        if (r == 0.0) {
-                          return const SizedBox.shrink();
-                        }
+                        if (r == 0.0) return const SizedBox.shrink();
                         return Row(
                           children: [
                             const Icon(Icons.star, color: kGreen, size: 16),
@@ -493,6 +438,90 @@ class _CategoryPageState extends State<CategoryPage> {
           ],
         ),
       ),
+    );
+  }
+
+  // ✅ Build place image with caching - prevents reload on scroll
+  Widget _buildPlaceImage(String imgPath) {
+    // Check if we already have the URL cached
+    if (_imageUrlCache.containsKey(imgPath)) {
+      return CachedNetworkImage(
+        imageUrl: _imageUrlCache[imgPath]!,
+        cacheKey: imgPath,
+        width: double.infinity,
+        height: double.infinity,
+        fit: BoxFit.cover,
+        placeholder: (context, url) => Container(color: Colors.grey[200]),
+        errorWidget: (context, url, error) => Container(
+          width: double.infinity,
+          height: double.infinity,
+          color: Colors.grey[200],
+          child: const Icon(
+            Icons.image_not_supported,
+            color: Colors.grey,
+            size: 32,
+          ),
+        ),
+      );
+    }
+
+    // Not cached yet - load once and cache
+    return FutureBuilder<String?>(
+      future: _getDownloadUrl(imgPath),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return Container(
+            width: double.infinity,
+            height: double.infinity,
+            color: Colors.grey[200],
+            alignment: Alignment.center,
+            child: FutureBuilder(
+              future: Future.delayed(const Duration(milliseconds: 500)),
+              builder: (context, delaySnap) {
+                if (delaySnap.connectionState == ConnectionState.waiting) {
+                  return const SizedBox.shrink();
+                }
+                return CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: kGreen,
+                  backgroundColor: kGreen.withOpacity(0.2),
+                );
+              },
+            ),
+          );
+        }
+        if (!snap.hasData || snap.data == null || snap.data!.isEmpty) {
+          return Container(
+            width: double.infinity,
+            height: double.infinity,
+            color: Colors.grey[200],
+            child: const Icon(
+              Icons.image_not_supported,
+              color: Colors.grey,
+              size: 32,
+            ),
+          );
+        }
+        // URL loaded - now display with CachedNetworkImage
+        return CachedNetworkImage(
+          imageUrl: snap.data!,
+          cacheKey: imgPath,
+          width: double.infinity,
+          height: double.infinity,
+          fit: BoxFit.cover,
+          placeholder: (context, url) => Container(color: Colors.grey[200]),
+          errorWidget: (context, url, error) => Container(
+            width: double.infinity,
+            height: double.infinity,
+            color: Colors.grey[200],
+            child: const Icon(
+              Icons.image_not_supported,
+              color: Colors.grey,
+              size: 32,
+            ),
+          ),
+        );
+      },
     );
   }
 }

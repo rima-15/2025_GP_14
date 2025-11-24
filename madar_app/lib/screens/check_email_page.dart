@@ -63,10 +63,19 @@ class _CheckEmailPageState extends State<CheckEmailPage> {
         }
       });
     } catch (e) {
-      SnackbarHelper.showError(
-        context,
-        'Failed to resend verification email: $e',
-      );
+      String message = e.toString();
+
+      if (message.contains("too-many-requests")) {
+        SnackbarHelper.showError(
+          context,
+          "You’ve requested too many verification emails. Please wait a minute before trying again.",
+        );
+      } else {
+        SnackbarHelper.showError(
+          context,
+          "Failed to resend verification email. Please try again shortly.",
+        );
+      }
     } finally {
       if (mounted) setState(() => _sending = false);
     }

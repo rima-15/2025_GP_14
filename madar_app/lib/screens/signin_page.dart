@@ -84,7 +84,7 @@ class _SignInScreenState extends State<SignInScreen> {
           'lastName': prefs.getString('lastName') ?? '',
           'email': prefs.getString('email') ?? user.email,
           'phone': prefs.getString('phone') ?? '',
-          'createdAt': FieldValue.serverTimestamp(),
+          //  'createdAt': FieldValue.serverTimestamp(),
         });
 
         await prefs.clear();

@@ -2,16 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_embed_unity/flutter_embed_unity.dart';
 
 class UnityCameraPage extends StatefulWidget {
-  /// false = EXPLORE   ,  true = NAVIGATION
   final bool isNavigation;
-
-  /// 📌 جديد — placeId اللي نرسله ليونتي
-  final String? destinationPlaceId;
+  final String? placeId; // NEW: placeId for navigation mode
 
   const UnityCameraPage({
     super.key,
     this.isNavigation = false,
-    this.destinationPlaceId,
+    this.placeId, // NEW: receive placeId from navigation
   });
 
   @override
@@ -19,45 +16,83 @@ class UnityCameraPage extends StatefulWidget {
 }
 
 class _UnityCameraPageState extends State<UnityCameraPage> {
-  bool _sentDestination = false; // نتأكد ما نكرر الإرسال
+  // NEW: Track Unity initialization state
+  bool _isUnityReady = false;
+  String _statusMessage = "Initializing AR...";
 
   @override
   void initState() {
     super.initState();
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      Future.delayed(const Duration(milliseconds: 800), () {
-        final mode = widget.isNavigation ? "NAVIGATION" : "EXPLORE";
-        debugPrint("Flutter ➜ Unity | sending mode = $mode");
-
-        sendToUnity(
-          "FlutterListener", // GameObject
-          "OnFlutterMessage", // Method inside Unity
-          mode, // Parameter
-        );
-      });
-    });
+    // NEW: Start Unity initialization sequence
+    _initializeUnity();
   }
 
-  void _handleUnityMessage(String msg) {
-    debugPrint("From Unity: $msg");
+  // NEW: Initialize Unity with proper timing and logging
+  void _initializeUnity() async {
+    debugPrint("═══════════════════════════════════════════════════");
+    debugPrint("🚀 [FLUTTER → UNITY] Unity page opened");
+    debugPrint(
+      "   Mode: ${widget.isNavigation ? 'NAVIGATION' : 'EXPLORATION'}",
+    );
 
-    // 🚩 Unity يخبرنا أن المشهد جاهز
-    if (msg == "scene_loaded" &&
-        widget.isNavigation &&
-        widget.destinationPlaceId != null &&
-        !_sentDestination) {
-      _sentDestination = true;
-
-      sendToUnity(
-        "SharedPOIManager", // نفس اللي فيه JumpToPOIByPlaceId
-        "JumpToPOIByPlaceId", // الميثود
-        widget.destinationPlaceId!, // placeId من Flutter
-      );
-
+    if (widget.isNavigation) {
       debugPrint(
-        "🚀 Flutter ➜ Unity | sent placeId (${widget.destinationPlaceId}) for navigation",
-      );
+        "   Place ID: ${widget.placeId ?? 'NULL'}",
+      ); // NEW: Log placeId
+    }
+
+    debugPrint("═══════════════════════════════════════════════════");
+
+    // Wait for Unity to initialize (600ms as in your original code)
+    setState(() {
+      _statusMessage = "Loading AR environment...";
+    });
+
+    await Future.delayed(const Duration(milliseconds: 600));
+
+    // NEW: Prepare message based on mode
+    String message;
+
+    if (widget.isNavigation &&
+        widget.placeId != null &&
+        widget.placeId!.isNotEmpty) {
+      // UPDATED: Send navigation message with placeId
+      message = "NAVIGATION:${widget.placeId}";
+
+      debugPrint("📤 [FLUTTER → UNITY] Sending navigation request:");
+      debugPrint("   Message: $message");
+      debugPrint("   PlaceID: ${widget.placeId}");
+    } else {
+      // Send exploration message
+      message = "EXPLORE";
+
+      debugPrint("📤 [FLUTTER → UNITY] Sending exploration request:");
+      debugPrint("   Message: $message");
+    }
+
+    // Send message to Unity
+    try {
+      sendToUnity("FlutterListener", "OnFlutterMessage", message);
+
+      debugPrint("✅ [FLUTTER → UNITY] Message sent successfully");
+      debugPrint("   Target: FlutterListener.OnFlutterMessage");
+      debugPrint("   Content: $message");
+
+      setState(() {
+        _isUnityReady = true; // NEW: Mark Unity as ready
+        _statusMessage = widget.isNavigation
+            ? "Starting navigation..."
+            : "AR Ready";
+      });
+    } catch (e) {
+      // NEW: Error handling with logging
+      debugPrint("❌ [FLUTTER → UNITY] Failed to send message:");
+      debugPrint("   Error: $e");
+
+      setState(() {
+        _statusMessage = "Error initializing AR";
+      });
     }
   }
 
@@ -66,18 +101,60 @@ class _UnityCameraPageState extends State<UnityCameraPage> {
     return Scaffold(
       body: Stack(
         children: [
-          EmbedUnity(onMessageFromUnity: _handleUnityMessage),
+          // Unity View
+          EmbedUnity(
+            onMessageFromUnity: (msg) {
+              // NEW: Enhanced logging for Unity messages
+              debugPrint("═══════════════════════════════════════════════════");
+              debugPrint("📥 [UNITY → FLUTTER] Message received:");
+              debugPrint("   Content: $msg");
+              debugPrint("═══════════════════════════════════════════════════");
+            },
+          ),
 
+          // NEW: Loading indicator overlay (shown until Unity is ready)
+          if (!_isUnityReady)
+            Container(
+              color: Colors.black.withOpacity(0.7),
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const CircularProgressIndicator(
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        Color(0xFF787E65),
+                      ),
+                      strokeWidth: 3,
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      _statusMessage,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+          // Back button (always visible)
           Positioned(
             top: MediaQuery.of(context).padding.top + 12,
-            left: 16,
+            left: 12,
             child: GestureDetector(
-              onTap: () => Navigator.pop(context),
+              onTap: () {
+                // NEW: Log when user closes Unity
+                debugPrint("🔙 [FLUTTER] User closed Unity AR page");
+                Navigator.pop(context);
+              },
               child: Container(
                 width: 44,
                 height: 44,
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.8),
+                  color: Colors.white.withOpacity(0.85),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(

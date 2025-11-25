@@ -7,6 +7,8 @@ import 'directions_page.dart';
 import 'package:firebase_storage/firebase_storage.dart' as storage;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:madar_app/screens/unity_page.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 const kGreen = Color(0xFF777D63);
 
@@ -155,6 +157,124 @@ class _CategoryPageState extends State<CategoryPage>
     return (results.first['rating'] ?? 0).toDouble();
   }
 
+  // NEW: Validate if place has world position for AR navigation
+  Future<bool> _hasWorldPosition(String placeId) async {
+    try {
+      debugPrint("🔍 [FLUTTER] Checking world position for placeId: $placeId");
+
+      final doc = await FirebaseFirestore.instance
+          .collection('places')
+          .doc(placeId)
+          .get();
+
+      if (!doc.exists) {
+        debugPrint("⚠️ [FLUTTER] Place document does not exist: $placeId");
+        return false;
+      }
+
+      final data = doc.data();
+      if (data == null) {
+        debugPrint("⚠️ [FLUTTER] Place data is null: $placeId");
+        return false;
+      }
+
+      // NEW: Check for world_position field (adjust field name based on your Firebase structure)
+      final hasPosition =
+          data.containsKey('world_position') && data['world_position'] != null;
+
+      debugPrint("📍 [FLUTTER] World position check result:");
+      debugPrint("   PlaceID: $placeId");
+      debugPrint("   Has world_position: $hasPosition");
+
+      if (hasPosition) {
+        debugPrint("   Position data: ${data['world_position']}");
+      }
+
+      return hasPosition;
+    } catch (e) {
+      debugPrint("❌ [FLUTTER] Error checking world position: $e");
+      return false;
+    }
+  }
+
+  // UPDATED: Open navigation AR with validation and placeId passing
+  Future<void> _openNavigationAR(String placeId, String placeName) async {
+    debugPrint("═══════════════════════════════════════════════════");
+    debugPrint("🧭 [FLUTTER] Navigation arrow tapped");
+    debugPrint("   Place: $placeName");
+    debugPrint("   PlaceID: $placeId");
+    debugPrint("═══════════════════════════════════════════════════");
+
+    // NEW: Validate world position before proceeding
+    final hasPosition = await _hasWorldPosition(placeId);
+
+    if (!hasPosition) {
+      debugPrint(
+        "⚠️ [FLUTTER] Place does not have world position - blocking navigation",
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text(
+            "This place doesn't support AR navigation yet.",
+            style: TextStyle(fontSize: 15),
+          ),
+          backgroundColor: const Color(0xFF787E65),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+
+    debugPrint(
+      "✅ [FLUTTER] World position validated - proceeding with camera permission",
+    );
+
+    // Request camera permission
+    final status = await Permission.camera.request();
+
+    if (status.isGranted) {
+      debugPrint("✅ [FLUTTER] Camera permission granted");
+      debugPrint("🚀 [FLUTTER] Opening Unity in NAVIGATION mode");
+      debugPrint("   Passing PlaceID: $placeId");
+
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => UnityCameraPage(
+            isNavigation: true,
+            placeId: placeId, // NEW: Pass the placeId
+          ),
+        ),
+      );
+    } else if (status.isPermanentlyDenied) {
+      debugPrint("⚠️ [FLUTTER] Camera permission permanently denied");
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Camera permission is permanently denied. Please enable it from Settings.',
+          ),
+        ),
+      );
+      openAppSettings();
+    } else {
+      debugPrint("⚠️ [FLUTTER] Camera permission denied");
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Camera permission is required to use AR.'),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context); // ✅ Required for AutomaticKeepAliveClientMixin
@@ -209,46 +329,37 @@ class _CategoryPageState extends State<CategoryPage>
                         : widget.venueId,
                   )
                   .where('category_IDs', arrayContains: widget.categoryId)
-                  .orderBy('placeName')
                   .snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
-                  return Center(
-                    child: CircularProgressIndicator(
-                      color: kGreen,
-                      backgroundColor: kGreen.withOpacity(0.2),
-                    ),
+                  return const Center(
+                    child: CircularProgressIndicator(color: kGreen),
                   );
                 }
+
                 if (snapshot.hasError) {
+                  return Center(child: Text('Error: ${snapshot.error}'));
+                }
+
+                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                   return const Center(
-                    child: Text(
-                      'Something went wrong. Please try again later.',
-                      style: TextStyle(color: Colors.black54),
-                      textAlign: TextAlign.center,
-                    ),
+                    child: Text('No places found in this category.'),
                   );
                 }
 
-                final docs = snapshot.data?.docs ?? [];
-                if (docs.isEmpty) {
-                  return const Center(child: Text('No places found.'));
-                }
+                // Client-side filtering
+                final allDocs = snapshot.data!.docs;
+                final filtered = _query.trim().isEmpty
+                    ? allDocs
+                    : allDocs.where((doc) {
+                        final name = (doc.data()['placeName'] as String? ?? '')
+                            .toLowerCase();
+                        final q = _query.toLowerCase();
+                        return name.contains(q);
+                      }).toList();
 
-                final filteredDocs = docs.where((doc) {
-                  if (_query.trim().isEmpty) return true;
-                  final data = doc.data();
-                  final name = (data['placeName'] ?? '')
-                      .toString()
-                      .toLowerCase();
-                  final q = _query.toLowerCase();
-                  return name.contains(q);
-                }).toList();
-
-                if (filteredDocs.isEmpty) {
-                  return const Center(
-                    child: Text('No results found. Try again'),
-                  );
+                if (filtered.isEmpty) {
+                  return const Center(child: Text('No matching places found.'));
                 }
 
                 return GridView.builder(
@@ -257,11 +368,21 @@ class _CategoryPageState extends State<CategoryPage>
                     crossAxisCount: 2,
                     crossAxisSpacing: 12,
                     mainAxisSpacing: 12,
-                    childAspectRatio: 0.75, // Adjusted for better content fit
+                    childAspectRatio: 0.75,
                   ),
-                  itemCount: filteredDocs.length,
-                  itemBuilder: (context, i) =>
-                      _placeCard(filteredDocs[i].data(), filteredDocs[i].id),
+                  itemCount: filtered.length,
+                  itemBuilder: (context, index) {
+                    final doc = filtered[index];
+                    final data = doc.data();
+                    final originalId = doc.id;
+
+                    // UPDATED: Pass both placeId and placeName to the card
+                    return _placeCard(
+                      data,
+                      originalId,
+                      data['placeName'] ?? 'Unknown',
+                    );
+                  },
                 );
               },
             ),
@@ -271,13 +392,12 @@ class _CategoryPageState extends State<CategoryPage>
     );
   }
 
-  // 🔍 Search bar - exact style from home page
   Widget _buildSearchBar() => Container(
     margin: const EdgeInsets.symmetric(horizontal: 16),
     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
     decoration: BoxDecoration(
       color: Colors.white,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(12),
       border: Border.all(color: Colors.grey.shade300, width: 1),
     ),
     child: Row(
@@ -304,7 +424,12 @@ class _CategoryPageState extends State<CategoryPage>
     ),
   );
 
-  Widget _placeCard(Map<String, dynamic> data, String originalId) {
+  // UPDATED: Accept placeId and placeName as parameters
+  Widget _placeCard(
+    Map<String, dynamic> data,
+    String placeId,
+    String placeName,
+  ) {
     final name = data['placeName'] ?? '';
     final desc = data['placeDescription'] ?? '';
     final img = data['placeImage'] ?? '';
@@ -367,15 +492,11 @@ class _CategoryPageState extends State<CategoryPage>
                             ),
                           ),
                         ),
-                        // 🧭 Navigation arrow button
+                        // 🧭 Navigation arrow button - UPDATED
                         InkWell(
                           onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => DirectionsPage(placeName: name),
-                              ),
-                            );
+                            // UPDATED: Pass placeId and placeName to validation
+                            _openNavigationAR(placeId, placeName);
                           },
                           child: const Icon(
                             Icons.north_east,
@@ -405,10 +526,10 @@ class _CategoryPageState extends State<CategoryPage>
 
                     // - Green star + number
                     FutureBuilder<double?>(
-                      future: _ratingCache[originalId] != null
-                          ? Future.value(_ratingCache[originalId])
-                          : _getLiveRating(originalId).then((r) {
-                              _ratingCache[originalId] = r;
+                      future: _ratingCache[placeId] != null
+                          ? Future.value(_ratingCache[placeId])
+                          : _getLiveRating(placeId).then((r) {
+                              _ratingCache[placeId] = r;
                               return r;
                             }),
                       builder: (context, snap) {

@@ -180,7 +180,7 @@ class _CategoryPageState extends State<CategoryPage>
 
       // NEW: Check for world_position field (adjust field name based on your Firebase structure)
       final hasPosition =
-          data.containsKey('world_position') && data['world_position'] != null;
+          data.containsKey('worldPosition') && data['worldPosition'] != null;
 
       debugPrint("📍 [FLUTTER] World position check result:");
       debugPrint("   PlaceID: $placeId");

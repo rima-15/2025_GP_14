@@ -13,6 +13,52 @@ class AppColors {
 }
 
 // ============================================================================
+// UNIFIED LOADING WIDGETS
+// ============================================================================
+
+/// Full-page loading indicator - Use when the entire page content is loading
+/// Example: Profile page loading user data, Home page initial load
+class AppLoadingIndicator extends StatelessWidget {
+  const AppLoadingIndicator({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: CircularProgressIndicator(
+        color: AppColors.kGreen,
+        backgroundColor: AppColors.kGreen.withOpacity(0.2),
+      ),
+    );
+  }
+}
+
+/// Inline loading indicator - Use for buttons or small inline loading states
+/// Example: "Save Changes" button, "Update Password" button
+class InlineLoadingIndicator extends StatelessWidget {
+  final double? size; // Optional custom size
+
+  const InlineLoadingIndicator({super.key, this.size});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final indicatorSize =
+            size ?? (constraints.maxHeight * 0.6).clamp(16.0, 24.0);
+        return SizedBox(
+          width: indicatorSize,
+          height: indicatorSize,
+          child: CircularProgressIndicator(
+            color: Colors.white,
+            strokeWidth: 2.5,
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ============================================================================
 // ERROR MESSAGE WIDGET (Bottom of page)
 // ============================================================================
 class ErrorMessageBox extends StatelessWidget {

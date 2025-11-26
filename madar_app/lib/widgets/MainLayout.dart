@@ -116,7 +116,7 @@ class _MainLayoutState extends State<MainLayout> {
           ? SizedBox(
               height: 50,
               child: Image.asset(
-                'images/Madar2-resized4.png',
+                'images/Madar2-resized5.png',
                 fit: BoxFit.contain,
               ),
             )
@@ -228,13 +228,7 @@ class _MainLayoutState extends State<MainLayout> {
                       _buildMenuItem(
                         icon: Icons.help_outline,
                         title: 'Help & Support',
-                        onTap: () {
-                          Navigator.pop(context);
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (_) => const HelpPage()),
-                          );
-                        },
+                        onTap: () {}, // tap does nothing
                       ),
                     ],
                   ),

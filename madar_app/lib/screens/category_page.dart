@@ -187,7 +187,7 @@ class _CategoryPageState extends State<CategoryPage>
       debugPrint("   Has world_position: $hasPosition");
 
       if (hasPosition) {
-        debugPrint("   Position data: ${data['world_position']}");
+        debugPrint("   Position data: ${data['worldPosition']}");
       }
 
       return hasPosition;
@@ -197,10 +197,64 @@ class _CategoryPageState extends State<CategoryPage>
     }
   }
 
+  // NEW FIX: Show dialog popup instead of SnackBar
+  void _showNoPositionDialog(String placeName) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Row(
+            children: [
+              Icon(Icons.info_outline, color: kGreen, size: 28),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  'AR Navigation Unavailable',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    color: kGreen,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          content: Text(
+            '"$placeName" doesn\'t support AR navigation yet.\n\nPlease check back later or choose another place.',
+            style: const TextStyle(
+              fontSize: 15,
+              height: 1.4,
+              color: Colors.black87,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              style: TextButton.styleFrom(
+                foregroundColor: kGreen,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
+              ),
+              child: const Text(
+                'OK',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   // UPDATED: Open navigation AR with validation and placeId passing
   Future<void> _openNavigationAR(String placeId, String placeName) async {
     debugPrint("═══════════════════════════════════════════════════");
-    debugPrint("🧭 [FLUTTER] Navigation arrow tapped");
+    debugPrint("🧭 [FLUTTER] Navigation requested");
     debugPrint("   Place: $placeName");
     debugPrint("   PlaceID: $placeId");
     debugPrint("═══════════════════════════════════════════════════");
@@ -214,18 +268,9 @@ class _CategoryPageState extends State<CategoryPage>
       );
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text(
-            "This place doesn't support AR navigation yet.",
-            style: TextStyle(fontSize: 15),
-          ),
-          backgroundColor: const Color(0xFF787E65),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          duration: const Duration(seconds: 3),
-        ),
-      );
+
+      // NEW FIX: Show dialog instead of SnackBar
+      _showNoPositionDialog(placeName);
       return;
     }
 
@@ -424,7 +469,7 @@ class _CategoryPageState extends State<CategoryPage>
     ),
   );
 
-  // UPDATED: Accept placeId and placeName as parameters
+  // NEW FIX: Entire card is now tappable
   Widget _placeCard(
     Map<String, dynamic> data,
     String placeId,
@@ -434,129 +479,127 @@ class _CategoryPageState extends State<CategoryPage>
     final desc = data['placeDescription'] ?? '';
     final img = data['placeImage'] ?? '';
 
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Square aspect ratio
-            Expanded(
-              flex: 5,
-              child: img.isEmpty
-                  ? Container(
-                      width: double.infinity,
-                      height: double.infinity,
-                      color: Colors.grey[200],
-                      child: const Icon(
-                        Icons.image_not_supported,
-                        color: Colors.grey,
-                        size: 32,
-                      ),
-                    )
-                  : _buildPlaceImage(img),
-            ),
-
-            //
-            Expanded(
-              flex: 4,
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Place name with navigation arrow
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: Color.fromARGB(255, 44, 44, 44),
-                            ),
-                          ),
-                        ),
-                        // 🧭 Navigation arrow button - UPDATED
-                        InkWell(
-                          onTap: () {
-                            // UPDATED: Pass placeId and placeName to validation
-                            _openNavigationAR(placeId, placeName);
-                          },
-                          child: const Icon(
-                            Icons.north_east,
-                            color: kGreen,
-                            size: 20,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-
-                    // Description - flexible to prevent overflow
-                    Flexible(
-                      child: Text(
-                        desc,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Colors.black54,
-                          height: 1.3,
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 6),
-
-                    // - Green star + number
-                    FutureBuilder<double?>(
-                      future: _ratingCache[placeId] != null
-                          ? Future.value(_ratingCache[placeId])
-                          : _getLiveRating(placeId).then((r) {
-                              _ratingCache[placeId] = r;
-                              return r;
-                            }),
-                      builder: (context, snap) {
-                        if (!snap.hasData) return const SizedBox.shrink();
-                        final r = snap.data ?? 0.0;
-                        if (r == 0.0) return const SizedBox.shrink();
-                        return Row(
-                          children: [
-                            const Icon(Icons.star, color: kGreen, size: 16),
-                            const SizedBox(width: 4),
-                            Text(
-                              r.toStringAsFixed(1),
-                              style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.black87,
-                              ),
-                            ),
-                          ],
-                        );
-                      },
-                    ),
-                  ],
-                ),
-              ),
+    return InkWell(
+      // NEW FIX: Make entire card tappable
+      onTap: () {
+        debugPrint("🔘 [FLUTTER] Card tapped: $placeName");
+        _openNavigationAR(placeId, placeName);
+      },
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
             ),
           ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Square aspect ratio
+              Expanded(
+                flex: 5,
+                child: img.isEmpty
+                    ? Container(
+                        width: double.infinity,
+                        height: double.infinity,
+                        color: Colors.grey[200],
+                        child: const Icon(
+                          Icons.image_not_supported,
+                          color: Colors.grey,
+                          size: 32,
+                        ),
+                      )
+                    : _buildPlaceImage(img),
+              ),
+
+              //
+              Expanded(
+                flex: 4,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Place name with navigation arrow (visual indicator only)
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: Color.fromARGB(255, 44, 44, 44),
+                              ),
+                            ),
+                          ),
+                          // 🧭 Navigation arrow (visual indicator - card handles tap)
+                          const Icon(Icons.north_east, color: kGreen, size: 20),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+
+                      // Description - flexible to prevent overflow
+                      Flexible(
+                        child: Text(
+                          desc,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.black54,
+                            height: 1.3,
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 6),
+
+                      // - Green star + number
+                      FutureBuilder<double?>(
+                        future: _ratingCache[placeId] != null
+                            ? Future.value(_ratingCache[placeId])
+                            : _getLiveRating(placeId).then((r) {
+                                _ratingCache[placeId] = r;
+                                return r;
+                              }),
+                        builder: (context, snap) {
+                          if (!snap.hasData) return const SizedBox.shrink();
+                          final r = snap.data ?? 0.0;
+                          if (r == 0.0) return const SizedBox.shrink();
+                          return Row(
+                            children: [
+                              const Icon(Icons.star, color: kGreen, size: 16),
+                              const SizedBox(width: 4),
+                              Text(
+                                r.toStringAsFixed(1),
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.black87,
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -99,6 +99,7 @@ class _UnityCameraPageState extends State<UnityCameraPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       body: Stack(
         children: [
           // Unity View

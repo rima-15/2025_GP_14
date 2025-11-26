@@ -19,6 +19,10 @@ class _ProfilePageState extends State<ProfilePage> {
   final _emailCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
 
+  final _firstNameFocus = FocusNode();
+  final _lastNameFocus = FocusNode();
+  final _phoneFocus = FocusNode();
+
   bool _loading = true;
   bool _saving = false;
   bool _hasChanges = false;
@@ -47,10 +51,16 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   void dispose() {
+    if (mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+    }
     _firstNameCtrl.dispose();
     _lastNameCtrl.dispose();
     _emailCtrl.dispose();
     _phoneCtrl.dispose();
+    _firstNameFocus.dispose();
+    _lastNameFocus.dispose();
+    _phoneFocus.dispose();
     _messageManager.dispose();
     super.dispose();
   }
@@ -149,6 +159,18 @@ class _ProfilePageState extends State<ProfilePage> {
 
     // Validate all fields first
     if (!_formKey.currentState!.validate()) {
+      // Focus the first invalid field
+      final firstName = _firstNameCtrl.text;
+      final lastName = _lastNameCtrl.text;
+      final phone = _phoneCtrl.text;
+
+      if (_validateFirstName(firstName) != null) {
+        _firstNameFocus.requestFocus();
+      } else if (_validateLastName(lastName) != null) {
+        _lastNameFocus.requestFocus();
+      } else if (_validatePhone(phone) != null) {
+        _phoneFocus.requestFocus();
+      }
       return;
     }
 
@@ -270,7 +292,7 @@ class _ProfilePageState extends State<ProfilePage> {
         ),
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? const AppLoadingIndicator()
           : SingleChildScrollView(
               padding: const EdgeInsets.all(24),
               child: Form(
@@ -296,6 +318,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     // First Name
                     StyledTextField(
                       controller: _firstNameCtrl,
+                      focusNode: _firstNameFocus,
                       label: 'First Name',
                       hint: 'Enter first name',
                       validator: (v) => _validateFirstName(v ?? ''),
@@ -305,6 +328,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     // Last Name
                     StyledTextField(
                       controller: _lastNameCtrl,
+                      focusNode: _lastNameFocus,
                       label: 'Last Name',
                       hint: 'Enter last name',
                       validator: (v) => _validateLastName(v ?? ''),
@@ -323,6 +347,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     // Phone
                     StyledTextField(
                       controller: _phoneCtrl,
+                      focusNode: _phoneFocus,
                       label: 'Phone Number',
                       hint: 'Enter 9 digits',
                       keyboardType: TextInputType.number,
@@ -345,22 +370,16 @@ class _ProfilePageState extends State<ProfilePage> {
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppColors.kGreen,
                           foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+                            borderRadius: BorderRadius.circular(10),
                           ),
+
                           elevation: 0,
                           disabledBackgroundColor: Colors.grey[250],
                         ),
                         child: _saving
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2,
-                                ),
-                              )
+                            ? const InlineLoadingIndicator()
                             : const Text(
                                 'Save Changes',
                                 style: TextStyle(

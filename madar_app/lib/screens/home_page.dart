@@ -13,6 +13,7 @@ import 'package:firebase_storage/firebase_storage.dart' as storage;
 import 'package:flutter/foundation.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:madar_app/api/venue_cache_service.dart';
+import 'package:madar_app/widgets/app_widgets.dart';
 
 const double _riyadhLat = 24.7136;
 const double _riyadhLng = 46.6753;
@@ -25,7 +26,18 @@ class HomePage extends StatefulWidget {
   HomePageState createState() => HomePageState();
 }
 
-class HomePageState extends State<HomePage> {
+class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
+  @override
+  void dispose() {
+    if (mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+    }
+    super.dispose();
+  }
+
+  @override
+  bool get wantKeepAlive => true; // ✅ Keep state alive when navigating away
+
   final storage.FirebaseStorage _coversStorage =
       storage.FirebaseStorage.instanceFor(
         bucket: 'gs://madar-database.firebasestorage.app',
@@ -38,19 +50,25 @@ class HomePageState extends State<HomePage> {
   bool _loading = true;
   String? _error;
 
-  List<VenueData> _venues = [];
+  // ✅ Static variables persist across widget rebuilds (survive navigation)
+  static List<VenueData> _staticAllVenues = []; // Master list loaded once
+  static final Map<String, String> _staticImageCache = {};
+  static final Map<String, double> _staticRatingCache = {};
+  static bool _hasLoadedOnce = false; // Track if we've loaded data before
+
+  // ✅ Instance variables for UI state
+  List<VenueData> _venues = []; // Filtered/displayed list
   double baseLat = _riyadhLat, baseLng = _riyadhLng;
 
   late final VenueCacheService _cache = VenueCacheService(
     FirebaseFirestore.instance,
   );
 
-  int _loadToken = 0;
-  bool _isLoadingNow = false;
-
-  final Map<String, String> _imageCache = {};
-  final Map<String, List<VenueData>> _tabCache = {};
-  final Map<String, double> _ratingCache = {};
+  // ✅ Use static cache references in instance
+  Map<String, String> get _imageCache => _staticImageCache;
+  Map<String, double> get _ratingCache => _staticRatingCache;
+  List<VenueData> get _allVenues => _staticAllVenues;
+  set _allVenues(List<VenueData> value) => _staticAllVenues = value;
 
   @override
   void initState() {
@@ -59,6 +77,16 @@ class HomePageState extends State<HomePage> {
   }
 
   Future<void> _initAndLoad() async {
+    // ✅ Check static flag - if already loaded, just display cached data
+    if (_hasLoadedOnce && _allVenues.isNotEmpty) {
+      // Already loaded - just refresh the display instantly
+      setState(() {
+        _loading = false;
+      });
+      _applyLocalFilterAndSort();
+      return;
+    }
+
     setState(() {
       _loading = true;
       _error = null;
@@ -82,7 +110,7 @@ class HomePageState extends State<HomePage> {
         }
       } catch (_) {}
 
-      await _ensureTabLoaded();
+      await _loadAllVenues();
       _applyLocalFilterAndSort();
     } catch (e) {
       setState(() {
@@ -93,30 +121,12 @@ class HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _ensureTabLoaded() async {
-    final tab = filters[selectedFilterIndex];
-    if (_tabCache.containsKey(tab)) return;
-    await _loadTab(tab);
-  }
-
-  Future<void> _loadTab(String tab) async {
-    final myToken = ++_loadToken;
-    if (_isLoadingNow) return;
-    _isLoadingNow = true;
-
+  // ✅ Load ALL venues once from Firestore
+  Future<void> _loadAllVenues() async {
     try {
       final col = FirebaseFirestore.instance.collection('venues');
-      Query<Map<String, dynamic>> q = col;
-      if (tab == 'Malls') {
-        q = q.where('venueType', isEqualTo: 'malls');
-      } else if (tab == 'Stadiums') {
-        q = q.where('venueType', isEqualTo: 'stadiums');
-      } else if (tab == 'Airports') {
-        q = q.where('venueType', isEqualTo: 'airports');
-      }
-
-      final snap = await q.get();
-      debugPrint('venues fetched: ${snap.docs.length} (tab=$tab)');
+      final snap = await col.get();
+      debugPrint('🟢 All venues fetched: ${snap.docs.length}');
 
       final items = <VenueData>[];
       for (final doc in snap.docs) {
@@ -171,8 +181,9 @@ class HomePageState extends State<HomePage> {
             (a.distanceMeters ?? 1e12).compareTo(b.distanceMeters ?? 1e12),
       );
 
-      if (mounted && myToken == _loadToken) {
-        _tabCache[tab] = items;
+      if (mounted) {
+        _allVenues = items;
+        _hasLoadedOnce = true; // ✅ Mark as loaded
         setState(() => _loading = false);
       }
 
@@ -185,8 +196,6 @@ class HomePageState extends State<HomePage> {
           _loading = false;
         });
       }
-    } finally {
-      _isLoadingNow = false;
     }
   }
 
@@ -227,23 +236,35 @@ class HomePageState extends State<HomePage> {
       _ratingCache[v.placeId!] = r;
 
       if (!mounted) return;
-      final tab = filters[selectedFilterIndex];
-      final list = _tabCache[tab];
-      if (list != null) {
-        for (final it in list) {
-          if (it.placeId == v.placeId) {
-            it.rating = r;
-            break;
-          }
+
+      // ✅ Update rating in master list
+      for (final it in _allVenues) {
+        if (it.placeId == v.placeId) {
+          it.rating = r;
+          break;
         }
       }
+
       _applyLocalFilterAndSort();
     } catch (_) {}
   }
 
+  // ✅ Client-side filtering - NO network calls, NO reload
   void _applyLocalFilterAndSort() {
     final tab = filters[selectedFilterIndex];
-    final base = _tabCache[tab] ?? [];
+    List<VenueData> base = _allVenues;
+
+    // Apply filter based on selected tab
+    if (tab == 'Malls') {
+      base = _allVenues.where((v) => v.category == 'malls').toList();
+    } else if (tab == 'Stadiums') {
+      base = _allVenues.where((v) => v.category == 'stadiums').toList();
+    } else if (tab == 'Airports') {
+      base = _allVenues.where((v) => v.category == 'airports').toList();
+    }
+    // else tab == 'All', use all venues
+
+    // Apply search query if present
     List<VenueData> out = base;
     if (_query.isNotEmpty) {
       final ql = _query.toLowerCase();
@@ -251,11 +272,13 @@ class HomePageState extends State<HomePage> {
           .where((v) => (v.name ?? '').toLowerCase().contains(ql))
           .toList();
     }
+
     setState(() => _venues = out);
   }
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // ✅ Required for AutomaticKeepAliveClientMixin
     return Scaffold(
       backgroundColor: Colors.white,
       body: Column(
@@ -273,16 +296,13 @@ class HomePageState extends State<HomePage> {
           // ✅ Main content
           Expanded(
             child: _loading
-                ? Center(
-                    child: CircularProgressIndicator(
-                      color: kPrimaryGreen,
-                      backgroundColor: kPrimaryGreen.withOpacity(0.2),
-                    ),
-                  )
+                ? const AppLoadingIndicator()
                 : _error != null
                 ? Center(child: Text('Error: $_error'))
                 : _venues.isEmpty
-                ? const Center(child: Text('No venues'))
+                ? const Center(
+                    child: Text('No results found. Try again'),
+                  ) //no result in search msg
                 : _buildVenueList(),
           ),
         ],
@@ -311,7 +331,7 @@ class HomePageState extends State<HomePage> {
                 _applyLocalFilterAndSort();
               }),
               decoration: const InputDecoration(
-                hintText: 'Search for a place',
+                hintText: 'Search for a venue',
                 hintStyle: TextStyle(color: Color(0xFF9E9E9E)),
                 border: InputBorder.none,
                 enabledBorder: InputBorder.none,
@@ -339,13 +359,11 @@ class HomePageState extends State<HomePage> {
           final isSelected = idx == selectedFilterIndex;
           return GestureDetector(
             onTap: () {
+              // ✅ Instant client-side filtering - NO loading, NO network
               setState(() {
                 selectedFilterIndex = idx;
-                _loading = true;
               });
-              _ensureTabLoaded().then((_) {
-                _applyLocalFilterAndSort();
-              });
+              _applyLocalFilterAndSort();
             },
             child: Container(
               margin: const EdgeInsets.only(right: 8),
@@ -363,8 +381,10 @@ class HomePageState extends State<HomePage> {
                   filters[idx],
                   style: TextStyle(
                     fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: isSelected ? Colors.white : Colors.black87,
+                    fontWeight: FontWeight.w500,
+                    color: isSelected
+                        ? Colors.white
+                        : Colors.grey.shade500, // filters font color
                   ),
                 ),
               ),
@@ -497,52 +517,7 @@ class HomePageState extends State<HomePage> {
             // ✅ Background image
             ClipRRect(
               borderRadius: BorderRadius.circular(16),
-              child: FutureBuilder<String?>(
-                future: _imageUrlFor(v),
-                builder: (context, snap) {
-                  if (snap.connectionState == ConnectionState.waiting) {
-                    return Container(
-                      color: Colors.grey.shade200,
-                      child: Center(
-                        child: FutureBuilder(
-                          future: Future.delayed(
-                            const Duration(milliseconds: 500),
-                          ),
-                          builder: (context, delaySnap) {
-                            if (delaySnap.connectionState ==
-                                ConnectionState.waiting) {
-                              return const SizedBox.shrink();
-                            }
-                            return CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: kPrimaryGreen,
-                              backgroundColor: kPrimaryGreen.withOpacity(0.2),
-                            );
-                          },
-                        ),
-                      ),
-                    );
-                  }
-                  if (snap.hasError ||
-                      snap.data == null ||
-                      snap.data!.isEmpty) {
-                    return Container(
-                      color: Colors.grey.shade200,
-                      child: Icon(
-                        Icons.image_not_supported,
-                        color: Colors.grey.shade400,
-                        size: 48,
-                      ),
-                    );
-                  }
-                  return CachedNetworkImage(
-                    imageUrl: snap.data!,
-                    width: double.infinity,
-                    height: double.infinity,
-                    fit: BoxFit.cover,
-                  );
-                },
-              ),
+              child: _buildVenueImage(v),
             ),
             // ✅ Gradient overlay for text readability
             Container(
@@ -627,6 +602,97 @@ class HomePageState extends State<HomePage> {
       }),
     );
   }
+
+  // ✅ Build venue image with smart caching - skips loading if already cached
+  Widget _buildVenueImage(VenueData v) {
+    final String? storagePath = (v.thumbPath?.isNotEmpty == true)
+        ? v.thumbPath
+        : (v.imagePaths.isNotEmpty ? v.imagePaths.first : null);
+
+    if (storagePath == null || storagePath.isEmpty) {
+      return Container(
+        color: Colors.grey.shade200,
+        child: Icon(
+          Icons.image_not_supported,
+          color: Colors.grey.shade400,
+          size: 48,
+        ),
+      );
+    }
+
+    // ✅ If already cached, show immediately without loading indicator
+    if (_imageCache.containsKey(storagePath)) {
+      return CachedNetworkImage(
+        imageUrl: _imageCache[storagePath]!,
+        cacheKey: storagePath,
+        width: double.infinity,
+        height: double.infinity,
+        fit: BoxFit.cover,
+        placeholder: (context, url) => Container(color: Colors.grey.shade200),
+        errorWidget: (context, url, error) => Container(
+          color: Colors.grey.shade200,
+          child: Icon(
+            Icons.image_not_supported,
+            color: Colors.grey.shade400,
+            size: 48,
+          ),
+        ),
+      );
+    }
+
+    // Not cached - load with indicator
+    return FutureBuilder<String?>(
+      future: _imageUrlFor(v),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return Container(
+            color: Colors.grey.shade200,
+            child: Center(
+              child: FutureBuilder(
+                future: Future.delayed(const Duration(milliseconds: 500)),
+                builder: (context, delaySnap) {
+                  if (delaySnap.connectionState == ConnectionState.waiting) {
+                    return const SizedBox.shrink();
+                  }
+                  return CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: kPrimaryGreen,
+                    backgroundColor: kPrimaryGreen.withOpacity(0.2),
+                  );
+                },
+              ),
+            ),
+          );
+        }
+        if (snap.hasError || snap.data == null || snap.data!.isEmpty) {
+          return Container(
+            color: Colors.grey.shade200,
+            child: Icon(
+              Icons.image_not_supported,
+              color: Colors.grey.shade400,
+              size: 48,
+            ),
+          );
+        }
+        return CachedNetworkImage(
+          imageUrl: snap.data!,
+          cacheKey: storagePath,
+          width: double.infinity,
+          height: double.infinity,
+          fit: BoxFit.cover,
+          placeholder: (context, url) => Container(color: Colors.grey.shade200),
+          errorWidget: (context, url, error) => Container(
+            color: Colors.grey.shade200,
+            child: Icon(
+              Icons.image_not_supported,
+              color: Colors.grey.shade400,
+              size: 48,
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
 
 class VenueData {
@@ -656,3 +722,4 @@ class VenueData {
     this.imagePaths = const [],
   });
 }
+/////

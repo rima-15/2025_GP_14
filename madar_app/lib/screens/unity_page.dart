@@ -15,7 +15,8 @@ class UnityCameraPage extends StatefulWidget {
   State<UnityCameraPage> createState() => _UnityCameraPageState();
 }
 
-class _UnityCameraPageState extends State<UnityCameraPage> {
+class _UnityCameraPageState extends State<UnityCameraPage>
+    with WidgetsBindingObserver {
   // NEW: Track Unity initialization state
   bool _isUnityReady = false;
   String _statusMessage = "Initializing AR...";
@@ -24,8 +25,52 @@ class _UnityCameraPageState extends State<UnityCameraPage> {
   void initState() {
     super.initState();
 
+    // NEW: Add lifecycle observer
+    WidgetsBinding.instance.addObserver(this);
+
     // NEW: Start Unity initialization sequence
     _initializeUnity();
+  }
+
+  @override
+  void dispose() {
+    // Remove lifecycle observer
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  // ✅ NEW: Handle app lifecycle changes (when returning from another page)
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+
+    if (state == AppLifecycleState.resumed) {
+      // App resumed - send mode message again
+      debugPrint("═══════════════════════════════════════════════════");
+      debugPrint("🔄 [FLUTTER] App resumed - resending mode message");
+      debugPrint("═══════════════════════════════════════════════════");
+      _sendModeMessage();
+    }
+  }
+
+  // ✅ NEW: Detect when this widget becomes visible again (after popping another page)
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+
+    // If Unity is already ready and we're becoming visible again, resend message
+    if (_isUnityReady && ModalRoute.of(context)?.isCurrent == true) {
+      debugPrint("═══════════════════════════════════════════════════");
+      debugPrint("🔄 [FLUTTER] Page became active - resending mode message");
+      debugPrint("═══════════════════════════════════════════════════");
+
+      // Small delay to ensure Unity is ready to receive
+      Future.delayed(const Duration(milliseconds: 200), () {
+        if (mounted) {
+          _sendModeMessage();
+        }
+      });
+    }
   }
 
   // NEW: Initialize Unity with proper timing and logging
@@ -51,7 +96,20 @@ class _UnityCameraPageState extends State<UnityCameraPage> {
 
     await Future.delayed(const Duration(milliseconds: 600));
 
-    // NEW: Prepare message based on mode
+    // Send initial mode message
+    _sendModeMessage();
+
+    setState(() {
+      _isUnityReady = true;
+      _statusMessage = widget.isNavigation
+          ? "Starting navigation..."
+          : "AR Ready";
+    });
+  }
+
+  // ✅ NEW: Extracted method to send mode message (can be called multiple times)
+  void _sendModeMessage() {
+    // Prepare message based on mode
     String message;
 
     if (widget.isNavigation &&
@@ -78,21 +136,10 @@ class _UnityCameraPageState extends State<UnityCameraPage> {
       debugPrint("✅ [FLUTTER → UNITY] Message sent successfully");
       debugPrint("   Target: FlutterListener.OnFlutterMessage");
       debugPrint("   Content: $message");
-
-      setState(() {
-        _isUnityReady = true; // NEW: Mark Unity as ready
-        _statusMessage = widget.isNavigation
-            ? "Starting navigation..."
-            : "AR Ready";
-      });
     } catch (e) {
       // NEW: Error handling with logging
       debugPrint("❌ [FLUTTER → UNITY] Failed to send message:");
       debugPrint("   Error: $e");
-
-      setState(() {
-        _statusMessage = "Error initializing AR";
-      });
     }
   }
 

@@ -122,7 +122,7 @@ class _DataFetcherState extends State<DataFetcher> {
         'venue_ID': widget.venueId,
         'category_IDs': ['unassigned'], //
         'address': details['formatted_address'] ?? '',
-        'timestamp': FieldValue.serverTimestamp(),
+        //'timestamp': FieldValue.serverTimestamp(),
       });
 
       await Future.delayed(const Duration(milliseconds: 300));
@@ -169,7 +169,7 @@ class _DataFetcherState extends State<DataFetcher> {
         'venue_ID': widget.venueId,
         'category_IDs': ['unassigned'], //
         'address': details['formatted_address'] ?? '',
-        'timestamp': FieldValue.serverTimestamp(),
+        //'timestamp': FieldValue.serverTimestamp(),
       });
 
       await Future.delayed(const Duration(milliseconds: 300));

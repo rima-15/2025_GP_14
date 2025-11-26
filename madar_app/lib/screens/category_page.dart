@@ -197,55 +197,104 @@ class _CategoryPageState extends State<CategoryPage>
     }
   }
 
-  // NEW FIX: Show dialog popup instead of SnackBar
+  // ✅ Enhanced AR not supported dialog with vibrant design
   void _showNoPositionDialog(String placeName) {
     showDialog(
       context: context,
+      barrierDismissible: true,
       builder: (BuildContext context) {
-        return AlertDialog(
+        return Dialog(
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(24),
           ),
-          title: Row(
-            children: [
-              Icon(Icons.info_outline, color: kGreen, size: 28),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Text(
-                  'AR Navigation Unavailable',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                    color: kGreen,
+          elevation: 0,
+          backgroundColor: Colors.transparent,
+          child: Container(
+            padding: const EdgeInsets.all(28),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.15),
+                  blurRadius: 20,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // ✨ Cute illustration/icon with Madar colors
+                Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    color: kGreen.withOpacity(0.15), // Light green background
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Center(
+                    child: Icon(
+                      Icons.location_off_rounded,
+                      size: 42,
+                      color: kGreen, // Madar green
+                    ),
                   ),
                 ),
-              ),
-            ],
-          ),
-          content: Text(
-            '"$placeName" doesn\'t support AR navigation yet.\n\nPlease check back later or choose another place.',
-            style: const TextStyle(
-              fontSize: 15,
-              height: 1.4,
-              color: Colors.black87,
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              style: TextButton.styleFrom(
-                foregroundColor: kGreen,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 12,
+                const SizedBox(height: 20),
+
+                // 📌 Title
+                const Text(
+                  'AR Not Supported',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: kGreen, // Madar green
+                    height: 1.2,
+                  ),
                 ),
-              ),
-              child: const Text(
-                'OK',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-              ),
+                const SizedBox(height: 12),
+
+                // 📝 Description
+                Text(
+                  'This place doesn\'t support AR navigation yet. Please check back later!',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 15,
+                    height: 1.5,
+                    color: Colors.grey[700],
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                // ✅ "Got it" button with Madar green
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: kGreen, // Madar green
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: const Text(
+                      'Got it',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         );
       },
     );

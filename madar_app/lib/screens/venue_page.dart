@@ -1734,6 +1734,7 @@ class _FloorMapViewer extends StatelessWidget {
 
     try {
       return ModelViewer(
+        key: ValueKey(currentFloor), 
         src: currentFloor,
         alt: "3D Floor Map",
         ar: false,
@@ -1846,35 +1847,35 @@ class _FloorMapSectionState extends State<_FloorMapSection> {
   }
 
   Widget _buildFloorButton(String label, String mapURL) {
-    bool isSelected = _currentFloor == mapURL;
+  bool isSelected = _currentFloor == mapURL;
 
-    return SizedBox(
-      width: 42,
-      height: 36,
-      child: ElevatedButton(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: isSelected ? kPrimaryGreen : Colors.white,
-          foregroundColor: isSelected ? Colors.white : kPrimaryGreen,
-          padding: EdgeInsets.zero,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-            side: BorderSide(
-              color: isSelected ? kPrimaryGreen : Colors.grey.shade300,
-              width: 1.5,
-            ),
+  return SizedBox(
+    width: 42,
+    height: 36,
+    child: ElevatedButton(
+      style: ElevatedButton.styleFrom(
+        backgroundColor: isSelected ? kPrimaryGreen : Colors.white,
+        foregroundColor: isSelected ? Colors.white : kPrimaryGreen,
+        padding: EdgeInsets.zero,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: BorderSide(
+            color: isSelected ? kPrimaryGreen : Colors.grey.shade300,
+            width: 1.5,
           ),
-          elevation: isSelected ? 2 : 0,
         ),
-        onPressed: () {
-          setState(() {
-            _currentFloor = mapURL;
-          });
-        },
-        child: Text(
-          label,
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-        ),
+        elevation: isSelected ? 2 : 0,
       ),
-    );
-  }
+      onPressed: () {
+        setState(() {
+          _currentFloor = mapURL;
+        });
+      },
+      child: Text(
+        label,
+        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+      ),
+    ),
+  );
+}
 }

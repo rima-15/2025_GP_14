@@ -264,9 +264,9 @@ class _VenuePageState extends State<VenuePage>
 
         final convertedMaps = maps.map((map) {
           final floorNumber = (map['floorNumber'] ?? '').toString();
-          final fileName = (map['fileName'] ?? '').toString();
+          final mapURL = (map['mapURL'] ?? '').toString();
 
-          return {'floorNumber': floorNumber, 'fileName': fileName};
+          return {'floorNumber': floorNumber, 'mapURL': mapURL};
         }).toList();
 
         setState(() {
@@ -276,9 +276,11 @@ class _VenuePageState extends State<VenuePage>
         // Load the first map if available
         if (convertedMaps.isNotEmpty) {
           final firstMap = convertedMaps.first;
-          final firstFileName = firstMap['fileName'];
-          if (firstFileName != null && firstFileName.isNotEmpty) {
-            _currentFloor = 'assets/maps/$firstFileName';
+          final firstMapURL = firstMap['mapURL'];
+          if (firstMapURL != null && firstMapURL.isNotEmpty) {
+            setState(() {
+              _currentFloor = firstMapURL;
+            });
           }
         }
       } else {
@@ -1603,170 +1605,6 @@ class _VenuePageState extends State<VenuePage>
 }
 
 // Separate widget for the 3D viewer - only rebuilds when floor changes
-class _FloorMapViewer extends StatelessWidget {
-  final String currentFloor;
-
-  const _FloorMapViewer({required this.currentFloor});
-
-  @override
-  Widget build(BuildContext context) {
-    if (currentFloor.isEmpty) {
-      return _buildError('No map selected');
-    }
-
-    try {
-      return ModelViewer(
-        key: ValueKey(currentFloor),
-        src: currentFloor,
-        alt: "3D Floor Map",
-        ar: false,
-        autoRotate: false,
-        cameraControls: true,
-        backgroundColor: Colors.white,
-        cameraOrbit: "0deg 65deg 2.5m",
-        minCameraOrbit: "auto 0deg auto",
-        maxCameraOrbit: "auto 90deg auto",
-        cameraTarget: "0m 0m 0m",
-        fieldOfView: "45deg",
-      );
-    } catch (e) {
-      return _buildError('Failed to load 3D map');
-    }
-  }
-
-  Widget _buildError(String message) {
-    return Container(
-      color: Colors.grey.shade100,
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.error_outline, size: 48, color: Colors.red),
-            SizedBox(height: 8),
-            Text(message),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// Complete floor map section as a separate widget
-class _FloorMapSection extends StatefulWidget {
-  final List<Map<String, String>> venueMaps;
-  final String initialFloor;
-
-  const _FloorMapSection({
-    required this.venueMaps,
-    required this.initialFloor,
-  });
-
-  @override
-  State<_FloorMapSection> createState() => _FloorMapSectionState();
-}
-
-class _FloorMapSectionState extends State<_FloorMapSection> {
-  late String _currentFloor;
-
-  @override
-  void initState() {
-    super.initState();
-    _currentFloor = widget.initialFloor;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade300),
-      ),
-      child: Column(
-        children: [
-          Container(
-            height: 250,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.only(
-                topLeft: Radius.circular(12),
-                topRight: Radius.circular(12),
-              ),
-            ),
-            child: Stack(
-              children: [
-                _FloorMapViewer(currentFloor: _currentFloor),
-                if (widget.venueMaps.length > 1)
-                  Positioned(
-                    top: 12,
-                    right: 12,
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.9),
-                        borderRadius: BorderRadius.circular(8),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.1),
-                            blurRadius: 4,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        children: widget.venueMaps.map((map) {
-                          final floorNumber = map['floorNumber'] ?? '';
-                          final fileName = map['fileName'] ?? '';
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: _buildFloorButton(floorNumber, fileName),
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFloorButton(String label, String fileName) {
-    String fullPath = 'assets/maps/$fileName';
-    bool isSelected = _currentFloor == fullPath;
-
-    return SizedBox(
-      width: 42,
-      height: 36,
-      child: ElevatedButton(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: isSelected ? kPrimaryGreen : Colors.white,
-          foregroundColor: isSelected ? Colors.white : kPrimaryGreen,
-          padding: EdgeInsets.zero,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-            side: BorderSide(
-              color: isSelected ? kPrimaryGreen : Colors.grey.shade300,
-              width: 1.5,
-            ),
-          ),
-          elevation: isSelected ? 2 : 0,
-          shadowColor: Colors.black.withOpacity(0.1),
-        ),
-        onPressed: () {
-          setState(() {
-            _currentFloor = 'assets/maps/$fileName';
-          });
-        },
-        child: Text(
-          label,
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-        ),
-      ),
-    );
-  }
-}
 
 class _ImageOverlay extends StatefulWidget {
   final List<String> imagePaths;
@@ -1877,6 +1715,165 @@ class _ImageOverlayState extends State<_ImageOverlay> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// Separate widget for the 3D viewer
+class _FloorMapViewer extends StatelessWidget {
+  final String currentFloor;
+
+  const _FloorMapViewer({required this.currentFloor});
+
+  @override
+  Widget build(BuildContext context) {
+    if (currentFloor.isEmpty) {
+      return _buildError('No map selected');
+    }
+
+    try {
+      return ModelViewer(
+        src: currentFloor,
+        alt: "3D Floor Map",
+        ar: false,
+        autoRotate: false,
+        cameraControls: true,
+        backgroundColor: Colors.white,
+        cameraOrbit: "0deg 65deg 2.5m",
+        minCameraOrbit: "auto 0deg auto",
+        maxCameraOrbit: "auto 90deg auto",
+        cameraTarget: "0m 0m 0m",
+      );
+    } catch (e) {
+      return _buildError('Failed to load 3D map');
+    }
+  }
+
+  Widget _buildError(String message) {
+    return Container(
+      color: Colors.grey.shade100,
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.error_outline, size: 48, color: Colors.red),
+            SizedBox(height: 8),
+            Text(message),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Complete floor map section
+class _FloorMapSection extends StatefulWidget {
+  final List<Map<String, String>> venueMaps;
+  final String initialFloor;
+
+  const _FloorMapSection({required this.venueMaps, required this.initialFloor});
+
+  @override
+  State<_FloorMapSection> createState() => _FloorMapSectionState();
+}
+
+class _FloorMapSectionState extends State<_FloorMapSection> {
+  late String _currentFloor;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentFloor = widget.initialFloor;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+      child: Column(
+        children: [
+          Container(
+            height: 250,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(12),
+                topRight: Radius.circular(12),
+              ),
+            ),
+            child: Stack(
+              children: [
+                _FloorMapViewer(currentFloor: _currentFloor),
+                if (widget.venueMaps.length > 1)
+                  Positioned(
+                    top: 12,
+                    right: 12,
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.9),
+                        borderRadius: BorderRadius.circular(8),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.1),
+                            blurRadius: 4,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        children: widget.venueMaps.map((map) {
+                          final floorNumber = map['floorNumber'] ?? '';
+                          final mapURL = map['mapURL'] ?? '';
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: _buildFloorButton(floorNumber, mapURL),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFloorButton(String label, String mapURL) {
+    bool isSelected = _currentFloor == mapURL;
+
+    return SizedBox(
+      width: 42,
+      height: 36,
+      child: ElevatedButton(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: isSelected ? kPrimaryGreen : Colors.white,
+          foregroundColor: isSelected ? Colors.white : kPrimaryGreen,
+          padding: EdgeInsets.zero,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: BorderSide(
+              color: isSelected ? kPrimaryGreen : Colors.grey.shade300,
+              width: 1.5,
+            ),
+          ),
+          elevation: isSelected ? 2 : 0,
+        ),
+        onPressed: () {
+          setState(() {
+            _currentFloor = mapURL;
+          });
+        },
+        child: Text(
+          label,
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
       ),
     );
   }

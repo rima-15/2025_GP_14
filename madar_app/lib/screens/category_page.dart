@@ -2,7 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_storage/firebase_storage.dart' as storage;
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:madar_app/screens/unity_page.dart';
+import 'package:madar_app/screens/AR_page.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:madar_app/theme/theme.dart';
 import 'package:madar_app/api/place_rating_service.dart';

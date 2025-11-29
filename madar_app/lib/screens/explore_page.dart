@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:madar_app/screens/unity_page.dart';
+import 'package:madar_app/screens/AR_page.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
 import 'package:madar_app/theme/theme.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -87,7 +87,9 @@ class ExplorePage extends StatelessWidget {
                     vertical: AppSpacing.buttonVerticalPadding,
                   ),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
+                    borderRadius: BorderRadius.circular(
+                      AppSpacing.buttonRadius,
+                    ),
                   ),
                   elevation: 0,
                 ),

@@ -443,9 +443,13 @@ class _CategoryPageState extends State<CategoryPage>
 
                 // Client-side filtering
                 final allDocs = snapshot.data!.docs;
+                // ✅ Exclude AR_ POIs (they are AR-only and shouldn't show in category pages)
+                final nonArDocs = allDocs
+                    .where((doc) => !doc.id.startsWith('AR_'))
+                    .toList();
                 final filtered = _query.trim().isEmpty
-                    ? allDocs
-                    : allDocs.where((doc) {
+                    ? nonArDocs
+                    : nonArDocs.where((doc) {
                         final name = (doc.data()['placeName'] as String? ?? '')
                             .toLowerCase();
                         final q = _query.toLowerCase();

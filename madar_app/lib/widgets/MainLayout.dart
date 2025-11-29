@@ -116,7 +116,7 @@ class _MainLayoutState extends State<MainLayout> {
           ? SizedBox(
               height: 50,
               child: Image.asset(
-                'images/Madar2-resized5.png',
+                'images/Madar2-resized62.png',
                 fit: BoxFit.contain,
               ),
             )

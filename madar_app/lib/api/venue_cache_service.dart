@@ -3,6 +3,9 @@ import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 
+// ---- cache config ----
+const int _kCacheMaxAgeDays = 7; // 🔁 refresh rating if older than 7 days
+
 // ---- types ----
 typedef PlaceDetailsFetcher =
     Future<Map<String, dynamic>> Function(String placeId);
@@ -85,12 +88,14 @@ class VenueCacheService {
       final ts = data['lastUpdated'] is Timestamp
           ? (data['lastUpdated'] as Timestamp).toDate()
           : null;
-      if (ts != null && DateTime.now().difference(ts).inDays < 30) {
+      if (ts != null &&
+          DateTime.now().difference(ts).inDays < _kCacheMaxAgeDays) {
+        // ✅ Use cached value if it's newer than 7 days
         return VenueMeta.fromMap(data);
       }
     }
 
-    // 2) stale → fetch once
+    // 2) stale → fetch once from Google Places
     final j = await _fetcher(placeId);
     final result = (j['result'] as Map<String, dynamic>?) ?? {};
 
@@ -124,6 +129,7 @@ class VenueCacheService {
     await _doc(
       placeId,
     ).set(toStore, SetOptions(merge: true)).catchError((_) {});
+
     return VenueMeta(
       rating: rating,
       openingHours: opening == null ? null : Map<String, dynamic>.from(opening),

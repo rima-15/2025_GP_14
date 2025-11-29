@@ -158,13 +158,19 @@ class _CheckEmailPageState extends State<CheckEmailPage> {
                         padding: const EdgeInsets.symmetric(vertical: 14),
                       ),
                       icon: _sending
-                          ? const SizedBox(
-                              height: 18,
-                              width: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
+                          ? LayoutBuilder(
+                              builder: (context, constraints) {
+                                final size = (constraints.maxHeight * 0.6)
+                                    .clamp(16.0, 24.0); // Between 16-24
+                                return SizedBox(
+                                  width: size,
+                                  height: size,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 2.5,
+                                  ),
+                                );
+                              },
                             )
                           : const Icon(Icons.refresh, color: Colors.white),
                       label: Text(

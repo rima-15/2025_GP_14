@@ -620,33 +620,34 @@ class _CategoryPageState extends State<CategoryPage>
                       const SizedBox(height: 6),
 
                       // - Green star + number
-                      FutureBuilder<double?>(
-                        future: _ratingCache[placeId] != null
-                            ? Future.value(_ratingCache[placeId])
-                            : _getLiveRating(placeId).then((r) {
-                                _ratingCache[placeId] = r;
-                                return r;
-                              }),
-                        builder: (context, snap) {
-                          if (!snap.hasData) return const SizedBox.shrink();
-                          final r = snap.data ?? 0.0;
-                          if (r == 0.0) return const SizedBox.shrink();
-                          return Row(
-                            children: [
-                              const Icon(Icons.star, color: kGreen, size: 16),
-                              const SizedBox(width: 4),
-                              Text(
-                                r.toStringAsFixed(1),
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.black87,
+                      if (widget.categoryName.toLowerCase() != 'services')
+                        FutureBuilder<double?>(
+                          future: _ratingCache[placeId] != null
+                              ? Future.value(_ratingCache[placeId])
+                              : _getLiveRating(placeId).then((r) {
+                                  _ratingCache[placeId] = r;
+                                  return r;
+                                }),
+                          builder: (context, snap) {
+                            if (!snap.hasData) return const SizedBox.shrink();
+                            final r = snap.data ?? 0.0;
+                            if (r == 0.0) return const SizedBox.shrink();
+                            return Row(
+                              children: [
+                                const Icon(Icons.star, color: kGreen, size: 16),
+                                const SizedBox(width: 4),
+                                Text(
+                                  r.toStringAsFixed(1),
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.black87,
+                                  ),
                                 ),
-                              ),
-                            ],
-                          );
-                        },
-                      ),
+                              ],
+                            );
+                          },
+                        ),
                     ],
                   ),
                 ),

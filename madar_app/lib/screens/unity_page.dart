@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_embed_unity/flutter_embed_unity.dart';
+import 'package:madar_app/theme/theme.dart';
+
+// ----------------------------------------------------------------------------
+// Unity Camera Page - AR experience using Unity
+// ----------------------------------------------------------------------------
 
 class UnityCameraPage extends StatefulWidget {
   final bool isNavigation;
-  final String? placeId; // NEW: placeId for navigation mode
+  final String? placeId;
 
-  const UnityCameraPage({
-    super.key,
-    this.isNavigation = false,
-    this.placeId, // NEW: receive placeId from navigation
-  });
+  const UnityCameraPage({super.key, this.isNavigation = false, this.placeId});
 
   @override
   State<UnityCameraPage> createState() => _UnityCameraPageState();
@@ -17,53 +18,41 @@ class UnityCameraPage extends StatefulWidget {
 
 class _UnityCameraPageState extends State<UnityCameraPage>
     with WidgetsBindingObserver {
-  // NEW: Track Unity initialization state
+  // Track Unity initialization state
   bool _isUnityReady = false;
   String _statusMessage = "Initializing AR...";
 
   @override
   void initState() {
     super.initState();
-
-    // NEW: Add lifecycle observer
     WidgetsBinding.instance.addObserver(this);
-
-    // NEW: Start Unity initialization sequence
     _initializeUnity();
   }
 
   @override
   void dispose() {
-    // Remove lifecycle observer
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
-  // ✅ NEW: Handle app lifecycle changes (when returning from another page)
+  // Handle app lifecycle changes (when returning from another page)
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
 
     if (state == AppLifecycleState.resumed) {
       // App resumed - send mode message again
-      debugPrint("═══════════════════════════════════════════════════");
-      debugPrint("🔄 [FLUTTER] App resumed - resending mode message");
-      debugPrint("═══════════════════════════════════════════════════");
       _sendModeMessage();
     }
   }
 
-  // ✅ NEW: Detect when this widget becomes visible again (after popping another page)
+  // Detect when this widget becomes visible again (after popping another page)
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
 
     // If Unity is already ready and we're becoming visible again, resend message
     if (_isUnityReady && ModalRoute.of(context)?.isCurrent == true) {
-      debugPrint("═══════════════════════════════════════════════════");
-      debugPrint("🔄 [FLUTTER] Page became active - resending mode message");
-      debugPrint("═══════════════════════════════════════════════════");
-
       // Small delay to ensure Unity is ready to receive
       Future.delayed(const Duration(milliseconds: 200), () {
         if (mounted) {
@@ -73,27 +62,13 @@ class _UnityCameraPageState extends State<UnityCameraPage>
     }
   }
 
-  // NEW: Initialize Unity with proper timing and logging
+  // Initialize Unity with proper timing
   void _initializeUnity() async {
-    debugPrint("═══════════════════════════════════════════════════");
-    debugPrint("🚀 [FLUTTER → UNITY] Unity page opened");
-    debugPrint(
-      "   Mode: ${widget.isNavigation ? 'NAVIGATION' : 'EXPLORATION'}",
-    );
-
-    if (widget.isNavigation) {
-      debugPrint(
-        "   Place ID: ${widget.placeId ?? 'NULL'}",
-      ); // NEW: Log placeId
-    }
-
-    debugPrint("═══════════════════════════════════════════════════");
-
-    // Wait for Unity to initialize (600ms as in your original code)
     setState(() {
       _statusMessage = "Loading AR environment...";
     });
 
+    // Wait for Unity to initialize
     await Future.delayed(const Duration(milliseconds: 600));
 
     // Send initial mode message
@@ -107,44 +82,35 @@ class _UnityCameraPageState extends State<UnityCameraPage>
     });
   }
 
-  // ✅ NEW: Extracted method to send mode message (can be called multiple times)
+  // Send mode message to Unity (can be called multiple times)
   void _sendModeMessage() {
-    // Prepare message based on mode
     String message;
 
     if (widget.isNavigation &&
         widget.placeId != null &&
         widget.placeId!.isNotEmpty) {
-      // UPDATED: Send navigation message with placeId
+      // Send navigation message with placeId
       message = "NAVIGATION:${widget.placeId}";
-
-      debugPrint("📤 [FLUTTER → UNITY] Sending navigation request:");
-      debugPrint("   Message: $message");
-      debugPrint("   PlaceID: ${widget.placeId}");
     } else {
       // Send exploration message
       message = "EXPLORE";
-
-      debugPrint("📤 [FLUTTER → UNITY] Sending exploration request:");
-      debugPrint("   Message: $message");
     }
 
     // Send message to Unity
     try {
       sendToUnity("FlutterListener", "OnFlutterMessage", message);
-
-      debugPrint("✅ [FLUTTER → UNITY] Message sent successfully");
-      debugPrint("   Target: FlutterListener.OnFlutterMessage");
-      debugPrint("   Content: $message");
     } catch (e) {
-      // NEW: Error handling with logging
-      debugPrint("❌ [FLUTTER → UNITY] Failed to send message:");
-      debugPrint("   Error: $e");
+      debugPrint("Failed to send message to Unity: $e");
     }
   }
 
+  // ---------- Build ----------
+
   @override
   Widget build(BuildContext context) {
+    // Responsive back button position
+    final topPadding = MediaQuery.of(context).padding.top;
+
     return Scaffold(
       resizeToAvoidBottomInset: false,
       body: Stack(
@@ -152,15 +118,11 @@ class _UnityCameraPageState extends State<UnityCameraPage>
           // Unity View
           EmbedUnity(
             onMessageFromUnity: (msg) {
-              // NEW: Enhanced logging for Unity messages
-              debugPrint("═══════════════════════════════════════════════════");
-              debugPrint("📥 [UNITY → FLUTTER] Message received:");
-              debugPrint("   Content: $msg");
-              debugPrint("═══════════════════════════════════════════════════");
+              debugPrint("Message from Unity: $msg");
             },
           ),
 
-          // NEW: Loading indicator overlay (shown until Unity is ready)
+          // Loading overlay (shown until Unity is ready)
           if (!_isUnityReady)
             Container(
               color: Colors.black.withOpacity(0.7),
@@ -169,9 +131,7 @@ class _UnityCameraPageState extends State<UnityCameraPage>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     const CircularProgressIndicator(
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        Color(0xFF787E65),
-                      ),
+                      valueColor: AlwaysStoppedAnimation<Color>(kGreen),
                       strokeWidth: 3,
                     ),
                     const SizedBox(height: 20),
@@ -190,14 +150,10 @@ class _UnityCameraPageState extends State<UnityCameraPage>
 
           // Back button (always visible)
           Positioned(
-            top: MediaQuery.of(context).padding.top + 12,
+            top: topPadding + 12,
             left: 12,
             child: GestureDetector(
-              onTap: () {
-                // NEW: Log when user closes Unity
-                debugPrint("🔙 [FLUTTER] User closed Unity AR page");
-                Navigator.pop(context);
-              },
+              onTap: () => Navigator.pop(context),
               child: Container(
                 width: 44,
                 height: 44,
@@ -205,11 +161,7 @@ class _UnityCameraPageState extends State<UnityCameraPage>
                   color: Colors.white.withOpacity(0.85),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(
-                  Icons.arrow_back,
-                  color: Color(0xFF787E65),
-                  size: 22,
-                ),
+                child: const Icon(Icons.arrow_back, color: kGreen, size: 22),
               ),
             ),
           ),

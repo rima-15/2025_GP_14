@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:madar_app/theme/theme.dart';
 
-const kGreen = Color(0xFF787E65);
+// ----------------------------------------------------------------------------
+// Directions Page - Shows route options and directions to a place
+// ----------------------------------------------------------------------------
 
 class DirectionsPage extends StatefulWidget {
   final String placeName;
@@ -15,8 +18,15 @@ class _DirectionsPageState extends State<DirectionsPage> {
 
   @override
   Widget build(BuildContext context) {
+    // Responsive values
+    final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
+    final horizontalPadding = screenWidth < 360 ? 12.0 : 16.0;
+    final circleSize = screenWidth < 360 ? 56.0 : 64.0;
+    final iconSize = screenWidth < 360 ? 24.0 : 28.0;
+    final mapHeight = screenHeight < 700 ? 250.0 : 300.0;
+
     return Scaffold(
-      // ⬇️ Background set to white
       backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.white,
@@ -26,7 +36,7 @@ class _DirectionsPageState extends State<DirectionsPage> {
           icon: const Icon(Icons.close, color: kGreen),
           onPressed: () => Navigator.pop(context),
         ),
-        // ⬇️ Light divider under the header
+        // Light divider under the header
         bottom: const PreferredSize(
           preferredSize: Size.fromHeight(1),
           child: SizedBox(
@@ -41,8 +51,14 @@ class _DirectionsPageState extends State<DirectionsPage> {
         child: Stack(
           children: [
             ListView(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 220),
+              padding: EdgeInsets.fromLTRB(
+                horizontalPadding,
+                16,
+                horizontalPadding,
+                220,
+              ),
               children: [
+                // Mode selection
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -50,23 +66,30 @@ class _DirectionsPageState extends State<DirectionsPage> {
                       index: 0,
                       label: 'Stairs',
                       icon: Icons.stairs_outlined,
+                      circleSize: circleSize,
+                      iconSize: iconSize,
                     ),
                     _circleChoice(
                       index: 1,
                       label: 'Elevator',
                       icon: Icons.elevator_outlined,
+                      circleSize: circleSize,
+                      iconSize: iconSize,
                     ),
                     _circleChoice(
                       index: 2,
                       label: 'Escalator',
                       icon: Icons.escalator_outlined,
+                      circleSize: circleSize,
+                      iconSize: iconSize,
                     ),
                   ],
                 ),
                 const SizedBox(height: 30),
 
+                // Map placeholder
                 Container(
-                  height: 300,
+                  height: mapHeight,
                   decoration: BoxDecoration(
                     color: const Color(0xFFEDEFE3),
                     borderRadius: BorderRadius.circular(16),
@@ -82,9 +105,10 @@ class _DirectionsPageState extends State<DirectionsPage> {
               ],
             ),
 
+            // Bottom sheet
             Align(
               alignment: Alignment.bottomCenter,
-              child: _routeBottomSheet(),
+              child: _routeBottomSheet(horizontalPadding),
             ),
           ],
         ),
@@ -92,10 +116,14 @@ class _DirectionsPageState extends State<DirectionsPage> {
     );
   }
 
+  // ---------- UI Builders ----------
+
   Widget _circleChoice({
     required int index,
     required String label,
     required IconData icon,
+    required double circleSize,
+    required double iconSize,
   }) {
     final selected = _selectedMode == index;
     return GestureDetector(
@@ -103,8 +131,8 @@ class _DirectionsPageState extends State<DirectionsPage> {
       child: Column(
         children: [
           Container(
-            width: 64,
-            height: 64,
+            width: circleSize,
+            height: circleSize,
             decoration: BoxDecoration(
               color: selected ? kGreen : const Color(0xFFEDEFE3),
               shape: BoxShape.circle,
@@ -112,7 +140,7 @@ class _DirectionsPageState extends State<DirectionsPage> {
             child: Icon(
               icon,
               color: selected ? Colors.white : kGreen,
-              size: 28,
+              size: iconSize,
             ),
           ),
           const SizedBox(height: 8),
@@ -128,12 +156,16 @@ class _DirectionsPageState extends State<DirectionsPage> {
     );
   }
 
-  // ===== Bottom Sheet =====
-  Widget _routeBottomSheet() {
+  Widget _routeBottomSheet(double horizontalPadding) {
     return SafeArea(
       top: false,
       child: Container(
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        margin: EdgeInsets.fromLTRB(
+          horizontalPadding,
+          0,
+          horizontalPadding,
+          16,
+        ),
         padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
         decoration: BoxDecoration(
           color: Colors.white,
@@ -149,6 +181,7 @@ class _DirectionsPageState extends State<DirectionsPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // Drag handle
             Container(
               width: 40,
               height: 4,
@@ -159,15 +192,17 @@ class _DirectionsPageState extends State<DirectionsPage> {
               ),
             ),
 
-            Row(
+            // Info pills
+            const Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: const [
+              children: [
                 _InfoPill(icon: Icons.access_time, text: '5 min'),
                 _InfoPill(icon: Icons.place_outlined, text: '250 m'),
               ],
             ),
             const SizedBox(height: 12),
 
+            // Place info row
             Row(
               children: [
                 // Shop placeholder icon
@@ -211,6 +246,7 @@ class _DirectionsPageState extends State<DirectionsPage> {
             ),
             const SizedBox(height: 16),
 
+            // AR Mode button
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
@@ -233,6 +269,10 @@ class _DirectionsPageState extends State<DirectionsPage> {
     );
   }
 }
+
+// ----------------------------------------------------------------------------
+// Info Pill Widget
+// ----------------------------------------------------------------------------
 
 class _InfoPill extends StatelessWidget {
   final IconData icon;

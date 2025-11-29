@@ -1,16 +1,15 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
-import 'directions_page.dart';
 import 'package:firebase_storage/firebase_storage.dart' as storage;
-import 'package:flutter/services.dart' show rootBundle;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:madar_app/screens/unity_page.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:madar_app/theme/theme.dart';
+import 'package:madar_app/api/place_rating_service.dart';
 
-const kGreen = Color(0xFF777D63);
+// ----------------------------------------------------------------------------
+// Category Page - Shows places within a specific category
+// ----------------------------------------------------------------------------
 
 class CategoryPage extends StatefulWidget {
   final String categoryName;
@@ -31,15 +30,15 @@ class CategoryPage extends StatefulWidget {
 class _CategoryPageState extends State<CategoryPage>
     with AutomaticKeepAliveClientMixin {
   @override
-  bool get wantKeepAlive => true; // ✅ Keep state alive when navigating away
+  bool get wantKeepAlive => true;
 
   final TextEditingController _searchCtrl = TextEditingController();
 
-  // ✅ Static caches persist across navigation (keyed by category)
+  // Static caches persist across navigation (keyed by category)
   static final Map<String, Map<String, double?>> _staticRatingCache = {};
   static final Map<String, Map<String, String>> _staticImageUrlCache = {};
 
-  // ✅ Get instance caches for this category
+  // Instance caches for this category
   Map<String, double?> get _ratingCache {
     final key = '${widget.venueId}_${widget.categoryId}';
     return _staticRatingCache.putIfAbsent(key, () => {});
@@ -50,12 +49,29 @@ class _CategoryPageState extends State<CategoryPage>
     return _staticImageUrlCache.putIfAbsent(key, () => {});
   }
 
-  late String _apiKey;
+  // Rating service for cached ratings
+  late final PlaceRatingService _ratingService;
   String _query = '';
 
-  // Firebase Storage
+  @override
+  void initState() {
+    super.initState();
+    _ratingService = PlaceRatingService();
+  }
+
+  @override
+  void dispose() {
+    if (mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+    }
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  // ---------- Firebase Storage ----------
+
   Future<String?> _getDownloadUrl(String path) async {
-    // ✅ Check cache first
+    // Check cache first
     if (_imageUrlCache.containsKey(path)) {
       return _imageUrlCache[path];
     }
@@ -66,139 +82,63 @@ class _CategoryPageState extends State<CategoryPage>
       ).ref(path);
 
       final url = await ref.getDownloadURL();
-      // ✅ Cache the URL
+      // Cache the URL
       _imageUrlCache[path] = url;
       return url;
     } catch (e) {
-      debugPrint('⚠️ Image load error: $e');
+      debugPrint('Image load error: $e');
       return null;
     }
   }
 
-  @override
-  void initState() {
-    super.initState();
-    _apiKey = dotenv.maybeGet('GOOGLE_API_KEY') ?? '';
-  }
+  // ---------- Cached Rating ----------
 
-  @override
-  void dispose() {
-    if (mounted) {
-      ScaffoldMessenger.of(context).clearSnackBars();
-    }
-    _searchCtrl.dispose();
-
-    super.dispose();
-  }
-
-  Future<double?> _getLiveRating(String docId) async {
-    final bool isSolitaire = widget.venueId == "ChIJcYTQDwDjLj4RZEiboV6gZzM";
-    Uri uri;
-
-    if (isSolitaire) {
-      //solitaire.json
-      try {
-        final jsonStr = await rootBundle.loadString(
-          'assets/venues/solitaire.json',
-        );
-        final data = json.decode(jsonStr);
-        final lat = data['center']['lat'];
-        final lng = data['center']['lng'];
-
-        uri = Uri.https(
-          'maps.googleapis.com',
-          '/maps/api/place/nearbysearch/json',
-          {
-            'location': '$lat,$lng',
-            'radius': '150',
-            'keyword': docId, //  Document ID
-            'key': _apiKey,
-          },
-        );
-      } catch (e) {
-        debugPrint("⚠️ Error loading solitaire.json: $e");
-        return null;
-      }
-    } else {
-      // Firestore
-      final venueSnap = await FirebaseFirestore.instance
-          .collection('venues')
-          .doc(widget.venueId)
-          .get();
-
-      if (!venueSnap.exists) return null;
-      final lat = venueSnap.data()?['latitude'];
-      final lng = venueSnap.data()?['longitude'];
-
-      if (lat == null || lng == null) return null;
-
-      uri = Uri.https(
-        'maps.googleapis.com',
-        '/maps/api/place/nearbysearch/json',
-        {
-          'location': '$lat,$lng',
-          'radius': '150',
-          'keyword': docId,
-          'key': _apiKey,
-        },
-      );
+  /// Get rating from Firestore cache (refreshes weekly from API if stale)
+  Future<double?> _getCachedRating(String placeId) async {
+    // Check local memory cache first
+    if (_ratingCache.containsKey(placeId)) {
+      return _ratingCache[placeId];
     }
 
-    // Google API
-    final r = await http.get(uri);
-    if (r.statusCode != 200) return null;
+    // Use the rating service which reads from Firestore and refreshes weekly
+    final rating = await _ratingService.getCachedRating(
+      placeId,
+      widget.venueId,
+    );
 
-    final j = json.decode(r.body);
-    if (j['status'] != 'OK') return null;
-
-    final results = j['results'] as List?;
-    if (results == null || results.isEmpty) return null;
-
-    return (results.first['rating'] ?? 0).toDouble();
+    // Store in local memory cache
+    _ratingCache[placeId] = rating;
+    return rating;
   }
 
-  // NEW: Validate if place has world position for AR navigation
+  // ---------- AR Navigation ----------
+
+  // Check if place has world position for AR navigation
   Future<bool> _hasWorldPosition(String placeId) async {
     try {
-      debugPrint("🔍 [FLUTTER] Checking world position for placeId: $placeId");
-
       final doc = await FirebaseFirestore.instance
           .collection('places')
           .doc(placeId)
           .get();
 
-      if (!doc.exists) {
-        debugPrint("⚠️ [FLUTTER] Place document does not exist: $placeId");
-        return false;
-      }
+      if (!doc.exists) return false;
 
       final data = doc.data();
-      if (data == null) {
-        debugPrint("⚠️ [FLUTTER] Place data is null: $placeId");
-        return false;
-      }
+      if (data == null) return false;
 
-      // NEW: Check for world_position field (adjust field name based on your Firebase structure)
-      final hasPosition =
-          data.containsKey('worldPosition') && data['worldPosition'] != null;
-
-      debugPrint("📍 [FLUTTER] World position check result:");
-      debugPrint("   PlaceID: $placeId");
-      debugPrint("   Has world_position: $hasPosition");
-
-      if (hasPosition) {
-        debugPrint("   Position data: ${data['worldPosition']}");
-      }
-
-      return hasPosition;
+      // Check for world_position field
+      return data.containsKey('worldPosition') && data['worldPosition'] != null;
     } catch (e) {
-      debugPrint("❌ [FLUTTER] Error checking world position: $e");
+      debugPrint("Error checking world position: $e");
       return false;
     }
   }
 
-  // ✅ Enhanced AR not supported dialog with vibrant design
+  // Show dialog when AR is not supported for this place
   void _showNoPositionDialog(String placeName) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final dialogPadding = screenWidth < 360 ? 20.0 : 28.0;
+
     showDialog(
       context: context,
       barrierDismissible: true,
@@ -210,7 +150,7 @@ class _CategoryPageState extends State<CategoryPage>
           elevation: 0,
           backgroundColor: Colors.transparent,
           child: Container(
-            padding: const EdgeInsets.all(28),
+            padding: EdgeInsets.all(dialogPadding),
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(24),
@@ -225,38 +165,38 @@ class _CategoryPageState extends State<CategoryPage>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // ✨ Cute illustration/icon with Madar colors
+                // Icon
                 Container(
                   width: 80,
                   height: 80,
                   decoration: BoxDecoration(
-                    color: kGreen.withOpacity(0.15), // Light green background
+                    color: kGreen.withOpacity(0.15),
                     shape: BoxShape.circle,
                   ),
                   child: const Center(
                     child: Icon(
                       Icons.location_off_rounded,
                       size: 42,
-                      color: kGreen, // Madar green
+                      color: kGreen,
                     ),
                   ),
                 ),
                 const SizedBox(height: 20),
 
-                // 📌 Title
+                // Title
                 const Text(
                   'AR Not Supported',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
-                    color: kGreen, // Madar green
+                    color: kGreen,
                     height: 1.2,
                   ),
                 ),
                 const SizedBox(height: 12),
 
-                // 📝 Description
+                // Description
                 Text(
                   'This place doesn\'t support AR navigation yet. Please check back later!',
                   textAlign: TextAlign.center,
@@ -268,13 +208,13 @@ class _CategoryPageState extends State<CategoryPage>
                 ),
                 const SizedBox(height: 24),
 
-                // ✅ "Got it" button with Madar green
+                // Button
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
                     onPressed: () => Navigator.of(context).pop(),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: kGreen, // Madar green
+                      backgroundColor: kGreen,
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(
@@ -300,54 +240,29 @@ class _CategoryPageState extends State<CategoryPage>
     );
   }
 
-  // UPDATED: Open navigation AR with validation and placeId passing
+  // Open AR navigation with validation
   Future<void> _openNavigationAR(String placeId, String placeName) async {
-    debugPrint("═══════════════════════════════════════════════════");
-    debugPrint("🧭 [FLUTTER] Navigation requested");
-    debugPrint("   Place: $placeName");
-    debugPrint("   PlaceID: $placeId");
-    debugPrint("═══════════════════════════════════════════════════");
-
-    // NEW: Validate world position before proceeding
+    // Validate world position before proceeding
     final hasPosition = await _hasWorldPosition(placeId);
 
     if (!hasPosition) {
-      debugPrint(
-        "⚠️ [FLUTTER] Place does not have world position - blocking navigation",
-      );
-
       if (!mounted) return;
-
-      // NEW FIX: Show dialog instead of SnackBar
       _showNoPositionDialog(placeName);
       return;
     }
-
-    debugPrint(
-      "✅ [FLUTTER] World position validated - proceeding with camera permission",
-    );
 
     // Request camera permission
     final status = await Permission.camera.request();
 
     if (status.isGranted) {
-      debugPrint("✅ [FLUTTER] Camera permission granted");
-      debugPrint("🚀 [FLUTTER] Opening Unity in NAVIGATION mode");
-      debugPrint("   Passing PlaceID: $placeId");
-
       if (!mounted) return;
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => UnityCameraPage(
-            isNavigation: true,
-            placeId: placeId, // NEW: Pass the placeId
-          ),
+          builder: (_) => UnityCameraPage(isNavigation: true, placeId: placeId),
         ),
       );
     } else if (status.isPermanentlyDenied) {
-      debugPrint("⚠️ [FLUTTER] Camera permission permanently denied");
-
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -358,8 +273,6 @@ class _CategoryPageState extends State<CategoryPage>
       );
       openAppSettings();
     } else {
-      debugPrint("⚠️ [FLUTTER] Camera permission denied");
-
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -369,9 +282,18 @@ class _CategoryPageState extends State<CategoryPage>
     }
   }
 
+  // ---------- Build ----------
+
   @override
   Widget build(BuildContext context) {
-    super.build(context); // ✅ Required for AutomaticKeepAliveClientMixin
+    super.build(context);
+
+    // Responsive values
+    final screenWidth = MediaQuery.of(context).size.width;
+    final horizontalPadding = screenWidth < 360 ? 12.0 : 16.0;
+    final gridSpacing = screenWidth < 360 ? 10.0 : 12.0;
+    final crossAxisCount = screenWidth > 600 ? 3 : 2;
+
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
@@ -379,7 +301,7 @@ class _CategoryPageState extends State<CategoryPage>
         elevation: 0,
         leading: Container(
           margin: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
+          decoration: const BoxDecoration(
             color: Colors.white,
             shape: BoxShape.circle,
           ),
@@ -406,8 +328,8 @@ class _CategoryPageState extends State<CategoryPage>
         children: [
           const SizedBox(height: 12),
 
-          // 🔍 Search bar - below header
-          _buildSearchBar(),
+          // Search bar
+          _buildSearchBar(horizontalPadding),
 
           const SizedBox(height: 12),
 
@@ -443,7 +365,7 @@ class _CategoryPageState extends State<CategoryPage>
 
                 // Client-side filtering
                 final allDocs = snapshot.data!.docs;
-                // ✅ Exclude AR_ POIs (they are AR-only and shouldn't show in category pages)
+                // Exclude AR_ POIs (they are AR-only and shouldn't show in category pages)
                 final nonArDocs = allDocs
                     .where((doc) => !doc.id.startsWith('AR_'))
                     .toList();
@@ -461,11 +383,11 @@ class _CategoryPageState extends State<CategoryPage>
                 }
 
                 return GridView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    crossAxisSpacing: 12,
-                    mainAxisSpacing: 12,
+                  padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: crossAxisCount,
+                    crossAxisSpacing: gridSpacing,
+                    mainAxisSpacing: gridSpacing,
                     childAspectRatio: 0.75,
                   ),
                   itemCount: filtered.length,
@@ -474,7 +396,6 @@ class _CategoryPageState extends State<CategoryPage>
                     final data = doc.data();
                     final originalId = doc.id;
 
-                    // UPDATED: Pass both placeId and placeName to the card
                     return _placeCard(
                       data,
                       originalId,
@@ -490,8 +411,10 @@ class _CategoryPageState extends State<CategoryPage>
     );
   }
 
-  Widget _buildSearchBar() => Container(
-    margin: const EdgeInsets.symmetric(horizontal: 16),
+  // ---------- UI Builders ----------
+
+  Widget _buildSearchBar(double horizontalPadding) => Container(
+    margin: EdgeInsets.symmetric(horizontal: horizontalPadding),
     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
     decoration: BoxDecoration(
       color: Colors.white,
@@ -522,7 +445,7 @@ class _CategoryPageState extends State<CategoryPage>
     ),
   );
 
-  // NEW FIX: Entire card is now tappable
+  // Place card - entire card is tappable
   Widget _placeCard(
     Map<String, dynamic> data,
     String placeId,
@@ -533,11 +456,7 @@ class _CategoryPageState extends State<CategoryPage>
     final img = data['placeImage'] ?? '';
 
     return InkWell(
-      // NEW FIX: Make entire card tappable
-      onTap: () {
-        debugPrint("🔘 [FLUTTER] Card tapped: $placeName");
-        _openNavigationAR(placeId, placeName);
-      },
+      onTap: () => _openNavigationAR(placeId, placeName),
       borderRadius: BorderRadius.circular(12),
       child: Container(
         decoration: BoxDecoration(
@@ -556,7 +475,7 @@ class _CategoryPageState extends State<CategoryPage>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Square aspect ratio
+              // Image
               Expanded(
                 flex: 5,
                 child: img.isEmpty
@@ -573,7 +492,7 @@ class _CategoryPageState extends State<CategoryPage>
                     : _buildPlaceImage(img),
               ),
 
-              //
+              // Info section
               Expanded(
                 flex: 4,
                 child: Padding(
@@ -582,7 +501,7 @@ class _CategoryPageState extends State<CategoryPage>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Place name with navigation arrow (visual indicator only)
+                      // Place name with navigation arrow
                       Row(
                         children: [
                           Expanded(
@@ -597,13 +516,12 @@ class _CategoryPageState extends State<CategoryPage>
                               ),
                             ),
                           ),
-                          // 🧭 Navigation arrow (visual indicator - card handles tap)
                           const Icon(Icons.north_east, color: kGreen, size: 20),
                         ],
                       ),
                       const SizedBox(height: 4),
 
-                      // Description - flexible to prevent overflow
+                      // Description
                       Flexible(
                         child: Text(
                           desc,
@@ -619,15 +537,10 @@ class _CategoryPageState extends State<CategoryPage>
 
                       const SizedBox(height: 6),
 
-                      // - Green star + number
+                      // Rating (except for services category) - Now uses cached rating
                       if (widget.categoryName.toLowerCase() != 'services')
                         FutureBuilder<double?>(
-                          future: _ratingCache[placeId] != null
-                              ? Future.value(_ratingCache[placeId])
-                              : _getLiveRating(placeId).then((r) {
-                                  _ratingCache[placeId] = r;
-                                  return r;
-                                }),
+                          future: _getCachedRating(placeId),
                           builder: (context, snap) {
                             if (!snap.hasData) return const SizedBox.shrink();
                             final r = snap.data ?? 0.0;
@@ -659,7 +572,7 @@ class _CategoryPageState extends State<CategoryPage>
     );
   }
 
-  // ✅ Build place image with caching - prevents reload on scroll
+  // Build place image with caching - prevents reload on scroll
   Widget _buildPlaceImage(String imgPath) {
     // Check if we already have the URL cached
     if (_imageUrlCache.containsKey(imgPath)) {

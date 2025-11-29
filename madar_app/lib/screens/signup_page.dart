@@ -5,8 +5,13 @@ import 'package:madar_app/screens/signin_page.dart';
 import 'package:madar_app/widgets/custom_scaffold.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'check_email_page.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
+import 'package:madar_app/theme/theme.dart';
+import 'check_email_page.dart';
+
+// ----------------------------------------------------------------------------
+// Sign Up Screen
+// ----------------------------------------------------------------------------
 
 class SignUpScreen extends StatefulWidget {
   const SignUpScreen({super.key});
@@ -18,12 +23,14 @@ class SignUpScreen extends StatefulWidget {
 class _SignUpScreenState extends State<SignUpScreen> {
   final _formSignupKey = GlobalKey<FormState>();
 
+  // Controllers
   final _firstNameCtrl = TextEditingController();
   final _lastNameCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
 
+  // Focus Nodes
   final _firstNameFocus = FocusNode();
   final _lastNameFocus = FocusNode();
   final _emailFocus = FocusNode();
@@ -32,23 +39,20 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
   bool _loading = false;
 
+  // Validation States
   bool _isFirstNameValid = true;
   String? _firstNameError;
-
   bool _isLastNameValid = true;
   String? _lastNameError;
-
   bool _isEmailValid = true;
   String? _emailError;
-
   bool _isPhoneValid = true;
   String? _phoneError;
-
   bool _isPasswordValid = true;
   String? _passwordError;
   bool _obscurePassword = true;
 
-  // Password requirements
+  // Password Requirements
   bool _showPasswordRequirements = false;
   bool _hasMinLength = false;
   bool _hasUppercase = false;
@@ -56,7 +60,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
   bool _hasNumber = false;
   bool _hasSpecialChar = false;
 
-  // Name requirements
+  // Name Requirements
   bool _showFirstNameRequirements = false;
   bool _showLastNameRequirements = false;
   bool _firstNameHasMinLength = false;
@@ -84,12 +88,15 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
   @override
   void dispose() {
+    // Clear any lingering snackbars when leaving the page
+    if (mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+    }
     _firstNameCtrl.dispose();
     _lastNameCtrl.dispose();
     _emailCtrl.dispose();
     _phoneCtrl.dispose();
     _passCtrl.dispose();
-
     _firstNameFocus.dispose();
     _lastNameFocus.dispose();
     _emailFocus.dispose();
@@ -97,6 +104,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
     _passwordFocus.dispose();
     super.dispose();
   }
+
+  // ---------- Validation Methods ----------
 
   /// Validates all previous fields before allowing the next step
   bool _validatePreviousFields(int step) {
@@ -184,7 +193,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
     return null;
   }
 
-  /// Handles sign-up process using Firebase Authentication and Firestore
+  // ---------- Sign Up Logic ----------
+
   Future<void> _signUp() async {
     setState(() => _loading = true);
 
@@ -250,8 +260,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
       await prefs.setString('email', email);
       await prefs.setString('phone', fullPhone);
 
-      //await FirebaseAuth.instance.signOut();
-
       if (mounted) {
         await Navigator.pushReplacement(
           context,
@@ -276,6 +284,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
     }
   }
 
+  // ---------- UI Helper Methods ----------
+
   /// Unified input decoration for all fields
   InputDecoration _decorateField({
     required String label,
@@ -285,29 +295,24 @@ class _SignUpScreenState extends State<SignUpScreen> {
     Widget? suffix,
     String? prefix,
   }) {
-    const Color mainGreen = Color(0xFF787E65);
-    //final Color errorColor = Colors.redAccent.shade700; //red
-    final Color kError = Color(0xFFC62828);
-    const Color normalColor = Colors.grey;
-
     final OutlineInputBorder normalBorder = OutlineInputBorder(
-      borderRadius: BorderRadius.circular(10),
-      borderSide: const BorderSide(color: normalColor),
+      borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
+      borderSide: const BorderSide(color: Colors.grey),
     );
 
     final OutlineInputBorder errorBorder = OutlineInputBorder(
-      borderRadius: BorderRadius.circular(10),
-      borderSide: BorderSide(color: kError, width: 1),
+      borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
+      borderSide: const BorderSide(color: AppColors.kError, width: 1),
     );
 
     final OutlineInputBorder focusedBorder = OutlineInputBorder(
-      borderRadius: BorderRadius.circular(10),
-      borderSide: const BorderSide(color: mainGreen, width: 1.8),
+      borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
+      borderSide: const BorderSide(color: AppColors.kGreen, width: 1.8),
     );
 
     final OutlineInputBorder focusedErrorBorder = OutlineInputBorder(
-      borderRadius: BorderRadius.circular(10),
-      borderSide: BorderSide(color: kError, width: 1.8),
+      borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
+      borderSide: const BorderSide(color: AppColors.kError, width: 1.8),
     );
 
     return InputDecoration(
@@ -322,30 +327,30 @@ class _SignUpScreenState extends State<SignUpScreen> {
       focusedErrorBorder: errorBorder,
       errorText: label == 'Password' ? null : error,
       errorStyle: TextStyle(
-        color: kError,
+        color: AppColors.kError,
         fontSize: label == 'Password' ? 0 : 13,
       ),
       floatingLabelStyle: TextStyle(
-        color: valid ? mainGreen : kError,
+        color: valid ? AppColors.kGreen : AppColors.kError,
         fontWeight: FontWeight.w400,
       ),
     );
   }
 
-  /// Builds requirement list items (used for names and password)
+  /// Builds requirement list items for names and password
   Widget _buildRequirementItem(String text, bool met) {
     return Row(
       children: [
         Icon(
           met ? Icons.check_circle : Icons.circle_outlined,
-          color: met ? const Color(0xFF787E65) : Colors.grey,
+          color: met ? AppColors.kGreen : Colors.grey,
           size: 18,
         ),
         const SizedBox(width: 8),
         Text(
           text,
           style: TextStyle(
-            color: met ? const Color(0xFF787E65) : Colors.grey,
+            color: met ? AppColors.kGreen : Colors.grey,
             fontSize: 13,
             fontWeight: met ? FontWeight.w600 : FontWeight.w400,
           ),
@@ -354,8 +359,13 @@ class _SignUpScreenState extends State<SignUpScreen> {
     );
   }
 
+  // ---------- Build ----------
+
   @override
   Widget build(BuildContext context) {
+    final screenHeight = MediaQuery.of(context).size.height;
+    final isSmallScreen = screenHeight < 700;
+
     return CustomScaffold(
       showLogo: true,
       child: Column(
@@ -364,12 +374,17 @@ class _SignUpScreenState extends State<SignUpScreen> {
           Expanded(
             flex: 13,
             child: Container(
-              padding: const EdgeInsets.fromLTRB(25, 50, 25, 20),
+              padding: EdgeInsets.fromLTRB(
+                AppSpacing.xxl,
+                isSmallScreen ? 40 : 50,
+                AppSpacing.xxl,
+                AppSpacing.xl + MediaQuery.of(context).padding.bottom,
+              ),
               decoration: const BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(35),
-                  topRight: Radius.circular(35),
+                  topLeft: Radius.circular(AppSpacing.sheetRadius),
+                  topRight: Radius.circular(AppSpacing.sheetRadius),
                 ),
               ),
               child: SingleChildScrollView(
@@ -377,68 +392,12 @@ class _SignUpScreenState extends State<SignUpScreen> {
                   key: _formSignupKey,
                   child: Column(
                     children: [
-                      const Text(
-                        'Get Started',
-                        style: TextStyle(
-                          fontSize: 30,
-                          fontWeight: FontWeight.w900,
-                          color: Color(0xFF787E65),
-                        ),
-                      ),
-                      const SizedBox(height: 40),
+                      // Title
+                      Text('Get Started', style: AppTextStyles.largeTitles),
+                      SizedBox(height: isSmallScreen ? 30 : 40),
 
                       // First Name Field
-                      TextFormField(
-                        controller: _firstNameCtrl,
-                        focusNode: _firstNameFocus,
-                        autovalidateMode: AutovalidateMode.onUserInteraction,
-                        onChanged: (value) {
-                          setState(() {
-                            _firstNameHasMinLength = value.length >= 2;
-                            _firstNameStartsWithLetter = RegExp(
-                              r'^[A-Za-z]',
-                            ).hasMatch(value);
-
-                            if (value.isEmpty) {
-                              _firstNameError = 'Enter First Name';
-                              _isFirstNameValid = false;
-                            } else if (!RegExp(r'^[A-Za-z]').hasMatch(value)) {
-                              _firstNameError = null;
-                              _isFirstNameValid = false;
-                            } else if (value.length < 2) {
-                              _firstNameError = null;
-                              _isFirstNameValid = false;
-                            } else if (value.length > 20) {
-                              _firstNameError =
-                                  'Must be less than 20 characters';
-                              _isFirstNameValid = false;
-                            } else if (!RegExp(
-                              r'^[A-Za-z][A-Za-z0-9-]{1,19}$',
-                            ).hasMatch(value)) {
-                              _firstNameError =
-                                  'Only letters, numbers, and "-" allowed';
-                              _isFirstNameValid = false;
-                            } else {
-                              _firstNameError = null;
-                              _isFirstNameValid = true;
-                            }
-                          });
-                        },
-                        decoration: _decorateField(
-                          label: 'First Name',
-                          hint: 'Enter First Name',
-                          valid: _isFirstNameValid,
-                          error: _firstNameError,
-                          suffix:
-                              _isFirstNameValid &&
-                                  _firstNameCtrl.text.isNotEmpty
-                              ? const Icon(
-                                  Icons.check_circle,
-                                  color: Color(0xFF787E65),
-                                )
-                              : null,
-                        ),
-                      ),
+                      _buildFirstNameField(),
                       if (_showFirstNameRequirements) ...[
                         const SizedBox(height: 10),
                         _buildRequirementItem(
@@ -453,57 +412,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                       const SizedBox(height: 25),
 
                       // Last Name Field
-                      TextFormField(
-                        controller: _lastNameCtrl,
-                        focusNode: _lastNameFocus,
-                        onTap: () => _validatePreviousFields(1),
-                        autovalidateMode: AutovalidateMode.onUserInteraction,
-                        onChanged: (value) {
-                          setState(() {
-                            _lastNameHasMinLength = value.length >= 2;
-                            _lastNameStartsWithLetter = RegExp(
-                              r'^[A-Za-z]',
-                            ).hasMatch(value);
-
-                            if (value.isEmpty) {
-                              _lastNameError = 'Enter Last Name';
-                              _isLastNameValid = false;
-                            } else if (!RegExp(r'^[A-Za-z]').hasMatch(value)) {
-                              _lastNameError = null;
-                              _isLastNameValid = false;
-                            } else if (value.length < 2) {
-                              _lastNameError = null;
-                              _isLastNameValid = false;
-                            } else if (value.length > 20) {
-                              _lastNameError =
-                                  'Must be less than 20 characters';
-                              _isLastNameValid = false;
-                            } else if (!RegExp(
-                              r'^[A-Za-z][A-Za-z0-9-]{1,19}$',
-                            ).hasMatch(value)) {
-                              _lastNameError =
-                                  'Only letters, numbers, and "-" allowed';
-                              _isLastNameValid = false;
-                            } else {
-                              _lastNameError = null;
-                              _isLastNameValid = true;
-                            }
-                          });
-                        },
-                        decoration: _decorateField(
-                          label: 'Last Name',
-                          hint: 'Enter Last Name',
-                          valid: _isLastNameValid,
-                          error: _lastNameError,
-                          suffix:
-                              _isLastNameValid && _lastNameCtrl.text.isNotEmpty
-                              ? const Icon(
-                                  Icons.check_circle,
-                                  color: Color(0xFF787E65),
-                                )
-                              : null,
-                        ),
-                      ),
+                      _buildLastNameField(),
                       if (_showLastNameRequirements) ...[
                         const SizedBox(height: 10),
                         _buildRequirementItem(
@@ -518,142 +427,15 @@ class _SignUpScreenState extends State<SignUpScreen> {
                       const SizedBox(height: 25),
 
                       // Email Field
-                      TextFormField(
-                        controller: _emailCtrl,
-                        focusNode: _emailFocus,
-                        onTap: () => _validatePreviousFields(2),
-                        keyboardType: TextInputType.emailAddress,
-                        autovalidateMode: AutovalidateMode.onUserInteraction,
-                        onChanged: (v) => setState(() {
-                          if (v.isEmpty) {
-                            _emailError = 'Enter Email';
-                            _isEmailValid = false;
-                          } else if (!RegExp(
-                            r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$",
-                          ).hasMatch(v)) {
-                            _emailError = 'Invalid email format';
-                            _isEmailValid = false;
-                          } else {
-                            _emailError = null;
-                            _isEmailValid = true;
-                          }
-                        }),
-                        decoration: _decorateField(
-                          label: 'Email',
-                          hint: 'Enter Email',
-                          valid: _isEmailValid,
-                          error: _emailError,
-                          suffix: _isEmailValid && _emailCtrl.text.isNotEmpty
-                              ? const Icon(
-                                  Icons.check_circle,
-                                  color: Color(0xFF787E65),
-                                )
-                              : null,
-                        ),
-                      ),
+                      _buildEmailField(),
                       const SizedBox(height: 25),
 
                       // Phone Field
-                      TextFormField(
-                        controller: _phoneCtrl,
-                        focusNode: _phoneFocus,
-                        onTap: () => _validatePreviousFields(3),
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.digitsOnly,
-                          LengthLimitingTextInputFormatter(9),
-                        ],
-                        autovalidateMode: AutovalidateMode.onUserInteraction,
-                        onChanged: (v) => setState(() {
-                          if (v.isEmpty) {
-                            _phoneError = 'Enter phone number';
-                            _isPhoneValid = false;
-                          } else if (!RegExp(r'^\d{9}$').hasMatch(v)) {
-                            _phoneError = 'Enter 9 digits';
-                            _isPhoneValid = false;
-                          } else {
-                            _phoneError = null;
-                            _isPhoneValid = true;
-                          }
-                        }),
-                        decoration: _decorateField(
-                          label: 'Phone Number',
-                          hint: 'Enter 9 digits',
-                          valid: _isPhoneValid,
-                          error: _phoneError,
-                          prefix: '+966 ',
-                          suffix: _isPhoneValid && _phoneCtrl.text.isNotEmpty
-                              ? const Icon(
-                                  Icons.check_circle,
-                                  color: Color(0xFF787E65),
-                                )
-                              : null,
-                        ),
-                      ),
+                      _buildPhoneField(),
                       const SizedBox(height: 25),
 
                       // Password Field
-                      TextFormField(
-                        controller: _passCtrl,
-                        focusNode: _passwordFocus,
-                        onTap: () => _validatePreviousFields(4),
-                        obscureText: _obscurePassword,
-                        autovalidateMode: AutovalidateMode.onUserInteraction,
-                        onChanged: (v) => setState(() {
-                          _hasMinLength = v.length >= 8;
-                          _hasUppercase = RegExp(r'[A-Z]').hasMatch(v);
-                          _hasLowercase = RegExp(r'[a-z]').hasMatch(v);
-                          _hasNumber = RegExp(r'[0-9]').hasMatch(v);
-                          _hasSpecialChar = RegExp(
-                            r'[^A-Za-z0-9 ]',
-                          ).hasMatch(v);
-
-                          final err = _validatePassword(v);
-                          _passwordError = err;
-                          _isPasswordValid = err == null;
-                        }),
-                        decoration: _decorateField(
-                          label: 'Password',
-                          hint: 'Enter Password',
-                          valid: _isPasswordValid,
-                          error: _passwordError,
-                          suffix: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.only(
-                                  right: 4,
-                                ), // Add spacing to push it left
-                                child: IconButton(
-                                  icon: Icon(
-                                    _obscurePassword
-                                        ? Icons.visibility_off
-                                        : Icons.visibility,
-                                    color: Colors.grey.shade600,
-                                  ),
-                                  onPressed: () => setState(
-                                    () => _obscurePassword = !_obscurePassword,
-                                  ),
-                                  padding: EdgeInsets
-                                      .zero, // Remove default IconButton padding
-                                  constraints:
-                                      const BoxConstraints(), // Remove minimum size constraints
-                                ),
-                              ),
-                              if (_isPasswordValid && _passCtrl.text.isNotEmpty)
-                                const Padding(
-                                  padding: EdgeInsets.only(
-                                    right: 12,
-                                  ), // Match the default suffix icon padding
-                                  child: Icon(
-                                    Icons.check_circle,
-                                    color: Color(0xFF787E65),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
+                      _buildPasswordField(),
                       if (_showPasswordRequirements) ...[
                         const SizedBox(height: 10),
                         _buildRequirementItem(
@@ -677,45 +459,14 @@ class _SignUpScreenState extends State<SignUpScreen> {
                       const SizedBox(height: 25),
 
                       // Sign Up Button
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.kGreen,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ), // add general method
-                          onPressed: _loading ? null : _signUp,
-                          child: _loading
-                              ? LayoutBuilder(
-                                  builder: (context, constraints) {
-                                    final size = (constraints.maxHeight * 0.6)
-                                        .clamp(16.0, 24.0); // Between 16-24
-                                    return SizedBox(
-                                      width: size,
-                                      height: size,
-                                      child: CircularProgressIndicator(
-                                        color: Colors.white,
-                                        strokeWidth: 2.5,
-                                      ),
-                                    );
-                                  },
-                                )
-                              : const Text(
-                                  'Sign up',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                        ),
+                      PrimaryButton(
+                        text: 'Sign up',
+                        onPressed: _signUp,
+                        isLoading: _loading,
                       ),
                       const SizedBox(height: 25),
 
-                      // Redirect to Sign In
+                      // Sign In Link
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
@@ -729,13 +480,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                                 ),
                               );
                             },
-                            child: const Text(
-                              ' Sign in',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF787E65),
-                              ),
-                            ),
+                            child: Text(' Sign in', style: AppTextStyles.link),
                           ),
                         ],
                       ),
@@ -746,6 +491,214 @@ class _SignUpScreenState extends State<SignUpScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // ---------- Field Builders ----------
+
+  Widget _buildFirstNameField() {
+    return TextFormField(
+      controller: _firstNameCtrl,
+      focusNode: _firstNameFocus,
+      autovalidateMode: AutovalidateMode.onUserInteraction,
+      onChanged: (value) {
+        setState(() {
+          _firstNameHasMinLength = value.length >= 2;
+          _firstNameStartsWithLetter = RegExp(r'^[A-Za-z]').hasMatch(value);
+
+          if (value.isEmpty) {
+            _firstNameError = 'Enter First Name';
+            _isFirstNameValid = false;
+          } else if (!RegExp(r'^[A-Za-z]').hasMatch(value)) {
+            _firstNameError = null;
+            _isFirstNameValid = false;
+          } else if (value.length < 2) {
+            _firstNameError = null;
+            _isFirstNameValid = false;
+          } else if (value.length > 20) {
+            _firstNameError = 'Must be less than 20 characters';
+            _isFirstNameValid = false;
+          } else if (!RegExp(r'^[A-Za-z][A-Za-z0-9-]{1,19}$').hasMatch(value)) {
+            _firstNameError = 'Only letters, numbers, and "-" allowed';
+            _isFirstNameValid = false;
+          } else {
+            _firstNameError = null;
+            _isFirstNameValid = true;
+          }
+        });
+      },
+      decoration: _decorateField(
+        label: 'First Name',
+        hint: 'Enter First Name',
+        valid: _isFirstNameValid,
+        error: _firstNameError,
+        suffix: _isFirstNameValid && _firstNameCtrl.text.isNotEmpty
+            ? const Icon(Icons.check_circle, color: AppColors.kGreen)
+            : null,
+      ),
+    );
+  }
+
+  Widget _buildLastNameField() {
+    return TextFormField(
+      controller: _lastNameCtrl,
+      focusNode: _lastNameFocus,
+      onTap: () => _validatePreviousFields(1),
+      autovalidateMode: AutovalidateMode.onUserInteraction,
+      onChanged: (value) {
+        setState(() {
+          _lastNameHasMinLength = value.length >= 2;
+          _lastNameStartsWithLetter = RegExp(r'^[A-Za-z]').hasMatch(value);
+
+          if (value.isEmpty) {
+            _lastNameError = 'Enter Last Name';
+            _isLastNameValid = false;
+          } else if (!RegExp(r'^[A-Za-z]').hasMatch(value)) {
+            _lastNameError = null;
+            _isLastNameValid = false;
+          } else if (value.length < 2) {
+            _lastNameError = null;
+            _isLastNameValid = false;
+          } else if (value.length > 20) {
+            _lastNameError = 'Must be less than 20 characters';
+            _isLastNameValid = false;
+          } else if (!RegExp(r'^[A-Za-z][A-Za-z0-9-]{1,19}$').hasMatch(value)) {
+            _lastNameError = 'Only letters, numbers, and "-" allowed';
+            _isLastNameValid = false;
+          } else {
+            _lastNameError = null;
+            _isLastNameValid = true;
+          }
+        });
+      },
+      decoration: _decorateField(
+        label: 'Last Name',
+        hint: 'Enter Last Name',
+        valid: _isLastNameValid,
+        error: _lastNameError,
+        suffix: _isLastNameValid && _lastNameCtrl.text.isNotEmpty
+            ? const Icon(Icons.check_circle, color: AppColors.kGreen)
+            : null,
+      ),
+    );
+  }
+
+  Widget _buildEmailField() {
+    return TextFormField(
+      controller: _emailCtrl,
+      focusNode: _emailFocus,
+      onTap: () => _validatePreviousFields(2),
+      keyboardType: TextInputType.emailAddress,
+      autovalidateMode: AutovalidateMode.onUserInteraction,
+      onChanged: (v) => setState(() {
+        if (v.isEmpty) {
+          _emailError = 'Enter Email';
+          _isEmailValid = false;
+        } else if (!RegExp(
+          r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$",
+        ).hasMatch(v)) {
+          _emailError = 'Invalid email format';
+          _isEmailValid = false;
+        } else {
+          _emailError = null;
+          _isEmailValid = true;
+        }
+      }),
+      decoration: _decorateField(
+        label: 'Email',
+        hint: 'Enter Email',
+        valid: _isEmailValid,
+        error: _emailError,
+        suffix: _isEmailValid && _emailCtrl.text.isNotEmpty
+            ? const Icon(Icons.check_circle, color: AppColors.kGreen)
+            : null,
+      ),
+    );
+  }
+
+  Widget _buildPhoneField() {
+    return TextFormField(
+      controller: _phoneCtrl,
+      focusNode: _phoneFocus,
+      onTap: () => _validatePreviousFields(3),
+      keyboardType: TextInputType.number,
+      inputFormatters: [
+        FilteringTextInputFormatter.digitsOnly,
+        LengthLimitingTextInputFormatter(9),
+      ],
+      autovalidateMode: AutovalidateMode.onUserInteraction,
+      onChanged: (v) => setState(() {
+        if (v.isEmpty) {
+          _phoneError = 'Enter phone number';
+          _isPhoneValid = false;
+        } else if (!RegExp(r'^\d{9}$').hasMatch(v)) {
+          _phoneError = 'Enter 9 digits';
+          _isPhoneValid = false;
+        } else {
+          _phoneError = null;
+          _isPhoneValid = true;
+        }
+      }),
+      decoration: _decorateField(
+        label: 'Phone Number',
+        hint: 'Enter 9 digits',
+        valid: _isPhoneValid,
+        error: _phoneError,
+        prefix: '+966 ',
+        suffix: _isPhoneValid && _phoneCtrl.text.isNotEmpty
+            ? const Icon(Icons.check_circle, color: AppColors.kGreen)
+            : null,
+      ),
+    );
+  }
+
+  Widget _buildPasswordField() {
+    return TextFormField(
+      controller: _passCtrl,
+      focusNode: _passwordFocus,
+      onTap: () => _validatePreviousFields(4),
+      obscureText: _obscurePassword,
+      autovalidateMode: AutovalidateMode.onUserInteraction,
+      onChanged: (v) => setState(() {
+        _hasMinLength = v.length >= 8;
+        _hasUppercase = RegExp(r'[A-Z]').hasMatch(v);
+        _hasLowercase = RegExp(r'[a-z]').hasMatch(v);
+        _hasNumber = RegExp(r'[0-9]').hasMatch(v);
+        _hasSpecialChar = RegExp(r'[^A-Za-z0-9 ]').hasMatch(v);
+
+        final err = _validatePassword(v);
+        _passwordError = err;
+        _isPasswordValid = err == null;
+      }),
+      decoration: _decorateField(
+        label: 'Password',
+        hint: 'Enter Password',
+        valid: _isPasswordValid,
+        error: _passwordError,
+        suffix: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: IconButton(
+                icon: Icon(
+                  _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                  color: Colors.grey.shade600,
+                ),
+                onPressed: () =>
+                    setState(() => _obscurePassword = !_obscurePassword),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
+            ),
+            if (_isPasswordValid && _passCtrl.text.isNotEmpty)
+              const Padding(
+                padding: EdgeInsets.only(right: 12),
+                child: Icon(Icons.check_circle, color: AppColors.kGreen),
+              ),
+          ],
+        ),
       ),
     );
   }

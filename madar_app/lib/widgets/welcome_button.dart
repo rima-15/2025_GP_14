@@ -1,7 +1,16 @@
 import 'package:flutter/material.dart';
 
-class WelcomeButton
-    extends StatelessWidget {
+// ----------------------------------------------------------------------------
+// Welcome Button
+// ----------------------------------------------------------------------------
+
+/// Custom button used on the welcome screen with rounded corner style
+class WelcomeButton extends StatelessWidget {
+  final String? buttonText;
+  final Widget? onTap;
+  final Color? color;
+  final Color? textColor;
+
   const WelcomeButton({
     super.key,
     this.buttonText,
@@ -9,35 +18,23 @@ class WelcomeButton
     this.color,
     this.textColor,
   });
-  final String? buttonText;
-  final Widget? onTap;
-  final Color? color;
-  final Color? textColor;
+
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: () {
         Navigator.push(
           context,
-          MaterialPageRoute(
-            builder: (e) => onTap!,
-          ),
+          MaterialPageRoute(builder: (e) => onTap!),
         );
       },
       child: Container(
-        padding:
-            const EdgeInsets.symmetric(
-              horizontal: 30.0,
-              vertical: 1.0,
-            ),
-
+        padding: const EdgeInsets.symmetric(horizontal: 30.0, vertical: 1.0),
         decoration: BoxDecoration(
           color: color!,
-          borderRadius:
-              const BorderRadius.only(
-                topLeft:
-                    Radius.circular(50),
-              ),
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(50),
+          ),
         ),
         child: Text(
           buttonText!,

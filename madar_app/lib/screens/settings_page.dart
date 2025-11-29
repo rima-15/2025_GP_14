@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
+import 'package:madar_app/theme/theme.dart';
+
+// ----------------------------------------------------------------------------
+// Settings Page
+// ----------------------------------------------------------------------------
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -78,6 +83,8 @@ class _SettingsPageState extends State<SettingsPage> {
     super.dispose();
   }
 
+  // ---------- Focus Listeners ----------
+
   void _onNewPasswordFocusChange() {
     if (!_newPasswordFocus.hasFocus) {
       _formKey.currentState?.validate();
@@ -104,6 +111,8 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
+  // ---------- Password Requirements Check ----------
+
   void _checkPasswordRequirements() {
     final password = _newPasswordCtrl.text;
     final oldPassword = _oldPasswordCtrl.text;
@@ -122,6 +131,8 @@ class _SettingsPageState extends State<SettingsPage> {
       }
     });
   }
+
+  // ---------- Validation ----------
 
   String? _validateOldPassword(String? value) {
     if (value == null || value.isEmpty) {
@@ -152,16 +163,17 @@ class _SettingsPageState extends State<SettingsPage> {
       return 'Please confirm your password';
     }
     if (value != _newPasswordCtrl.text) {
-      return 'Passwords do not match';
+      return 'q';
     }
     return null;
   }
+
+  // ---------- Update Password ----------
 
   Future<void> _updatePassword() async {
     _messageManager.clearMessage();
 
     if (!_formKey.currentState!.validate()) {
-      // Focus the first invalid field
       final oldPassword = _oldPasswordCtrl.text;
       final newPassword = _newPasswordCtrl.text;
       final confirmPassword = _confirmPasswordCtrl.text;
@@ -200,7 +212,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
         setState(() {
           _updating = false;
-          _securityExpanded = false; // Collapse after success
+          _securityExpanded = false;
         });
       }
     } on FirebaseAuthException catch (e) {
@@ -221,10 +233,16 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
+  // ---------- Build ----------
+
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isSmallScreen = screenWidth < 360;
+    final horizontalPadding = isSmallScreen ? 20.0 : 24.0;
+
     return Scaffold(
-      backgroundColor: Colors.white, // Clean white background
+      backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
@@ -250,62 +268,54 @@ class _SettingsPageState extends State<SettingsPage> {
           physics: const ClampingScrollPhysics(),
         ),
         child: ListView(
-          padding: const EdgeInsets.all(24),
+          padding: EdgeInsets.all(horizontalPadding),
           children: [
-            // Preferences Section Title
-            Padding(
-              padding: const EdgeInsets.only(left: 4, bottom: 12),
-              child: Text(
-                'Preferences',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.grey[600],
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ),
-
             // Preferences Section
+            _buildSectionTitle('Preferences'),
+            const SizedBox(height: 12),
+
             _buildSwitchTile(
               icon: Icons.notifications_outlined,
               title: 'Notifications',
               subtitle: 'Receive push notifications',
               value: _notificationsEnabled,
-              onChanged: (val) {
-                setState(() => _notificationsEnabled = val);
-              },
+              onChanged: (val) => setState(() => _notificationsEnabled = val),
             ),
             const SizedBox(height: 12),
+
             _buildSwitchTile(
               icon: Icons.location_on_outlined,
               title: 'Location Services',
               subtitle: 'Allow location access',
               value: _locationEnabled,
-              onChanged: (val) {
-                setState(() => _locationEnabled = val);
-              },
+              onChanged: (val) => setState(() => _locationEnabled = val),
             ),
 
             const SizedBox(height: 32),
 
-            // Privacy and Security Section Title
-            Padding(
-              padding: const EdgeInsets.only(left: 4, bottom: 12),
-              child: Text(
-                'Privacy and Security',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.grey[600],
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ),
+            // Privacy and Security Section
+            _buildSectionTitle('Privacy and Security'),
+            const SizedBox(height: 12),
 
-            // Change Password Section (Expandable)
             _buildSecuritySection(),
           ],
+        ),
+      ),
+    );
+  }
+
+  // ---------- UI Builders ----------
+
+  Widget _buildSectionTitle(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 4),
+      child: Text(
+        title,
+        style: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w700,
+          color: Colors.grey[600],
+          letterSpacing: 0.5,
         ),
       ),
     );
@@ -322,7 +332,7 @@ class _SettingsPageState extends State<SettingsPage> {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
         border: Border.all(color: Colors.grey[300]!, width: 1),
       ),
       child: Row(
@@ -357,7 +367,7 @@ class _SettingsPageState extends State<SettingsPage> {
             activeColor: AppColors.kGreen,
             inactiveThumbColor: Colors.grey[400],
             inactiveTrackColor: Colors.grey[300],
-            trackOutlineColor: MaterialStateProperty.all(Colors.grey[400]),
+            trackOutlineColor: WidgetStateProperty.all(Colors.grey[400]),
           ),
         ],
       ),
@@ -369,15 +379,13 @@ class _SettingsPageState extends State<SettingsPage> {
       children: [
         // Change Password header (collapsible)
         InkWell(
-          onTap: () {
-            setState(() => _securityExpanded = !_securityExpanded);
-          },
-          borderRadius: BorderRadius.circular(10),
+          onTap: () => setState(() => _securityExpanded = !_securityExpanded),
+          borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
               border: Border.all(color: Colors.grey[300]!, width: 1),
             ),
             child: Row(
@@ -414,7 +422,7 @@ class _SettingsPageState extends State<SettingsPage> {
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
               color: Colors.grey[50],
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
               border: Border.all(color: Colors.grey[300]!, width: 1),
             ),
             child: Form(
@@ -541,43 +549,10 @@ class _SettingsPageState extends State<SettingsPage> {
                   const SizedBox(height: 24),
 
                   // Update Password Button
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _updating ? null : _updatePassword,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.kGreen,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        elevation: 0,
-                        disabledBackgroundColor: Colors.grey[250],
-                      ),
-                      child: _updating
-                          ? LayoutBuilder(
-                              builder: (context, constraints) {
-                                final size = (constraints.maxHeight * 0.6)
-                                    .clamp(16.0, 24.0);
-                                return SizedBox(
-                                  width: size,
-                                  height: size,
-                                  child: const CircularProgressIndicator(
-                                    color: Colors.white,
-                                    strokeWidth: 2.5,
-                                  ),
-                                );
-                              },
-                            )
-                          : const Text(
-                              'Update Password',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                    ),
+                  PrimaryButton(
+                    text: 'Update Password',
+                    onPressed: _updatePassword,
+                    isLoading: _updating,
                   ),
 
                   // Message box
@@ -607,12 +582,14 @@ class _SettingsPageState extends State<SettingsPage> {
             size: 18,
           ),
           const SizedBox(width: 8),
-          Text(
-            text,
-            style: TextStyle(
-              color: isMet ? AppColors.kGreen : Colors.grey,
-              fontSize: 13,
-              fontWeight: isMet ? FontWeight.w600 : FontWeight.w400,
+          Flexible(
+            child: Text(
+              text,
+              style: TextStyle(
+                color: isMet ? AppColors.kGreen : Colors.grey,
+                fontSize: 13,
+                fontWeight: isMet ? FontWeight.w600 : FontWeight.w400,
+              ),
             ),
           ),
         ],

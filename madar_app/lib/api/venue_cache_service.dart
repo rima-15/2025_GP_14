@@ -3,21 +3,24 @@ import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 
-// ---- cache config ----
-const int _kCacheMaxAgeDays = 7; // 🔁 refresh rating if older than 7 days
+// ----------------------------------------------------------------------------
+// Venue Cache Service - Caches Google Places data to reduce API calls
+// ----------------------------------------------------------------------------
 
-// ---- types ----
+// Refresh rating if older than 7 days
+const int _kCacheMaxAgeDays = 7;
+
+// Type alias for the fetcher function
 typedef PlaceDetailsFetcher =
     Future<Map<String, dynamic>> Function(String placeId);
 
-// Expanded: we may store more fields over time
+/// Venue metadata from Google Places
 class VenueMeta {
   final double? rating;
-  final Map<String, dynamic>?
-  openingHours; // current_opening_hours OR opening_hours
-  final int? utcOffset; // minutes
-  final List<String>? types; // place types
-  final String? businessStatus; // e.g. CLOSED_TEMPORARILY
+  final Map<String, dynamic>? openingHours;
+  final int? utcOffset;
+  final List<String>? types;
+  final String? businessStatus;
   final DateTime? lastUpdated;
 
   VenueMeta({
@@ -43,7 +46,8 @@ class VenueMeta {
   );
 }
 
-// ---- default Google fetcher kept INSIDE the service file ----
+// ---------- Default Google Places Fetcher ----------
+
 Future<Map<String, dynamic>> defaultPlacesDetailsFetcher(String placeId) async {
   final key = dotenv.maybeGet('GOOGLE_API_KEY') ?? '';
   if (key.isEmpty) {
@@ -63,14 +67,16 @@ Future<Map<String, dynamic>> defaultPlacesDetailsFetcher(String placeId) async {
   });
   final r = await http.get(uri).timeout(const Duration(seconds: 10));
   final j = jsonDecode(r.body) as Map<String, dynamic>;
-  return j; // we'll read j['result'] below
+  return j;
 }
+
+// ---------- Cache Service ----------
 
 class VenueCacheService {
   final FirebaseFirestore _db;
   final PlaceDetailsFetcher _fetcher;
 
-  // 👇 fetcher is optional; defaults to the internal Google fetcher
+  /// fetcher is optional; defaults to the internal Google fetcher
   VenueCacheService(this._db, [PlaceDetailsFetcher? fetcher])
     : _fetcher = fetcher ?? defaultPlacesDetailsFetcher;
 
@@ -80,8 +86,9 @@ class VenueCacheService {
       .collection('cache')
       .doc('googlePlaces');
 
+  /// Get venue metadata, using cache if fresh, otherwise fetching from Google
   Future<VenueMeta> getMonthlyMeta(String placeId) async {
-    // 1) read cache
+    // Read cache
     final snap = await _doc(placeId).get();
     final data = snap.data();
     if (data != null) {
@@ -90,12 +97,12 @@ class VenueCacheService {
           : null;
       if (ts != null &&
           DateTime.now().difference(ts).inDays < _kCacheMaxAgeDays) {
-        // ✅ Use cached value if it's newer than 7 days
+        // Use cached value if it's newer than 7 days
         return VenueMeta.fromMap(data);
       }
     }
 
-    // 2) stale → fetch once from Google Places
+    // Stale or missing - fetch from Google Places
     final j = await _fetcher(placeId);
     final result = (j['result'] as Map<String, dynamic>?) ?? {};
 

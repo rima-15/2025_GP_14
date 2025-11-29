@@ -1,11 +1,5 @@
-// ✅ NEW HOME PAGE - Following EXACTLY the reference image
-// Large cards with image, name overlay, stars, and distance
-
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:http/http.dart' as http;
 import 'package:madar_app/screens/venue_page.dart';
 import 'package:madar_app/api/data_fetcher.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -15,18 +9,29 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:madar_app/api/venue_cache_service.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
 
+// ----------------------------------------------------------------------------
+// Constants
+// ----------------------------------------------------------------------------
+
 const double _riyadhLat = 24.7136;
 const double _riyadhLng = 46.6753;
-
 const Color kPrimaryGreen = Color(0xFF777D63);
+
+// ----------------------------------------------------------------------------
+// Home Page
+// ----------------------------------------------------------------------------
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
+
   @override
   HomePageState createState() => HomePageState();
 }
 
 class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
   @override
   void dispose() {
     if (mounted) {
@@ -35,36 +40,39 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
     super.dispose();
   }
 
-  @override
-  bool get wantKeepAlive => true; // ✅ Keep state alive when navigating away
+  // ---------- Storage & Caching ----------
 
   final storage.FirebaseStorage _coversStorage =
       storage.FirebaseStorage.instanceFor(
         bucket: 'gs://madar-database.firebasestorage.app',
       );
 
-  final List<String> filters = const ['All', 'Malls', 'Stadiums', 'Airports'];
+  // ---------- Filters ----------
 
+  final List<String> filters = const ['All', 'Malls', 'Stadiums', 'Airports'];
   int selectedFilterIndex = 0;
   String _query = '';
+
+  // ---------- State ----------
+
   bool _loading = true;
   String? _error;
 
-  // ✅ Static variables persist across widget rebuilds (survive navigation)
-  static List<VenueData> _staticAllVenues = []; // Master list loaded once
+  // Static variables persist across widget rebuilds
+  static List<VenueData> _staticAllVenues = [];
   static final Map<String, String> _staticImageCache = {};
   static final Map<String, double> _staticRatingCache = {};
-  static bool _hasLoadedOnce = false; // Track if we've loaded data before
+  static bool _hasLoadedOnce = false;
 
-  // ✅ Instance variables for UI state
-  List<VenueData> _venues = []; // Filtered/displayed list
+  // Instance variables for UI state
+  List<VenueData> _venues = [];
   double baseLat = _riyadhLat, baseLng = _riyadhLng;
 
   late final VenueCacheService _cache = VenueCacheService(
     FirebaseFirestore.instance,
   );
 
-  // ✅ Use static cache references in instance
+  // Cache references
   Map<String, String> get _imageCache => _staticImageCache;
   Map<String, double> get _ratingCache => _staticRatingCache;
   List<VenueData> get _allVenues => _staticAllVenues;
@@ -76,13 +84,12 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
     _initAndLoad();
   }
 
+  // ---------- Data Loading ----------
+
   Future<void> _initAndLoad() async {
-    // ✅ Check static flag - if already loaded, just display cached data
+    // If already loaded, just display cached data
     if (_hasLoadedOnce && _allVenues.isNotEmpty) {
-      // Already loaded - just refresh the display instantly
-      setState(() {
-        _loading = false;
-      });
+      setState(() => _loading = false);
       _applyLocalFilterAndSort();
       return;
     }
@@ -93,24 +100,23 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
     });
 
     try {
-      try {
-        final enabled = await Geolocator.isLocationServiceEnabled();
-        var perm = await Geolocator.checkPermission();
-        if (perm == LocationPermission.denied) {
-          perm = await Geolocator.requestPermission();
-        }
-        if (enabled &&
-            perm != LocationPermission.denied &&
-            perm != LocationPermission.deniedForever) {
-          final p = await Geolocator.getCurrentPosition(
-            desiredAccuracy: LocationAccuracy.high,
-          );
-          baseLat = p.latitude;
-          baseLng = p.longitude;
-        }
-      } catch (_) {}
+      // Start both operations in parallel for faster loading
+      // 1. Load venues from cache immediately (fast)
+      // 2. Get location in background (can be slow)
+      final venuesFuture = _loadAllVenues();
+      final locationFuture = _getUserLocation();
 
-      await _loadAllVenues();
+      // Wait for venues first (usually faster from cache)
+      await venuesFuture;
+
+      // Location updates in background, re-sort when available
+      locationFuture.then((_) {
+        if (mounted && _allVenues.isNotEmpty) {
+          _recalculateDistances();
+          _applyLocalFilterAndSort();
+        }
+      });
+
       _applyLocalFilterAndSort();
     } catch (e) {
       setState(() {
@@ -121,12 +127,52 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
     }
   }
 
-  // ✅ Load ALL venues once from Firestore
+  /// Get user location in background (non-blocking)
+  Future<void> _getUserLocation() async {
+    try {
+      final enabled = await Geolocator.isLocationServiceEnabled();
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (enabled &&
+          perm != LocationPermission.denied &&
+          perm != LocationPermission.deniedForever) {
+        final p = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+        ).timeout(const Duration(seconds: 10));
+        baseLat = p.latitude;
+        baseLng = p.longitude;
+      }
+    } catch (_) {}
+  }
+
+  /// Recalculate distances after location is available
+  void _recalculateDistances() {
+    for (final v in _allVenues) {
+      if (v.lat != null && v.lng != null) {
+        v.distanceMeters = Geolocator.distanceBetween(
+          baseLat,
+          baseLng,
+          v.lat!,
+          v.lng!,
+        );
+      }
+    }
+    _allVenues.sort(
+      (a, b) => (a.distanceMeters ?? 1e12).compareTo(b.distanceMeters ?? 1e12),
+    );
+  }
+
+  /// Load ALL venues once from Firestore
   Future<void> _loadAllVenues() async {
     try {
       final col = FirebaseFirestore.instance.collection('venues');
-      final snap = await col.get();
-      debugPrint('🟢 All venues fetched: ${snap.docs.length}');
+      // Use cache first for instant display, then server
+      final snap = await col
+          .get(const GetOptions(source: Source.cache))
+          .catchError((_) => col.get());
+      debugPrint('All venues fetched: ${snap.docs.length}');
 
       final items = <VenueData>[];
       for (final doc in snap.docs) {
@@ -183,12 +229,16 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
 
       if (mounted) {
         _allVenues = items;
-        _hasLoadedOnce = true; // ✅ Mark as loaded
+        _hasLoadedOnce = true;
         setState(() => _loading = false);
       }
 
+      // Start background tasks after UI is shown
       _kickOffRatings(items);
       _prefetchCoverUrls(items);
+
+      // Refresh from server in background if we used cache
+      _refreshFromServerIfNeeded();
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -197,6 +247,77 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
         });
       }
     }
+  }
+
+  /// Refresh data from server in background (non-blocking)
+  Future<void> _refreshFromServerIfNeeded() async {
+    try {
+      final col = FirebaseFirestore.instance.collection('venues');
+      final snap = await col.get(const GetOptions(source: Source.server));
+
+      // Only update if we got newer data
+      if (snap.docs.length != _allVenues.length) {
+        // Rebuild venues list
+        final items = <VenueData>[];
+        for (final doc in snap.docs) {
+          final d = doc.data();
+          final String? name = (d['venueName'] as String?)?.trim();
+          final String? address = (d['venueAddress'] as String?)?.trim();
+          final String? description = (d['venueDescription'] as String?)
+              ?.trim();
+          final String? categoryStr = (d['venueType'] as String?)?.trim();
+          final String placeId = doc.id;
+
+          final double? lat = (d['latitude'] as num?)?.toDouble();
+          final double? lng = (d['longitude'] as num?)?.toDouble();
+
+          List<String> imagePaths = [];
+          final images = d['venueImages'];
+          if (images is String && images.isNotEmpty) {
+            imagePaths = [images];
+          } else if (images is List) {
+            imagePaths = images
+                .whereType<String>()
+                .where((e) => e.isNotEmpty)
+                .toList();
+          }
+
+          double? dist;
+          if (lat != null && lng != null) {
+            dist = Geolocator.distanceBetween(baseLat, baseLng, lat, lng);
+          } else {
+            dist = 1e12;
+          }
+
+          final double? rating = _ratingCache[placeId];
+          items.add(
+            VenueData(
+              placeId: placeId,
+              name: name,
+              address: address,
+              description: description,
+              lat: lat,
+              lng: lng,
+              rating: rating ?? 0,
+              imagePaths: imagePaths,
+              thumbPath: null,
+              category: categoryStr,
+              distanceMeters: dist,
+            ),
+          );
+        }
+
+        items.sort(
+          (a, b) =>
+              (a.distanceMeters ?? 1e12).compareTo(b.distanceMeters ?? 1e12),
+        );
+
+        if (mounted) {
+          _allVenues = items;
+          _applyLocalFilterAndSort();
+        }
+      }
+    } catch (_) {}
   }
 
   Future<void> _kickOffRatings(List<VenueData> items) async {
@@ -237,7 +358,7 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
 
       if (!mounted) return;
 
-      // ✅ Update rating in master list
+      // Update rating in master list
       for (final it in _allVenues) {
         if (it.placeId == v.placeId) {
           it.rating = r;
@@ -249,7 +370,9 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
     } catch (_) {}
   }
 
-  // ✅ Client-side filtering - NO network calls, NO reload
+  // ---------- Filtering ----------
+
+  /// Client-side filtering - NO network calls
   void _applyLocalFilterAndSort() {
     final tab = filters[selectedFilterIndex];
     List<VenueData> base = _allVenues;
@@ -262,7 +385,6 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
     } else if (tab == 'Airports') {
       base = _allVenues.where((v) => v.category == 'airports').toList();
     }
-    // else tab == 'All', use all venues
 
     // Apply search query if present
     List<VenueData> out = base;
@@ -276,44 +398,48 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
     setState(() => _venues = out);
   }
 
+  // ---------- Build ----------
+
   @override
   Widget build(BuildContext context) {
-    super.build(context); // ✅ Required for AutomaticKeepAliveClientMixin
+    super.build(context);
+    final screenWidth = MediaQuery.of(context).size.width;
+    final horizontalPadding = screenWidth < 360 ? 12.0 : 16.0;
+
     return Scaffold(
       backgroundColor: Colors.white,
       body: Column(
         children: [
           const SizedBox(height: 8),
-          // ✅ Search bar
-          _buildSearchBar(),
+
+          // Search bar
+          _buildSearchBar(horizontalPadding),
           const SizedBox(height: 12),
 
-          // ✅ Filter tabs - NEW rounded design
-          _buildFilterTabs(),
-
+          // Filter tabs
+          _buildFilterTabs(horizontalPadding),
           const SizedBox(height: 16),
 
-          // ✅ Main content
+          // Main content
           Expanded(
             child: _loading
                 ? const AppLoadingIndicator()
                 : _error != null
                 ? Center(child: Text('Error: $_error'))
                 : _venues.isEmpty
-                ? const Center(
-                    child: Text('No results found. Try again'),
-                  ) //no result in search msg
-                : _buildVenueList(),
+                ? const Center(child: Text('No results found. Try again'))
+                : _buildVenueList(horizontalPadding),
           ),
         ],
       ),
     );
   }
 
-  // ✅ NEW search bar - identical to home page
-  Widget _buildSearchBar() {
+  // ---------- UI Builders ----------
+
+  Widget _buildSearchBar(double horizontalPadding) {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16),
+      margin: EdgeInsets.symmetric(horizontal: horizontalPadding),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -347,11 +473,10 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
     );
   }
 
-  // ✅ NEW filter tabs with rounded design
-  Widget _buildFilterTabs() {
+  Widget _buildFilterTabs(double horizontalPadding) {
     return Container(
       height: 40,
-      margin: const EdgeInsets.symmetric(horizontal: 16),
+      margin: EdgeInsets.symmetric(horizontal: horizontalPadding),
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         itemCount: filters.length,
@@ -359,10 +484,7 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
           final isSelected = idx == selectedFilterIndex;
           return GestureDetector(
             onTap: () {
-              // ✅ Instant client-side filtering - NO loading, NO network
-              setState(() {
-                selectedFilterIndex = idx;
-              });
+              setState(() => selectedFilterIndex = idx);
               _applyLocalFilterAndSort();
             },
             child: Container(
@@ -382,9 +504,7 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w500,
-                    color: isSelected
-                        ? Colors.white
-                        : Colors.grey.shade500, // filters font color
+                    color: isSelected ? Colors.white : Colors.grey.shade500,
                   ),
                 ),
               ),
@@ -395,16 +515,18 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
     );
   }
 
-  Widget _buildVenueList() {
+  Widget _buildVenueList(double horizontalPadding) {
     return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
       itemCount: _venues.length,
       itemBuilder: (context, index) => _buildVenueCard(_venues[index]),
     );
   }
 
+  // ---------- Venue Card ----------
+
   void _openVenue(VenueData v) async {
-    debugPrint('🟢 Opening venue: ${v.name}');
+    debugPrint('Opening venue: ${v.name}');
     if (v.placeId == null) return;
 
     final hasPlaces = await FirebaseFirestore.instance
@@ -421,12 +543,15 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
     if (coverUrl == null && path != null && path.isNotEmpty) {
       try {
         final ref = _coversStorage.ref(path);
-        coverUrl = await ref.getDownloadURL().timeout(
+        final url = await ref.getDownloadURL().timeout(
           const Duration(seconds: 5),
         );
-        _imageCache[path] = coverUrl!;
+        coverUrl = url;
+        _imageCache[path] = url;
       } catch (_) {}
     }
+
+    if (!mounted) return;
 
     if (hasPlaces.docs.isEmpty) {
       Navigator.of(context, rootNavigator: true).push(
@@ -472,7 +597,8 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
     }
     final cached = _imageCache[storagePath];
     if (cached != null) return cached;
-    Future<String?> _try(Duration t) async {
+
+    Future<String?> tryFetch(Duration t) async {
       final ref = _coversStorage.ref(storagePath);
       final url = await ref.getDownloadURL().timeout(t);
       _imageCache[storagePath] = url;
@@ -481,18 +607,21 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
     }
 
     try {
-      return await _try(const Duration(seconds: 5));
+      return await tryFetch(const Duration(seconds: 5));
     } catch (_) {
       try {
-        return await _try(const Duration(seconds: 3));
+        return await tryFetch(const Duration(seconds: 3));
       } catch (_) {
         return null;
       }
     }
   }
 
-  // ✅ Large venue card with image, name overlay, stars, distance
+  /// Large venue card with image, name overlay, stars, distance
   Widget _buildVenueCard(VenueData v) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final cardHeight = screenWidth < 360 ? 180.0 : 200.0;
+
     final distanceText = (v.distanceMeters ?? 0) < 1000
         ? '${(v.distanceMeters ?? 0).round()} m'
         : '${((v.distanceMeters ?? 0) / 1000).toStringAsFixed(1)} km';
@@ -501,7 +630,7 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
       onTap: () => _openVenue(v),
       child: Container(
         margin: const EdgeInsets.only(bottom: 16),
-        height: 200,
+        height: cardHeight,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
@@ -514,12 +643,13 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
         ),
         child: Stack(
           children: [
-            // ✅ Background image
+            // Background image
             ClipRRect(
               borderRadius: BorderRadius.circular(16),
               child: _buildVenueImage(v),
             ),
-            // ✅ Gradient overlay for text readability
+
+            // Gradient overlay
             Container(
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(16),
@@ -530,7 +660,8 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
                 ),
               ),
             ),
-            // ✅ Content overlay
+
+            // Content overlay
             Positioned(
               left: 16,
               right: 16,
@@ -550,12 +681,12 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 8),
-                  // ✅ Star rating
+
+                  // Star rating and distance
                   Row(
                     children: [
                       _buildStars(v.rating ?? 0),
                       const Spacer(),
-                      // Distance
                       Row(
                         children: [
                           const Icon(
@@ -585,25 +716,22 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
     );
   }
 
-  // ✅ Star rating widget - filled based on actual rating
+  /// Star rating widget
   Widget _buildStars(double rating) {
     return Row(
       children: List.generate(5, (index) {
         if (rating >= index + 1) {
-          // Full star
           return const Icon(Icons.star, color: kPrimaryGreen, size: 20);
         } else if (rating > index && rating < index + 1) {
-          // Half star
           return const Icon(Icons.star_half, color: kPrimaryGreen, size: 20);
         } else {
-          // Empty star
           return Icon(Icons.star_border, color: Colors.grey.shade400, size: 20);
         }
       }),
     );
   }
 
-  // ✅ Build venue image with smart caching - skips loading if already cached
+  /// Build venue image with smart caching
   Widget _buildVenueImage(VenueData v) {
     final String? storagePath = (v.thumbPath?.isNotEmpty == true)
         ? v.thumbPath
@@ -620,7 +748,7 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
       );
     }
 
-    // ✅ If already cached, show immediately without loading indicator
+    // If already cached, show immediately
     if (_imageCache.containsKey(storagePath)) {
       return CachedNetworkImage(
         imageUrl: _imageCache[storagePath]!,
@@ -695,6 +823,10 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
   }
 }
 
+// ----------------------------------------------------------------------------
+// Venue Data Model
+// ----------------------------------------------------------------------------
+
 class VenueData {
   final String? placeId;
   final String? name;
@@ -722,4 +854,3 @@ class VenueData {
     this.imagePaths = const [],
   });
 }
-/////

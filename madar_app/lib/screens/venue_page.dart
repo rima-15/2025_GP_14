@@ -1,22 +1,27 @@
 import 'dart:io' show Platform;
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/gestures.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:firebase_storage/firebase_storage.dart' as storage;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:madar_app/api/venue_cache_service.dart';
-import 'category_page.dart';
-import 'package:model_viewer_plus/model_viewer_plus.dart';
-
-// ▼▼ added for API-based opening-hours (logic only)
+import 'package:madar_app/widgets/app_widgets.dart';
+import 'package:madar_app/theme/theme.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'dart:convert';
-// ▲▲ added for API-based opening-hours (logic only)
+import 'package:model_viewer_plus/model_viewer_plus.dart';
+import 'category_page.dart';
 
-// Madar color
+// ----------------------------------------------------------------------------
+// Constants
+// ----------------------------------------------------------------------------
+
 const Color kPrimaryGreen = Color(0xFF777D63);
+
+// ----------------------------------------------------------------------------
+// Venue Page
+// ----------------------------------------------------------------------------
 
 class VenuePage extends StatefulWidget {
   final String placeId;
@@ -27,7 +32,7 @@ class VenuePage extends StatefulWidget {
   final double? lng;
   final List<String> imagePaths;
   final String? initialCoverUrl;
-  final String? venueType; // Add this to get venue type
+  final String? venueType;
 
   const VenuePage({
     super.key,
@@ -49,11 +54,14 @@ class VenuePage extends StatefulWidget {
 class _VenuePageState extends State<VenuePage>
     with AutomaticKeepAliveClientMixin {
   @override
-  bool get wantKeepAlive => true; // ✅ Keep state alive when navigating away
+  bool get wantKeepAlive => true;
 
-  // --- NEW: keep header sizing and overlap consistent ---
-  static const double _headerHeight = 180; // hero image height
-  static const double _topRadius = 35; // rounded top radius & overlap
+  // ---------- Constants ----------
+
+  static const double _headerHeight = 180;
+  static const double _topRadius = 35;
+
+  // ---------- State ----------
 
   bool _loading = true;
   String? _error;
@@ -68,14 +76,14 @@ class _VenuePageState extends State<VenuePage>
   String? _businessStatus;
   List<String> _types = const [];
 
-  // NEW: website/phone from DB
   String? _venueWebsite;
   String? _venuePhone;
 
-  // 3D map
   String _currentFloor = '';
-  List<Map<String, String>> _venueMaps = []; // Store {floorNumber, fileName}
+  List<Map<String, String>> _venueMaps = [];
   bool _mapsLoading = false;
+
+  // ---------- Caching ----------
 
   static final storage.FirebaseStorage _coversStorage =
       storage.FirebaseStorage.instanceFor(
@@ -83,7 +91,6 @@ class _VenuePageState extends State<VenuePage>
       );
   static final Map<String, String> _urlCache = {};
   static final Map<String, Map<String, dynamic>> _hoursCache = {};
-  // NEW: Cache for venue contacts (website/phone)
   static final Map<String, Map<String, String>> _contactsCache = {};
 
   late final VenueCacheService _cache = VenueCacheService(
@@ -95,37 +102,33 @@ class _VenuePageState extends State<VenuePage>
     super.initState();
     _address = widget.dbAddress;
 
-    // ✅ Check if we have cached data for this venue
+    // Check for cached data
     final cachedHours = _hoursCache[widget.placeId];
     final cachedContacts = _contactsCache[widget.placeId];
 
     if (cachedHours != null) {
-      // We have cached hours data - use it immediately
       _applyHours(cachedHours);
       setState(() => _loading = false);
     } else {
-      // No cache - load from API/DB
       _loadHours();
     }
 
     if (cachedContacts != null) {
-      // We have cached contacts - use immediately
       _venueWebsite = cachedContacts['website'];
       _venuePhone = cachedContacts['phone'];
     } else {
-      // No cache - load from DB
       _loadVenueContacts();
     }
 
-    // Always prefetch images (they have their own cache)
     _prefetchAllVenueImages();
-
     _loadVenueMaps();
   }
 
-  // ✅ API-first opening hours (rating stays from DB)
+  // ---------- Data Loading ----------
+
+  /// Load opening hours from API with fallback to DB
   Future<void> _loadHours() async {
-    // 1) Try LIVE Google Place Details API first (force API-first)
+    // Try Google Place Details API first
     try {
       final key = dotenv.env['GOOGLE_API_KEY'];
       if (key != null && widget.placeId.isNotEmpty) {
@@ -146,7 +149,7 @@ class _VenuePageState extends State<VenuePage>
             final normalized = <String, dynamic>{
               'current_opening_hours': result['current_opening_hours'],
               'opening_hours': result['opening_hours'],
-              'utc_offset': result['utc_offset'], // minutes
+              'utc_offset': result['utc_offset'],
               'types': (result['types'] as List?)?.cast<String>(),
               'business_status': result['business_status'],
               '_source': 'api',
@@ -156,15 +159,13 @@ class _VenuePageState extends State<VenuePage>
             _hoursCache[widget.placeId] = normalized;
             _applyHours(normalized);
             setState(() => _loading = false);
-            return; // ✅ API success → stop here
+            return;
           }
         }
       }
-    } catch (_) {
-      // swallow; we'll fallback below
-    }
+    } catch (_) {}
 
-    // 2) If API not OK: use cached API data (if exists)
+    // Fallback to cached API data
     final cached = _hoursCache[widget.placeId];
     if (cached != null && cached['_source'] == 'api') {
       _applyHours(cached);
@@ -172,7 +173,7 @@ class _VenuePageState extends State<VenuePage>
       return;
     }
 
-    // 3) Final fallback: monthly meta from DB (rating kept here)
+    // Final fallback: monthly meta from DB
     try {
       final meta = await _cache
           .getMonthlyMeta(widget.placeId)
@@ -183,7 +184,7 @@ class _VenuePageState extends State<VenuePage>
         resultLike['current_opening_hours'] = meta.openingHours;
       }
       if (meta.rating != null) {
-        resultLike['rating'] = meta.rating; // ✅ rating stays from DB
+        resultLike['rating'] = meta.rating;
       }
       if (meta.businessStatus != null) {
         resultLike['business_status'] = meta.businessStatus;
@@ -220,7 +221,6 @@ class _VenuePageState extends State<VenuePage>
     }
   }
 
-  // NEW: load website/phone from venues/{placeId}
   Future<void> _loadVenueContacts() async {
     try {
       final doc = await FirebaseFirestore.instance
@@ -232,7 +232,6 @@ class _VenuePageState extends State<VenuePage>
         final site = (data['venueWebsite'] ?? '').toString().trim();
         final phone = (data['venuePhone'] ?? '').toString().trim();
 
-        // ✅ Cache the contacts data
         _contactsCache[widget.placeId] = {
           'website': site.isNotEmpty ? site : '',
           'phone': phone.isNotEmpty ? phone : '',
@@ -243,9 +242,7 @@ class _VenuePageState extends State<VenuePage>
           _venuePhone = phone.isNotEmpty ? phone : null;
         });
       }
-    } catch (_) {
-      // Keep silently; buttons will just stay hidden
-    }
+    } catch (_) {}
   }
 
   Future<void> _loadVenueMaps() async {
@@ -265,39 +262,30 @@ class _VenuePageState extends State<VenuePage>
         final convertedMaps = maps.map((map) {
           final floorNumber = (map['floorNumber'] ?? '').toString();
           final mapURL = (map['mapURL'] ?? '').toString();
-
           return {'floorNumber': floorNumber, 'mapURL': mapURL};
         }).toList();
 
-        setState(() {
-          _venueMaps = convertedMaps;
-        });
+        setState(() => _venueMaps = convertedMaps);
 
-        // Load the first map if available
         if (convertedMaps.isNotEmpty) {
           final firstMap = convertedMaps.first;
           final firstMapURL = firstMap['mapURL'];
           if (firstMapURL != null && firstMapURL.isNotEmpty) {
-            setState(() {
-              _currentFloor = firstMapURL;
-            });
+            setState(() => _currentFloor = firstMapURL);
           }
         }
       } else {
-        setState(() {
-          _venueMaps = [];
-        });
+        setState(() => _venueMaps = []);
       }
     } catch (e) {
-      setState(() {
-        _venueMaps = [];
-      });
+      setState(() => _venueMaps = []);
     } finally {
       setState(() => _mapsLoading = false);
     }
   }
 
-  // ✅ apply hours + airport 24h + Sunday-first
+  // ---------- Apply Hours Data ----------
+
   void _applyHours(Map<String, dynamic> res) {
     final currentOpening =
         (res['current_opening_hours'] as Map<String, dynamic>?) ?? {};
@@ -308,12 +296,11 @@ class _VenuePageState extends State<VenuePage>
     List<String> weekdayText =
         (opening['weekday_text'] as List?)?.cast<String>() ?? const [];
     final periods = (opening['periods'] as List?) ?? const [];
-    final openNow = opening['open_now'] as bool?;
     final utcOffset = res['utc_offset'] as int?;
     final types = (res['types'] as List?)?.cast<String>() ?? const [];
     final businessStatus = res['business_status'] as String?;
 
-    // If no hours but it's an airport → assume 24h (your original rule)
+    // Assume 24h for airports without hours
     if (weekdayText.isEmpty && types.contains('airport')) {
       weekdayText = const [
         'Sunday: Open 24 hours',
@@ -326,7 +313,7 @@ class _VenuePageState extends State<VenuePage>
       ];
     }
 
-    // Ensure Sunday-first order if Google returns Monday-first
+    // Ensure Sunday-first order
     if (weekdayText.isNotEmpty &&
         weekdayText.first.toLowerCase().startsWith('monday')) {
       final idxSun = weekdayText.indexWhere(
@@ -340,8 +327,18 @@ class _VenuePageState extends State<VenuePage>
       }
     }
 
+    // Store periods and UTC offset first
+    _periods = periods;
+    _utcOffsetMinutes = utcOffset;
+    _types = types;
+    _businessStatus = businessStatus;
+    _weekdayText = weekdayText;
+
+    // Compute open/closed status locally from stored data
+    final computedOpenNow = _computeLocalOpenNow();
+
     setState(() {
-      _openNow = openNow;
+      _openNow = computedOpenNow;
       _weekdayText = weekdayText;
       _periods = periods;
       _utcOffsetMinutes = utcOffset;
@@ -349,6 +346,147 @@ class _VenuePageState extends State<VenuePage>
       _businessStatus = businessStatus;
     });
   }
+
+  // ---------- Local Open/Closed Computation ----------
+
+  /// Computes whether the venue is currently open based on stored periods
+  /// and UTC offset, instead of relying on API's open_now boolean.
+  bool? _computeLocalOpenNow() {
+    // If no periods data, cannot determine
+    if (_periods.isEmpty) {
+      // Check if 24 hours from weekday text
+      if (_isOpen24Hours()) return true;
+      return null;
+    }
+
+    // Check for 24/7 open (single period with no close)
+    if (_periods.length == 1) {
+      final period = _periods.first as Map<String, dynamic>?;
+      if (period != null && !period.containsKey('close')) {
+        // Open 24/7
+        return true;
+      }
+    }
+
+    // Get current time in venue's timezone
+    final now = DateTime.now().toUtc();
+    final venueOffset = _utcOffsetMinutes ?? 180; // Default to UTC+3 (Riyadh)
+    final venueNow = now.add(Duration(minutes: venueOffset));
+
+    // Google API uses 0=Sunday, 1=Monday, ..., 6=Saturday
+    // Dart's DateTime.weekday: 1=Monday, ..., 7=Sunday
+    // Convert Dart weekday to Google format
+    final dartWeekday = venueNow.weekday; // 1-7 (Mon-Sun)
+    final googleDay = dartWeekday == 7 ? 0 : dartWeekday; // 0-6 (Sun-Sat)
+
+    final currentTimeMinutes = venueNow.hour * 60 + venueNow.minute;
+
+    // Check each period to see if we're within opening hours
+    for (final period in _periods) {
+      if (period is! Map<String, dynamic>) continue;
+
+      final openData = period['open'] as Map<String, dynamic>?;
+      final closeData = period['close'] as Map<String, dynamic>?;
+
+      if (openData == null) continue;
+
+      final openDay = openData['day'] as int?;
+      final openTime = openData['time'] as String?;
+
+      if (openDay == null || openTime == null) continue;
+
+      // Parse open time (format: "HHMM")
+      final openMinutes = _parseTimeToMinutes(openTime);
+      if (openMinutes == null) continue;
+
+      // Handle case where there's no close (24 hours for that day)
+      if (closeData == null) {
+        if (openDay == googleDay) return true;
+        continue;
+      }
+
+      final closeDay = closeData['day'] as int?;
+      final closeTime = closeData['time'] as String?;
+
+      if (closeDay == null || closeTime == null) continue;
+
+      final closeMinutes = _parseTimeToMinutes(closeTime);
+      if (closeMinutes == null) continue;
+
+      // Check if current time falls within this period
+      final isOpen = _isWithinPeriod(
+        currentDay: googleDay,
+        currentMinutes: currentTimeMinutes,
+        openDay: openDay,
+        openMinutes: openMinutes,
+        closeDay: closeDay,
+        closeMinutes: closeMinutes,
+      );
+
+      if (isOpen) return true;
+    }
+
+    return false;
+  }
+
+  /// Parse time string "HHMM" to minutes since midnight
+  int? _parseTimeToMinutes(String time) {
+    if (time.length != 4) return null;
+    final hour = int.tryParse(time.substring(0, 2));
+    final minute = int.tryParse(time.substring(2, 4));
+    if (hour == null || minute == null) return null;
+    return hour * 60 + minute;
+  }
+
+  /// Check if current time is within an opening period
+  /// Handles overnight periods (e.g., 10PM - 2AM)
+  bool _isWithinPeriod({
+    required int currentDay,
+    required int currentMinutes,
+    required int openDay,
+    required int openMinutes,
+    required int closeDay,
+    required int closeMinutes,
+  }) {
+    // Same day period
+    if (openDay == closeDay) {
+      if (currentDay == openDay &&
+          currentMinutes >= openMinutes &&
+          currentMinutes < closeMinutes) {
+        return true;
+      }
+      return false;
+    }
+
+    // Overnight period (closes next day)
+    // Check if we're in the opening part (after open time on open day)
+    if (currentDay == openDay && currentMinutes >= openMinutes) {
+      return true;
+    }
+
+    // Check if we're in the closing part (before close time on close day)
+    if (currentDay == closeDay && currentMinutes < closeMinutes) {
+      return true;
+    }
+
+    // Handle multi-day spans (rare, but possible)
+    // Calculate days between open and close
+    int daySpan = closeDay - openDay;
+    if (daySpan < 0) daySpan += 7;
+
+    if (daySpan > 1) {
+      // Check if current day is between open and close days
+      int currentOffset = currentDay - openDay;
+      if (currentOffset < 0) currentOffset += 7;
+      if (currentOffset > 0 && currentOffset < daySpan) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  // ---------- URL & Navigation Helpers ----------
 
   Future<String?> _imageUrlForPath(
     String path, {
@@ -375,7 +513,6 @@ class _VenuePageState extends State<VenuePage>
         ? '${widget.lat!.toStringAsFixed(6)},${widget.lng!.toStringAsFixed(6)}'
         : null;
 
-    // ✅ 1) Preferred: universal links that open the place details page
     final Uri primary = hasLL
         ? Uri.parse(
             'https://www.google.com/maps/search/?api=1&query=$nameEnc&query_place_id=$id',
@@ -384,12 +521,10 @@ class _VenuePageState extends State<VenuePage>
             'https://www.google.com/maps/search/?api=1&query_place_id=$id',
           );
 
-    // ✅ 2) Alternate universal link that also targets the place page
     final Uri alt = Uri.parse(
       'https://www.google.com/maps/place/?q=place_id:$id',
     );
 
-    // ✅ 3) Fallback: plain geo (last resort)
     final Uri geo = hasLL
         ? Uri.parse('geo:$ll?q=$ll($nameEnc)')
         : Uri.parse('geo:0,0?q=$nameEnc');
@@ -426,7 +561,6 @@ class _VenuePageState extends State<VenuePage>
     }
   }
 
-  // NEW: open website safely
   Future<void> _openWebsite() async {
     final raw = _venueWebsite?.trim();
     if (raw == null || raw.isEmpty) return;
@@ -439,7 +573,6 @@ class _VenuePageState extends State<VenuePage>
     }
   }
 
-  // NEW: start phone call (OS will show dialer UI)
   Future<void> _callVenue() async {
     final raw = _venuePhone?.trim();
     if (raw == null || raw.isEmpty) return;
@@ -450,7 +583,8 @@ class _VenuePageState extends State<VenuePage>
     }
   }
 
-  // Helper to get venue type display name
+  // ---------- Display Helpers ----------
+
   String _getVenueTypeDisplay() {
     if (widget.venueType == null || widget.venueType!.isEmpty) {
       return 'Venue';
@@ -468,7 +602,6 @@ class _VenuePageState extends State<VenuePage>
     return widget.venueType![0].toUpperCase() + widget.venueType!.substring(1);
   }
 
-  // Helper to determine if open 24 hours
   bool _isOpen24Hours() {
     if (_weekdayText.isEmpty) return false;
     return _weekdayText.every(
@@ -478,12 +611,10 @@ class _VenuePageState extends State<VenuePage>
     );
   }
 
-  // Helper to check if temporarily closed
   bool _isTemporarilyClosed() {
     return _businessStatus?.toLowerCase() == 'closed_temporarily';
   }
 
-  // Helper to check if hours vary
   bool _hasVaryingHours() {
     if (_weekdayText.isEmpty) return false;
     return _weekdayText.any(
@@ -494,37 +625,22 @@ class _VenuePageState extends State<VenuePage>
   }
 
   String _getOpeningStatus() {
-    if (_isTemporarilyClosed()) {
-      return 'Temporarily Closed';
-    }
-    if (_isOpen24Hours()) {
-      return 'Open 24 Hours';
-    }
-    if (_hasVaryingHours()) {
-      return 'Hours Vary';
-    }
-    if (_openNow == true) {
-      return 'Open';
-    } else if (_openNow == false) {
-      return 'Closed';
-    }
+    if (_isTemporarilyClosed()) return 'Temporarily Closed';
+    if (_isOpen24Hours()) return 'Open 24 Hours';
+    if (_hasVaryingHours()) return 'Hours Vary';
+    if (_openNow == true) return 'Open';
+    if (_openNow == false) return 'Closed';
     return 'Not Available';
   }
 
-  // ====== NEW: tiny normalizer to handle unicode dashes/spaces from Google ======
-  // Normalizes unicode dashes and thin spaces Google often uses in weekday_text
   String _normalizeHoursLine(String s) {
     return s
-        .replaceAll(
-          RegExp(r'[\u2012\u2013\u2014\u2212\-]+'),
-          '-',
-        ) // various dashes → hyphen
-        .replaceAll(RegExp(r'[\u202F\u00A0]'), ' ') // thin/nbsp → space
-        .replaceAll(RegExp(r'\s+'), ' ') // collapse spaces
+        .replaceAll(RegExp(r'[\u2012\u2013\u2014\u2212\-]+'), '-')
+        .replaceAll(RegExp(r'[\u202F\u00A0]'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
   }
 
-  // ====== REPLACED: robust parser that infers missing AM/PM on the opening time ======
   String _getOpeningTime() {
     if (_isTemporarilyClosed() || _isOpen24Hours() || _hasVaryingHours()) {
       return '';
@@ -558,32 +674,27 @@ class _VenuePageState extends State<VenuePage>
       return '';
     }
 
-    // Normalize unicode punctuation/spaces to make parsing robust
     timePart = _normalizeHoursLine(timePart);
 
-    // Try to parse "HH:MM [AM/PM]? - HH:MM AM/PM"
     final m = RegExp(
       r'^\s*(\d{1,2}:\d{2})\s*(?:([AP]M))?\s*-\s*(\d{1,2}:\d{2})\s*([AP]M)\s*$',
       caseSensitive: false,
     ).firstMatch(timePart);
 
     if (m != null) {
-      final startTime = m.group(1)!; // e.g. "12:00"
-      final startMer =
-          (m.group(2) ?? m.group(4))!; // infer AM/PM from end if missing
-      final endTime = m.group(3)!; // e.g. "5:00"
-      final endMer = m.group(4)!; // e.g. "PM"
+      final startTime = m.group(1)!;
+      final startMer = (m.group(2) ?? m.group(4))!;
+      final endTime = m.group(3)!;
+      final endMer = m.group(4)!;
 
       if (_openNow == true) {
-        // Currently open → show closing time
         return 'Closes at $endTime $endMer';
       } else {
-        // Currently closed → show opening time (with inferred AM/PM if needed)
         return 'Opens at $startTime $startMer';
       }
     }
 
-    // Fallbacks (keep behavior similar to your previous logic)
+    // Fallbacks
     if (_openNow == true) {
       final matchClose = RegExp(
         r'[-–]\s*(\d{1,2}:\d{2}\s?[AP]M)',
@@ -591,7 +702,6 @@ class _VenuePageState extends State<VenuePage>
       ).firstMatch(timePart);
       if (matchClose != null) return 'Closes at ${matchClose.group(1)}';
     } else {
-      // Prefer FIRST time as opening if present, even without AM/PM
       final matchOpenLoose = RegExp(
         r'(\d{1,2}:\d{2})(?:\s?([AP]M))?',
         caseSensitive: false,
@@ -607,21 +717,12 @@ class _VenuePageState extends State<VenuePage>
   }
 
   Color _getStatusColor() {
-    if (_isTemporarilyClosed()) {
-      return Colors.red;
-    }
-    if (_isOpen24Hours()) {
-      return Colors.green;
-    }
-    if (_hasVaryingHours()) {
-      return Colors.orange;
-    }
-    if (_openNow == true) {
-      return Colors.green;
-    } else if (_openNow == false) {
-      return const Color.fromRGBO(244, 67, 54, 1);
-    }
-    return Colors.orange; // Not Available
+    if (_isTemporarilyClosed()) return Colors.red;
+    if (_isOpen24Hours()) return Colors.green;
+    if (_hasVaryingHours()) return Colors.orange;
+    if (_openNow == true) return Colors.green;
+    if (_openNow == false) return const Color.fromRGBO(244, 67, 54, 1);
+    return Colors.orange;
   }
 
   void _showImageOverlay(int startIndex) {
@@ -638,9 +739,16 @@ class _VenuePageState extends State<VenuePage>
     );
   }
 
+  // ---------- Build ----------
+
   @override
   Widget build(BuildContext context) {
-    super.build(context); // ✅ Required for AutomaticKeepAliveClientMixin
+    super.build(context);
+
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isSmallScreen = screenWidth < 360;
+    final horizontalPadding = isSmallScreen ? 12.0 : 16.0;
+
     final hasWebsite = (_venueWebsite != null && _venueWebsite!.isNotEmpty);
     final hasPhone = (_venuePhone != null && _venuePhone!.isNotEmpty);
     final bool isMall =
@@ -648,27 +756,24 @@ class _VenuePageState extends State<VenuePage>
         widget.venueType?.toLowerCase() == 'mall';
     final bool isSolitaire = widget.name.toLowerCase().contains('solitaire');
 
-    //solitaire or others
     final String effectiveVenueId = (isMall && !isSolitaire)
-        ? 'ChIJcYTQDwDjLj4RZEiboV6gZzM' // 🔗 ID Solitaire
+        ? 'ChIJcYTQDwDjLj4RZEiboV6gZzM'
         : widget.placeId;
 
     return Scaffold(
-      backgroundColor: Colors
-          .grey
-          .shade100, // ✅ Light gray background to show rounded white container
-      extendBodyBehindAppBar: true, // ✅ Make body extend behind app bar
+      backgroundColor: Colors.grey.shade100,
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        backgroundColor: Colors.transparent, // ✅ Transparent app bar
+        backgroundColor: Colors.transparent,
         elevation: 0,
         leading: Container(
           margin: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: const Color.fromARGB(145, 255, 255, 255),
+          decoration: const BoxDecoration(
+            color: Color.fromARGB(145, 255, 255, 255),
             shape: BoxShape.circle,
           ),
           child: IconButton(
-            icon: const Icon(Icons.arrow_back, color: kGreen, size: 20),
+            icon: const Icon(Icons.arrow_back, color: kPrimaryGreen, size: 20),
             onPressed: () => Navigator.pop(context),
           ),
         ),
@@ -685,7 +790,7 @@ class _VenuePageState extends State<VenuePage>
           : ListView(
               padding: EdgeInsets.zero,
               children: [
-                // ✅ Hero image - SLIM height (150px from reference image)
+                // Hero image
                 if (widget.imagePaths.isNotEmpty)
                   _buildHeroImage()
                 else
@@ -699,9 +804,7 @@ class _VenuePageState extends State<VenuePage>
                     ),
                   ),
 
-                // ✅ White content section with rounded top corners
-                // NOTE: shift up by the same radius amount so the image and the rounded
-                // corners overlap perfectly (no white sliver).
+                // White content section
                 Transform.translate(
                   offset: const Offset(0, -_topRadius),
                   child: Container(
@@ -717,23 +820,25 @@ class _VenuePageState extends State<VenuePage>
                       children: [
                         const SizedBox(height: 20),
 
-                        // ✅ Venue name and type
+                        // Venue name and type
                         Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          padding: EdgeInsets.symmetric(
+                            horizontal: horizontalPadding,
+                          ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
                                 widget.name,
-                                style: const TextStyle(
-                                  fontSize: 22,
+                                style: TextStyle(
+                                  fontSize: isSmallScreen ? 20 : 22,
                                   fontWeight: FontWeight.w700,
                                   color: kPrimaryGreen,
                                 ),
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                _getVenueTypeDisplay(), // ✅ Dynamic venue type
+                                _getVenueTypeDisplay(),
                                 style: TextStyle(
                                   fontSize: 14,
                                   color: Colors.grey.shade600,
@@ -742,12 +847,13 @@ class _VenuePageState extends State<VenuePage>
                             ],
                           ),
                         ),
-
                         const SizedBox(height: 20),
 
-                        // ✅ Three action buttons - with GREEN accent color
+                        // Action buttons
                         Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          padding: EdgeInsets.symmetric(
+                            horizontal: horizontalPadding,
+                          ),
                           child: Row(
                             children: [
                               Expanded(
@@ -763,7 +869,7 @@ class _VenuePageState extends State<VenuePage>
                                   child: _actionButton(
                                     icon: Icons.language,
                                     label: 'Website',
-                                    onTap: _openWebsite, // NEW
+                                    onTap: _openWebsite,
                                   ),
                                 ),
                               ],
@@ -773,29 +879,30 @@ class _VenuePageState extends State<VenuePage>
                                   child: _actionButton(
                                     icon: Icons.phone_outlined,
                                     label: 'Call',
-                                    onTap: _callVenue, // NEW
+                                    onTap: _callVenue,
                                   ),
                                 ),
                               ],
                             ],
                           ),
                         ),
-
                         const SizedBox(height: 24),
 
-                        // ✅ Photo grid - ORIGINAL layout: large left, 2 small squares stacked right
+                        // Photo strip
                         if (widget.imagePaths.length > 1)
                           Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                            child:
-                                _buildPhotoStrip(), // NEW: horizontal repeating pattern
+                            padding: EdgeInsets.symmetric(
+                              horizontal: horizontalPadding,
+                            ),
+                            child: _buildPhotoStrip(),
                           ),
-
                         const SizedBox(height: 24),
 
-                        // ✅ About section - with inline expand arrow
+                        // About section
                         Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          padding: EdgeInsets.symmetric(
+                            horizontal: horizontalPadding,
+                          ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -819,12 +926,13 @@ class _VenuePageState extends State<VenuePage>
                             ],
                           ),
                         ),
-
                         const SizedBox(height: 20),
 
-                        // ✅ Opening hours - with ALL cases + expand arrow
+                        // Opening hours section
                         Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          padding: EdgeInsets.symmetric(
+                            horizontal: horizontalPadding,
+                          ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -843,10 +951,10 @@ class _VenuePageState extends State<VenuePage>
                           ),
                         ),
 
-                        // ✅ Light divider line after opening hours
+                        // Divider
                         Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
+                          padding: EdgeInsets.symmetric(
+                            horizontal: horizontalPadding,
                             vertical: 20,
                           ),
                           child: Divider(
@@ -855,9 +963,11 @@ class _VenuePageState extends State<VenuePage>
                           ),
                         ),
 
-                        // ✅ Floor Map section - REGULAR heading
+                        // Floor Map section
                         Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          padding: EdgeInsets.symmetric(
+                            horizontal: horizontalPadding,
+                          ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -876,10 +986,10 @@ class _VenuePageState extends State<VenuePage>
                           ),
                         ),
 
-                        // ✅ Light divider line after floor map
+                        // Divider
                         Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
+                          padding: EdgeInsets.symmetric(
+                            horizontal: horizontalPadding,
                             vertical: 20,
                           ),
                           child: Divider(
@@ -888,9 +998,11 @@ class _VenuePageState extends State<VenuePage>
                           ),
                         ),
 
-                        // ✅ Discover More section - REGULAR heading
+                        // Discover More section
                         Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 16),
+                          padding: EdgeInsets.symmetric(
+                            horizontal: horizontalPadding,
+                          ),
                           child: Text(
                             'Discover More',
                             style: TextStyle(
@@ -903,7 +1015,6 @@ class _VenuePageState extends State<VenuePage>
                         ),
                         const SizedBox(height: 12),
 
-                        // ✅ Use separate widget to prevent blinking
                         SizedBox(
                           height: 180,
                           child: _DiscoverMoreSection(
@@ -911,7 +1022,6 @@ class _VenuePageState extends State<VenuePage>
                             getUrlFor: _imageUrlForCategory,
                           ),
                         ),
-
                         const SizedBox(height: 24),
                       ],
                     ),
@@ -922,18 +1032,66 @@ class _VenuePageState extends State<VenuePage>
     );
   }
 
-  // ✅ Hero image - SLIM height (150px)
-  Widget _buildHeroImage() {
-    final path = widget.imagePaths.first;
+  // ---------- UI Builders ----------
 
+  Widget _buildHeroImage() {
+    final path = widget.imagePaths.isNotEmpty ? widget.imagePaths.first : '';
+
+    // Use initial cover URL if provided (passed from home page)
     if (widget.initialCoverUrl != null && widget.initialCoverUrl!.isNotEmpty) {
+      // Cache the URL for future use
+      if (path.isNotEmpty) {
+        _urlCache[path] = widget.initialCoverUrl!;
+      }
       return SizedBox(
         height: _headerHeight,
         width: double.infinity,
-        child: Image.network(widget.initialCoverUrl!, fit: BoxFit.cover),
+        child: CachedNetworkImage(
+          imageUrl: widget.initialCoverUrl!,
+          cacheKey: path.isNotEmpty ? path : widget.initialCoverUrl,
+          fit: BoxFit.cover,
+          placeholder: (context, url) => Container(color: Colors.grey.shade200),
+          errorWidget: (context, url, error) => Container(
+            color: Colors.grey.shade200,
+            child: const Center(
+              child: Icon(Icons.image_not_supported, size: 48),
+            ),
+          ),
+        ),
       );
     }
 
+    if (path.isEmpty) {
+      return SizedBox(
+        height: _headerHeight,
+        child: Container(
+          color: Colors.grey.shade200,
+          child: const Center(child: Icon(Icons.image_not_supported, size: 48)),
+        ),
+      );
+    }
+
+    // Check static cache first for instant display
+    if (_urlCache.containsKey(path)) {
+      return SizedBox(
+        height: _headerHeight,
+        width: double.infinity,
+        child: CachedNetworkImage(
+          imageUrl: _urlCache[path]!,
+          cacheKey: path,
+          fit: BoxFit.cover,
+          placeholder: (context, url) => Container(color: Colors.grey.shade200),
+          errorWidget: (context, url, error) => Container(
+            color: Colors.grey.shade200,
+            child: const Center(
+              child: Icon(Icons.image_not_supported, size: 48),
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Not cached - load with FutureBuilder
     return FutureBuilder<String?>(
       future: _imageUrlForPath(path),
       builder: (context, snap) {
@@ -974,13 +1132,24 @@ class _VenuePageState extends State<VenuePage>
         return SizedBox(
           height: _headerHeight,
           width: double.infinity,
-          child: Image.network(snap.data!, fit: BoxFit.cover),
+          child: CachedNetworkImage(
+            imageUrl: snap.data!,
+            cacheKey: path,
+            fit: BoxFit.cover,
+            placeholder: (context, url) =>
+                Container(color: Colors.grey.shade200),
+            errorWidget: (context, url, error) => Container(
+              color: Colors.grey.shade200,
+              child: const Center(
+                child: Icon(Icons.image_not_supported, size: 48),
+              ),
+            ),
+          ),
         );
       },
     );
   }
 
-  // ✅ Action button - with GREEN accent color
   Widget _actionButton({
     required IconData icon,
     required String label,
@@ -997,14 +1166,17 @@ class _VenuePageState extends State<VenuePage>
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: kPrimaryGreen, size: 20), // ✅ GREEN color
+            Icon(icon, color: kPrimaryGreen, size: 20),
             const SizedBox(width: 6),
-            Text(
-              label,
-              style: const TextStyle(
-                fontSize: 13,
-                color: kPrimaryGreen, // ✅ GREEN color
-                fontWeight: FontWeight.w500,
+            Flexible(
+              child: Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: kPrimaryGreen,
+                  fontWeight: FontWeight.w500,
+                ),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
           ],
@@ -1013,7 +1185,6 @@ class _VenuePageState extends State<VenuePage>
     );
   }
 
-  // === NEW: HORIZONTAL STRIP repeating your 3-tile pattern ===
   Widget _buildPhotoStrip() {
     final images = widget.imagePaths.length > 1
         ? widget.imagePaths.sublist(1)
@@ -1021,7 +1192,6 @@ class _VenuePageState extends State<VenuePage>
 
     if (images.isEmpty) return const SizedBox.shrink();
 
-    // ✅ Use separate stateful widget to prevent rebuilds when about/hours expand
     return _PhotoStripWidget(
       images: images,
       onImageTap: _showImageOverlay,
@@ -1029,74 +1199,6 @@ class _VenuePageState extends State<VenuePage>
     );
   }
 
-  Widget _gridImageOrBlank(String? path, bool large, int index) {
-    if (path == null || path.isEmpty) {
-      return Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(8),
-        ),
-      );
-    }
-    return _gridImage(path, large, index);
-  }
-
-  Widget _gridImage(String path, bool large, int index) {
-    return GestureDetector(
-      onTap: () => _showImageOverlay(index),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: FutureBuilder<String?>(
-          future: _imageUrlForPath(path),
-          builder: (context, snap) {
-            if (snap.connectionState == ConnectionState.waiting) {
-              return Container(
-                color: Colors.grey.shade200,
-                child: Center(
-                  child: FutureBuilder(
-                    future: Future.delayed(const Duration(milliseconds: 500)),
-                    builder: (context, delaySnap) {
-                      if (delaySnap.connectionState ==
-                          ConnectionState.waiting) {
-                        return const SizedBox.shrink();
-                      }
-                      return CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: kPrimaryGreen,
-                        backgroundColor: kPrimaryGreen.withOpacity(0.2),
-                      );
-                    },
-                  ),
-                ),
-              );
-            }
-            if (snap.hasError || snap.data == null || snap.data!.isEmpty) {
-              return Container(
-                color: Colors.grey.shade200,
-                child: const Center(
-                  child: Icon(Icons.image_not_supported, size: 24),
-                ),
-              );
-            }
-            return CachedNetworkImage(
-              imageUrl: snap.data!,
-              fit: BoxFit.cover,
-              width: double.infinity,
-              height: double.infinity,
-              placeholder: (context, url) =>
-                  Container(color: Colors.grey.shade200),
-              errorWidget: (context, url, error) => Container(
-                color: Colors.grey.shade200,
-                child: const Icon(Icons.error),
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
-
-  // ✅ Expandable text with INLINE arrow that stays in place (reverses on expand)
   Widget _buildExpandableText(
     String text,
     bool isExpanded,
@@ -1108,30 +1210,25 @@ class _VenuePageState extends State<VenuePage>
       height: 1.5,
     );
 
-    const double _arrowSlotWidth =
-        32; // fixed trailing slot so arrow never moves
-    const EdgeInsets _arrowPad = EdgeInsets.symmetric(horizontal: 6);
+    const double arrowSlotWidth = 32;
+    const EdgeInsets arrowPad = EdgeInsets.symmetric(horizontal: 6);
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        // Probe if text exceeds 2 lines
         final probe = TextPainter(
           text: TextSpan(text: text, style: style),
           maxLines: 2,
           textDirection: TextDirection.ltr,
-        )..layout(maxWidth: constraints.maxWidth - _arrowSlotWidth);
+        )..layout(maxWidth: constraints.maxWidth - arrowSlotWidth);
         final exceeded = probe.didExceedMaxLines;
 
-        // If content fits, just show text (no arrow)
         if (!exceeded) {
           return Text(text, style: style);
         }
 
-        // Use the SAME Row in both states so the arrow stays put
         return Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Text area
             Expanded(
               child: Text(
                 text,
@@ -1142,17 +1239,15 @@ class _VenuePageState extends State<VenuePage>
                 style: style,
               ),
             ),
-
-            // Narrow trailing slot that always hosts the arrow (top aligned)
             SizedBox(
-              width: _arrowSlotWidth,
+              width: arrowSlotWidth,
               child: Align(
                 alignment: Alignment.topCenter,
                 child: InkWell(
                   onTap: onTap,
                   borderRadius: BorderRadius.circular(8),
                   child: Padding(
-                    padding: _arrowPad,
+                    padding: arrowPad,
                     child: Icon(
                       isExpanded
                           ? Icons.keyboard_arrow_up
@@ -1170,7 +1265,6 @@ class _VenuePageState extends State<VenuePage>
     );
   }
 
-  // ✅ Opening hours with ALL cases + expand arrow
   Widget _buildOpeningHours() {
     final status = _getOpeningStatus();
     final time = _getOpeningTime();
@@ -1210,11 +1304,14 @@ class _VenuePageState extends State<VenuePage>
                         ),
                       ),
                     if (time.isNotEmpty)
-                      Text(
-                        time,
-                        style: const TextStyle(
-                          fontSize: 15,
-                          color: Colors.black87,
+                      Flexible(
+                        child: Text(
+                          time,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            color: Colors.black87,
+                          ),
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                   ],
@@ -1281,11 +1378,14 @@ class _VenuePageState extends State<VenuePage>
                           color: isToday ? Colors.black : Colors.grey.shade700,
                         ),
                       ),
-                      Text(
-                        hours,
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey.shade600,
+                      Flexible(
+                        child: Text(
+                          hours,
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey.shade600,
+                          ),
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ],
@@ -1314,111 +1414,7 @@ class _VenuePageState extends State<VenuePage>
     }
   }
 
-  static Widget _categoryCard(
-    BuildContext context,
-    String title,
-    String imagePath,
-    String venueId,
-    String categoryId,
-    Future<String?> Function(String) getUrlFor,
-  ) {
-    return GestureDetector(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => CategoryPage(
-              categoryName: title,
-              venueId: venueId,
-              categoryId: categoryId,
-            ),
-          ),
-        );
-      },
-      child: Container(
-        width: 130,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: FutureBuilder<String?>(
-                future: getUrlFor(imagePath),
-                builder: (context, snap) {
-                  if (snap.connectionState == ConnectionState.waiting) {
-                    return Container(
-                      height: 130,
-                      width: 130,
-                      color: Colors.grey.shade200,
-                      child: Center(
-                        child: FutureBuilder(
-                          future: Future.delayed(
-                            const Duration(milliseconds: 500),
-                          ),
-                          builder: (context, delaySnap) {
-                            if (delaySnap.connectionState ==
-                                ConnectionState.waiting) {
-                              return const SizedBox.shrink();
-                            }
-                            return CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: kPrimaryGreen,
-                              backgroundColor: kPrimaryGreen.withOpacity(0.2),
-                            );
-                          },
-                        ),
-                      ),
-                    );
-                  }
-                  if (snap.hasError ||
-                      snap.data == null ||
-                      snap.data!.isEmpty) {
-                    return Container(
-                      height: 130,
-                      width: 130,
-                      color: Colors.grey.shade200,
-                      child: const Center(
-                        child: Icon(Icons.image_not_supported),
-                      ),
-                    );
-                  }
-                  return CachedNetworkImage(
-                    imageUrl: snap.data!,
-                    height: 130,
-                    width: 130,
-                    fit: BoxFit.cover,
-                  );
-                },
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(8),
-              child: Text(
-                title,
-                textAlign: TextAlign.left,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14,
-                  color: Color.fromARGB(255, 44, 44, 44), // categories color
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // Floor map state
-
   Widget _buildFloorMapViewer() {
-    // Show loading while fetching maps
     if (_mapsLoading) {
       return Container(
         height: 200,
@@ -1434,15 +1430,14 @@ class _VenuePageState extends State<VenuePage>
                 color: kPrimaryGreen,
                 backgroundColor: kPrimaryGreen.withOpacity(0.2),
               ),
-              SizedBox(height: 8),
-              Text('Loading maps...'),
+              const SizedBox(height: 8),
+              const Text('Loading maps...'),
             ],
           ),
         ),
       );
     }
 
-    // Check if venue has maps
     final hasMaps = _venueMaps.isNotEmpty;
 
     if (!hasMaps) {
@@ -1457,20 +1452,21 @@ class _VenuePageState extends State<VenuePage>
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(Icons.map_outlined, size: 48, color: Colors.grey.shade400),
-              SizedBox(height: 8),
-              Text('No floor maps available'),
+              const SizedBox(height: 8),
+              const Text('No floor maps available'),
             ],
           ),
         ),
       );
     }
 
-    // Return the interactive 3D map for venues with maps
     return _FloorMapSection(venueMaps: _venueMaps, initialFloor: _currentFloor);
   }
 }
 
-// Separate widget for the 3D viewer - only rebuilds when floor changes
+// ----------------------------------------------------------------------------
+// Image Overlay
+// ----------------------------------------------------------------------------
 
 class _ImageOverlay extends StatefulWidget {
   final List<String> imagePaths;
@@ -1586,7 +1582,10 @@ class _ImageOverlayState extends State<_ImageOverlay> {
   }
 }
 
-// Separate widget for the 3D viewer
+// ----------------------------------------------------------------------------
+// Floor Map Widgets
+// ----------------------------------------------------------------------------
+
 class _FloorMapViewer extends StatelessWidget {
   final String currentFloor;
 
@@ -1624,8 +1623,8 @@ class _FloorMapViewer extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.error_outline, size: 48, color: Colors.red),
-            SizedBox(height: 8),
+            const Icon(Icons.error_outline, size: 48, color: Colors.red),
+            const SizedBox(height: 8),
             Text(message),
           ],
         ),
@@ -1634,7 +1633,6 @@ class _FloorMapViewer extends StatelessWidget {
   }
 }
 
-// Complete floor map section
 class _FloorMapSection extends StatefulWidget {
   final List<Map<String, String>> venueMaps;
   final String initialFloor;
@@ -1666,7 +1664,7 @@ class _FloorMapSectionState extends State<_FloorMapSection> {
         children: [
           Container(
             height: 250,
-            decoration: BoxDecoration(
+            decoration: const BoxDecoration(
               borderRadius: BorderRadius.only(
                 topLeft: Radius.circular(12),
                 topRight: Radius.circular(12),
@@ -1732,11 +1730,7 @@ class _FloorMapSectionState extends State<_FloorMapSection> {
           ),
           elevation: isSelected ? 2 : 0,
         ),
-        onPressed: () {
-          setState(() {
-            _currentFloor = mapURL;
-          });
-        },
+        onPressed: () => setState(() => _currentFloor = mapURL),
         child: Text(
           label,
           style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
@@ -1746,7 +1740,10 @@ class _FloorMapSectionState extends State<_FloorMapSection> {
   }
 }
 
-// ✅ Separate widget for Discover More section to prevent blinking
+// ----------------------------------------------------------------------------
+// Discover More Section
+// ----------------------------------------------------------------------------
+
 class _DiscoverMoreSection extends StatefulWidget {
   final String venueId;
   final Future<String?> Function(String) getUrlFor;
@@ -1762,7 +1759,6 @@ class _DiscoverMoreSectionState extends State<_DiscoverMoreSection>
   @override
   bool get wantKeepAlive => true;
 
-  // ✅ Cache URLs in state - EXACT same as photo strip
   final Map<String, String> _cachedUrls = {};
   final Map<String, CategoryData> _categoryData = {};
   bool _urlsLoaded = false;
@@ -1773,7 +1769,6 @@ class _DiscoverMoreSectionState extends State<_DiscoverMoreSection>
     _loadCategories();
   }
 
-  // ✅ Pre-load all categories and URLs - EXACT same pattern as photo strip
   Future<void> _loadCategories() async {
     try {
       final snapshot = await FirebaseFirestore.instance
@@ -1820,10 +1815,10 @@ class _DiscoverMoreSectionState extends State<_DiscoverMoreSection>
       );
     }
 
-    // ✅ Sort categories
     final categories = _categoryData.values.toList();
 
-    int _priorityFor(String name) {
+    // Sort categories
+    int priorityFor(String name) {
       final n = name.trim().toLowerCase();
       switch (n) {
         case 'shops':
@@ -1841,8 +1836,8 @@ class _DiscoverMoreSectionState extends State<_DiscoverMoreSection>
     }
 
     categories.sort((a, b) {
-      final aPri = _priorityFor(a.name);
-      final bPri = _priorityFor(b.name);
+      final aPri = priorityFor(a.name);
+      final bPri = priorityFor(b.name);
 
       if (aPri != bPri) return aPri.compareTo(bPri);
 
@@ -1931,7 +1926,10 @@ class _DiscoverMoreSectionState extends State<_DiscoverMoreSection>
   }
 }
 
-// ✅ Simple data class for category
+// ----------------------------------------------------------------------------
+// Category Data Model
+// ----------------------------------------------------------------------------
+
 class CategoryData {
   final String id;
   final String name;
@@ -1940,7 +1938,10 @@ class CategoryData {
   CategoryData({required this.id, required this.name, required this.image});
 }
 
-// ✅ Separate widget for photo strip to prevent rebuilds when expanding/collapsing sections
+// ----------------------------------------------------------------------------
+// Photo Strip Widget
+// ----------------------------------------------------------------------------
+
 class _PhotoStripWidget extends StatefulWidget {
   final List<String> images;
   final void Function(int) onImageTap;
@@ -1959,9 +1960,8 @@ class _PhotoStripWidget extends StatefulWidget {
 class _PhotoStripWidgetState extends State<_PhotoStripWidget>
     with AutomaticKeepAliveClientMixin {
   @override
-  bool get wantKeepAlive => true; // ✅ Keep state alive
+  bool get wantKeepAlive => true;
 
-  // ✅ Cache URLs in state to prevent FutureBuilder from re-running
   final Map<String, String> _cachedUrls = {};
   bool _urlsLoaded = false;
 
@@ -1971,7 +1971,6 @@ class _PhotoStripWidgetState extends State<_PhotoStripWidget>
     _preloadUrls();
   }
 
-  // ✅ Pre-load all image URLs once
   Future<void> _preloadUrls() async {
     for (final path in widget.images) {
       if (path.isEmpty) continue;
@@ -1980,9 +1979,7 @@ class _PhotoStripWidgetState extends State<_PhotoStripWidget>
         if (url != null && mounted) {
           _cachedUrls[path] = url;
         }
-      } catch (_) {
-        // Skip failed images
-      }
+      } catch (_) {}
     }
     if (mounted) {
       setState(() => _urlsLoaded = true);
@@ -1991,7 +1988,7 @@ class _PhotoStripWidgetState extends State<_PhotoStripWidget>
 
   @override
   Widget build(BuildContext context) {
-    super.build(context); // Required for AutomaticKeepAliveClientMixin
+    super.build(context);
 
     final width = MediaQuery.of(context).size.width - 32;
     final pageCount = (widget.images.length / 3).ceil();
@@ -2056,7 +2053,6 @@ class _PhotoStripWidgetState extends State<_PhotoStripWidget>
   }
 
   Widget _gridImage(String path, bool large, int index) {
-    // ✅ Use cached URL directly - no FutureBuilder to prevent blinking
     final cachedUrl = _cachedUrls[path];
 
     return GestureDetector(

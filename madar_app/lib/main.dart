@@ -4,44 +4,27 @@ import 'package:madar_app/screens/welcome_page.dart';
 import 'package:madar_app/widgets/MainLayout.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:madar_app/api/seed_venues.dart'; // to save venue info in database
-import 'package:flutter/foundation.dart'
-    show kDebugMode; // for debug-only logic
-
-// NEW: contacts backfiller (adds venuePhone + venueWebsite via Places Details)
+import 'package:madar_app/api/seed_venues.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:madar_app/api/seed_venue_contacts.dart';
+
+// ----------------------------------------------------------------------------
+// Main Entry Point
+// ----------------------------------------------------------------------------
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 1) Load environment variables
+  // Load environment variables
   await dotenv.load(fileName: ".env");
 
-  // 2) Initialize Firebase
+  // Initialize Firebase
   await Firebase.initializeApp();
 
-  // 3) DEV-ONLY AUTO LOGIN (anonymous)
-  /* final enableDevAutoLogin =
-      kDebugMode &&
-      (dotenv.maybeGet('DEV_AUTO_LOGIN')?.toLowerCase() == 'true');
-
-  if (enableDevAutoLogin && FirebaseAuth.instance.currentUser == null) {
-    try {
-      await FirebaseAuth.instance.signInAnonymously();
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('remember_me', true);
-    } catch (e) {
-      debugPrint('Anonymous sign-in failed: $e');
-    }
-  }*/
-
-  // 4) Run the venue seeder (debug only, guarded by .env flag)
+  // DEV-ONLY: Run the venue seeder (controlled by DEV_SEED=true in .env)
   final devSeedRaw = dotenv.maybeGet('DEV_SEED');
-  debugPrint('DEV_SEED raw: "$devSeedRaw"  kDebugMode=$kDebugMode');
   final doSeed = kDebugMode && (devSeedRaw?.toLowerCase() == 'true');
-  debugPrint('Will run seeder? $doSeed');
 
   if (doSeed) {
     final key = dotenv.env['GOOGLE_API_KEY'] ?? '';
@@ -54,19 +37,15 @@ Future<void> main() async {
     }
   }
 
-  // NEW: Backfill phone + website ONLY (safe merge). Controlled by DEV_SEED_CONTACTS=true
+  // DEV-ONLY: Backfill phone + website (controlled by DEV_SEED_CONTACTS=true)
   final devSeedContactsRaw = dotenv.maybeGet('DEV_SEED_CONTACTS');
-  debugPrint(
-    'DEV_SEED_CONTACTS raw: "$devSeedContactsRaw"  kDebugMode=$kDebugMode',
-  );
   final doSeedContacts =
       kDebugMode && (devSeedContactsRaw?.toLowerCase() == 'true');
 
   if (doSeedContacts) {
     final key = dotenv.env['GOOGLE_API_KEY'] ?? '';
     try {
-      debugPrint('Running VenueContactSeeder (onlyIfMissing=true)…');
-      // onlyIfMissing=true ensures we don’t overwrite existing values
+      debugPrint('Running VenueContactSeeder...');
       await VenueContactSeeder(
         key,
         onlyIfMissing: true,
@@ -78,9 +57,7 @@ Future<void> main() async {
     }
   }
 
-  // ✅ تحقق من حالة المستخدم و "Remember Me"
-  final prefs = await SharedPreferences.getInstance();
-  final remember = prefs.getBool('remember_me') ?? false;
+  // Check user state
   final user = FirebaseAuth.instance.currentUser;
 
   Widget startScreen;
@@ -94,6 +71,10 @@ Future<void> main() async {
   runApp(MadarApp(startScreen: startScreen));
 }
 
+// ----------------------------------------------------------------------------
+// Root App Widget
+// ----------------------------------------------------------------------------
+
 class MadarApp extends StatelessWidget {
   final Widget startScreen;
   const MadarApp({super.key, required this.startScreen});
@@ -104,6 +85,8 @@ class MadarApp extends StatelessWidget {
       title: 'Madar',
       theme: buildAppTheme(),
       debugShowCheckedModeBanner: false,
+      // Remove overscroll glow effect globally
+      scrollBehavior: NoGlowScrollBehavior(),
       home: startScreen,
     );
   }

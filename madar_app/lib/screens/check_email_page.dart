@@ -4,7 +4,13 @@ import 'package:madar_app/screens/signin_page.dart';
 import 'package:madar_app/widgets/custom_scaffold.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
+import 'package:madar_app/theme/theme.dart';
 
+// ----------------------------------------------------------------------------
+// Check Email Page
+// ----------------------------------------------------------------------------
+
+/// Page shown after sign up to prompt user to verify their email
 class CheckEmailPage extends StatefulWidget {
   final String email;
 
@@ -20,12 +26,11 @@ class _CheckEmailPageState extends State<CheckEmailPage> {
   int _countdown = 0;
   Timer? _timer;
 
-  /// Sends a verification email to the current user
+  // ---------- Resend Verification Email ----------
+
   Future<void> _resendVerificationEmail() async {
     try {
-      setState(() {
-        _sending = true;
-      });
+      setState(() => _sending = true);
 
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
@@ -44,7 +49,7 @@ class _CheckEmailPageState extends State<CheckEmailPage> {
         'Verification email has been resent.',
       );
 
-      // Start a 30-second cooldown after resending
+      // Start a 60-second cooldown after resending
       setState(() {
         _sentRecently = true;
         _countdown = 60;
@@ -68,7 +73,7 @@ class _CheckEmailPageState extends State<CheckEmailPage> {
       if (message.contains("too-many-requests")) {
         SnackbarHelper.showError(
           context,
-          "You’ve requested too many verification emails. Please wait a minute before trying again.",
+          "You've requested too many verification emails. Please wait a minute before trying again.",
         );
       } else {
         SnackbarHelper.showError(
@@ -83,21 +88,36 @@ class _CheckEmailPageState extends State<CheckEmailPage> {
 
   @override
   void dispose() {
+    // Clear any lingering snackbars when leaving the page
+    if (mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+    }
     _timer?.cancel();
     super.dispose();
   }
 
+  // ---------- Build ----------
+
   @override
   Widget build(BuildContext context) {
+    final screenHeight = MediaQuery.of(context).size.height;
+    final isSmallScreen = screenHeight < 700;
+    final bottomSafeArea = MediaQuery.of(context).padding.bottom;
+
     return CustomScaffold(
       showLogo: true,
       child: Column(
         children: [
-          const Expanded(flex: 1, child: SizedBox(height: 10)),
+          Expanded(flex: 1, child: SizedBox(height: isSmallScreen ? 5 : 10)),
           Expanded(
             flex: 7,
             child: Container(
-              padding: const EdgeInsets.fromLTRB(25, 50, 25, 20),
+              padding: EdgeInsets.fromLTRB(
+                AppSpacing.xxl,
+                isSmallScreen ? 40 : 50,
+                AppSpacing.xxl,
+                AppSpacing.xl + bottomSafeArea,
+              ),
               decoration: const BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.only(
@@ -108,27 +128,27 @@ class _CheckEmailPageState extends State<CheckEmailPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  const Icon(
+                  // Email Icon
+                  Icon(
                     Icons.email_outlined,
-                    size: 90,
+                    size: isSmallScreen ? 70 : 90,
                     color: AppColors.kGreen,
                   ),
-                  const SizedBox(height: 24),
-                  const Text(
-                    'Verify Email',
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w900,
-                      color: AppColors.kGreen,
-                    ),
-                  ),
+                  SizedBox(height: isSmallScreen ? 18 : 24),
+
+                  // Title
+                  Text('Verify Email', style: AppTextStyles.pageTitle),
                   const SizedBox(height: 16),
+
+                  // Description
                   const Text(
                     'We have sent a verification email to:',
                     textAlign: TextAlign.center,
                     style: TextStyle(color: Colors.black54),
                   ),
                   const SizedBox(height: 8),
+
+                  // Email Address
                   Text(
                     widget.email,
                     textAlign: TextAlign.center,
@@ -139,6 +159,8 @@ class _CheckEmailPageState extends State<CheckEmailPage> {
                     ),
                   ),
                   const SizedBox(height: 24),
+
+                  // Instruction Text
                   const Text(
                     'Please verify your email before signing in.',
                     textAlign: TextAlign.center,
@@ -149,13 +171,22 @@ class _CheckEmailPageState extends State<CheckEmailPage> {
                   // Resend Verification Email Button
                   SizedBox(
                     width: double.infinity,
+                    height: 50, // Fixed height to prevent jumping
                     child: ElevatedButton.icon(
                       onPressed: (_sending || _sentRecently)
                           ? null
                           : _resendVerificationEmail,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.kGreen,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        padding: EdgeInsets.zero,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(
+                            AppSpacing.buttonRadius,
+                          ),
+                        ),
+                        // Gray when loading or disabled (original behavior)
+                        disabledBackgroundColor: Colors.grey[300],
+                        disabledForegroundColor: Colors.grey[600],
                       ),
                       icon: _sending
                           ? const SizedBox(
@@ -166,38 +197,42 @@ class _CheckEmailPageState extends State<CheckEmailPage> {
                                 color: Colors.white,
                               ),
                             )
-                          : const Icon(Icons.refresh, color: Colors.white),
+                          : Icon(
+                              Icons.refresh,
+                              color: _sentRecently
+                                  ? Colors.grey[600]
+                                  : Colors.white,
+                            ),
                       label: Text(
                         _sending
                             ? 'Sending...'
                             : _sentRecently
                             ? 'Try again in $_countdown s'
                             : 'Resend Verification Email',
-                        style: const TextStyle(color: Colors.white),
+                        style: TextStyle(
+                          color: _sentRecently
+                              ? Colors.grey[600]
+                              : Colors.white,
+                        ),
                       ),
                     ),
                   ),
                   const SizedBox(height: 16),
 
                   // Go to Sign In Button
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.kGreen,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                      onPressed: () async {
-                        await FirebaseAuth.instance.signOut();
+                  PrimaryButton(
+                    text: 'Go to Sign In',
+                    onPressed: () async {
+                      await FirebaseAuth.instance.signOut();
+                      if (mounted) {
                         Navigator.pushReplacement(
                           context,
                           MaterialPageRoute(
                             builder: (_) => const SignInScreen(),
                           ),
                         );
-                      },
-                      child: const Text('Go to Sign In'),
-                    ),
+                      }
+                    },
                   ),
                 ],
               ),

@@ -1,192 +1,107 @@
 import 'package:flutter/material.dart';
 import 'package:madar_app/widgets/custom_scaffold.dart';
+import 'package:madar_app/widgets/app_widgets.dart';
 import 'package:madar_app/screens/signin_page.dart';
 import 'package:madar_app/screens/signup_page.dart';
+import 'package:madar_app/theme/theme.dart';
 
-class WelcomeScreen
-    extends StatelessWidget {
+// ----------------------------------------------------------------------------
+// Welcome Screen
+// ----------------------------------------------------------------------------
+
+/// Initial welcome screen with sign in/sign up options
+class WelcomeScreen extends StatelessWidget {
   const WelcomeScreen({super.key});
-
-  static const Color green = Color(
-    0xFF787E65,
-  );
 
   @override
   Widget build(BuildContext context) {
+    final screenHeight = MediaQuery.of(context).size.height;
+    final isSmallScreen = screenHeight < 700;
+
     return CustomScaffold(
       showLogo: false,
       child: Column(
         children: [
+          // ---------- Logo Section ----------
           Expanded(
             flex: 1,
             child: Center(
               child: Image.asset(
                 'images/MadarLogoVersion2.png',
-                height: 90,
+                height: isSmallScreen ? 70 : 90,
                 fit: BoxFit.contain,
               ),
             ),
           ),
 
+          // ---------- Content Section ----------
           Expanded(
             flex: 1,
             child: Container(
-              padding:
-                  const EdgeInsets.fromLTRB(
-                    25,
-                    30,
-                    25,
-                    20,
-                  ),
+              padding: EdgeInsets.fromLTRB(
+                AppSpacing.xxl,
+                isSmallScreen ? 24 : 30,
+                AppSpacing.xxl,
+                AppSpacing.xl + MediaQuery.of(context).padding.bottom,
+              ),
               decoration: const BoxDecoration(
                 color: Colors.white,
-                borderRadius:
-                    BorderRadius.only(
-                      topLeft:
-                          Radius.circular(
-                            35,
-                          ),
-                      topRight:
-                          Radius.circular(
-                            35,
-                          ),
-                    ),
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(AppSpacing.sheetRadius),
+                  topRight: Radius.circular(AppSpacing.sheetRadius),
+                ),
               ),
               child: SingleChildScrollView(
                 child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment
-                          .center,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    const Text(
+                    // Title
+                    Text(
                       'Welcome!',
-                      textAlign:
-                          TextAlign
-                              .center,
-                      style: TextStyle(
-                        fontSize: 28,
-                        fontWeight:
-                            FontWeight
-                                .w900,
-                        color: green,
+                      textAlign: TextAlign.center,
+                      style: AppTextStyles.pageTitle.copyWith(
+                        fontSize: isSmallScreen ? 24 : 28,
                       ),
                     ),
-                    const SizedBox(
-                      height: 8,
-                    ),
+                    SizedBox(height: isSmallScreen ? 6 : 8),
+
+                    // Subtitle
                     Text(
                       'Find venues, meet friends, and explore with confidence!',
-                      textAlign:
-                          TextAlign
-                              .center,
+                      textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: Colors
-                            .grey[700],
-                        fontSize: 15,
+                        color: Colors.grey[700],
+                        fontSize: isSmallScreen ? 14 : 15,
                         height: 1.4,
                       ),
                     ),
-                    const SizedBox(
-                      height: 30,
-                    ),
+                    SizedBox(height: isSmallScreen ? 24 : 30),
 
-                    // زر Sign in
-                    SizedBox(
-                      width: double
-                          .infinity,
-                      child: OutlinedButton(
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder:
-                                  (_) =>
-                                      const SignInScreen(),
-                            ),
-                          );
-                        },
-                        style: OutlinedButton.styleFrom(
-                          side: const BorderSide(
-                            color:
-                                green,
-                            width: 2,
+                    // Sign In Button
+                    SecondaryButton(
+                      text: 'Sign in',
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const SignInScreen(),
                           ),
-                          foregroundColor:
-                              green,
-                          padding:
-                              const EdgeInsets.symmetric(
-                                vertical:
-                                    14,
-                              ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius:
-                                BorderRadius.circular(
-                                  10,
-                                ),
-                          ),
-                        ),
-                        child: const Text(
-                          'Sign in',
-                          style: TextStyle(
-                            fontSize:
-                                16,
-                            fontWeight:
-                                FontWeight
-                                    .bold,
-                          ),
-                        ),
-                      ),
+                        );
+                      },
                     ),
+                    const SizedBox(height: 12),
 
-                    const SizedBox(
-                      height: 12,
-                    ),
-
-                    // زر Sign up
-                    SizedBox(
-                      width: double
-                          .infinity,
-                      child: ElevatedButton(
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder:
-                                  (_) =>
-                                      const SignUpScreen(),
-                            ),
-                          );
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor:
-                              green,
-                          foregroundColor:
-                              Colors
-                                  .white,
-                          padding:
-                              const EdgeInsets.symmetric(
-                                vertical:
-                                    14,
-                              ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius:
-                                BorderRadius.circular(
-                                  10,
-                                ),
+                    // Sign Up Button
+                    PrimaryButton(
+                      text: 'Sign up',
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const SignUpScreen(),
                           ),
-                          elevation: 2,
-                        ),
-                        child: const Text(
-                          'Sign up',
-                          style: TextStyle(
-                            fontSize:
-                                16,
-                            fontWeight:
-                                FontWeight
-                                    .bold,
-                          ),
-                        ),
-                      ),
+                        );
+                      },
                     ),
                   ],
                 ),

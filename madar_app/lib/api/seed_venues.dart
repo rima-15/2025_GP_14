@@ -1,8 +1,11 @@
-// lib/dev/seed_venues.dart
 import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+
+// ----------------------------------------------------------------------------
+// Venue Seeder - Seeds venue data from Google Places API (debug only)
+// ----------------------------------------------------------------------------
 
 class VenueSeeder {
   final _fire = FirebaseFirestore.instance;
@@ -14,7 +17,7 @@ class VenueSeeder {
     if (!kDebugMode) throw Exception('VenueSeeder should run in debug only');
     if (apiKey.isEmpty) throw Exception('GOOGLE_API_KEY missing');
 
-    // Curated list (doc id == place_id)
+    // Curated list of venues (doc id == place_id)
     final base = <Map<String, dynamic>>[
       {
         "name": "Solitaire",
@@ -98,7 +101,7 @@ class VenueSeeder {
       final name = v['name'] as String;
       final category = v['category'] as String;
 
-      if (kDebugMode) print('→ Seeding $name ($placeId) [$category]');
+      if (kDebugMode) print('Seeding $name ($placeId) [$category]');
       try {
         final det = await _getDetails(placeId);
         if (det == null) {
@@ -126,15 +129,15 @@ class VenueSeeder {
           'venueType': category,
           'venueDescription': description,
           'venueAddress': address,
-          'latitude': lat, // number
-          'longitude': lng, // number
+          'latitude': lat,
+          'longitude': lng,
         };
 
         await _fire
             .collection('venues')
             .doc(placeId)
             .set(data, SetOptions(merge: true));
-        if (kDebugMode) print('   Saved ✓ $name');
+        if (kDebugMode) print('   Saved $name');
       } catch (e, st) {
         if (kDebugMode) {
           print('   ERROR while seeding $name: $e');
@@ -146,16 +149,13 @@ class VenueSeeder {
 
   /// Google Places Details (no photos requested)
   Future<Map<String, dynamic>?> _getDetails(String placeId) async {
-    final uri = Uri.https(
-      'maps.googleapis.com',
-      '/maps/api/place/details/json',
-      {
-        'place_id': placeId,
-        'fields': 'name,formatted_address,geometry,editorial_summary',
-        'language': 'en', // or 'ar'
-        'key': apiKey,
-      },
-    );
+    final uri =
+        Uri.https('maps.googleapis.com', '/maps/api/place/details/json', {
+          'place_id': placeId,
+          'fields': 'name,formatted_address,geometry,editorial_summary',
+          'language': 'en',
+          'key': apiKey,
+        });
     try {
       final r = await http.get(uri).timeout(const Duration(seconds: 15));
       final j = jsonDecode(r.body) as Map<String, dynamic>;

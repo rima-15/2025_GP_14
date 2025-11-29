@@ -1,10 +1,11 @@
-// Backfills phone + website for existing venue documents (docId == place_id).
-
 import 'dart:convert';
-import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+
+// ----------------------------------------------------------------------------
+// Venue Contact Seeder - Backfills phone + website for venues (debug only)
+// ----------------------------------------------------------------------------
 
 class VenueContactSeeder {
   final FirebaseFirestore _fire;
@@ -21,7 +22,7 @@ class VenueContactSeeder {
     this.apiKey, {
     FirebaseFirestore? firestore,
     this.onlyIfMissing = true,
-    this.perCallDelayMs = 250, // ~4 calls/sec
+    this.perCallDelayMs = 250,
   }) : _fire = firestore ?? FirebaseFirestore.instance;
 
   Future<void> runOnceForCollection(String collectionPath) async {
@@ -67,10 +68,10 @@ class VenueContactSeeder {
             (details['international_phone_number'] as String?)?.trim() ?? '';
         final website = (details['website'] as String?)?.trim() ?? '';
 
-        // Choose the best phone to store (prefer international if present).
+        // Choose the best phone to store (prefer international if present)
         final chosenPhone = phoneIntl.isNotEmpty ? phoneIntl : phoneLocal;
 
-        // Build update map respecting onlyIfMissing.
+        // Build update map respecting onlyIfMissing
         final update = <String, dynamic>{};
         if (!onlyIfMissing || existingPhone.isEmpty) {
           if (chosenPhone.isNotEmpty) update['venuePhone'] = chosenPhone;
@@ -97,7 +98,7 @@ class VenueContactSeeder {
       }
       if (pending >= 400) {
         await batch.commit();
-        if (kDebugMode) print('Committed 400 updates…');
+        if (kDebugMode) print('Committed 400 updates...');
         batch = _fire.batch();
         pending = 0;
       }
@@ -117,9 +118,7 @@ class VenueContactSeeder {
     final uri =
         Uri.https('maps.googleapis.com', '/maps/api/place/details/json', {
           'place_id': placeId,
-          'fields':
-              // Keep it small; only what we need
-              'formatted_phone_number,international_phone_number,website',
+          'fields': 'formatted_phone_number,international_phone_number,website',
           'language': 'en',
           'key': apiKey,
         });

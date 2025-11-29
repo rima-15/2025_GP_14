@@ -7,9 +7,14 @@ import 'package:madar_app/screens/track_page.dart';
 import 'package:madar_app/screens/signin_page.dart';
 import 'package:madar_app/screens/profile_page.dart';
 import 'package:madar_app/screens/settings_page.dart';
-import 'package:madar_app/screens/help_page.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
+import 'package:madar_app/theme/theme.dart';
 
+// ----------------------------------------------------------------------------
+// Main Layout
+// ----------------------------------------------------------------------------
+
+/// Main app layout with bottom navigation and drawer
 class MainLayout extends StatefulWidget {
   const MainLayout({super.key});
 
@@ -28,8 +33,6 @@ class _MainLayoutState extends State<MainLayout> {
   ];
 
   final _scaffoldKey = GlobalKey<ScaffoldState>();
-
-  // User data
   String _firstName = '';
 
   @override
@@ -37,6 +40,8 @@ class _MainLayoutState extends State<MainLayout> {
     super.initState();
     _loadUserData();
   }
+
+  // ---------- Data Loading ----------
 
   Future<void> _loadUserData() async {
     final user = FirebaseAuth.instance.currentUser;
@@ -58,8 +63,9 @@ class _MainLayoutState extends State<MainLayout> {
     }
   }
 
+  // ---------- Actions ----------
+
   Future<void> _logout(BuildContext context) async {
-    // Show confirmation dialog
     final confirmed = await ConfirmationDialog.showPositiveConfirmation(
       context,
       title: 'Log out',
@@ -69,7 +75,6 @@ class _MainLayoutState extends State<MainLayout> {
 
     if (!confirmed) return;
 
-    // Proceed with logout
     await FirebaseAuth.instance.signOut();
     if (context.mounted) {
       Navigator.pushAndRemoveUntil(
@@ -82,6 +87,8 @@ class _MainLayoutState extends State<MainLayout> {
 
   void _openMenu() => _scaffoldKey.currentState?.openDrawer();
 
+  // ---------- Build ----------
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -89,12 +96,13 @@ class _MainLayoutState extends State<MainLayout> {
       appBar: _buildAppBar(_index),
       body: pages[_index],
       drawer: _buildDrawer(context),
-      bottomNavigationBar: _buildModernBottomBar(),
+      bottomNavigationBar: _buildBottomNavBar(),
       backgroundColor: Colors.white,
     );
   }
 
-  // -------------------------- 🔹 AppBar Builder 🔹 --------------------------
+  // ---------- App Bar ----------
+
   PreferredSizeWidget _buildAppBar(int index) {
     final titles = ['Home', 'Explore', 'Track'];
 
@@ -103,15 +111,11 @@ class _MainLayoutState extends State<MainLayout> {
       elevation: 0,
       centerTitle: true,
       automaticallyImplyLeading: false,
-
-      // Hamburger menu on the LEFT
       leading: IconButton(
         icon: const Icon(Icons.menu, color: AppColors.kGreen),
         onPressed: _openMenu,
         padding: const EdgeInsets.only(left: 16),
       ),
-
-      // Title/Logo in center
       title: index == 0
           ? SizedBox(
               height: 50,
@@ -127,8 +131,6 @@ class _MainLayoutState extends State<MainLayout> {
                 fontWeight: FontWeight.w600,
               ),
             ),
-
-      // Notifications on the RIGHT
       actions: index == 0
           ? [
               IconButton(
@@ -141,8 +143,6 @@ class _MainLayoutState extends State<MainLayout> {
               ),
             ]
           : null,
-
-      // Light divider ONLY for Explore (1) and Track (2)
       bottom: (index == 1 || index == 2)
           ? PreferredSize(
               preferredSize: const Size.fromHeight(1),
@@ -152,30 +152,33 @@ class _MainLayoutState extends State<MainLayout> {
     );
   }
 
-  // -------------------------- 🔹 Professional Drawer 🔹 --------------------------
+  // ---------- Navigation Drawer ----------
+
   Widget _buildDrawer(BuildContext context) {
     return Drawer(
       child: Container(
         color: Colors.white,
         child: Column(
           children: [
-            // Header with logo and greeting
+            // Header
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(24, 60, 24, 28),
+              padding: EdgeInsets.fromLTRB(
+                24,
+                MediaQuery.of(context).padding.top + 24,
+                24,
+                28,
+              ),
               decoration: const BoxDecoration(color: AppColors.kGreen),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Logo
                   Image.asset(
                     'images/MadarLogoVersion2.png',
                     height: 45,
                     fit: BoxFit.contain,
                   ),
                   const SizedBox(height: 20),
-
-                  // Greeting
                   Text(
                     'Hello, ${_firstName.isEmpty ? 'User' : _firstName}',
                     style: const TextStyle(
@@ -191,7 +194,7 @@ class _MainLayoutState extends State<MainLayout> {
               ),
             ),
 
-            // Menu items
+            // Menu Items
             Expanded(
               child: Column(
                 children: [
@@ -228,14 +231,11 @@ class _MainLayoutState extends State<MainLayout> {
                       _buildMenuItem(
                         icon: Icons.help_outline,
                         title: 'Help & Support',
-                        onTap: () {}, // tap does nothing
+                        onTap: () {},
                       ),
                     ],
                   ),
-
                   const Spacer(),
-
-                  // Log out at the bottom
                   const Divider(height: 1, thickness: 1),
                   _buildMenuItem(
                     icon: Icons.logout,
@@ -278,8 +278,9 @@ class _MainLayoutState extends State<MainLayout> {
     );
   }
 
-  // ✅ Modern flat bottom navigation bar with filled pill background
-  Widget _buildModernBottomBar() {
+  // ---------- Bottom Navigation ----------
+
+  Widget _buildBottomNavBar() {
     return SafeArea(
       top: false,
       child: Container(

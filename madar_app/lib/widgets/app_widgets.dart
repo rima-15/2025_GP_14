@@ -1,23 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:madar_app/theme/theme.dart';
 
-// ============================================================================
-// COLORS - Define all your app colors here
-// ============================================================================
+// ----------------------------------------------------------------------------
+// App Colors
+// ----------------------------------------------------------------------------
 class AppColors {
   static const kGreen = Color(0xFF787E65);
   static const kError = Color(0xFFC62828);
   static const kErrorLight = Color(0xFFFEF2F2);
   static const kErrorBorder = Color(0xFFF5B8B8);
-  static const kSuccess = Color.fromARGB(255, 104, 114, 134);
+  static const kSuccess = Color(0xFF687286);
+  static const kSuccessLight = Color(0xFFF0F7E8);
+  static const kSuccessBorder = Color(0xFFB8C9A0);
 }
 
-// ============================================================================
-// UNIFIED LOADING WIDGETS
-// ============================================================================
+// ----------------------------------------------------------------------------
+// Loading Indicators
+// ----------------------------------------------------------------------------
 
-/// Full-page loading indicator - Use when the entire page content is loading
-/// Example: Profile page loading user data, Home page initial load
+/// Full-page loading indicator for initial page loads
 class AppLoadingIndicator extends StatelessWidget {
   const AppLoadingIndicator({super.key});
 
@@ -32,10 +34,9 @@ class AppLoadingIndicator extends StatelessWidget {
   }
 }
 
-/// Inline loading indicator - Use for buttons or small inline loading states
-/// Example: "Save Changes" button, "Update Password" button
+/// Inline loading indicator for buttons and small spaces
 class InlineLoadingIndicator extends StatelessWidget {
-  final double? size; // Optional custom size
+  final double? size;
 
   const InlineLoadingIndicator({super.key, this.size});
 
@@ -48,7 +49,7 @@ class InlineLoadingIndicator extends StatelessWidget {
         return SizedBox(
           width: indicatorSize,
           height: indicatorSize,
-          child: CircularProgressIndicator(
+          child: const CircularProgressIndicator(
             color: Colors.white,
             strokeWidth: 2.5,
           ),
@@ -58,9 +59,11 @@ class InlineLoadingIndicator extends StatelessWidget {
   }
 }
 
-// ============================================================================
-// ERROR MESSAGE WIDGET (Bottom of page)
-// ============================================================================
+// ----------------------------------------------------------------------------
+// Message Boxes
+// ----------------------------------------------------------------------------
+
+/// Error message box displayed at bottom of forms
 class ErrorMessageBox extends StatelessWidget {
   final String message;
 
@@ -94,10 +97,45 @@ class ErrorMessageBox extends StatelessWidget {
   }
 }
 
-// ============================================================================
-// SNACKBAR HELPERS
-// ============================================================================
+/// Success message box displayed at bottom of forms
+class SuccessMessageBox extends StatelessWidget {
+  final String message;
+
+  const SuccessMessageBox({super.key, required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.kSuccessLight,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.kSuccessBorder, width: 1),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.check_circle_outline, color: AppColors.kGreen),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(
+                color: AppColors.kGreen,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Snackbar Helpers
+// ----------------------------------------------------------------------------
 class SnackbarHelper {
+  /// Shows a success snackbar with green styling
   static void showSuccess(BuildContext context, String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -116,14 +154,11 @@ class SnackbarHelper {
             ),
           ],
         ),
-        backgroundColor: const Color(0xFFF0F7E8), // Same as SuccessMessageBox
+        backgroundColor: AppColors.kSuccessLight,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8),
-          side: const BorderSide(
-            color: Color(0xFFB8C9A0), // Same border as SuccessMessageBox
-            width: 1,
-          ),
+          side: const BorderSide(color: AppColors.kSuccessBorder, width: 1),
         ),
         margin: const EdgeInsets.all(16),
         padding: const EdgeInsets.all(12),
@@ -133,6 +168,7 @@ class SnackbarHelper {
     );
   }
 
+  /// Shows an error snackbar with red styling
   static void showError(BuildContext context, String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -151,14 +187,11 @@ class SnackbarHelper {
             ),
           ],
         ),
-        backgroundColor: AppColors.kErrorLight, // Same as ErrorMessageBox
+        backgroundColor: AppColors.kErrorLight,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8),
-          side: const BorderSide(
-            color: AppColors.kErrorBorder, // Same border as ErrorMessageBox
-            width: 1,
-          ),
+          side: const BorderSide(color: AppColors.kErrorBorder, width: 1),
         ),
         margin: const EdgeInsets.all(16),
         padding: const EdgeInsets.all(12),
@@ -169,11 +202,11 @@ class SnackbarHelper {
   }
 }
 
-// ============================================================================
-// CONFIRMATION DIALOGS
-// ============================================================================
+// ----------------------------------------------------------------------------
+// Confirmation Dialogs
+// ----------------------------------------------------------------------------
 class ConfirmationDialog {
-  // Delete confirmation (Destructive action)
+  /// Shows a delete/destructive action confirmation dialog
   static Future<bool> showDeleteConfirmation(
     BuildContext context, {
     required String title,
@@ -237,7 +270,7 @@ class ConfirmationDialog {
     return result ?? false;
   }
 
-  // Positive confirmation (Non-destructive action) - like logout
+  /// Shows a positive/non-destructive confirmation dialog (e.g., logout)
   static Future<bool> showPositiveConfirmation(
     BuildContext context, {
     required String title,
@@ -302,9 +335,11 @@ class ConfirmationDialog {
   }
 }
 
-// ============================================================================
-// STYLED TEXT FIELD (with consistent error styling)
-// ============================================================================
+// ----------------------------------------------------------------------------
+// Styled Text Field
+// ----------------------------------------------------------------------------
+
+/// Consistent styled text field used across the app
 class StyledTextField extends StatelessWidget {
   final TextEditingController controller;
   final String label;
@@ -314,10 +349,10 @@ class StyledTextField extends StatelessWidget {
   final String? prefixText;
   final List<TextInputFormatter>? inputFormatters;
   final bool enabled;
-  final bool obscureText; // ADD THIS
-  final Widget? suffixIcon; // ADD THIS
-  final String? obscuringCharacter; // ADD THIS
-  final FocusNode? focusNode; // ADD THIS FOR AUTO-FOCUS
+  final bool obscureText;
+  final Widget? suffixIcon;
+  final String? obscuringCharacter;
+  final FocusNode? focusNode;
 
   const StyledTextField({
     super.key,
@@ -329,22 +364,22 @@ class StyledTextField extends StatelessWidget {
     this.prefixText,
     this.inputFormatters,
     this.enabled = true,
-    this.obscureText = false, // ADD THIS
-    this.suffixIcon, // ADD THIS
-    this.obscuringCharacter, // ADD THIS
-    this.focusNode, // ADD THIS FOR AUTO-FOCUS
+    this.obscureText = false,
+    this.suffixIcon,
+    this.obscuringCharacter,
+    this.focusNode,
   });
 
   @override
   Widget build(BuildContext context) {
     return TextFormField(
       controller: controller,
-      focusNode: focusNode, // ADD THIS FOR AUTO-FOCUS
+      focusNode: focusNode,
       enabled: enabled,
       keyboardType: keyboardType,
       inputFormatters: inputFormatters,
-      obscureText: obscureText, // ADD THIS
-      obscuringCharacter: obscuringCharacter ?? '•', // ADD THIS
+      obscureText: obscureText,
+      obscuringCharacter: obscuringCharacter ?? '•',
       autovalidateMode: AutovalidateMode.onUserInteraction,
       validator: validator,
       style: TextStyle(
@@ -355,127 +390,153 @@ class StyledTextField extends StatelessWidget {
         labelText: label,
         hintText: hint,
         prefixText: prefixText,
-        suffixIcon: suffixIcon, // ADD THIS
+        suffixIcon: suffixIcon,
         labelStyle: TextStyle(color: enabled ? null : Colors.grey[600]),
         filled: true,
         fillColor: enabled ? Colors.white : Colors.grey[200],
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10), // CHANGE from 12 to 10
+          borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
           borderSide: BorderSide.none,
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10), // CHANGE from 12 to 10
+          borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
           borderSide: const BorderSide(color: Colors.black12, width: 1),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10), // CHANGE from 12 to 10
+          borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
           borderSide: const BorderSide(color: AppColors.kGreen, width: 1.8),
         ),
         errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10), // CHANGE from 12 to 10
+          borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
           borderSide: const BorderSide(color: AppColors.kError, width: 1),
         ),
         focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10), // CHANGE from 12 to 10
+          borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
           borderSide: const BorderSide(color: AppColors.kError, width: 1.8),
         ),
         disabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10), // CHANGE from 12 to 10
+          borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
           borderSide: BorderSide(color: Colors.grey[300]!, width: 1),
         ),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 16,
           vertical: 16,
         ),
-        errorStyle: const TextStyle(
-          color: AppColors.kError,
-          fontSize: 12,
-          fontWeight: FontWeight.w400,
-        ),
+        errorStyle: AppTextStyles.error,
       ),
     );
   }
 }
 
-// ============================================================================
-// TIMED ERROR STATE MANAGER (for bottom error messages)
-// ============================================================================
-class TimedErrorManager {
-  String _errorMessage = '';
-  VoidCallback? _onUpdate;
+// ----------------------------------------------------------------------------
+// Primary Button
+// ----------------------------------------------------------------------------
 
-  String get errorMessage => _errorMessage;
+// Fixed button height to prevent jumping during loading state
+const double _kButtonHeight = 50.0;
+const double _kLoadingIndicatorSize = 22.0;
 
-  void setUpdateCallback(VoidCallback callback) {
-    _onUpdate = callback;
-  }
+/// Consistent primary button used across the app
+/// Has fixed height to prevent size changes during loading
+class PrimaryButton extends StatelessWidget {
+  final String text;
+  final VoidCallback? onPressed;
+  final bool isLoading;
+  final bool enabled;
 
-  void showError(
-    String message, {
-    Duration duration = const Duration(seconds: 5),
-  }) {
-    _errorMessage = message;
-    _onUpdate?.call();
-
-    Future.delayed(duration, () {
-      clearError();
-    });
-  }
-
-  void clearError() {
-    _errorMessage = '';
-    _onUpdate?.call();
-  }
-
-  void dispose() {
-    _onUpdate = null;
-  }
-}
-
-// ============================================================================
-// SUCCESS MESSAGE WIDGET (Bottom of page)
-// ============================================================================
-class SuccessMessageBox extends StatelessWidget {
-  final String message;
-
-  const SuccessMessageBox({super.key, required this.message});
+  const PrimaryButton({
+    super.key,
+    required this.text,
+    required this.onPressed,
+    this.isLoading = false,
+    this.enabled = true,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF0F7E8), // Light green background
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: const Color(0xFFB8C9A0), // Light green border
-          width: 1,
-        ),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.check_circle_outline, color: AppColors.kGreen),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              message,
-              style: const TextStyle(
-                color: AppColors.kGreen,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+    return SizedBox(
+      width: double.infinity,
+      height: _kButtonHeight,
+      child: ElevatedButton(
+        onPressed: (isLoading || !enabled) ? null : onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppColors.kGreen,
+          foregroundColor: Colors.white,
+          padding: EdgeInsets.zero,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
           ),
-        ],
+          elevation: 0,
+          // Gray when loading or disabled (original behavior)
+          disabledBackgroundColor: Colors.grey[300],
+          disabledForegroundColor: Colors.grey[600],
+        ),
+        child: isLoading
+            ? const SizedBox(
+                width: _kLoadingIndicatorSize,
+                height: _kLoadingIndicatorSize,
+                child: CircularProgressIndicator(
+                  color: Colors.white,
+                  strokeWidth: 2.5,
+                ),
+              )
+            : Text(text, style: AppTextStyles.button),
       ),
     );
   }
 }
 
-// ============================================================================
-// TIMED MESSAGE STATE MANAGER (for bottom messages)
-// ============================================================================
+/// Consistent outlined button used across the app
+/// Has fixed height to prevent size changes during loading
+class SecondaryButton extends StatelessWidget {
+  final String text;
+  final VoidCallback? onPressed;
+  final bool isLoading;
+
+  const SecondaryButton({
+    super.key,
+    required this.text,
+    required this.onPressed,
+    this.isLoading = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      height: _kButtonHeight,
+      child: OutlinedButton(
+        onPressed: isLoading ? null : onPressed,
+        style: OutlinedButton.styleFrom(
+          side: const BorderSide(color: AppColors.kGreen, width: 2),
+          foregroundColor: AppColors.kGreen,
+          padding: EdgeInsets.zero,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
+          ),
+        ),
+        child: isLoading
+            ? const SizedBox(
+                width: _kLoadingIndicatorSize,
+                height: _kLoadingIndicatorSize,
+                child: CircularProgressIndicator(
+                  color: AppColors.kGreen,
+                  strokeWidth: 2.5,
+                ),
+              )
+            : Text(text, style: AppTextStyles.button),
+      ),
+    );
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Message State Managers
+// ----------------------------------------------------------------------------
+
 enum MessageType { error, success, none }
 
+/// Manages timed messages (errors/success) that auto-clear
 class TimedMessageManager {
   String _message = '';
   MessageType _type = MessageType.none;
@@ -518,6 +579,39 @@ class TimedMessageManager {
   void clearMessage() {
     _message = '';
     _type = MessageType.none;
+    _onUpdate?.call();
+  }
+
+  void dispose() {
+    _onUpdate = null;
+  }
+}
+
+/// Legacy error-only manager for backwards compatibility
+class TimedErrorManager {
+  String _errorMessage = '';
+  VoidCallback? _onUpdate;
+
+  String get errorMessage => _errorMessage;
+
+  void setUpdateCallback(VoidCallback callback) {
+    _onUpdate = callback;
+  }
+
+  void showError(
+    String message, {
+    Duration duration = const Duration(seconds: 5),
+  }) {
+    _errorMessage = message;
+    _onUpdate?.call();
+
+    Future.delayed(duration, () {
+      clearError();
+    });
+  }
+
+  void clearError() {
+    _errorMessage = '';
     _onUpdate?.call();
   }
 

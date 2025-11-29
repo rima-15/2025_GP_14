@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:madar_app/widgets/app_widgets.dart';
+import 'package:madar_app/theme/theme.dart';
 
-const kGreen = Color(0xFF787E65);
+// ----------------------------------------------------------------------------
+// Help Page
+// ----------------------------------------------------------------------------
 
 class HelpPage extends StatelessWidget {
   const HelpPage({super.key});
@@ -20,6 +24,10 @@ class HelpPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isSmallScreen = screenWidth < 360;
+    final horizontalPadding = isSmallScreen ? 20.0 : 24.0;
+
     return Scaffold(
       backgroundColor: const Color(0xFFF8F8F3),
       appBar: AppBar(
@@ -27,23 +35,26 @@ class HelpPage extends StatelessWidget {
         elevation: 0,
         centerTitle: true,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: kGreen),
+          icon: const Icon(Icons.arrow_back_ios_new, color: AppColors.kGreen),
           onPressed: () => Navigator.pop(context),
         ),
         title: const Text(
           'Help & Support',
-          style: TextStyle(color: kGreen, fontWeight: FontWeight.w600),
+          style: TextStyle(
+            color: AppColors.kGreen,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
+        padding: EdgeInsets.all(horizontalPadding),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Contact Card
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(24),
+              padding: EdgeInsets.all(isSmallScreen ? 20 : 24),
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(16),
@@ -58,23 +69,23 @@ class HelpPage extends StatelessWidget {
               child: Column(
                 children: [
                   Container(
-                    width: 80,
-                    height: 80,
+                    width: isSmallScreen ? 64 : 80,
+                    height: isSmallScreen ? 64 : 80,
                     decoration: BoxDecoration(
-                      color: kGreen.withOpacity(0.1),
+                      color: AppColors.kGreen.withOpacity(0.1),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.email_outlined,
-                      size: 40,
-                      color: kGreen,
+                      size: isSmallScreen ? 32 : 40,
+                      color: AppColors.kGreen,
                     ),
                   ),
-                  const SizedBox(height: 20),
-                  const Text(
+                  SizedBox(height: isSmallScreen ? 16 : 20),
+                  Text(
                     'Need Help?',
                     style: TextStyle(
-                      fontSize: 24,
+                      fontSize: isSmallScreen ? 20 : 24,
                       fontWeight: FontWeight.bold,
                       color: Colors.black87,
                     ),
@@ -84,7 +95,7 @@ class HelpPage extends StatelessWidget {
                     'Contact our support team',
                     style: TextStyle(fontSize: 15, color: Colors.black54),
                   ),
-                  const SizedBox(height: 24),
+                  SizedBox(height: isSmallScreen ? 20 : 24),
                   InkWell(
                     onTap: _launchEmail,
                     borderRadius: BorderRadius.circular(12),
@@ -94,21 +105,23 @@ class HelpPage extends StatelessWidget {
                         vertical: 16,
                       ),
                       decoration: BoxDecoration(
-                        color: kGreen.withOpacity(0.1),
+                        color: AppColors.kGreen.withOpacity(0.1),
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: kGreen.withOpacity(0.3)),
+                        border: Border.all(
+                          color: AppColors.kGreen.withOpacity(0.3),
+                        ),
                       ),
-                      child: Row(
+                      child: const Row(
                         mainAxisAlignment: MainAxisAlignment.center,
-                        children: const [
-                          Icon(Icons.email, color: kGreen, size: 20),
+                        children: [
+                          Icon(Icons.email, color: AppColors.kGreen, size: 20),
                           SizedBox(width: 12),
                           Text(
                             'madar@gmail.com',
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w600,
-                              color: kGreen,
+                              color: AppColors.kGreen,
                             ),
                           ),
                         ],
@@ -121,10 +134,10 @@ class HelpPage extends StatelessWidget {
             const SizedBox(height: 32),
 
             // FAQ Section
-            const Text(
+            Text(
               'Frequently Asked Questions',
               style: TextStyle(
-                fontSize: 20,
+                fontSize: isSmallScreen ? 18 : 20,
                 fontWeight: FontWeight.bold,
                 color: Colors.black87,
               ),
@@ -199,8 +212,8 @@ class HelpPage extends StatelessWidget {
               color: Colors.black87,
             ),
           ),
-          iconColor: kGreen,
-          collapsedIconColor: kGreen,
+          iconColor: AppColors.kGreen,
+          collapsedIconColor: AppColors.kGreen,
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),

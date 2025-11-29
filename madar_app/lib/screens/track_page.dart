@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:madar_app/widgets/app_widgets.dart';
+import 'package:madar_app/theme/theme.dart';
 
-const kGreen = Color(0xFF787E65);
+// ----------------------------------------------------------------------------
+// Track Page
+// ----------------------------------------------------------------------------
 
-// Toggle this later for Release 2
+// Toggle this for Release 2
 const bool kFeatureEnabled = false;
 
 class TrackPage extends StatefulWidget {
@@ -13,6 +17,7 @@ class TrackPage extends StatefulWidget {
 }
 
 class _TrackPageState extends State<TrackPage> {
+  // Sample data for full feature (Release 2)
   final List<Participant> meetingParticipants = [
     Participant(name: 'Alex Chen', status: 'On the way - 2 mins ago'),
     Participant(name: 'Sarah Kim', status: 'Arrived - Just now'),
@@ -27,43 +32,52 @@ class _TrackPageState extends State<TrackPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Color.fromARGB(255, 255, 255, 255),
+      backgroundColor: Colors.white,
       body: SafeArea(
         child: kFeatureEnabled ? _buildFullContent() : _buildComingSoon(),
       ),
     );
   }
 
-  // ====== RELEASE 1: Placeholder (Track icon + Coming soon) ======
+  // ---------- Coming Soon Placeholder ----------
+
   Widget _buildComingSoon() {
+    final screenHeight = MediaQuery.of(context).size.height;
+    final isSmallScreen = screenHeight < 700;
+
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
-        children: const [
-          Icon(Icons.group_outlined, size: 96, color: kGreen),
-          SizedBox(height: 16),
-          const Text(
+        children: [
+          Icon(
+            Icons.group_outlined,
+            size: isSmallScreen ? 80 : 96,
+            color: AppColors.kGreen,
+          ),
+          const SizedBox(height: 16),
+          Text(
             'Coming soon',
             textAlign: TextAlign.center,
             style: TextStyle(
-              fontSize: 26,
+              fontSize: isSmallScreen ? 22 : 26,
               height: 1.2,
               fontWeight: FontWeight.w800,
-              color: kGreen,
+              color: AppColors.kGreen,
             ),
           ),
-          SizedBox(height: 6),
+          const SizedBox(height: 6),
         ],
       ),
     );
   }
 
-  // ====== RELEASE 2: Your full page (kept intact) ======
+  // ---------- Full Content (Release 2) ----------
+
   Widget _buildFullContent() {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        // ---------------- Map Preview ----------------
+        // Map Preview
         _card(
           Container(
             height: 160,
@@ -78,6 +92,7 @@ class _TrackPageState extends State<TrackPage> {
         ),
         const SizedBox(height: 16),
 
+        // Action Buttons
         Row(
           children: [
             Expanded(
@@ -100,7 +115,7 @@ class _TrackPageState extends State<TrackPage> {
         ),
         const SizedBox(height: 20),
 
-        // ---------------- Me ----------------
+        // Me Section
         _card(
           Padding(
             padding: const EdgeInsets.all(12),
@@ -113,7 +128,6 @@ class _TrackPageState extends State<TrackPage> {
                   showArrow: false,
                 ),
                 const SizedBox(height: 12),
-
                 Row(
                   children: [
                     Expanded(
@@ -122,7 +136,7 @@ class _TrackPageState extends State<TrackPage> {
                         icon: const Icon(Icons.check_circle_outline),
                         label: const Text('Arrived'),
                         style: FilledButton.styleFrom(
-                          backgroundColor: kGreen,
+                          backgroundColor: AppColors.kGreen,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           shape: RoundedRectangleBorder(
@@ -136,8 +150,8 @@ class _TrackPageState extends State<TrackPage> {
                       child: OutlinedButton(
                         onPressed: () {},
                         style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: kGreen, width: 2),
-                          foregroundColor: kGreen,
+                          side: const BorderSide(color: AppColors.kGreen, width: 2),
+                          foregroundColor: AppColors.kGreen,
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
@@ -155,149 +169,141 @@ class _TrackPageState extends State<TrackPage> {
             ),
           ),
         ),
-
         const SizedBox(height: 16),
 
-        // ---------------- Meeting Participants ----------------
+        // Meeting Participants Section
         const Text(
           'Meeting Point Participants',
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 8),
 
-        for (final p in meetingParticipants)
-          Container(
-            margin: const EdgeInsets.only(bottom: 8),
-            decoration: BoxDecoration(
-              color: Colors.white, // خلفية واضحة
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.04),
-                  blurRadius: 6,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: ExpansionTile(
-              tilePadding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 4,
-              ),
-              title: Text(
-                p.name,
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-              subtitle: Text(
-                p.status,
-                style: const TextStyle(color: Colors.black54),
-              ),
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  child: FilledButton.icon(
-                    onPressed: () {},
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Refresh Location Request'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: kGreen,
-                      foregroundColor: Colors.white,
-                      minimumSize: const Size.fromHeight(48),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
+        for (final p in meetingParticipants) _buildParticipantTile(p),
         const SizedBox(height: 16),
 
-        // ---------------- Tracking Users ----------------
+        // Tracking Users Section
         const Text(
           'Tracking Users',
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 8),
 
-        for (final u in trackingUsers)
-          Container(
-            margin: const EdgeInsets.only(bottom: 8),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.04),
-                  blurRadius: 6,
-                  offset: const Offset(0, 2),
+        for (final u in trackingUsers) _buildTrackingUserTile(u),
+      ],
+    );
+  }
+
+  // ---------- UI Helpers ----------
+
+  Widget _buildParticipantTile(Participant p) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: ExpansionTile(
+        tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        title: Text(
+          p.name,
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+        subtitle: Text(
+          p.status,
+          style: const TextStyle(color: Colors.black54),
+        ),
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: FilledButton.icon(
+              onPressed: () {},
+              icon: const Icon(Icons.refresh),
+              label: const Text('Refresh Location Request'),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.kGreen,
+                foregroundColor: Colors.white,
+                minimumSize: const Size.fromHeight(48),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
                 ),
-              ],
+              ),
             ),
-            child: ExpansionTile(
-              tilePadding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 4,
-              ),
-              title: Text(
-                u.name,
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-              subtitle: Text(
-                "Location sharing active • ${u.lastSeen}",
-                style: const TextStyle(color: Colors.black54),
-              ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTrackingUserTile(TrackingUser u) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: ExpansionTile(
+        tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        title: Text(
+          u.name,
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+        subtitle: Text(
+          "Location sharing active - ${u.lastSeen}",
+          style: const TextStyle(color: Colors.black54),
+        ),
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Column(
               children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
+                FilledButton.icon(
+                  onPressed: () {},
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Refresh Location Request'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.kGreen,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size.fromHeight(48),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                   ),
-                  child: Column(
-                    children: [
-                      FilledButton.icon(
-                        onPressed: () {},
-                        icon: const Icon(Icons.refresh),
-                        label: const Text('Refresh Location Request'),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: kGreen,
-                          foregroundColor: Colors.white,
-                          minimumSize: const Size.fromHeight(48),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      OutlinedButton.icon(
-                        onPressed: () {},
-                        icon: const Icon(Icons.flag_outlined),
-                        label: const Text('Set Friend as Destination'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: kGreen,
-                          side: const BorderSide(color: kGreen, width: 2),
-                          minimumSize: const Size.fromHeight(48),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                      ),
-                    ],
+                ),
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: () {},
+                  icon: const Icon(Icons.flag_outlined),
+                  label: const Text('Set Friend as Destination'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.kGreen,
+                    side: const BorderSide(color: AppColors.kGreen, width: 2),
+                    minimumSize: const Size.fromHeight(48),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                   ),
                 ),
               ],
             ),
           ),
-      ],
+        ],
+      ),
     );
   }
-
-  // ---------- Widgets helpers ----------
 
   Widget _pillButton({
     required IconData icon,
@@ -311,13 +317,16 @@ class _TrackPageState extends State<TrackPage> {
     if (outlined) {
       return OutlinedButton.icon(
         onPressed: onTap,
-        icon: Icon(icon, color: kGreen),
+        icon: Icon(icon, color: AppColors.kGreen),
         label: Text(
           label,
-          style: const TextStyle(color: kGreen, fontWeight: FontWeight.w600),
+          style: const TextStyle(
+            color: AppColors.kGreen,
+            fontWeight: FontWeight.w600,
+          ),
         ),
         style: OutlinedButton.styleFrom(
-          side: const BorderSide(color: kGreen, width: 2),
+          side: const BorderSide(color: AppColors.kGreen, width: 2),
           shape: shape,
           padding: const EdgeInsets.symmetric(vertical: 14),
           backgroundColor: Colors.white,
@@ -326,13 +335,10 @@ class _TrackPageState extends State<TrackPage> {
     }
     return FilledButton.icon(
       onPressed: onTap,
-      icon: const Icon(
-        Icons.place_outlined,
-        color: Colors.white,
-      ), // keep white icon on filled
+      icon: const Icon(Icons.place_outlined, color: Colors.white),
       label: Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
       style: FilledButton.styleFrom(
-        backgroundColor: kGreen,
+        backgroundColor: AppColors.kGreen,
         foregroundColor: Colors.white,
         shape: shape,
         padding: const EdgeInsets.symmetric(vertical: 14),
@@ -408,7 +414,10 @@ class _TrackPageState extends State<TrackPage> {
   }
 }
 
-// ---------------- Models ----------------
+// ----------------------------------------------------------------------------
+// Models
+// ----------------------------------------------------------------------------
+
 class Participant {
   final String name;
   final String status;

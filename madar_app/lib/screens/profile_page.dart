@@ -4,6 +4,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:madar_app/screens/welcome_page.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
+import 'package:madar_app/theme/theme.dart';
+
+// ----------------------------------------------------------------------------
+// Profile Page
+// ----------------------------------------------------------------------------
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -26,12 +31,12 @@ class _ProfilePageState extends State<ProfilePage> {
   bool _loading = true;
   bool _saving = false;
   bool _hasChanges = false;
+
   String _originalFirstName = '';
   String _originalLastName = '';
   String _originalEmail = '';
   String _originalPhone = '';
 
-  // Use the TimedMessageManager
   final _messageManager = TimedMessageManager();
 
   @override
@@ -43,7 +48,6 @@ class _ProfilePageState extends State<ProfilePage> {
     _lastNameCtrl.addListener(_checkChanges);
     _phoneCtrl.addListener(_checkChanges);
 
-    // Set up message manager callback
     _messageManager.setUpdateCallback(() {
       if (mounted) setState(() {});
     });
@@ -65,6 +69,8 @@ class _ProfilePageState extends State<ProfilePage> {
     super.dispose();
   }
 
+  // ---------- Change Detection ----------
+
   void _checkChanges() {
     final hasChanges =
         _firstNameCtrl.text != _originalFirstName ||
@@ -76,7 +82,8 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  // Validate first name instantly
+  // ---------- Validation ----------
+
   String? _validateFirstName(String value) {
     if (value.isEmpty) {
       return 'First name is required';
@@ -90,7 +97,6 @@ class _ProfilePageState extends State<ProfilePage> {
     return null;
   }
 
-  // Validate last name instantly
   String? _validateLastName(String value) {
     if (value.isEmpty) {
       return 'Last name is required';
@@ -104,7 +110,6 @@ class _ProfilePageState extends State<ProfilePage> {
     return null;
   }
 
-  // Validate phone instantly
   String? _validatePhone(String value) {
     if (value.isEmpty) {
       return 'Phone number is required';
@@ -113,6 +118,8 @@ class _ProfilePageState extends State<ProfilePage> {
     }
     return null;
   }
+
+  // ---------- Data Loading ----------
 
   Future<void> _loadUserData() async {
     final user = FirebaseAuth.instance.currentUser;
@@ -153,13 +160,12 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  // ---------- Save Changes ----------
+
   Future<void> _saveChanges() async {
-    // Clear any previous message
     _messageManager.clearMessage();
 
-    // Validate all fields first
     if (!_formKey.currentState!.validate()) {
-      // Focus the first invalid field
       final firstName = _firstNameCtrl.text;
       final lastName = _lastNameCtrl.text;
       final phone = _phoneCtrl.text;
@@ -208,13 +214,11 @@ class _ProfilePageState extends State<ProfilePage> {
             'phone': newPhone,
           });
 
-      // Update original values
       _originalFirstName = _firstNameCtrl.text.trim();
       _originalLastName = _lastNameCtrl.text.trim();
       _originalPhone = _phoneCtrl.text.trim();
 
       if (mounted) {
-        // Show SUCCESS message in the same bottom style
         SnackbarHelper.showSuccess(context, 'Profile updated successfully!');
         setState(() {
           _saving = false;
@@ -226,6 +230,8 @@ class _ProfilePageState extends State<ProfilePage> {
       _messageManager.showError('An error occurred. Please try again.');
     }
   }
+
+  // ---------- Delete Account ----------
 
   Future<void> _deleteAccount() async {
     final confirmed = await ConfirmationDialog.showDeleteConfirmation(
@@ -267,8 +273,15 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  // ---------- Build ----------
+
   @override
   Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isSmallScreen = screenWidth < 360;
+    final horizontalPadding = isSmallScreen ? 20.0 : 24.0;
+    final avatarSize = isSmallScreen ? 80.0 : 100.0;
+
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
@@ -294,22 +307,22 @@ class _ProfilePageState extends State<ProfilePage> {
       body: _loading
           ? const AppLoadingIndicator()
           : SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
+              padding: EdgeInsets.all(horizontalPadding),
               child: Form(
                 key: _formKey,
                 child: Column(
                   children: [
-                    // Modern profile avatar (no shadow)
+                    // Profile Avatar
                     Container(
-                      width: 100,
-                      height: 100,
+                      width: avatarSize,
+                      height: avatarSize,
                       decoration: BoxDecoration(
                         color: AppColors.kGreen.withOpacity(0.15),
                         shape: BoxShape.circle,
                       ),
-                      child: const Icon(
+                      child: Icon(
                         Icons.person,
-                        size: 50,
+                        size: avatarSize * 0.5,
                         color: AppColors.kGreen,
                       ),
                     ),
@@ -360,38 +373,16 @@ class _ProfilePageState extends State<ProfilePage> {
                     ),
                     const SizedBox(height: 40),
 
-                    // Save button
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: (_saving || !_hasChanges)
-                            ? null
-                            : _saveChanges,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.kGreen,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-
-                          elevation: 0,
-                          disabledBackgroundColor: Colors.grey[250],
-                        ),
-                        child: _saving
-                            ? const InlineLoadingIndicator()
-                            : const Text(
-                                'Save Changes',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                      ),
+                    // Save Button
+                    PrimaryButton(
+                      text: 'Save Changes',
+                      onPressed: _saveChanges,
+                      isLoading: _saving,
+                      enabled: _hasChanges,
                     ),
                     const SizedBox(height: 16),
 
-                    // Delete account button
+                    // Delete Account Button
                     InkWell(
                       onTap: _deleteAccount,
                       splashColor: Colors.transparent,
@@ -410,7 +401,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       ),
                     ),
 
-                    // Message box (Error OR Success)
+                    // Message box
                     if (_messageManager.hasMessage) ...[
                       const SizedBox(height: 16),
                       _messageManager.type == MessageType.error

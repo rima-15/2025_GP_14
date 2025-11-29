@@ -7,7 +7,12 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
+import 'package:madar_app/theme/theme.dart';
 import 'check_email_page.dart';
+
+// ----------------------------------------------------------------------------
+// Sign In Screen
+// ----------------------------------------------------------------------------
 
 class SignInScreen extends StatefulWidget {
   const SignInScreen({super.key});
@@ -23,15 +28,22 @@ class _SignInScreenState extends State<SignInScreen> {
   final _emailFocus = FocusNode();
   final _passFocus = FocusNode();
   bool _loading = false;
+  bool _obscurePassword = true;
 
   @override
   void dispose() {
+    // Clear any lingering snackbars when leaving the page
+    if (mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+    }
     _emailCtrl.dispose();
     _passCtrl.dispose();
     _emailFocus.dispose();
     _passFocus.dispose();
     super.dispose();
   }
+
+  // ---------- Sign In Logic ----------
 
   Future<void> _signIn() async {
     if (!_formSignInKey.currentState!.validate()) {
@@ -58,19 +70,13 @@ class _SignInScreenState extends State<SignInScreen> {
       await user.reload();
 
       if (!user.emailVerified) {
-        // Show friendly message (without sending a new verification email)
         SnackbarHelper.showError(
           context,
-          'Your email isn’t verified. Check your email or request a new one',
+          'Your email isn\'t verified. Check your email or request a new one',
         );
 
-        // Wait a bit so user can read the message
         await Future.delayed(const Duration(seconds: 4));
 
-        // Force sign out so user doesn't enter unverified
-        //await FirebaseAuth.instance.signOut();
-
-        // Navigate to the Check Email screen (no email sent automatically)
         if (mounted) {
           Navigator.pushReplacement(
             context,
@@ -84,7 +90,7 @@ class _SignInScreenState extends State<SignInScreen> {
         return;
       }
 
-      // add user to firestore first time
+      // Add user to Firestore on first sign in
       final userRef = FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid);
@@ -98,7 +104,6 @@ class _SignInScreenState extends State<SignInScreen> {
           'lastName': prefs.getString('lastName') ?? '',
           'email': prefs.getString('email') ?? user.email,
           'phone': prefs.getString('phone') ?? '',
-          //  'createdAt': FieldValue.serverTimestamp(),
         });
 
         await prefs.clear();
@@ -138,24 +143,33 @@ class _SignInScreenState extends State<SignInScreen> {
     }
   }
 
-  bool _obscurePassword = true; //eye icon
+  // ---------- Build ----------
 
   @override
   Widget build(BuildContext context) {
+    final screenHeight = MediaQuery.of(context).size.height;
+    final isSmallScreen = screenHeight < 700;
+    final bottomSafeArea = MediaQuery.of(context).padding.bottom;
+
     return CustomScaffold(
       showLogo: true,
       child: Column(
         children: [
-          const Expanded(flex: 1, child: SizedBox(height: 10)),
+          Expanded(flex: 1, child: SizedBox(height: isSmallScreen ? 5 : 10)),
           Expanded(
             flex: 7,
             child: Container(
-              padding: const EdgeInsets.fromLTRB(25, 50, 25, 20),
+              padding: EdgeInsets.fromLTRB(
+                AppSpacing.xxl,
+                isSmallScreen ? 40 : 50,
+                AppSpacing.xxl,
+                AppSpacing.xl + bottomSafeArea,
+              ),
               decoration: const BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(35),
-                  topRight: Radius.circular(35),
+                  topLeft: Radius.circular(AppSpacing.sheetRadius),
+                  topRight: Radius.circular(AppSpacing.sheetRadius),
                 ),
               ),
               child: SingleChildScrollView(
@@ -164,17 +178,11 @@ class _SignInScreenState extends State<SignInScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      Text(
-                        'Welcome back',
-                        style: TextStyle(
-                          fontSize: 30,
-                          fontWeight: FontWeight.w900,
-                          color: AppColors.kGreen,
-                        ),
-                      ),
-                      const SizedBox(height: 40),
+                      // Title
+                      Text('Welcome back', style: AppTextStyles.largeTitles),
+                      SizedBox(height: isSmallScreen ? 30 : 40),
 
-                      // Email
+                      // Email Field
                       StyledTextField(
                         controller: _emailCtrl,
                         focusNode: _emailFocus,
@@ -193,7 +201,7 @@ class _SignInScreenState extends State<SignInScreen> {
                       ),
                       const SizedBox(height: 25),
 
-                      // Password
+                      // Password Field
                       StyledTextField(
                         controller: _passCtrl,
                         focusNode: _passFocus,
@@ -215,14 +223,12 @@ class _SignInScreenState extends State<SignInScreen> {
                           if (v == null || v.isEmpty) {
                             return 'Please enter password';
                           }
-
                           return null;
                         },
                       ),
-
                       const SizedBox(height: 25),
 
-                      // Forgot password
+                      // Forgot Password Link
                       Align(
                         alignment: Alignment.centerRight,
                         child: GestureDetector(
@@ -236,55 +242,21 @@ class _SignInScreenState extends State<SignInScreen> {
                           },
                           child: Text(
                             'Forget password?',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.kGreen,
-                            ),
+                            style: AppTextStyles.link,
                           ),
                         ),
                       ),
                       const SizedBox(height: 25),
 
-                      // Sign in button
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.kGreen,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                          onPressed: _loading ? null : _signIn,
-                          child: _loading
-                              ? LayoutBuilder(
-                                  builder: (context, constraints) {
-                                    final size = (constraints.maxHeight * 0.6)
-                                        .clamp(16.0, 24.0); // Between 16-24
-                                    return SizedBox(
-                                      width: size,
-                                      height: size,
-                                      child: CircularProgressIndicator(
-                                        color: Colors.white,
-                                        strokeWidth: 2.5,
-                                      ),
-                                    );
-                                  },
-                                )
-                              : const Text(
-                                  'Sign in',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                        ),
+                      // Sign In Button
+                      PrimaryButton(
+                        text: 'Sign in',
+                        onPressed: _signIn,
+                        isLoading: _loading,
                       ),
                       const SizedBox(height: 25),
 
-                      // Sign up link
+                      // Sign Up Link
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
@@ -301,13 +273,7 @@ class _SignInScreenState extends State<SignInScreen> {
                                 ),
                               );
                             },
-                            child: Text(
-                              'Sign up',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.kGreen,
-                              ),
-                            ),
+                            child: Text('Sign up', style: AppTextStyles.link),
                           ),
                         ],
                       ),

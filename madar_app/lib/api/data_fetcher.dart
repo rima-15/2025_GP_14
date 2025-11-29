@@ -5,7 +5,10 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 import '../screens/venue_page.dart';
-import 'package:flutter/services.dart' show rootBundle;
+
+// ----------------------------------------------------------------------------
+// Data Fetcher - Fetches and stores place data for a venue
+// ----------------------------------------------------------------------------
 
 class DataFetcher extends StatefulWidget {
   final String venueId;
@@ -48,6 +51,8 @@ class _DataFetcherState extends State<DataFetcher> {
     _fetchAndStore();
   }
 
+  // ---------- Data Fetching ----------
+
   Future<void> _fetchAndStore() async {
     debugPrint('DataFetcher started for ${widget.venueName}');
     try {
@@ -63,9 +68,9 @@ class _DataFetcherState extends State<DataFetcher> {
       }
 
       if (widget.venueId == solitaireId) {
-        await _fetchFromJson(); // solitaire from json
+        await _fetchFromJson();
       } else {
-        await _fetchFromNearby(); // Other venues from lang-lat
+        await _fetchFromNearby();
       }
 
       setState(() => _loading = false);
@@ -78,7 +83,7 @@ class _DataFetcherState extends State<DataFetcher> {
     }
   }
 
-  // for solitaire only
+  // Fetch places from solitaire.json (local asset)
   Future<void> _fetchFromJson() async {
     final jsonStr = await rootBundle.loadString('assets/venues/solitaire.json');
     final data = json.decode(jsonStr);
@@ -92,7 +97,7 @@ class _DataFetcherState extends State<DataFetcher> {
       final exists = await docRef.get();
       if (exists.exists) continue;
 
-      //by name
+      // Search by name using Google Nearby Search
       final uri = Uri.https(
         'maps.googleapis.com',
         '/maps/api/place/nearbysearch/json',
@@ -120,16 +125,15 @@ class _DataFetcherState extends State<DataFetcher> {
             details['editorial_summary']?['overview'] ?? 'No description',
         'placeImage': photoUrl,
         'venue_ID': widget.venueId,
-        'category_IDs': ['unassigned'], //
+        'category_IDs': ['unassigned'],
         'address': details['formatted_address'] ?? '',
-        //'timestamp': FieldValue.serverTimestamp(),
       });
 
       await Future.delayed(const Duration(milliseconds: 300));
     }
   }
 
-  //other venues
+  // Fetch places from Google Nearby Search using lat/lng
   Future<void> _fetchFromNearby() async {
     if (widget.lat == null || widget.lng == null) return;
 
@@ -167,27 +171,15 @@ class _DataFetcherState extends State<DataFetcher> {
             details['editorial_summary']?['overview'] ?? 'No description',
         'placeImage': photoUrl,
         'venue_ID': widget.venueId,
-        'category_IDs': ['unassigned'], //
+        'category_IDs': ['unassigned'],
         'address': details['formatted_address'] ?? '',
-        //'timestamp': FieldValue.serverTimestamp(),
       });
 
       await Future.delayed(const Duration(milliseconds: 300));
     }
   }
 
-  Future<Map<String, dynamic>?> _textSearch(String query) async {
-    final uri = Uri.https(
-      'maps.googleapis.com',
-      '/maps/api/place/textsearch/json',
-      {'query': query, 'key': _apiKey},
-    );
-    final r = await http.get(uri);
-    if (r.statusCode != 200) return null;
-    final jsonBody = json.decode(r.body);
-    if (jsonBody['status'] != 'OK') return null;
-    return (jsonBody['results'] as List).first;
-  }
+  // ---------- Google Places API Helpers ----------
 
   Future<Map<String, dynamic>> _placeDetails(String placeId) async {
     final uri =
@@ -204,6 +196,8 @@ class _DataFetcherState extends State<DataFetcher> {
 
   String _photoUrl(String ref) =>
       'https://maps.googleapis.com/maps/api/place/photo?maxwidth=700&photo_reference=$ref&key=$_apiKey';
+
+  // ---------- Navigation ----------
 
   void _openVenuePage() {
     Navigator.pushReplacement(
@@ -222,6 +216,8 @@ class _DataFetcherState extends State<DataFetcher> {
       ),
     );
   }
+
+  // ---------- Build ----------
 
   @override
   Widget build(BuildContext context) {

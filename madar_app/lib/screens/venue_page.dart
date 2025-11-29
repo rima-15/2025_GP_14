@@ -264,9 +264,9 @@ class _VenuePageState extends State<VenuePage>
 
         final convertedMaps = maps.map((map) {
           final floorNumber = (map['floorNumber'] ?? '').toString();
-          final fileName = (map['fileName'] ?? '').toString();
+          final mapURL = (map['mapURL'] ?? '').toString();
 
-          return {'floorNumber': floorNumber, 'fileName': fileName};
+          return {'floorNumber': floorNumber, 'mapURL': mapURL};
         }).toList();
 
         setState(() {
@@ -276,9 +276,11 @@ class _VenuePageState extends State<VenuePage>
         // Load the first map if available
         if (convertedMaps.isNotEmpty) {
           final firstMap = convertedMaps.first;
-          final firstFileName = firstMap['fileName'];
-          if (firstFileName != null && firstFileName.isNotEmpty) {
-            _currentFloor = 'assets/maps/$firstFileName';
+          final firstMapURL = firstMap['mapURL'];
+          if (firstMapURL != null && firstMapURL.isNotEmpty) {
+            setState(() {
+              _currentFloor = firstMapURL;
+            });
           }
         }
       } else {
@@ -901,109 +903,12 @@ class _VenuePageState extends State<VenuePage>
                         ),
                         const SizedBox(height: 12),
 
+                        // ✅ Use separate widget to prevent blinking
                         SizedBox(
                           height: 180,
-                          child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                            stream: FirebaseFirestore.instance
-                                .collection('venues')
-                                .doc(effectiveVenueId)
-                                .collection('categories')
-                                .snapshots(),
-                            builder: (context, snapshot) {
-                              if (snapshot.connectionState ==
-                                  ConnectionState.waiting) {
-                                return Center(
-                                  child: CircularProgressIndicator(
-                                    color: kPrimaryGreen,
-                                    backgroundColor: kPrimaryGreen.withOpacity(
-                                      0.2,
-                                    ),
-                                  ),
-                                );
-                              }
-                              if (snapshot.hasError) {
-                                return Center(
-                                  child: Text('Error: ${snapshot.error}'),
-                                );
-                              }
-
-                              final docs = snapshot.data?.docs ?? [];
-                              if (docs.isEmpty) {
-                                return const Center(
-                                  child: Text('No categories found.'),
-                                );
-                              }
-
-                              // ✅ Custom order: Shops → Cafes → Restaurants → (others A–Z) → Services
-                              int _priorityFor(String name) {
-                                final n = name.trim().toLowerCase();
-                                switch (n) {
-                                  case 'shops':
-                                    return 0;
-                                  case 'cafes':
-                                    return 1;
-                                  case 'restaurants':
-                                  case 'resturants': // tolerate spelling
-                                    return 2;
-                                  case 'services':
-                                    return 9999; // force last
-                                  default:
-                                    return 100; // others
-                                }
-                              }
-
-                              final sorted = [...docs];
-                              sorted.sort((a, b) {
-                                final aName =
-                                    (a.data()['categoryName'] ?? 'Unnamed')
-                                        .toString();
-                                final bName =
-                                    (b.data()['categoryName'] ?? 'Unnamed')
-                                        .toString();
-
-                                final aPri = _priorityFor(aName);
-                                final bPri = _priorityFor(bName);
-
-                                if (aPri != bPri) return aPri.compareTo(bPri);
-
-                                // If both are "others", sort alphabetically; otherwise keep original order
-                                if (aPri == 100) {
-                                  return aName.toLowerCase().compareTo(
-                                    bName.toLowerCase(),
-                                  );
-                                }
-                                return 0;
-                              });
-
-                              return ListView.separated(
-                                scrollDirection: Axis.horizontal,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                ),
-                                itemCount: sorted.length,
-                                separatorBuilder: (_, __) =>
-                                    const SizedBox(width: 12),
-                                itemBuilder: (context, i) {
-                                  final categoryId = sorted[i].id;
-                                  final data = sorted[i].data();
-                                  final name =
-                                      data['categoryName'] ?? 'Unnamed';
-                                  final image =
-                                      data['categoryImage'] ??
-                                      'images/default.jpg';
-
-                                  //
-                                  return _categoryCard(
-                                    context,
-                                    name,
-                                    image,
-                                    effectiveVenueId,
-                                    categoryId,
-                                    _imageUrlForCategory,
-                                  );
-                                },
-                              );
-                            },
+                          child: _DiscoverMoreSection(
+                            venueId: effectiveVenueId,
+                            getUrlFor: _imageUrlForCategory,
                           ),
                         ),
 
@@ -1566,167 +1471,6 @@ class _VenuePageState extends State<VenuePage>
 }
 
 // Separate widget for the 3D viewer - only rebuilds when floor changes
-class _FloorMapViewer extends StatelessWidget {
-  final String currentFloor;
-
-  const _FloorMapViewer({required this.currentFloor});
-
-  @override
-  Widget build(BuildContext context) {
-    if (currentFloor.isEmpty) {
-      return _buildError('No map selected');
-    }
-
-    try {
-      return ModelViewer(
-        key: ValueKey(currentFloor),
-        src: currentFloor,
-        alt: "3D Floor Map",
-        ar: false,
-        autoRotate: false,
-        cameraControls: true,
-        backgroundColor: Colors.white,
-        cameraOrbit: "0deg 65deg 2.5m",
-        minCameraOrbit: "auto 0deg auto",
-        maxCameraOrbit: "auto 90deg auto",
-        cameraTarget: "0m 0m 0m",
-        fieldOfView: "45deg",
-      );
-    } catch (e) {
-      return _buildError('Failed to load 3D map');
-    }
-  }
-
-  Widget _buildError(String message) {
-    return Container(
-      color: Colors.grey.shade100,
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.error_outline, size: 48, color: Colors.red),
-            SizedBox(height: 8),
-            Text(message),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// Complete floor map section as a separate widget
-class _FloorMapSection extends StatefulWidget {
-  final List<Map<String, String>> venueMaps;
-  final String initialFloor;
-
-  const _FloorMapSection({required this.venueMaps, required this.initialFloor});
-
-  @override
-  State<_FloorMapSection> createState() => _FloorMapSectionState();
-}
-
-class _FloorMapSectionState extends State<_FloorMapSection> {
-  late String _currentFloor;
-
-  @override
-  void initState() {
-    super.initState();
-    _currentFloor = widget.initialFloor;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade300),
-      ),
-      child: Column(
-        children: [
-          Container(
-            height: 250,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.only(
-                topLeft: Radius.circular(12),
-                topRight: Radius.circular(12),
-              ),
-            ),
-            child: Stack(
-              children: [
-                _FloorMapViewer(currentFloor: _currentFloor),
-                if (widget.venueMaps.length > 1)
-                  Positioned(
-                    top: 12,
-                    right: 12,
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.9),
-                        borderRadius: BorderRadius.circular(8),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.1),
-                            blurRadius: 4,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        children: widget.venueMaps.map((map) {
-                          final floorNumber = map['floorNumber'] ?? '';
-                          final fileName = map['fileName'] ?? '';
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: _buildFloorButton(floorNumber, fileName),
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFloorButton(String label, String fileName) {
-    String fullPath = 'assets/maps/$fileName';
-    bool isSelected = _currentFloor == fullPath;
-
-    return SizedBox(
-      width: 42,
-      height: 36,
-      child: ElevatedButton(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: isSelected ? kPrimaryGreen : Colors.white,
-          foregroundColor: isSelected ? Colors.white : kPrimaryGreen,
-          padding: EdgeInsets.zero,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-            side: BorderSide(
-              color: isSelected ? kPrimaryGreen : Colors.grey.shade300,
-              width: 1.5,
-            ),
-          ),
-          elevation: isSelected ? 2 : 0,
-          shadowColor: Colors.black.withOpacity(0.1),
-        ),
-        onPressed: () {
-          setState(() {
-            _currentFloor = 'assets/maps/$fileName';
-          });
-        },
-        child: Text(
-          label,
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-        ),
-      ),
-    );
-  }
-}
 
 class _ImageOverlay extends StatefulWidget {
   final List<String> imagePaths;
@@ -1837,6 +1581,388 @@ class _ImageOverlayState extends State<_ImageOverlay> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// Separate widget for the 3D viewer
+class _FloorMapViewer extends StatelessWidget {
+  final String currentFloor;
+
+  const _FloorMapViewer({required this.currentFloor});
+
+  @override
+  Widget build(BuildContext context) {
+    if (currentFloor.isEmpty) {
+      return _buildError('No map selected');
+    }
+
+    try {
+      return ModelViewer(
+        key: ValueKey(currentFloor),
+        src: currentFloor,
+        alt: "3D Floor Map",
+        ar: false,
+        autoRotate: false,
+        cameraControls: true,
+        backgroundColor: Colors.white,
+        cameraOrbit: "0deg 65deg 2.5m",
+        minCameraOrbit: "auto 0deg auto",
+        maxCameraOrbit: "auto 90deg auto",
+        cameraTarget: "0m 0m 0m",
+      );
+    } catch (e) {
+      return _buildError('Failed to load 3D map');
+    }
+  }
+
+  Widget _buildError(String message) {
+    return Container(
+      color: Colors.grey.shade100,
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.error_outline, size: 48, color: Colors.red),
+            SizedBox(height: 8),
+            Text(message),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Complete floor map section
+class _FloorMapSection extends StatefulWidget {
+  final List<Map<String, String>> venueMaps;
+  final String initialFloor;
+
+  const _FloorMapSection({required this.venueMaps, required this.initialFloor});
+
+  @override
+  State<_FloorMapSection> createState() => _FloorMapSectionState();
+}
+
+class _FloorMapSectionState extends State<_FloorMapSection> {
+  late String _currentFloor;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentFloor = widget.initialFloor;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+      child: Column(
+        children: [
+          Container(
+            height: 250,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(12),
+                topRight: Radius.circular(12),
+              ),
+            ),
+            child: Stack(
+              children: [
+                _FloorMapViewer(currentFloor: _currentFloor),
+                if (widget.venueMaps.length > 1)
+                  Positioned(
+                    top: 12,
+                    right: 12,
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.9),
+                        borderRadius: BorderRadius.circular(8),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.1),
+                            blurRadius: 4,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        children: widget.venueMaps.map((map) {
+                          final floorNumber = map['floorNumber'] ?? '';
+                          final mapURL = map['mapURL'] ?? '';
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: _buildFloorButton(floorNumber, mapURL),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFloorButton(String label, String mapURL) {
+    bool isSelected = _currentFloor == mapURL;
+
+    return SizedBox(
+      width: 42,
+      height: 36,
+      child: ElevatedButton(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: isSelected ? kPrimaryGreen : Colors.white,
+          foregroundColor: isSelected ? Colors.white : kPrimaryGreen,
+          padding: EdgeInsets.zero,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: BorderSide(
+              color: isSelected ? kPrimaryGreen : Colors.grey.shade300,
+              width: 1.5,
+            ),
+          ),
+          elevation: isSelected ? 2 : 0,
+        ),
+        onPressed: () {
+          setState(() {
+            _currentFloor = mapURL;
+          });
+        },
+        child: Text(
+          label,
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
+      ),
+    );
+  }
+}
+
+// ✅ Separate widget for Discover More section to prevent blinking
+class _DiscoverMoreSection extends StatefulWidget {
+  final String venueId;
+  final Future<String?> Function(String) getUrlFor;
+
+  const _DiscoverMoreSection({required this.venueId, required this.getUrlFor});
+
+  @override
+  State<_DiscoverMoreSection> createState() => _DiscoverMoreSectionState();
+}
+
+class _DiscoverMoreSectionState extends State<_DiscoverMoreSection>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  // ✅ Cache category image URLs
+  final Map<String, String> _cachedUrls = {};
+  bool _urlsPreloaded = false;
+
+  Future<void> _preloadCategoryUrls(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  ) async {
+    if (_urlsPreloaded) return;
+
+    for (final doc in docs) {
+      final data = doc.data();
+      final image = data['categoryImage'] ?? 'images/default.jpg';
+      if (image.isNotEmpty && !_cachedUrls.containsKey(image)) {
+        try {
+          final url = await widget.getUrlFor(image);
+          if (url != null && mounted) {
+            _cachedUrls[image] = url;
+          }
+        } catch (_) {}
+      }
+    }
+
+    if (mounted) {
+      setState(() => _urlsPreloaded = true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('venues')
+          .doc(widget.venueId)
+          .collection('categories')
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Center(
+            child: CircularProgressIndicator(
+              color: kPrimaryGreen,
+              backgroundColor: kPrimaryGreen.withOpacity(0.2),
+            ),
+          );
+        }
+        if (snapshot.hasError) {
+          return Center(child: Text('Error: ${snapshot.error}'));
+        }
+
+        final docs = snapshot.data?.docs ?? [];
+        if (docs.isEmpty) {
+          return const Center(child: Text('No categories found.'));
+        }
+
+        // ✅ Preload URLs once
+        if (!_urlsPreloaded) {
+          _preloadCategoryUrls(docs);
+        }
+
+        // ✅ Custom order: Shops → Cafes → Restaurants → (others A–Z) → Services
+        int _priorityFor(String name) {
+          final n = name.trim().toLowerCase();
+          switch (n) {
+            case 'shops':
+              return 0;
+            case 'cafes':
+              return 1;
+            case 'restaurants':
+            case 'resturants':
+              return 2;
+            case 'services':
+              return 9999;
+            default:
+              return 100;
+          }
+        }
+
+        final sorted = [...docs];
+        sorted.sort((a, b) {
+          final aName = (a.data()['categoryName'] ?? 'Unnamed').toString();
+          final bName = (b.data()['categoryName'] ?? 'Unnamed').toString();
+
+          final aPri = _priorityFor(aName);
+          final bPri = _priorityFor(bName);
+
+          if (aPri != bPri) return aPri.compareTo(bPri);
+
+          if (aPri == 100) {
+            return aName.toLowerCase().compareTo(bName.toLowerCase());
+          }
+          return 0;
+        });
+
+        return ListView.separated(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          addAutomaticKeepAlives: true, // ✅ Keep list items alive
+          itemCount: sorted.length,
+          separatorBuilder: (_, __) => const SizedBox(width: 12),
+          itemBuilder: (context, i) {
+            final categoryId = sorted[i].id;
+            final data = sorted[i].data();
+            final name = data['categoryName'] ?? 'Unnamed';
+            final image = data['categoryImage'] ?? 'images/default.jpg';
+
+            return _buildCategoryCard(
+              context,
+              name,
+              image,
+              widget.venueId,
+              categoryId,
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildCategoryCard(
+    BuildContext context,
+    String title,
+    String imagePath,
+    String venueId,
+    String categoryId,
+  ) {
+    // ✅ Only use cached URL - no FutureBuilder
+    final cachedUrl = _cachedUrls[imagePath];
+
+    return RepaintBoundary(
+      key: ValueKey(categoryId),
+      child: GestureDetector(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => CategoryPage(
+                categoryName: title,
+                venueId: venueId,
+                categoryId: categoryId,
+              ),
+            ),
+          );
+        },
+        child: Container(
+          width: 130,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: cachedUrl != null
+                    ? CachedNetworkImage(
+                        imageUrl: cachedUrl,
+                        cacheKey: imagePath,
+                        height: 130,
+                        width: 130,
+                        fit: BoxFit.cover,
+                        placeholder: (context, url) =>
+                            Container(color: Colors.grey.shade200),
+                        errorWidget: (context, url, error) => Container(
+                          height: 130,
+                          width: 130,
+                          color: Colors.grey.shade200,
+                          child: const Icon(Icons.image_not_supported),
+                        ),
+                      )
+                    : Container(
+                        height: 130,
+                        width: 130,
+                        color: Colors.grey.shade200,
+                        child: Center(
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: kPrimaryGreen,
+                            backgroundColor: kPrimaryGreen.withOpacity(0.2),
+                          ),
+                        ),
+                      ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(8),
+                child: Text(
+                  title,
+                  textAlign: TextAlign.left,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                    color: Color.fromARGB(255, 44, 44, 44),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -36,6 +36,29 @@ In the project directory, run the following command to fetch all necessary packa
 ```bash
 flutter pub get
 ```
+### Unity Setup (Required for AR Features)
+
+- **Download the full Unity project ZIP** from Google Drive:  
+  https://drive.google.com/file/d/1F7o6-_UUwTj8-sqNXyBySFHWlEhCujWp/view?usp=drive_link
+
+- **Extract** the folder and open it in **Unity 6**.
+
+- **Export Unity as a Library**  
+  (this will generate the `unityLibrary` folder).
+
+- **Copy the required AAR files** into the Flutter project:
+  - From your Unity export, locate:
+    - `firebase-app-unity-13.5.0.aar`
+    - `firebase-firestore-unity-13.5.0.aar`
+  - Paste both files into:  
+    `madar_app/android/unityLibrary/libs/`
+
+- **Replace the build.gradle file** inside the Unity Library:
+  - Download the updated build.gradle file from Google Drive:  
+    https://drive.google.com/file/d/1rgIoYa4Rp4iuzN6k53UWTq20M61SF4rx/view?usp=sharing
+  - Replace the content of:  
+    `madar_app/android/unityLibrary/build.gradle`  
+    with the file you downloaded.
 
 ### Run the App
 

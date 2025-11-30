@@ -60,6 +60,8 @@ flutter pub get
     `madar_app/android/unityLibrary/build.gradle`  
     with the file you downloaded.
 
+# Note: 
+We shared the Unity project as a ZIP on Google Drive because Unity files exceed GitHub’s size limits and the unityLibrary output differs across devices. Using a ZIP ensures a consistent, stable version of the AR project that can be opened and exported reliably with Unity 6.
 ### Run the App
 
 To launch the app on an Android device or emulator, use:

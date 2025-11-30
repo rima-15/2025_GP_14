@@ -27,6 +27,7 @@ git clone https://github.com/rima-15/2025_GP_14
 * Ensure you have **Flutter**, **Dart**, and **Android Studio** installed.
 * Add Flutter and Dart to your system path.
 * Have an Android device with **Developer Mode** enabled or an **Android emulator** running via Android Studio.
+* Unity 6 (required for AR features)
 
 ### Install Dependencies
 

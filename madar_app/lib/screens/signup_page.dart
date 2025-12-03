@@ -252,13 +252,17 @@ class _SignUpScreenState extends State<SignUpScreen> {
       );
 
       final user = cred.user!;
-      await user.sendEmailVerification();
+      //await user.sendEmailVerification();
 
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('firstName', _firstNameCtrl.text.trim());
-      await prefs.setString('lastName', _lastNameCtrl.text.trim());
-      await prefs.setString('email', email);
-      await prefs.setString('phone', fullPhone);
+      // Create Firestore user immediately after Sign Up
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+        'firstName': _firstNameCtrl.text.trim(),
+        'lastName': _lastNameCtrl.text.trim(),
+        'email': email,
+        'phone': fullPhone,
+        'emailVerifiedStrict': false, // <-- NEW ATTRIBUTE
+      });
+      await user.sendEmailVerification();
 
       if (mounted) {
         await Navigator.pushReplacement(

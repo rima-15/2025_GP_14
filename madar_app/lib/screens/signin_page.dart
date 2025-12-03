@@ -4,7 +4,6 @@ import 'package:madar_app/screens/signup_page.dart';
 import 'package:madar_app/screens/forgot_password_page.dart';
 import 'package:madar_app/widgets/MainLayout.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
 import 'package:madar_app/theme/theme.dart';
@@ -66,13 +65,23 @@ class _SignInScreenState extends State<SignInScreen> {
         password: _passCtrl.text,
       );
 
-      final user = cred.user!;
-      await user.reload();
+      User user = cred.user!;
 
-      if (!user.emailVerified) {
+      await user.reload();
+      user = FirebaseAuth.instance.currentUser!;
+
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      final strictVerified =
+          (userDoc.data()?['emailVerifiedStrict'] as bool?) ?? false;
+
+      if (!user.emailVerified || !strictVerified) {
         SnackbarHelper.showError(
           context,
-          'Your email isn\'t verified. Check your email or request a new one',
+          'Your email isn\'t verified. Please check your email first.',
         );
 
         await Future.delayed(const Duration(seconds: 4));
@@ -88,25 +97,6 @@ class _SignInScreenState extends State<SignInScreen> {
 
         setState(() => _loading = false);
         return;
-      }
-
-      // Add user to Firestore on first sign in
-      final userRef = FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid);
-      final doc = await userRef.get();
-
-      if (!doc.exists) {
-        final prefs = await SharedPreferences.getInstance();
-
-        await userRef.set({
-          'firstName': prefs.getString('firstName') ?? '',
-          'lastName': prefs.getString('lastName') ?? '',
-          'email': prefs.getString('email') ?? user.email,
-          'phone': prefs.getString('phone') ?? '',
-        });
-
-        await prefs.clear();
       }
 
       if (mounted) {

@@ -5,6 +5,7 @@ import 'package:madar_app/widgets/custom_scaffold.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
 import 'package:madar_app/theme/theme.dart';
+import 'package:cloud_firestore/cloud_firestore.dart'; // NEW
 
 // ----------------------------------------------------------------------------
 // Check Email Page
@@ -73,7 +74,7 @@ class _CheckEmailPageState extends State<CheckEmailPage> {
       if (message.contains("too-many-requests")) {
         SnackbarHelper.showError(
           context,
-          "You've requested too many verification emails. Please wait a minute before trying again.",
+          "A verification email was already sent. Please check your email.",
         );
       } else {
         SnackbarHelper.showError(
@@ -223,7 +224,32 @@ class _CheckEmailPageState extends State<CheckEmailPage> {
                   PrimaryButton(
                     text: 'Go to Sign In',
                     onPressed: () async {
-                      await FirebaseAuth.instance.signOut();
+                      final user = FirebaseAuth.instance.currentUser;
+
+                      if (user != null) {
+                        await user.reload();
+                        final refreshedUser =
+                            FirebaseAuth.instance.currentUser!;
+
+                        if (!refreshedUser.emailVerified) {
+                          SnackbarHelper.showError(
+                            context,
+                            'Please verify your email from the link we sent you first.',
+                          );
+                          return;
+                        }
+
+                        await FirebaseFirestore.instance
+                            .collection('users')
+                            .doc(refreshedUser.uid)
+                            .set({
+                              'emailVerifiedStrict':
+                                  true, // <-- mark as verified strictly
+                            }, SetOptions(merge: true));
+
+                        await FirebaseAuth.instance.signOut();
+                      }
+
                       if (mounted) {
                         Navigator.pushReplacement(
                           context,

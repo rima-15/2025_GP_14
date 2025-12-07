@@ -61,9 +61,6 @@ class _CategoryPageState extends State<CategoryPage>
 
   @override
   void dispose() {
-    if (mounted) {
-      ScaffoldMessenger.of(context).clearSnackBars();
-    }
     _searchCtrl.dispose();
     super.dispose();
   }

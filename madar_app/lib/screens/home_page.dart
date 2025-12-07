@@ -34,9 +34,6 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
 
   @override
   void dispose() {
-    if (mounted) {
-      ScaffoldMessenger.of(context).clearSnackBars();
-    }
     super.dispose();
   }
 

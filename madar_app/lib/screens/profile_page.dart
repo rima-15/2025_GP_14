@@ -55,9 +55,6 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   void dispose() {
-    if (mounted) {
-      ScaffoldMessenger.of(context).clearSnackBars();
-    }
     _firstNameCtrl.dispose();
     _lastNameCtrl.dispose();
     _emailCtrl.dispose();

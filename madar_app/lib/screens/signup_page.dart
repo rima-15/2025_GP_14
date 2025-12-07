@@ -88,10 +88,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
   @override
   void dispose() {
-    // Clear any lingering snackbars when leaving the page
-    if (mounted) {
-      ScaffoldMessenger.of(context).clearSnackBars();
-    }
     _firstNameCtrl.dispose();
     _lastNameCtrl.dispose();
     _emailCtrl.dispose();

@@ -31,10 +31,6 @@ class _SignInScreenState extends State<SignInScreen> {
 
   @override
   void dispose() {
-    // Clear any lingering snackbars when leaving the page
-    if (mounted) {
-      ScaffoldMessenger.of(context).clearSnackBars();
-    }
     _emailCtrl.dispose();
     _passCtrl.dispose();
     _emailFocus.dispose();

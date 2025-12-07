@@ -89,10 +89,6 @@ class _CheckEmailPageState extends State<CheckEmailPage> {
 
   @override
   void dispose() {
-    // Clear any lingering snackbars when leaving the page
-    if (mounted) {
-      ScaffoldMessenger.of(context).clearSnackBars();
-    }
     _timer?.cancel();
     super.dispose();
   }

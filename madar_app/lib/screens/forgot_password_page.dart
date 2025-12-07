@@ -24,10 +24,6 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
 
   @override
   void dispose() {
-    // Clear any lingering snackbars when leaving the page
-    if (mounted) {
-      ScaffoldMessenger.of(context).clearSnackBars();
-    }
     _emailCtrl.dispose();
     _emailFocus.dispose();
     super.dispose();

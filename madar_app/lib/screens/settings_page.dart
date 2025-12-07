@@ -163,7 +163,7 @@ class _SettingsPageState extends State<SettingsPage> {
       return 'Please confirm your password';
     }
     if (value != _newPasswordCtrl.text) {
-      return 'q';
+      return 'New and confirm passwords do not match';
     }
     return null;
   }

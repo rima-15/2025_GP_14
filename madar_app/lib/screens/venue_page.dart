@@ -972,7 +972,7 @@ class _VenuePageState extends State<VenuePage>
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Floor Map',
+                                'Map',
                                 style: TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w600,

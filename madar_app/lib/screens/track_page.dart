@@ -1,13 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
 import 'package:madar_app/theme/theme.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:model_viewer_plus/model_viewer_plus.dart';
+import 'track_request_dialog.dart';
 
 // ----------------------------------------------------------------------------
 // Track Page
 // ----------------------------------------------------------------------------
 
 // Toggle this for Release 2
-const bool kFeatureEnabled = false;
+const bool kFeatureEnabled = true;
+
+// Solitaire venue ID for loading the 3D map
+const String kSolitaireVenueId = 'ChIJ_WZ_Y1iXwxUR_U6jcP83SIg';
 
 class TrackPage extends StatefulWidget {
   const TrackPage({super.key});
@@ -19,15 +25,138 @@ class TrackPage extends StatefulWidget {
 class _TrackPageState extends State<TrackPage> {
   // Sample data for full feature (Release 2)
   final List<Participant> meetingParticipants = [
-    Participant(name: 'Alex Chen', status: 'On the way - 2 mins ago'),
-    Participant(name: 'Sarah Kim', status: 'Arrived - Just now'),
-    Participant(name: 'Jordan Martinez', status: 'On the way - 8 mins ago'),
+    Participant(
+      name: 'Alex Chen',
+      status: 'On the way - 2 mins ago',
+      isHost: false,
+    ),
+    Participant(name: 'Sarah Kim', status: 'Arrived - Just now', isHost: false),
+    Participant(
+      name: 'Jordan Martinez',
+      status: 'On the way - 8 mins ago',
+      isHost: false,
+    ),
   ];
 
   final List<TrackingUser> trackingUsers = [
     TrackingUser(name: 'Mike Johnson', lastSeen: '5 mins ago'),
-    TrackingUser(name: 'Sara Alqahtani', lastSeen: 'Just now'),
+    TrackingUser(name: 'Emma Davis', lastSeen: '1 min ago'),
+    TrackingUser(name: 'Ryan Foster', lastSeen: '12 mins ago'),
   ];
+
+  // For the host/current user
+  final String currentUserName = 'Ahmed Hassan';
+  bool isArrived = false;
+
+  // View mode toggle
+  bool _isTrackingView = true; // false = Meeting Point, true = Tracking
+
+  // 3D Map data
+  String _currentFloor = '';
+  List<Map<String, String>> _venueMaps = [];
+  bool _mapsLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadVenueMaps();
+  }
+
+  // ---------- Load 3D Maps from Solitaire Venue ----------
+
+  Future<void> _loadVenueMaps() async {
+    setState(() => _mapsLoading = true);
+
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('venues')
+          .doc(kSolitaireVenueId)
+          .get(const GetOptions(source: Source.serverAndCache))
+          .timeout(const Duration(seconds: 10));
+
+      final data = doc.data();
+      debugPrint('Venue data loaded: ${data != null}');
+      debugPrint('Map field exists: ${data?['map'] != null}');
+      debugPrint('Map is List: ${data?['map'] is List}');
+
+      if (data != null && data['map'] is List) {
+        final maps = (data['map'] as List).cast<Map<String, dynamic>>();
+        debugPrint('Number of maps: ${maps.length}');
+
+        final convertedMaps = maps.map((map) {
+          final floorNumber = (map['floorNumber'] ?? '').toString();
+          final mapURL = (map['mapURL'] ?? '').toString();
+          debugPrint('Floor: $floorNumber, URL: $mapURL');
+          return {'floorNumber': floorNumber, 'mapURL': mapURL};
+        }).toList();
+
+        if (mounted) {
+          setState(() {
+            _venueMaps = convertedMaps;
+            if (convertedMaps.isNotEmpty) {
+              final firstMapURL = convertedMaps.first['mapURL'];
+              if (firstMapURL != null && firstMapURL.isNotEmpty) {
+                _currentFloor = firstMapURL;
+                debugPrint('Set current floor to: $_currentFloor');
+              }
+            }
+          });
+        }
+      } else {
+        debugPrint('Map data not found, using fallback');
+        _useFallbackMaps();
+      }
+    } catch (e) {
+      debugPrint('Error loading venue maps: $e');
+      _useFallbackMaps();
+    } finally {
+      if (mounted) {
+        setState(() => _mapsLoading = false);
+      }
+    }
+  }
+
+  // Fallback maps in case Firestore fails
+  void _useFallbackMaps() {
+    // These are example URLs - you should replace with actual Solitaire 3D map URLs
+    final fallbackMaps = [
+      {
+        'floorNumber': 'GF',
+        'mapURL':
+            'https://firebasestorage.googleapis.com/v0/b/madar-database.firebasestorage.app/o/3D%20Maps%2FSolitaire%2FGF.glb?alt=media',
+      },
+      {
+        'floorNumber': 'F1',
+        'mapURL':
+            'https://firebasestorage.googleapis.com/v0/b/madar-database.firebasestorage.app/o/3D%20Maps%2FSolitaire%2FF1.glb?alt=media',
+      },
+      {
+        'floorNumber': 'F2',
+        'mapURL':
+            'https://firebasestorage.googleapis.com/v0/b/madar-database.firebasestorage.app/o/3D%20Maps%2FSolitaire%2FF2.glb?alt=media',
+      },
+    ];
+
+    if (mounted) {
+      setState(() {
+        _venueMaps = fallbackMaps;
+        if (fallbackMaps.isNotEmpty) {
+          _currentFloor = fallbackMaps.first['mapURL'] ?? '';
+        }
+      });
+    }
+  }
+
+  // ---------- Show Track Request Dialog ----------
+
+  void _showTrackRequestDialog() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => const TrackRequestDialog(),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -75,235 +204,689 @@ class _TrackPageState extends State<TrackPage> {
 
   Widget _buildFullContent() {
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       children: [
-        // Map Preview
-        _card(
-          Container(
-            height: 160,
-            decoration: BoxDecoration(
-              color: const Color(0xFFEDEFE3),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Center(
-              child: Icon(Icons.map_outlined, size: 48, color: Colors.black45),
-            ),
-          ),
-        ),
-        const SizedBox(height: 16),
-
-        // Action Buttons
-        Row(
-          children: [
-            Expanded(
-              child: _pillButton(
-                icon: Icons.place_outlined,
-                label: 'Create Meeting Point',
-                onTap: () {},
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _pillButton(
-                icon: Icons.person_search_outlined,
-                label: 'Track Request',
-                onTap: () {},
-                outlined: true,
-              ),
-            ),
-          ],
-        ),
+        // View Toggle Switch
+        _buildViewToggle(),
         const SizedBox(height: 20),
 
-        // Me Section
-        _card(
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              children: [
-                _tileHeader(
-                  title: 'Me',
-                  subtitle: 'Active meeting point',
-                  trailing: _roleChip('Host'),
-                  showArrow: false,
+        // Map Preview with floor selector
+        _buildMapPreview(),
+        const SizedBox(height: 16),
+
+        // Action Buttons - Different based on view mode
+        if (!_isTrackingView) ...[
+          // Meeting Point View - Shows both buttons
+          Row(
+            children: [
+              Expanded(
+                flex: 3, // Takes 60% of the space
+                child: _pillButton(
+                  icon: Icons.place_outlined,
+                  label: 'Create Meeting Point',
+                  onTap: () {
+                    // TODO: Implement create meeting point
+                  },
                 ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: () {},
-                        icon: const Icon(Icons.check_circle_outline),
-                        label: const Text('Arrived'),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppColors.kGreen,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () {},
-                        style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: AppColors.kGreen, width: 2),
-                          foregroundColor: AppColors.kGreen,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: const Text(
-                          'Cancel',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+              ),
+              const SizedBox(width: 12),
+            ],
           ),
-        ),
-        const SizedBox(height: 16),
+          const SizedBox(height: 20),
 
-        // Meeting Participants Section
-        const Text(
-          'Meeting Point Participants',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 8),
+          // Meeting Point Participants Section Header
+          _buildSectionHeader(
+            icon: Icons.place_outlined,
+            title: 'Meeting Point Participants',
+            subtitle: 'Active meeting point',
+            count: meetingParticipants.length + 1, // +1 for host
+          ),
+          const SizedBox(height: 12),
 
-        for (final p in meetingParticipants) _buildParticipantTile(p),
-        const SizedBox(height: 16),
+          // Host (Current User) Card
+          _buildHostCard(),
+          const SizedBox(height: 8),
 
-        // Tracking Users Section
-        const Text(
-          'Tracking Users',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 8),
+          // Meeting Participants
+          for (final p in meetingParticipants) ...[
+            _buildParticipantTile(p),
+            const SizedBox(height: 8),
+          ],
+        ] else ...[
+          // Tracking View - Shows only Track Request button
+          _pillButton(
+            icon: Icons.person_search_outlined,
+            label: 'Track Request',
+            onTap: _showTrackRequestDialog,
+          ),
+          const SizedBox(height: 20),
 
-        for (final u in trackingUsers) _buildTrackingUserTile(u),
+          // Tracking Users Section Header
+          _buildSectionHeader(
+            icon: Icons.access_time,
+            title: 'Tracking Users',
+            subtitle: 'Location sharing active',
+            count: trackingUsers.length,
+          ),
+          const SizedBox(height: 12),
+
+          // Tracking Users
+          for (final u in trackingUsers) ...[
+            _buildTrackingUserTile(u),
+            const SizedBox(height: 8),
+          ],
+        ],
       ],
     );
   }
 
-  // ---------- UI Helpers ----------
+  // ---------- View Toggle Switch ----------
 
-  Widget _buildParticipantTile(Participant p) {
+  Widget _buildViewToggle() {
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
+      height: 50,
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        borderRadius: BorderRadius.circular(12),
+      ),
+      padding: const EdgeInsets.all(4),
+      child: Row(
+        children: [
+          Expanded(
+            child: _toggleButton(
+              label: 'Tracking',
+              isSelected: _isTrackingView,
+              onTap: () => setState(() => _isTrackingView = true),
+            ),
+          ),
+          Expanded(
+            child: _toggleButton(
+              label: 'Meeting Point',
+              isSelected: !_isTrackingView,
+              onTap: () => setState(() => _isTrackingView = false),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _toggleButton({
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: isSelected ? AppColors.kGreen : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+          boxShadow: isSelected
+              ? [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
+              : null,
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+            color: isSelected ? Colors.white : Colors.grey[600],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ---------- Map Preview with 3D Model Viewer ----------
+
+  Widget _buildMapPreview() {
+    if (_mapsLoading) {
+      return Container(
+        height: 320,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.grey.shade300),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.06),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(
+                color: AppColors.kGreen,
+                backgroundColor: AppColors.kGreen.withOpacity(0.2),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Loading 3D map...',
+                style: TextStyle(color: Colors.grey[600], fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_venueMaps.isEmpty || _currentFloor.isEmpty) {
+      return Container(
+        height: 320,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.grey.shade300),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.06),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.map_outlined, size: 64, color: Colors.grey[400]),
+              const SizedBox(height: 12),
+              Text(
+                'No 3D map available',
+                style: TextStyle(color: Colors.grey[600], fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      height: 320,
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade300),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Stack(
+          children: [
+            // 3D Model Viewer
+            ModelViewer(
+              key: ValueKey(_currentFloor),
+              src: _currentFloor,
+              alt: "3D Floor Map",
+              ar: false,
+              autoRotate: false,
+              cameraControls: true,
+              backgroundColor: const Color(0xFFF5F5F0),
+              cameraOrbit: "0deg 65deg 2.5m",
+              minCameraOrbit: "auto 0deg auto",
+              maxCameraOrbit: "auto 90deg auto",
+              cameraTarget: "0m 0m 0m",
+            ),
+
+            // Vertical floor selector buttons (top-right)
+            if (_venueMaps.length > 1)
+              Positioned(
+                top: 12,
+                right: 12,
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.95),
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    children: _venueMaps.map((map) {
+                      final floorNumber = map['floorNumber'] ?? '';
+                      final mapURL = map['mapURL'] ?? '';
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: _floorButton(floorNumber, mapURL),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
+
+            // People count indicator (top-left)
+            Positioned(
+              top: 12,
+              left: 12,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.95),
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.people_outline,
+                      size: 18,
+                      color: Colors.grey[700],
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '${meetingParticipants.length + 1}', // +1 for host
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey[700],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _floorButton(String label, String mapURL) {
+    bool isSelected = _currentFloor == mapURL;
+
+    return SizedBox(
+      width: 44,
+      height: 38,
+      child: ElevatedButton(
+        onPressed: () {
+          setState(() => _currentFloor = mapURL);
+        },
+        style: ElevatedButton.styleFrom(
+          backgroundColor: isSelected ? AppColors.kGreen : Colors.white,
+          foregroundColor: isSelected ? Colors.white : AppColors.kGreen,
+          padding: EdgeInsets.zero,
+          elevation: isSelected ? 2 : 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+            side: BorderSide(
+              color: isSelected ? AppColors.kGreen : Colors.grey.shade300,
+              width: 1.5,
+            ),
+          ),
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
+      ),
+    );
+  }
+
+  // ---------- Section Header ----------
+
+  Widget _buildSectionHeader({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required int count,
+  }) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Colors.grey[100],
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, size: 20, color: AppColors.kGreen),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.black87,
+                ),
+              ),
+              Text(
+                subtitle,
+                style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+              ),
+            ],
+          ),
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.grey[100],
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.people_outline, size: 14, color: Colors.grey[700]),
+              const SizedBox(width: 4),
+              Text(
+                '$count',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey[700],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ---------- Host Card ----------
+
+  Widget _buildHostCard() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.kGreen.withOpacity(0.3), width: 2),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.04),
-            blurRadius: 6,
+            blurRadius: 8,
             offset: const Offset(0, 2),
           ),
         ],
       ),
-      child: ExpansionTile(
-        tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        title: Text(
-          p.name,
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-        subtitle: Text(
-          p.status,
-          style: const TextStyle(color: Colors.black54),
-        ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: FilledButton.icon(
+          // Header
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: AppColors.kGreen,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.person, color: Colors.white, size: 24),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          currentUserName,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.black87,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        _roleChip('Host'),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Now',
+                      style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          // Action buttons
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      isArrived = true;
+                    });
+                  },
+                  icon: const Icon(Icons.check_circle_outline, size: 20),
+                  label: const Text('Arrived'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.kGreen,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () {},
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: AppColors.kError, width: 2),
+                    foregroundColor: AppColors.kError,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'Cancel',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---------- Participant Tile ----------
+
+  Widget _buildParticipantTile(Participant p) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          childrenPadding: const EdgeInsets.only(
+            left: 16,
+            right: 16,
+            bottom: 16,
+          ),
+          leading: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: Colors.grey[200],
+              shape: BoxShape.circle,
+            ),
+            child: Icon(Icons.person, color: Colors.grey[600], size: 22),
+          ),
+          title: Text(
+            p.name,
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: Colors.black87,
+            ),
+          ),
+          subtitle: Text(
+            p.status,
+            style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+          ),
+          trailing: const Icon(
+            Icons.keyboard_arrow_down,
+            color: Colors.black45,
+          ),
+          children: [
+            const Divider(height: 1),
+            const SizedBox(height: 12),
+            ElevatedButton.icon(
               onPressed: () {},
-              icon: const Icon(Icons.refresh),
+              icon: const Icon(Icons.refresh, size: 20),
               label: const Text('Refresh Location Request'),
-              style: FilledButton.styleFrom(
+              style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.kGreen,
                 foregroundColor: Colors.white,
+                minimumSize: const Size.fromHeight(48),
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ---------- Tracking User Tile ----------
+
+  Widget _buildTrackingUserTile(TrackingUser u) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          childrenPadding: const EdgeInsets.only(
+            left: 16,
+            right: 16,
+            bottom: 16,
+          ),
+          leading: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: Colors.grey[200],
+              shape: BoxShape.circle,
+            ),
+            child: Icon(Icons.person, color: Colors.grey[600], size: 22),
+          ),
+          title: Text(
+            u.name,
+            style: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+              color: Colors.black87,
+            ),
+          ),
+          subtitle: Text(
+            u.lastSeen,
+            style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+          ),
+          trailing: const Icon(
+            Icons.keyboard_arrow_down,
+            color: Colors.black45,
+          ),
+          children: [
+            const Divider(height: 1),
+            const SizedBox(height: 12),
+            ElevatedButton.icon(
+              onPressed: () {},
+              icon: const Icon(Icons.refresh, size: 20),
+              label: const Text('Refresh Location Request'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.kGreen,
+                foregroundColor: Colors.white,
+                minimumSize: const Size.fromHeight(48),
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: () {},
+              icon: const Icon(Icons.navigation_outlined, size: 20),
+              label: const Text('Set Friend as Destination'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.kGreen,
+                side: const BorderSide(color: AppColors.kGreen, width: 2),
                 minimumSize: const Size.fromHeight(48),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildTrackingUserTile(TrackingUser u) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: ExpansionTile(
-        tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        title: Text(
-          u.name,
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-        subtitle: Text(
-          "Location sharing active - ${u.lastSeen}",
-          style: const TextStyle(color: Colors.black54),
-        ),
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Column(
-              children: [
-                FilledButton.icon(
-                  onPressed: () {},
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('Refresh Location Request'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppColors.kGreen,
-                    foregroundColor: Colors.white,
-                    minimumSize: const Size.fromHeight(48),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: () {},
-                  icon: const Icon(Icons.flag_outlined),
-                  label: const Text('Set Friend as Destination'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.kGreen,
-                    side: const BorderSide(color: AppColors.kGreen, width: 2),
-                    minimumSize: const Size.fromHeight(48),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  // ---------- UI Helpers ----------
 
   Widget _pillButton({
     required IconData icon,
@@ -317,12 +900,13 @@ class _TrackPageState extends State<TrackPage> {
     if (outlined) {
       return OutlinedButton.icon(
         onPressed: onTap,
-        icon: Icon(icon, color: AppColors.kGreen),
+        icon: Icon(icon, color: AppColors.kGreen, size: 20),
         label: Text(
           label,
           style: const TextStyle(
             color: AppColors.kGreen,
             fontWeight: FontWeight.w600,
+            fontSize: 14,
           ),
         ),
         style: OutlinedButton.styleFrom(
@@ -333,82 +917,37 @@ class _TrackPageState extends State<TrackPage> {
         ),
       );
     }
-    return FilledButton.icon(
+    return ElevatedButton.icon(
       onPressed: onTap,
-      icon: const Icon(Icons.place_outlined, color: Colors.white),
-      label: Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
-      style: FilledButton.styleFrom(
+      icon: Icon(icon, color: Colors.white, size: 20),
+      label: Text(
+        label,
+        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+      ),
+      style: ElevatedButton.styleFrom(
         backgroundColor: AppColors.kGreen,
         foregroundColor: Colors.white,
         shape: shape,
+        elevation: 0,
         padding: const EdgeInsets.symmetric(vertical: 14),
       ),
     );
   }
 
-  Widget _card(Widget child) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: child,
-    );
-  }
-
-  Widget _tileHeader({
-    required String title,
-    required String subtitle,
-    Widget? trailing,
-    bool showArrow = true,
-    Widget? leading,
-  }) {
-    return Row(
-      children: [
-        if (leading != null) leading,
-        if (leading != null) const SizedBox(width: 8),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  if (trailing != null) ...[const SizedBox(width: 8), trailing],
-                ],
-              ),
-              const SizedBox(height: 2),
-              Text(subtitle, style: const TextStyle(color: Colors.black54)),
-            ],
-          ),
-        ),
-        if (showArrow)
-          const Icon(Icons.keyboard_arrow_right, color: Colors.black38),
-      ],
-    );
-  }
-
   Widget _roleChip(String text) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: const Color(0xFFE8EAD9),
+        color: AppColors.kGreen.withOpacity(0.15),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Text(
         text,
-        style: const TextStyle(fontSize: 12, color: Colors.black87),
+        style: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: AppColors.kGreen,
+        ),
       ),
     );
   }
@@ -421,11 +960,14 @@ class _TrackPageState extends State<TrackPage> {
 class Participant {
   final String name;
   final String status;
-  Participant({required this.name, required this.status});
+  final bool isHost;
+
+  Participant({required this.name, required this.status, this.isHost = false});
 }
 
 class TrackingUser {
   final String name;
   final String lastSeen;
+
   TrackingUser({required this.name, required this.lastSeen});
 }

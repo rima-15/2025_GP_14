@@ -7,6 +7,7 @@ import 'package:madar_app/screens/track_page.dart';
 import 'package:madar_app/screens/signin_page.dart';
 import 'package:madar_app/screens/profile_page.dart';
 import 'package:madar_app/screens/settings_page.dart';
+import 'package:madar_app/screens/notifications_page.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
 import 'package:madar_app/theme/theme.dart';
 
@@ -138,7 +139,14 @@ class _MainLayoutState extends State<MainLayout> {
                   Icons.notifications_outlined,
                   color: AppColors.kGreen,
                 ),
-                onPressed: () {},
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const NotificationsPage(),
+                    ),
+                  );
+                },
                 padding: const EdgeInsets.only(right: 16),
               ),
             ]

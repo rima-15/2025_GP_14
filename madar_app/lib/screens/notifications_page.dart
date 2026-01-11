@@ -4,6 +4,9 @@ import 'package:madar_app/theme/theme.dart';
 import 'package:madar_app/screens/AR_page.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter/gestures.dart'; // Required for TapGestureRecognizer
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
 
 // ----------------------------------------------------------------------------
 // Notifications Page
@@ -20,67 +23,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
   // Mock notifications data
   final List<NotificationItem> _notifications = [
     // Track Request with full details
-    NotificationItem(
-      id: '1',
-      type: NotificationType.trackRequest,
-      title: 'Track Request',
-      message: '',
-      timestamp: DateTime.now().subtract(const Duration(minutes: 5)),
-      isRead: false,
-      isExpired: false,
-      senderName: 'Sara Ali',
-      senderPhone: '+966503349999',
-      venueName: 'Dubai Mall',
-      date: 'Sat, Mar 15',
-      startTime: '7:00 PM',
-      endTime: '9:00 PM',
-    ),
-    // Expired Track Request
-    NotificationItem(
-      id: '2',
-      type: NotificationType.trackRequest,
-      title: 'Track Request',
-      message: '',
-      timestamp: DateTime.now().subtract(const Duration(hours: 3)),
-      isRead: true,
-      isExpired: true,
-      senderName: 'Mohammed Ahmed',
-      senderPhone: '+966501234567',
-      venueName: 'Solitaire Mall',
-      date: 'Fri, Mar 14',
-      startTime: '2:00 PM',
-      endTime: '5:00 PM',
-    ),
-    // Request Accepted
-    NotificationItem(
-      id: '3',
-      type: NotificationType.trackAccepted,
-      title: 'Track Request Accepted',
-      message: 'Amal Ahmed accepted your track request',
-      timestamp: DateTime.now().subtract(const Duration(hours: 1)),
-      isRead: false,
-      senderName: 'Amal Ahmed',
-      senderPhone: '+966509876543',
-      venueName: 'U walk',
-      date: 'Saturday, March 15',
-      startTime: '11:00 PM',
-      endTime: '12:30 AM',
-    ),
-    // Request Rejected
-    NotificationItem(
-      id: '4',
-      type: NotificationType.trackRejected,
-      title: 'Track Request Declined',
-      message: '', // We build this dynamically now
-      timestamp: DateTime.now().subtract(const Duration(hours: 2)),
-      isRead: true,
-      senderName: 'Adel Ahmed',
-      senderPhone: '+966509876543',
-      venueName: 'Solitaire',
-      date: 'Saturday, March 15',
-      startTime: '11:00 PM',
-      endTime: '12:30 AM',
-    ),
+
     // Location Refresh
     NotificationItem(
       id: '5',
@@ -176,6 +119,114 @@ class _NotificationsPageState extends State<NotificationsPage> {
   final List<String> _respondedNotifications = [];
   final Map<String, double> _notificationOffsets = {};
 
+  Stream<List<NotificationItem>> _incomingTrackRequestsStream() {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return const Stream.empty();
+
+    return FirebaseFirestore.instance
+        .collection('trackRequests')
+        .where('receiverId', isEqualTo: user.uid)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snap) {
+          return snap.docs.map((doc) {
+            final d = doc.data();
+
+            final createdAt =
+                (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+            final startAt = (d['startAt'] as Timestamp?)?.toDate();
+            final endAt = (d['endAt'] as Timestamp?)?.toDate();
+
+            final dateStr = startAt != null
+                ? DateFormat('EEE, MMM d').format(startAt)
+                : '';
+            final startStr = startAt != null
+                ? DateFormat('h:mm a').format(startAt)
+                : '';
+            final endStr = endAt != null
+                ? DateFormat('h:mm a').format(endAt)
+                : '';
+
+            final status = (d['status'] ?? 'pending').toString();
+
+            String? actionLabel;
+            bool isExpired = status == 'expired';
+            if (status == 'accepted') actionLabel = 'Accepted';
+            if (status == 'declined') actionLabel = 'Declined';
+
+            return NotificationItem(
+              id: doc.id,
+              type: NotificationType.trackRequest,
+              title: 'Track Request',
+              message: '',
+              timestamp: createdAt,
+              isRead: status != 'pending',
+              isExpired: isExpired,
+              senderName: (d['senderName'] ?? '').toString(),
+              senderPhone: (d['senderPhone'] ?? '').toString(),
+              venueName: (d['venueName'] ?? '').toString(),
+              date: dateStr,
+              startTime: startStr,
+              endTime: endStr,
+              actionLabel: actionLabel,
+            );
+          }).toList();
+        });
+  }
+
+  Stream<List<NotificationItem>> _senderResponsesStream() {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return const Stream.empty();
+
+    return FirebaseFirestore.instance
+        .collection('trackRequests')
+        .where('senderId', isEqualTo: user.uid)
+        .where('status', whereIn: ['accepted', 'declined'])
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snap) {
+          return snap.docs.map((doc) {
+            final d = doc.data();
+
+            final createdAt =
+                (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+            final startAt = (d['startAt'] as Timestamp?)?.toDate();
+            final endAt = (d['endAt'] as Timestamp?)?.toDate();
+
+            return NotificationItem(
+              id: doc.id,
+
+              // 👇 نستخدم نفس الأنواع الموجودة عندك
+              type: d['status'] == 'accepted'
+                  ? NotificationType.trackAccepted
+                  : NotificationType.trackRejected,
+
+              title: d['status'] == 'accepted'
+                  ? 'Track Request Accepted'
+                  : 'Track Request Declined',
+
+              message: '', // UI عندك ما يعتمد عليه
+
+              timestamp: createdAt,
+              isRead: false,
+
+              // 👇 نخلي نفس الحقول اللي UI يستخدمها
+              senderName: d['receiverName'], // أو اسم لو أضفتيه لاحقًا
+              senderPhone: d['receiverPhone'],
+              venueName: d['venueName'],
+
+              date: startAt != null
+                  ? DateFormat('EEE, MMM d').format(startAt)
+                  : '',
+              startTime: startAt != null
+                  ? DateFormat('h:mm a').format(startAt)
+                  : '',
+              endTime: endAt != null ? DateFormat('h:mm a').format(endAt) : '',
+            );
+          }).toList();
+        });
+  }
+
   List<NotificationItem> get _visibleNotifications {
     if (_showAll) return _notifications;
     return _notifications.take(5).toList();
@@ -228,56 +279,78 @@ class _NotificationsPageState extends State<NotificationsPage> {
           child: Container(height: 1, color: Colors.grey[300]),
         ),
       ),
-      body: _notifications.isEmpty
-          ? _buildEmptyState()
-          : ListView(
-              children: [
-                // Clear All Button - Before first notification
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 1, 10, 1),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      TextButton(
-                        onPressed: _clearAllNotifications,
-                        child: Text(
-                          'Clear all',
-                          style: TextStyle(
-                            color: Colors.grey[600],
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
+      body: StreamBuilder<List<NotificationItem>>(
+        stream: _incomingTrackRequestsStream(), // للمستقبل (pending)
+        builder: (context, incomingSnap) {
+          final incomingTrack = incomingSnap.data ?? [];
+
+          return StreamBuilder<List<NotificationItem>>(
+            stream: _senderResponsesStream(), // للمرسل (accepted/declined)
+            builder: (context, senderSnap) {
+              final senderResponses = senderSnap.data ?? [];
+
+              // ✅ ندمج: incoming + senderResponses + mock
+              final merged = [
+                ...incomingTrack,
+                ...senderResponses,
+                ..._notifications,
+              ];
+              merged.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+
+              final visible = _showAll ? merged : merged.take(5).toList();
+
+              if (merged.isEmpty) return _buildEmptyState();
+
+              return ListView(
+                children: [
+                  // Clear All Button
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 1, 10, 1),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: _clearAllNotifications,
+                          child: Text(
+                            'Clear all',
+                            style: TextStyle(
+                              color: Colors.grey[600],
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                // Notifications List
-                ..._visibleNotifications.map(
-                  (notif) => _buildNotificationItem(notif),
-                ),
-
-                // View All Button
-                if (!_showAll && _notifications.length > 5)
-                  Padding(
-                    padding: const EdgeInsets.all(5),
-                    child: TextButton(
-                      onPressed: () => setState(() => _showAll = true),
-                      child: const Text(
-                        'View All Notifications',
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.kGreen,
-                        ),
-                      ),
+                      ],
                     ),
                   ),
 
-                const SizedBox(height: 20),
-              ],
-            ),
+                  // Notifications List
+                  ...visible.map((notif) => _buildNotificationItem(notif)),
+
+                  // View All Button
+                  if (!_showAll && merged.length > 5)
+                    Padding(
+                      padding: const EdgeInsets.all(5),
+                      child: TextButton(
+                        onPressed: () => setState(() => _showAll = true),
+                        child: const Text(
+                          'View All Notifications',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.kGreen,
+                          ),
+                        ),
+                      ),
+                    ),
+
+                  const SizedBox(height: 20),
+                ],
+              );
+            },
+          );
+        },
+      ),
     );
   }
 
@@ -1011,11 +1084,22 @@ class _NotificationsPageState extends State<NotificationsPage> {
     );
 
     if (confirmed && mounted) {
-      setState(() {
-        notification.actionLabel = "Accepted";
-        notification.isRead = true; // Mark as read on interaction
-        _respondedNotifications.add(notification.id);
-      });
+      try {
+        await FirebaseFirestore.instance
+            .collection('trackRequests')
+            .doc(notification.id)
+            .update({'status': 'accepted'});
+
+        setState(() {
+          notification.actionLabel = "Accepted";
+          notification.isRead = true;
+          _respondedNotifications.add(notification.id);
+        });
+      } catch (e) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to accept: $e')));
+      }
     }
   }
 
@@ -1028,11 +1112,22 @@ class _NotificationsPageState extends State<NotificationsPage> {
     );
 
     if (confirmed && mounted) {
-      setState(() {
-        notification.actionLabel = "Declined";
-        notification.isRead = true; // Mark as read on interaction
-        _respondedNotifications.add(notification.id);
-      });
+      try {
+        await FirebaseFirestore.instance
+            .collection('trackRequests')
+            .doc(notification.id)
+            .update({'status': 'declined'});
+
+        setState(() {
+          notification.actionLabel = "Declined";
+          notification.isRead = true;
+          _respondedNotifications.add(notification.id);
+        });
+      } catch (e) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to decline: $e')));
+      }
     }
   }
 

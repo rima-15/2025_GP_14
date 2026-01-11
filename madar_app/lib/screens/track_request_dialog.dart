@@ -5,6 +5,7 @@ import 'package:madar_app/theme/theme.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 // ----------------------------------------------------------------------------
 // Track Request Dialog
@@ -43,6 +44,17 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
   void dispose() {
     _phoneController.dispose();
     super.dispose();
+  }
+
+  Future<String?> _getUserIdByPhone(String phone) async {
+    final q = await FirebaseFirestore.instance
+        .collection('users')
+        .where('phone', isEqualTo: phone)
+        .limit(1)
+        .get();
+
+    if (q.docs.isEmpty) return null;
+    return q.docs.first.id; // docId = uid
   }
 
   Future<void> _loadVenues() async {
@@ -337,11 +349,142 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
         _endTime != null;
   }
 
-  void _submitRequest() {
+  Future<void> _submitRequest() async {
     if (!_canSubmit) return;
 
-    // TODO: Implement track request submission
-    Navigator.pop(context);
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('You must be signed in')));
+      return;
+    }
+
+    // ✅ Validate time
+    final date = _selectedDate!;
+    final start = DateTime(
+      date.year,
+      date.month,
+      date.day,
+      _startTime!.hour,
+      _startTime!.minute,
+    );
+    final end = DateTime(
+      date.year,
+      date.month,
+      date.day,
+      _endTime!.hour,
+      _endTime!.minute,
+    );
+
+    if (!end.isAfter(start)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('End time must be after start time')),
+      );
+      return;
+    }
+
+    final durationMinutes = end.difference(start).inMinutes;
+
+    // ✅ Get sender info (name/phone) from users/{uid}
+    final senderDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .get();
+    final senderData = senderDoc.data() ?? {};
+    final senderName =
+        ('${senderData['firstName'] ?? ''} ${senderData['lastName'] ?? ''}')
+            .trim();
+    final senderPhone = (senderData['phone'] ?? '').toString();
+
+    if (senderPhone.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Your phone number is missing in your profile'),
+        ),
+      );
+      return;
+    }
+
+    // ✅ Resolve receivers (UIDs)
+    final List<Friend> friends = List.from(_selectedFriends);
+    final List<Map<String, String>> resolved = []; // {uid, phone, name}
+
+    for (final f in friends) {
+      final receiverUid = await _getUserIdByPhone(f.phone);
+      if (receiverUid == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('User not found for ${f.phone}')),
+        );
+        return;
+      }
+
+      // ✅ جيبي اسم المستقبل من users/{uid}
+      final receiverDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(receiverUid)
+          .get();
+
+      final receiverData = receiverDoc.data() ?? {};
+      final receiverName =
+          ('${receiverData['firstName'] ?? ''} ${receiverData['lastName'] ?? ''}')
+              .trim();
+
+      resolved.add({
+        'uid': receiverUid,
+        'phone': f.phone,
+        'name': receiverName.isEmpty ? f.phone : receiverName,
+      });
+    }
+
+    // ✅ Create one request per receiver but same batchId
+    final batchId = '${user.uid}_${DateTime.now().millisecondsSinceEpoch}';
+    final col = FirebaseFirestore.instance.collection('trackRequests');
+    final batch = FirebaseFirestore.instance.batch();
+    final now = FieldValue.serverTimestamp();
+
+    for (final r in resolved) {
+      final docRef = col.doc();
+      batch.set(docRef, {
+        'senderId': user.uid,
+        'senderName': senderName.isEmpty ? senderPhone : senderName,
+        'senderPhone': senderPhone,
+
+        'receiverId': r['uid'],
+        'receiverPhone': r['phone'],
+        'receiverName': r['name'],
+
+        'venueId': _selectedVenueId,
+        'venueName': _selectedVenue,
+
+        'startAt': Timestamp.fromDate(start),
+        'endAt': Timestamp.fromDate(end),
+        'durationMinutes': durationMinutes,
+
+        'status': 'pending',
+        'createdAt': now,
+        'batchId': batchId,
+      });
+    }
+
+    try {
+      await batch.commit();
+
+      if (!mounted) return;
+      Navigator.pop(context);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Tracking request sent to ${resolved.length} friend(s).',
+          ),
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to send request: $e')));
+    }
   }
 
   @override

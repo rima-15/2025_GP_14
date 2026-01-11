@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
 import 'package:madar_app/theme/theme.dart';
 import 'package:intl/intl.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:geolocator/geolocator.dart';
 
 // ----------------------------------------------------------------------------
 // Track Request Dialog
@@ -23,10 +25,106 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
   TimeOfDay? _startTime;
   TimeOfDay? _endTime;
 
+  // Venue selection
+  String? _selectedVenue;
+  String? _selectedVenueId;
+  List<VenueOption> _allVenues = [];
+  bool _loadingVenues = false;
+  Position? _currentPosition;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadVenues();
+    _getCurrentLocation();
+  }
+
   @override
   void dispose() {
     _phoneController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadVenues() async {
+    setState(() => _loadingVenues = true);
+
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('venues')
+          .orderBy('venueName')
+          .get();
+
+      final venues = snapshot.docs.map((doc) {
+        final data = doc.data();
+        return VenueOption(
+          id: doc.id,
+          name: data['venueName'] ?? '',
+          latitude: data['latitude'] as double?,
+          longitude: data['longitude'] as double?,
+        );
+      }).toList();
+
+      // Sort alphabetically (case-insensitive)
+      venues.sort(
+        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+      );
+
+      setState(() {
+        _allVenues = venues;
+        _loadingVenues = false;
+      });
+    } catch (e) {
+      setState(() => _loadingVenues = false);
+      debugPrint('Error loading venues: $e');
+    }
+  }
+
+  Future<void> _getCurrentLocation() async {
+    try {
+      final permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        await Geolocator.requestPermission();
+      }
+
+      final position = await Geolocator.getCurrentPosition();
+      setState(() => _currentPosition = position);
+
+      // Auto-select nearest venue
+      if (_allVenues.isNotEmpty) {
+        _autoSelectNearestVenue(position);
+      }
+    } catch (e) {
+      debugPrint('Error getting location: $e');
+    }
+  }
+
+  void _autoSelectNearestVenue(Position position) {
+    VenueOption? nearestVenue;
+    double minDistance = double.infinity;
+
+    for (final venue in _allVenues) {
+      if (venue.latitude != null && venue.longitude != null) {
+        final distance = Geolocator.distanceBetween(
+          position.latitude,
+          position.longitude,
+          venue.latitude!,
+          venue.longitude!,
+        );
+
+        // Within 500 meters
+        if (distance < 500 && distance < minDistance) {
+          minDistance = distance;
+          nearestVenue = venue;
+        }
+      }
+    }
+
+    if (nearestVenue != null) {
+      setState(() {
+        _selectedVenue = nearestVenue!.name;
+        _selectedVenueId = nearestVenue.id;
+      });
+    }
   }
 
   bool get _canAddPhone {
@@ -34,7 +132,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
     return phone.length == 9 && RegExp(r'^\d{9}$').hasMatch(phone);
   }
 
-  void _addPhoneNumber() {
+  Future<void> _addPhoneNumber() async {
     if (!_canAddPhone) return;
 
     final phone = '+966${_phoneController.text.trim()}';
@@ -47,17 +145,66 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
       return;
     }
 
-    setState(() {
-      _selectedFriends.add(
-        Friend(name: phone, phone: phone, isFavorite: false),
-      );
-      _phoneController.clear();
-    });
+    // Fetch user from Firestore
+    try {
+      final query = await FirebaseFirestore.instance
+          .collection('users')
+          .where('phone', isEqualTo: phone)
+          .limit(1)
+          .get();
+
+      String displayName = phone;
+      if (query.docs.isNotEmpty) {
+        final userData = query.docs.first.data();
+        final firstName = userData['firstName'] ?? '';
+        final lastName = userData['lastName'] ?? '';
+        displayName = '$firstName $lastName'.trim();
+        if (displayName.isEmpty) displayName = phone;
+      }
+
+      setState(() {
+        _selectedFriends.add(
+          Friend(
+            name: displayName,
+            phone: phone,
+            isFavorite: false,
+            isFromPhoneInput: true,
+          ),
+        );
+        _phoneController.clear();
+      });
+    } catch (e) {
+      setState(() {
+        _selectedFriends.add(
+          Friend(
+            name: phone,
+            phone: phone,
+            isFavorite: false,
+            isFromPhoneInput: true,
+          ),
+        );
+        _phoneController.clear();
+      });
+    }
   }
 
   void _removeFriend(Friend friend) {
     setState(() {
       _selectedFriends.remove(friend);
+    });
+  }
+
+  void _toggleFavorite(Friend friend) {
+    setState(() {
+      final index = _selectedFriends.indexOf(friend);
+      if (index != -1) {
+        _selectedFriends[index] = Friend(
+          name: friend.name,
+          phone: friend.phone,
+          isFavorite: !friend.isFavorite,
+          isFromPhoneInput: friend.isFromPhoneInput,
+        );
+      }
     });
   }
 
@@ -77,6 +224,22 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
             _selectedFriends.add(friend);
           }
         }
+      });
+    }
+  }
+
+  Future<void> _showVenueSelection() async {
+    final result = await showModalBottomSheet<VenueOption>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => VenueSelectionSheet(venues: _allVenues),
+    );
+
+    if (result != null) {
+      setState(() {
+        _selectedVenue = result.name;
+        _selectedVenueId = result.id;
       });
     }
   }
@@ -168,6 +331,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
 
   bool get _canSubmit {
     return _selectedFriends.isNotEmpty &&
+        _selectedVenue != null &&
         _selectedDate != null &&
         _startTime != null &&
         _endTime != null;
@@ -178,15 +342,6 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
 
     // TODO: Implement track request submission
     Navigator.pop(context);
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Track request sent to ${_selectedFriends.length} friend(s)',
-        ),
-        backgroundColor: AppColors.kGreen,
-      ),
-    );
   }
 
   @override
@@ -216,7 +371,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                     color: Colors.grey[100],
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Icon(
+                  child: const Icon(
                     Icons.person_search_outlined,
                     color: AppColors.kGreen,
                     size: 24,
@@ -257,6 +412,59 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Venue Selection
+                  const Text(
+                    'Select Venue',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.black87,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  GestureDetector(
+                    onTap: _showVenueSelection,
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[50],
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.grey.shade300),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.place,
+                            color: AppColors.kGreen,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              _selectedVenue ?? 'Select venue',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: _selectedVenue != null
+                                    ? FontWeight.w600
+                                    : FontWeight.w400,
+                                color: _selectedVenue != null
+                                    ? Colors.black87
+                                    : Colors.grey[400],
+                              ),
+                            ),
+                          ),
+                          Icon(
+                            Icons.arrow_forward_ios,
+                            color: Colors.grey[400],
+                            size: 16,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+
                   // Select Friends Section
                   const Text(
                     'Select Friends to Track',
@@ -282,8 +490,13 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                           onChanged: (value) => setState(() {}),
                           decoration: InputDecoration(
                             hintText: 'Phone number',
-                            hintStyle: TextStyle(color: Colors.grey[400]),
-                            prefixText: '+966 ',
+                            hintStyle: TextStyle(
+                              color: Colors.grey[400],
+                              fontWeight: FontWeight.w400,
+                            ),
+                            prefixText: _phoneController.text.isEmpty
+                                ? null
+                                : '+966 ',
                             prefixStyle: const TextStyle(
                               color: Colors.black87,
                               fontWeight: FontWeight.w500,
@@ -415,15 +628,29 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                                     friend.phone,
                                     style: TextStyle(
                                       fontSize: 13,
-                                      color: Colors.grey[600],
+                                      color: Colors.grey[500],
                                     ),
                                   ),
                                 ],
                               ),
                             ),
+                            // Favorite button for phone-added friends
+                            if (friend.isFromPhoneInput)
+                              IconButton(
+                                onPressed: () => _toggleFavorite(friend),
+                                icon: Icon(
+                                  friend.isFavorite
+                                      ? Icons.favorite
+                                      : Icons.favorite_border,
+                                  color: friend.isFavorite
+                                      ? Colors.red
+                                      : Colors.grey[400],
+                                  size: 22,
+                                ),
+                              ),
                             IconButton(
                               onPressed: () => _removeFriend(friend),
-                              icon: Icon(
+                              icon: const Icon(
                                 Icons.check_circle,
                                 color: AppColors.kGreen,
                                 size: 24,
@@ -463,7 +690,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                       ),
                       child: Row(
                         children: [
-                          Icon(
+                          const Icon(
                             Icons.calendar_today,
                             color: AppColors.kGreen,
                             size: 20,
@@ -489,7 +716,9 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                                       : 'Select date',
                                   style: TextStyle(
                                     fontSize: 15,
-                                    fontWeight: FontWeight.w600,
+                                    fontWeight: _selectedDate != null
+                                        ? FontWeight.w600
+                                        : FontWeight.w400,
                                     color: _selectedDate != null
                                         ? Colors.black87
                                         : Colors.grey[400],
@@ -527,7 +756,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                               children: [
                                 Row(
                                   children: [
-                                    Icon(
+                                    const Icon(
                                       Icons.access_time,
                                       color: AppColors.kGreen,
                                       size: 20,
@@ -576,7 +805,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                               children: [
                                 Row(
                                   children: [
-                                    Icon(
+                                    const Icon(
                                       Icons.access_time,
                                       color: AppColors.kGreen,
                                       size: 20,
@@ -643,9 +872,149 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                 ),
               ),
               child: const Text(
-                'Send Track Request',
+                'Send Request',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Venue Selection Sheet
+// ----------------------------------------------------------------------------
+
+class VenueSelectionSheet extends StatefulWidget {
+  final List<VenueOption> venues;
+
+  const VenueSelectionSheet({super.key, required this.venues});
+
+  @override
+  State<VenueSelectionSheet> createState() => _VenueSelectionSheetState();
+}
+
+class _VenueSelectionSheetState extends State<VenueSelectionSheet> {
+  final _searchController = TextEditingController();
+  List<VenueOption> _filteredVenues = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _filteredVenues = widget.venues;
+    _searchController.addListener(_filterVenues);
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _filterVenues() {
+    final query = _searchController.text.toLowerCase();
+    setState(() {
+      if (query.isEmpty) {
+        _filteredVenues = widget.venues;
+      } else {
+        _filteredVenues = widget.venues
+            .where((venue) => venue.name.toLowerCase().contains(query))
+            .toList();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.7,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(24),
+          topRight: Radius.circular(24),
+        ),
+      ),
+      child: Column(
+        children: [
+          // Header
+          Container(
+            padding: const EdgeInsets.all(20),
+            child: const Text(
+              'Select Venue',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: Colors.black87,
+              ),
+            ),
+          ),
+
+          // Search Bar - FIXED HEIGHT
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: 'Search for a venue',
+                hintStyle: TextStyle(color: Colors.grey[400]),
+                prefixIcon: Icon(Icons.search, color: Colors.grey.shade600),
+                filled: true,
+                fillColor: Colors.white,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
+              ),
+              cursorColor: AppColors.kGreen,
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Venues List
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              itemCount: _filteredVenues.length,
+              itemBuilder: (context, index) {
+                final venue = _filteredVenues[index];
+                return ListTile(
+                  contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                  leading: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(shape: BoxShape.circle),
+                    child: const Icon(
+                      Icons.place,
+                      color: AppColors.kGreen,
+                      size: 22,
+                    ),
+                  ),
+                  title: Text(
+                    venue.name,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.black87,
+                    ),
+                  ),
+                  onTap: () => Navigator.pop(context, venue),
+                );
+              },
             ),
           ),
         ],
@@ -672,18 +1041,18 @@ class _FavoritesListSheetState extends State<FavoritesListSheet> {
   // Mock favorite friends data
   final List<Friend> _allFavorites = [
     Friend(name: 'Abeer فاد', phone: '+966503347979', isFavorite: true),
-    Friend(name: 'Afnan Salamah.', phone: '+966503347979', isFavorite: true),
-    Friend(name: 'Razan Aldosari', phone: '+966503347979', isFavorite: true),
+    Friend(name: 'Afnan Salamah', phone: '+966503347978', isFavorite: true),
+    Friend(name: 'Razan Aldosari', phone: '+966503347977', isFavorite: true),
     Friend(
       name: 'Dr. Rafah Almousli',
-      phone: '+966503347979',
+      phone: '+966503347976',
       isFavorite: true,
     ),
-    Friend(name: 'AMAL', phone: '+966503347979', isFavorite: true),
-    Friend(name: 'Ameera', phone: '+966503347979', isFavorite: true),
-    Friend(name: 'Amjad .', phone: '+966503347979', isFavorite: true),
-    Friend(name: 'Areen', phone: '+966503347979', isFavorite: true),
-    Friend(name: 'Aryam', phone: '+966503347979', isFavorite: true),
+    Friend(name: 'AMAL', phone: '+966503347975', isFavorite: true),
+    Friend(name: 'Ameera', phone: '+966503347974', isFavorite: true),
+    Friend(name: 'Amjad', phone: '+966503347973', isFavorite: true),
+    Friend(name: 'Areen', phone: '+966503347972', isFavorite: true),
+    Friend(name: 'Aryam', phone: '+966503347971', isFavorite: true),
   ];
 
   List<Friend> _filteredFavorites = [];
@@ -747,7 +1116,7 @@ class _FavoritesListSheetState extends State<FavoritesListSheet> {
             child: Row(
               children: [
                 IconButton(
-                  icon: const Icon(Icons.arrow_back, color: Colors.black87),
+                  icon: const Icon(Icons.arrow_back, color: AppColors.kGreen),
                   onPressed: () => Navigator.pop(context),
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
@@ -784,24 +1153,33 @@ class _FavoritesListSheetState extends State<FavoritesListSheet> {
 
           // Search Bar
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
             child: TextField(
               controller: _searchController,
               decoration: InputDecoration(
                 hintText: 'Search',
                 hintStyle: TextStyle(color: Colors.grey[400]),
-                prefixIcon: Icon(Icons.search, color: Colors.grey[400]),
+                prefixIcon: Icon(Icons.search, color: Colors.grey.shade600),
                 filled: true,
-                fillColor: Colors.grey[100],
+                fillColor: Colors.white,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
                 ),
                 contentPadding: const EdgeInsets.symmetric(
                   horizontal: 16,
                   vertical: 12,
                 ),
               ),
+              cursorColor: AppColors.kGreen,
             ),
           ),
           const SizedBox(height: 16),
@@ -846,6 +1224,7 @@ class _FavoritesListSheetState extends State<FavoritesListSheet> {
                   trailing: GestureDetector(
                     onTap: () => _toggleFriend(friend),
                     child: Container(
+                      key: ValueKey('${friend.phone}_$isSelected'),
                       width: 28,
                       height: 28,
                       decoration: BoxDecoration(
@@ -881,15 +1260,21 @@ class _FavoritesListSheetState extends State<FavoritesListSheet> {
 }
 
 // ----------------------------------------------------------------------------
-// Friend Model
+// Models
 // ----------------------------------------------------------------------------
 
 class Friend {
   final String name;
   final String phone;
   final bool isFavorite;
+  final bool isFromPhoneInput;
 
-  Friend({required this.name, required this.phone, this.isFavorite = false});
+  Friend({
+    required this.name,
+    required this.phone,
+    this.isFavorite = false,
+    this.isFromPhoneInput = false,
+  });
 
   @override
   bool operator ==(Object other) =>
@@ -900,4 +1285,18 @@ class Friend {
 
   @override
   int get hashCode => phone.hashCode;
+}
+
+class VenueOption {
+  final String id;
+  final String name;
+  final double? latitude;
+  final double? longitude;
+
+  VenueOption({
+    required this.id,
+    required this.name,
+    this.latitude,
+    this.longitude,
+  });
 }

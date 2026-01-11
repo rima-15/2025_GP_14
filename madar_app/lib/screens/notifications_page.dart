@@ -3,6 +3,7 @@ import 'package:madar_app/widgets/app_widgets.dart';
 import 'package:madar_app/theme/theme.dart';
 import 'package:madar_app/screens/AR_page.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter/gestures.dart'; // Required for TapGestureRecognizer
 
 // ----------------------------------------------------------------------------
 // Notifications Page
@@ -17,145 +18,196 @@ class NotificationsPage extends StatefulWidget {
 
 class _NotificationsPageState extends State<NotificationsPage> {
   // Mock notifications data
-  final List<NotificationItem> _trackNotifications = [
-    // 1. Active track request
+  final List<NotificationItem> _notifications = [
+    // Track Request with full details
     NotificationItem(
       id: '1',
       type: NotificationType.trackRequest,
       title: 'Track Request',
-      message: 'Sara Ali wants to track your location',
+      message: '',
       timestamp: DateTime.now().subtract(const Duration(minutes: 5)),
-      isActive: true,
+      isRead: false,
+      isExpired: false,
       senderName: 'Sara Ali',
-      expiryTime: DateTime.now().add(const Duration(hours: 2)),
+      senderPhone: '+966503349999',
+      venueName: 'Dubai Mall',
+      date: 'Sat, Mar 15',
+      startTime: '7:00 PM',
+      endTime: '9:00 PM',
     ),
-    // 2. Expired track request
+    // Expired Track Request
     NotificationItem(
       id: '2',
       type: NotificationType.trackRequest,
-      title: 'Track Request Expired',
-      message: 'Track request from Mohammed Ahmed has expired',
+      title: 'Track Request',
+      message: '',
       timestamp: DateTime.now().subtract(const Duration(hours: 3)),
-      isActive: false,
+      isRead: true,
+      isExpired: true,
       senderName: 'Mohammed Ahmed',
+      senderPhone: '+966501234567',
+      venueName: 'Solitaire Mall',
+      date: 'Fri, Mar 14',
+      startTime: '2:00 PM',
+      endTime: '5:00 PM',
     ),
-    // 3. Request accepted
+    // Request Accepted
     NotificationItem(
       id: '3',
       type: NotificationType.trackAccepted,
-      title: 'Request Accepted',
+      title: 'Track Request Accepted',
       message: 'Amal Ahmed accepted your track request',
       timestamp: DateTime.now().subtract(const Duration(hours: 1)),
+      isRead: false,
       senderName: 'Amal Ahmed',
+      senderPhone: '+966509876543',
+      venueName: 'U walk',
+      date: 'Saturday, March 15',
+      startTime: '11:00 PM',
+      endTime: '12:30 AM',
     ),
-    // 4. Request rejected
+    // Request Rejected
     NotificationItem(
       id: '4',
       type: NotificationType.trackRejected,
-      title: 'Request Rejected',
-      message: '+966503359898 rejected your track request',
+      title: 'Track Request Declined',
+      message: '', // We build this dynamically now
       timestamp: DateTime.now().subtract(const Duration(hours: 2)),
-      senderName: '+966503359898',
+      isRead: true,
+      senderName: 'Adel Ahmed',
+      senderPhone: '+966509876543',
+      venueName: 'Solitaire',
+      date: 'Saturday, March 15',
+      startTime: '11:00 PM',
+      endTime: '12:30 AM',
     ),
-    // 5. Location refresh request
+    // Location Refresh
     NotificationItem(
       id: '5',
       type: NotificationType.locationRefresh,
       title: 'Location Refresh',
       message: 'Sara Ali asked to refresh your location',
       timestamp: DateTime.now().subtract(const Duration(minutes: 10)),
+      isRead: false,
       senderName: 'Sara Ali',
     ),
-    // 6. Navigate request
+    // Navigate Request
     NotificationItem(
       id: '6',
       type: NotificationType.navigateRequest,
       title: 'Navigation Request',
       message: 'Sara Ali asked to navigate to you',
       timestamp: DateTime.now().subtract(const Duration(minutes: 15)),
+      isRead: true,
       senderName: 'Sara Ali',
     ),
-  ];
-
-  final List<NotificationItem> _meetingPointNotifications = [
-    // 1. Meeting point participation request
+    // Meeting Point Request
     NotificationItem(
       id: '7',
       type: NotificationType.meetingPointRequest,
       title: 'Meeting Point Invitation',
       message: 'Ali Mohammed invited you to join a meeting point',
       timestamp: DateTime.now().subtract(const Duration(minutes: 20)),
+      isRead: false,
       senderName: 'Ali Mohammed',
     ),
-    // 2. Location refresh in meeting point
+    // Meeting Location Refresh
     NotificationItem(
       id: '8',
       type: NotificationType.meetingLocationRefresh,
       title: 'Location Refresh',
       message: 'Sara Ali asked to refresh your location at meeting point',
       timestamp: DateTime.now().subtract(const Duration(minutes: 25)),
+      isRead: true,
       senderName: 'Sara Ali',
     ),
-    // 3. Active meeting point confirmation
+    // Meeting Point Confirmation (Active)
     NotificationItem(
       id: '9',
       type: NotificationType.meetingPointConfirmation,
       title: 'Meeting Point Suggestion',
       message: 'Is the suggested meeting point good to continue?',
       timestamp: DateTime.now().subtract(const Duration(minutes: 3)),
-      isActive: true,
-      expiryTime: DateTime.now().add(const Duration(minutes: 2)),
+      isRead: false,
+      autoAcceptTime: DateTime.now().add(const Duration(minutes: 2)),
     ),
-    // 4. Expired meeting point confirmation
+    // All Arrived
     NotificationItem(
       id: '10',
-      type: NotificationType.meetingPointConfirmation,
-      title: 'Meeting Point Accepted',
-      message: 'Meeting point was automatically accepted',
-      timestamp: DateTime.now().subtract(const Duration(hours: 1)),
-      isActive: false,
-    ),
-    // 5. All participants arrived
-    NotificationItem(
-      id: '11',
       type: NotificationType.allArrived,
-      title: 'Everyone Arrived!',
+      title: 'Everyone Arrived',
       message: 'All participants have arrived at the meeting point',
       timestamp: DateTime.now().subtract(const Duration(minutes: 30)),
+      isRead: true,
     ),
-    // 6. Participant cancelled
+    // Participant Cancelled
     NotificationItem(
-      id: '12',
+      id: '11',
       type: NotificationType.participantCancelled,
       title: 'Participant Cancelled',
       message: 'Mohammed cancelled participating in the meeting point',
       timestamp: DateTime.now().subtract(const Duration(minutes: 40)),
+      isRead: false,
       senderName: 'Mohammed',
     ),
-    // 7. Participant accepted
+    // Participant Accepted
     NotificationItem(
-      id: '13',
+      id: '12',
       type: NotificationType.participantAccepted,
       title: 'Participant Joined',
       message: 'Adel accepted participating in this meeting point',
       timestamp: DateTime.now().subtract(const Duration(minutes: 45)),
+      isRead: true,
       senderName: 'Adel',
     ),
-    // 8. Participant rejected
+    // Participant Rejected
     NotificationItem(
-      id: '14',
+      id: '13',
       type: NotificationType.participantRejected,
       title: 'Invitation Declined',
-      message: 'Adel rejected participating in this meeting point',
+      message: 'Adel declined participating in this meeting point',
       timestamp: DateTime.now().subtract(const Duration(hours: 1)),
+      isRead: true,
       senderName: 'Adel',
     ),
   ];
 
+  bool _showAll = false;
+  final List<String> _respondedNotifications = [];
+  final Map<String, double> _notificationOffsets = {};
+
+  List<NotificationItem> get _visibleNotifications {
+    if (_showAll) return _notifications;
+    return _notifications.take(5).toList();
+  }
+
+  void _deleteNotification(NotificationItem notification) {
+    setState(() {
+      _notifications.remove(notification);
+      _notificationOffsets.remove(notification.id);
+    });
+  }
+
+  void _clearAllNotifications() async {
+    final confirmed = await ConfirmationDialog.showDeleteConfirmation(
+      context,
+      title: 'Clear All Notifications',
+      message: 'Are you sure you want to clear all notifications?',
+      confirmText: 'Clear All',
+    );
+
+    if (confirmed == true) {
+      setState(() {
+        _notifications.clear();
+        _notificationOffsets.clear();
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Colors.grey[50],
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
@@ -176,216 +228,493 @@ class _NotificationsPageState extends State<NotificationsPage> {
           child: Container(height: 1, color: Colors.grey[300]),
         ),
       ),
-      body: ListView(
-        children: [
-          // Track Notifications Section
-          if (_trackNotifications.isNotEmpty) ...[
-            _buildSectionHeader('Track Notifications'),
-            ..._trackNotifications.map(
-              (notif) => _buildNotificationCard(notif),
-            ),
-          ],
-
-          // Meeting Point Notifications Section
-          if (_meetingPointNotifications.isNotEmpty) ...[
-            _buildSectionHeader('Meeting Point Notifications'),
-            ..._meetingPointNotifications.map(
-              (notif) => _buildNotificationCard(notif),
-            ),
-          ],
-
-          const SizedBox(height: 20),
-        ],
-      ),
-    );
-  }
-
-  // ---------- Section Header ----------
-
-  Widget _buildSectionHeader(String title) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-      child: Text(
-        title,
-        style: TextStyle(
-          fontSize: 13,
-          fontWeight: FontWeight.w600,
-          color: Colors.grey[600],
-          letterSpacing: 0.5,
-        ),
-      ),
-    );
-  }
-
-  // ---------- Notification Card ----------
-
-  Widget _buildNotificationCard(NotificationItem notification) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: notification.isActive
-              ? AppColors.kGreen.withOpacity(0.3)
-              : Colors.grey.shade200,
-          width: notification.isActive ? 2 : 1,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header with icon and title
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: _getNotificationColor(
-                    notification.type,
-                  ).withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
+      body: _notifications.isEmpty
+          ? _buildEmptyState()
+          : ListView(
+              children: [
+                // Clear All Button - Before first notification
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 1, 10, 1),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: _clearAllNotifications,
+                        child: Text(
+                          'Clear all',
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                child: Icon(
-                  _getNotificationIcon(notification.type),
-                  color: _getNotificationColor(notification.type),
-                  size: 20,
+
+                // Notifications List
+                ..._visibleNotifications.map(
+                  (notif) => _buildNotificationItem(notif),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      notification.title,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.black87,
+
+                // View All Button
+                if (!_showAll && _notifications.length > 5)
+                  Padding(
+                    padding: const EdgeInsets.all(5),
+                    child: TextButton(
+                      onPressed: () => setState(() => _showAll = true),
+                      child: const Text(
+                        'View All Notifications',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.kGreen,
+                        ),
                       ),
                     ),
-                    Text(
-                      _formatTimestamp(notification.timestamp),
-                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                    ),
-                  ],
-                ),
-              ),
-              if (!notification.isActive &&
-                  notification.type == NotificationType.trackRequest)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
                   ),
-                  decoration: BoxDecoration(
-                    color: Colors.grey[200],
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    'Expired',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.grey[600],
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 12),
 
-          // Message
-          Text(
-            notification.message,
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey[700],
-              height: 1.4,
-            ),
-          ),
-
-          // Timer for active confirmations
-          if (notification.isActive &&
-              notification.type == NotificationType.meetingPointConfirmation &&
-              notification.expiryTime != null) ...[
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Icon(Icons.timer_outlined, size: 16, color: Colors.orange[700]),
-                const SizedBox(width: 6),
-                Text(
-                  'Auto-accept in ${_getTimeRemaining(notification.expiryTime!)}',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.orange[700],
-                  ),
-                ),
+                const SizedBox(height: 20),
               ],
             ),
-          ],
+    );
+  }
 
-          // Action Buttons
-          if (_shouldShowActions(notification)) ...[
-            const SizedBox(height: 16),
-            _buildActionButtons(notification),
-          ],
+  // ---------- Empty State ----------
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.notifications_none_outlined,
+            size: 80,
+            color: Colors.grey[300],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'No notifications found',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+              color: Colors.grey[600],
+            ),
+          ),
         ],
       ),
     );
   }
 
-  // ---------- Action Buttons ----------
+  // ---------- Notification Item ----------
+
+  Widget _buildNotificationItem(NotificationItem notification) {
+    final currentOffset = _notificationOffsets[notification.id] ?? 0.0;
+    final deleteButtonWidth = 70.0;
+
+    return GestureDetector(
+      onHorizontalDragUpdate: (details) {
+        setState(() {
+          final newOffset = currentOffset + details.delta.dx;
+          _notificationOffsets[notification.id] = newOffset.clamp(
+            -deleteButtonWidth,
+            0.0,
+          );
+        });
+      },
+      onHorizontalDragEnd: (details) {
+        setState(() {
+          if (currentOffset < -deleteButtonWidth / 2) {
+            _notificationOffsets[notification.id] = -deleteButtonWidth;
+          } else {
+            _notificationOffsets[notification.id] = 0.0;
+          }
+        });
+      },
+      child: Stack(
+        children: [
+          // Delete Button (background)
+          Positioned.fill(
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: Container(
+                width: deleteButtonWidth,
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.kError,
+                  borderRadius: BorderRadius.only(
+                    topRight: Radius.circular(12),
+                    bottomRight: Radius.circular(12),
+                  ),
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () async {
+                      // Store the current swipe state before showing dialog
+                      final wasSwiped = currentOffset != 0.0;
+
+                      // Show confirmation dialog immediately
+                      final confirmed = await _showDeleteConfirmation(
+                        notification,
+                      );
+
+                      if (confirmed) {
+                        _deleteNotification(notification);
+                      } else {
+                        // Only reset if it was swiped and user cancelled
+                        if (wasSwiped && mounted) {
+                          setState(() {
+                            _notificationOffsets[notification.id] = 0.0;
+                          });
+                        }
+                      }
+                    },
+                    borderRadius: BorderRadius.only(
+                      topRight: Radius.circular(12),
+                      bottomRight: Radius.circular(12),
+                    ),
+                    child: const Center(
+                      child: Icon(
+                        Icons.delete_outline,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          // Main notification content (can be swiped) - WITH UNREAD INDICATOR
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 100), // FASTER ANIMATION
+            curve: Curves.easeOut,
+            transform: Matrix4.translationValues(
+              _notificationOffsets[notification.id] ?? 0.0,
+              0,
+              0,
+            ),
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: Stack(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.03),
+                        blurRadius: 4,
+                        offset: const Offset(0, 1),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Header Row
+                      Row(
+                        children: [
+                          // Circular Icon
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: _getNotificationColor(
+                                notification.type,
+                              ).withOpacity(0.1),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              _getNotificationIcon(notification.type),
+                              color: _getNotificationColor(notification.type),
+                              size: 20,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+
+                          // Title and Time
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        notification.title,
+                                        style: const TextStyle(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.black87,
+                                        ),
+                                      ),
+                                    ),
+                                    // Status Labels (Expired, Accepted, or Declined)
+                                    if (notification.isExpired ||
+                                        notification.actionLabel != null)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 3,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey[200],
+                                          borderRadius: BorderRadius.circular(
+                                            6,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          notification.actionLabel ?? 'Expired',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.grey[600],
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+
+                                const SizedBox(height: 2),
+                                Text(
+                                  _formatTimestamp(notification.timestamp),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey[500],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+
+                      // Message and Details for Track Request
+                      if (notification.type ==
+                          NotificationType.trackRequest) ...[
+                        // STYLE 1: Incoming Track Request (The one with the green bar)
+                        RichText(
+                          text: TextSpan(
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey[700],
+                              height: 1.4,
+                            ),
+                            children: [
+                              TextSpan(
+                                text: notification.senderName ?? '',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.black87,
+                                ),
+                              ),
+                              TextSpan(
+                                text: ' (${notification.senderPhone ?? ""}) ',
+                              ),
+                              const TextSpan(
+                                text: 'is asking to track your location',
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        IntrinsicHeight(
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 3,
+                                decoration: BoxDecoration(
+                                  color: AppColors.kGreen,
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Duration: ${notification.date} • ${notification.startTime} - ${notification.endTime}',
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      'Venue: ${notification.venueName ?? ''}',
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ] else if (notification.type ==
+                              NotificationType.trackRejected ||
+                          notification.type ==
+                              NotificationType.trackAccepted) ...[
+                        // STYLE 2: Request Result (Matches your photo with more/less)
+                        ExpandableNotificationBody(
+                          text:
+                              "${notification.senderName} (${notification.senderPhone ?? ""}) "
+                              "${notification.type == NotificationType.trackRejected ? 'declined' : 'accepted'} "
+                              "your track request at ${notification.venueName ?? 'Venue'} "
+                              "on ${notification.date ?? ''} from ${notification.startTime ?? ''} "
+                              "to ${notification.endTime ?? ''}.",
+                        ),
+                      ] else ...[
+                        // STYLE 3: All other simple notifications
+                        Text(
+                          notification.message,
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey[700],
+                            height: 1.4,
+                          ),
+                        ),
+                      ],
+
+                      // Auto-accept timer
+                      if (notification.autoAcceptTime != null &&
+                          notification.autoAcceptTime!.isAfter(
+                            DateTime.now(),
+                          )) ...[
+                        const SizedBox(height: 12),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.orange[50],
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.timer_outlined,
+                                size: 16,
+                                color: Colors.orange[700],
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Auto-accept in ${_getTimeRemaining(notification.autoAcceptTime!)}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                  color: Colors.orange[700],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+
+                      // Action Buttons
+                      if (notification.actionLabel == null &&
+                          _shouldShowActions(notification)) ...[
+                        const SizedBox(height: 14),
+                        _buildActionButtons(notification),
+                      ] else if (_shouldShowActions(notification)) ...[
+                        const SizedBox(height: 14),
+                        _buildActionButtons(notification),
+                      ],
+                    ],
+                  ),
+                ),
+
+                // Unread indicator - INSIDE the white container
+                if (!notification.isRead)
+                  Positioned(
+                    top: 18,
+                    right: 18,
+                    child: Container(
+                      width: 10,
+                      height: 10,
+                      decoration: const BoxDecoration(
+                        color: AppColors.kGreen,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---------- Action Buttons (Minimal Style) ----------
 
   Widget _buildActionButtons(NotificationItem notification) {
     switch (notification.type) {
       case NotificationType.trackRequest:
-        if (notification.isActive) {
+        if (!notification.isExpired) {
           return Row(
             children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => _handleReject(notification),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.kError,
-                    side: const BorderSide(color: AppColors.kError, width: 2),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
+              // Decline Button
+              InkWell(
+                onTap: () => _handleReject(notification),
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
                   ),
-                  child: const Text(
-                    'Reject',
-                    style: TextStyle(fontWeight: FontWeight.w600),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.close, size: 18, color: Colors.grey[700]),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Decline',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey[700],
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: () => _handleAccept(notification),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.kGreen,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
+              const SizedBox(width: 8),
+              // Accept Button
+              InkWell(
+                onTap: () => _handleAccept(notification),
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
                   ),
-                  child: const Text(
-                    'Accept',
-                    style: TextStyle(fontWeight: FontWeight.w600),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.check, size: 18, color: AppColors.kGreen),
+                      SizedBox(width: 6),
+                      Text(
+                        'Accept',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.kGreen,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -397,17 +726,29 @@ class _NotificationsPageState extends State<NotificationsPage> {
       case NotificationType.locationRefresh:
       case NotificationType.navigateRequest:
       case NotificationType.meetingLocationRefresh:
-        return ElevatedButton.icon(
-          onPressed: () => _openCameraForScan(context),
-          icon: const Icon(Icons.photo_camera_outlined, size: 20),
-          label: const Text('Scan Surrounding'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.kGreen,
-            foregroundColor: Colors.white,
-            minimumSize: const Size.fromHeight(48),
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
+        return InkWell(
+          onTap: () => _openCameraForScan(context),
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.photo_camera_outlined,
+                  size: 18,
+                  color: AppColors.kGreen,
+                ),
+                SizedBox(width: 6),
+                Text(
+                  'Scan Surrounding',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.kGreen,
+                  ),
+                ),
+              ],
             ),
           ),
         );
@@ -415,39 +756,54 @@ class _NotificationsPageState extends State<NotificationsPage> {
       case NotificationType.meetingPointRequest:
         return Row(
           children: [
-            Expanded(
-              child: OutlinedButton(
-                onPressed: () => _handleReject(notification),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.kError,
-                  side: const BorderSide(color: AppColors.kError, width: 2),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
+            InkWell(
+              onTap: () => _handleReject(notification),
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
                 ),
-                child: const Text(
-                  'Reject',
-                  style: TextStyle(fontWeight: FontWeight.w600),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.close, size: 18, color: Colors.grey[700]),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Decline',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey[700],
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: ElevatedButton(
-                onPressed: () => _handleAcceptMeetingPoint(notification),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.kGreen,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
+            const SizedBox(width: 8),
+            InkWell(
+              onTap: () => _handleAcceptMeetingPoint(notification),
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
                 ),
-                child: const Text(
-                  'Accept',
-                  style: TextStyle(fontWeight: FontWeight.w600),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.check, size: 18, color: AppColors.kGreen),
+                    SizedBox(width: 6),
+                    Text(
+                      'Accept',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.kGreen,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -455,42 +811,58 @@ class _NotificationsPageState extends State<NotificationsPage> {
         );
 
       case NotificationType.meetingPointConfirmation:
-        if (notification.isActive) {
+        if (notification.autoAcceptTime != null &&
+            notification.autoAcceptTime!.isAfter(DateTime.now())) {
           return Row(
             children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => _handleReject(notification),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.kError,
-                    side: const BorderSide(color: AppColors.kError, width: 2),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
+              InkWell(
+                onTap: () => _handleReject(notification),
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
                   ),
-                  child: const Text(
-                    'Reject',
-                    style: TextStyle(fontWeight: FontWeight.w600),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.close, size: 18, color: Colors.grey[700]),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Reject',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey[700],
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: () => _handleAccept(notification),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.kGreen,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
+              const SizedBox(width: 8),
+              InkWell(
+                onTap: () => _handleAccept(notification),
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
                   ),
-                  child: const Text(
-                    'Accept',
-                    style: TextStyle(fontWeight: FontWeight.w600),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.check, size: 18, color: AppColors.kGreen),
+                      SizedBox(width: 6),
+                      Text(
+                        'Accept',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.kGreen,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -506,14 +878,37 @@ class _NotificationsPageState extends State<NotificationsPage> {
     return const SizedBox.shrink();
   }
 
+  // ---------- Delete Confirmation ----------
+
+  Future<bool> _showDeleteConfirmation(NotificationItem notification) async {
+    return await ConfirmationDialog.showDeleteConfirmation(
+          context,
+          title: 'Delete Notification',
+          message: 'Are you sure you want to delete this notification?',
+          confirmText: 'Delete',
+        ) ??
+        false;
+  }
+
   // ---------- Helper Functions ----------
 
   bool _shouldShowActions(NotificationItem notification) {
-    // Don't show actions for expired/inactive notifications (except specific types)
-    if (!notification.isActive &&
-        notification.type != NotificationType.locationRefresh &&
-        notification.type != NotificationType.navigateRequest &&
-        notification.type != NotificationType.meetingLocationRefresh) {
+    // Hide if already has a label or in responded list
+    if (notification.actionLabel != null ||
+        _respondedNotifications.contains(notification.id)) {
+      return false;
+    }
+
+    // Don't show actions for expired track requests
+    if (notification.type == NotificationType.trackRequest &&
+        notification.isExpired) {
+      return false;
+    }
+
+    // Don't show actions for expired meeting confirmations
+    if (notification.type == NotificationType.meetingPointConfirmation &&
+        (notification.autoAcceptTime == null ||
+            notification.autoAcceptTime!.isBefore(DateTime.now()))) {
       return false;
     }
 
@@ -531,16 +926,18 @@ class _NotificationsPageState extends State<NotificationsPage> {
   IconData _getNotificationIcon(NotificationType type) {
     switch (type) {
       case NotificationType.trackRequest:
+        return Icons.my_location_outlined;
       case NotificationType.trackAccepted:
+        return Icons.check_circle_outline;
       case NotificationType.trackRejected:
-        return Icons.my_location;
+        return Icons.cancel_outlined;
       case NotificationType.locationRefresh:
         return Icons.refresh;
       case NotificationType.navigateRequest:
-        return Icons.navigation;
+        return Icons.navigation_outlined;
       case NotificationType.meetingPointRequest:
       case NotificationType.meetingPointConfirmation:
-        return Icons.place;
+        return Icons.place_outlined;
       case NotificationType.meetingLocationRefresh:
         return Icons.refresh;
       case NotificationType.allArrived:
@@ -548,9 +945,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
       case NotificationType.participantCancelled:
         return Icons.cancel_outlined;
       case NotificationType.participantAccepted:
-        return Icons.person_add;
+        return Icons.person_add_outlined;
       case NotificationType.participantRejected:
-        return Icons.person_remove;
+        return Icons.person_remove_outlined;
     }
   }
 
@@ -564,8 +961,6 @@ class _NotificationsPageState extends State<NotificationsPage> {
       case NotificationType.participantRejected:
       case NotificationType.participantCancelled:
         return AppColors.kError;
-      case NotificationType.meetingPointConfirmation:
-        return Colors.orange;
       default:
         return AppColors.kGreen;
     }
@@ -581,6 +976,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
       return '${difference.inMinutes}m ago';
     } else if (difference.inHours < 24) {
       return '${difference.inHours}h ago';
+    } else if (difference.inDays == 1) {
+      return 'Yesterday';
     } else if (difference.inDays < 7) {
       return '${difference.inDays}d ago';
     } else {
@@ -605,42 +1002,59 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
   // ---------- Action Handlers ----------
 
-  void _handleAccept(NotificationItem notification) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Accepted ${notification.title}'),
-        backgroundColor: AppColors.kGreen,
-      ),
+  void _handleAccept(NotificationItem notification) async {
+    final confirmed = await ConfirmationDialog.showPositiveConfirmation(
+      context,
+      title: 'Accept Request',
+      message: 'Are you sure you want to accept this request?',
+      confirmText: 'Accept',
     );
-    // TODO: Implement actual accept logic
+
+    if (confirmed && mounted) {
+      setState(() {
+        notification.actionLabel = "Accepted";
+        notification.isRead = true; // Mark as read on interaction
+        _respondedNotifications.add(notification.id);
+      });
+    }
   }
 
-  void _handleReject(NotificationItem notification) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Rejected ${notification.title}'),
-        backgroundColor: AppColors.kError,
-      ),
+  void _handleReject(NotificationItem notification) async {
+    final confirmed = await ConfirmationDialog.showDeleteConfirmation(
+      context,
+      title: 'Decline Request',
+      message: 'Are you sure you want to decline this request?',
+      confirmText: 'Decline',
     );
-    // TODO: Implement actual reject logic
+
+    if (confirmed && mounted) {
+      setState(() {
+        notification.actionLabel = "Declined";
+        notification.isRead = true; // Mark as read on interaction
+        _respondedNotifications.add(notification.id);
+      });
+    }
   }
 
-  void _handleAcceptMeetingPoint(NotificationItem notification) {
-    // After accepting, show scan button
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Accepted! Please scan your surrounding to join the meeting point',
-        ),
-        backgroundColor: AppColors.kGreen,
-        duration: Duration(seconds: 3),
-      ),
+  void _handleAcceptMeetingPoint(NotificationItem notification) async {
+    final confirmed = await ConfirmationDialog.showPositiveConfirmation(
+      context,
+      title: 'Join Meeting Point',
+      message: 'Do you want to join this meeting point and start scanning?',
+      confirmText: 'Join',
     );
 
-    // Open camera after a delay
-    Future.delayed(const Duration(seconds: 1), () {
-      _openCameraForScan(context);
-    });
+    if (confirmed && mounted) {
+      setState(() {
+        notification.actionLabel = "Accepted";
+        notification.isRead = true; // Mark as read on interaction
+        _respondedNotifications.add(notification.id);
+      });
+
+      Future.delayed(const Duration(milliseconds: 300), () {
+        _openCameraForScan(context);
+      });
+    }
   }
 
   Future<void> _openCameraForScan(BuildContext context) async {
@@ -677,6 +1091,65 @@ class _NotificationsPageState extends State<NotificationsPage> {
 // ----------------------------------------------------------------------------
 // Notification Models
 // ----------------------------------------------------------------------------
+class ExpandableNotificationBody extends StatefulWidget {
+  final String text;
+  const ExpandableNotificationBody({super.key, required this.text});
+
+  @override
+  State<ExpandableNotificationBody> createState() =>
+      _ExpandableNotificationBodyState();
+}
+
+class _ExpandableNotificationBodyState
+    extends State<ExpandableNotificationBody> {
+  bool isExpanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    // Style for the main body text
+    final TextStyle bodyStyle = TextStyle(
+      fontSize: 14,
+      color: Colors.grey[700],
+      height: 1.4,
+    );
+
+    // Style for the clickable link
+    final TextStyle linkStyle = const TextStyle(
+      color: Color.fromRGBO(97, 97, 97, 1),
+      fontWeight: FontWeight.bold,
+      fontSize: 13,
+    );
+
+    return Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(
+            text: isExpanded
+                ? widget.text
+                : (widget.text.length >
+                          80 // Preliminary check for length
+                      ? "${widget.text.substring(0, 80)}..."
+                      : widget.text),
+            style: bodyStyle,
+          ),
+          TextSpan(
+            text: isExpanded ? " less" : " more",
+            style: linkStyle,
+            recognizer: TapGestureRecognizer()
+              ..onTap = () {
+                setState(() {
+                  isExpanded = !isExpanded;
+                });
+              },
+          ),
+        ],
+      ),
+      // This ensures that when NOT expanded, it cuts off at 2 lines
+      maxLines: isExpanded ? null : 2,
+      overflow: isExpanded ? TextOverflow.visible : TextOverflow.ellipsis,
+    );
+  }
+}
 
 enum NotificationType {
   trackRequest,
@@ -699,9 +1172,16 @@ class NotificationItem {
   final String title;
   final String message;
   final DateTime timestamp;
-  final bool isActive;
+  bool isRead;
+  final bool isExpired;
   final String? senderName;
-  final DateTime? expiryTime;
+  final String? senderPhone;
+  final String? venueName;
+  final String? date;
+  final String? startTime;
+  final String? endTime;
+  final DateTime? autoAcceptTime;
+  String? actionLabel;
 
   NotificationItem({
     required this.id,
@@ -709,8 +1189,15 @@ class NotificationItem {
     required this.title,
     required this.message,
     required this.timestamp,
-    this.isActive = true,
+    this.isRead = true,
+    this.isExpired = false,
     this.senderName,
-    this.expiryTime,
+    this.senderPhone,
+    this.venueName,
+    this.date,
+    this.startTime,
+    this.endTime,
+    this.autoAcceptTime,
+    this.actionLabel,
   });
 }

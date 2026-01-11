@@ -657,16 +657,16 @@ class _TrackPageState extends State<TrackPage> {
               child: Row(
                 children: [
                   Container(
-                    width: 48,
-                    height: 48,
+                    width: 44,
+                    height: 44,
                     decoration: BoxDecoration(
-                      color: Colors.grey[300],
+                      color: Colors.grey[200],
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
                       Icons.person,
                       color: Colors.grey[600],
-                      size: 24,
+                      size: 22,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -740,16 +740,16 @@ class _TrackPageState extends State<TrackPage> {
               child: Row(
                 children: [
                   Container(
-                    width: 48,
-                    height: 48,
+                    width: 44,
+                    height: 44,
                     decoration: BoxDecoration(
-                      color: Colors.grey[300],
+                      color: Colors.grey[200],
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
                       Icons.person,
                       color: Colors.grey[600],
-                      size: 24,
+                      size: 22,
                     ),
                   ),
                   const SizedBox(width: 12),

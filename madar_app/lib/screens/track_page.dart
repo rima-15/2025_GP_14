@@ -4,6 +4,8 @@ import 'package:madar_app/theme/theme.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
 import 'track_request_dialog.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:async';
 
 const bool kFeatureEnabled = true;
 const String kSolitaireVenueId = 'ChIJ_WZ_Y1iXwxUR_U6jcP83SIg';
@@ -21,94 +23,97 @@ class _TrackPageState extends State<TrackPage> {
   List<Map<String, String>> _venueMaps = [];
   bool _mapsLoading = false;
   String? _expandedRequestId;
+  Timer? _clockTimer;
 
-  // Sample tracking requests
-  final List<TrackingRequest> _trackingRequests = [
-    // ========== ACTIVE REQUESTS (Always Active) ==========
-    TrackingRequest(
-      id: '1',
-      trackedUserName: 'Mike Johnson',
-      trackedUserPhone: '+966502331213',
-      status: 'accepted',
-      scheduledDate: DateTime.now(),
-      startTime: '12:00 AM', // Started at midnight
-      endTime: '11:59 PM', // Ends at end of day (always active today)
-      venueName: 'Dubai Mall',
-      venueId: 'venue1',
-      isFavorite: true,
-      lastSeen: '5 mins ago',
-    ),
-    TrackingRequest(
-      id: '2',
-      trackedUserName: 'Emma Davis',
-      trackedUserPhone: '+966501234567',
-      status: 'accepted',
-      scheduledDate: DateTime.now(),
-      startTime: '12:00 AM', // Started at midnight
-      endTime: '11:59 PM', // Ends at end of day (always active today)
-      venueName: 'Solitaire Mall',
-      venueId: 'venue2',
-      isFavorite: false,
-      lastSeen: '1 min ago',
-    ),
+  Stream<List<TrackingRequest>> _sentRequestsStream() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return Stream.value([]);
 
-    // ========== UPCOMING - PENDING (Always Scheduled) ==========
-    TrackingRequest(
-      id: '3',
-      trackedUserName: 'Ryan Foster',
-      trackedUserPhone: '+966509876543',
-      status: 'pending', // PENDING status
-      scheduledDate: DateTime.now().add(const Duration(days: 2)),
-      startTime: '2:00 PM',
-      endTime: '5:00 PM',
-      venueName: 'Mall of Arabia',
-      venueId: 'venue3',
-      isFavorite: false,
-    ),
+    return FirebaseFirestore.instance
+        .collection('trackRequests')
+        .where('senderId', isEqualTo: uid)
+        // نجيب بس pending/accepted (declined ما نعرضه)
+        .where('status', whereIn: ['pending', 'accepted'])
+        .orderBy('startAt')
+        .snapshots()
+        .map((snap) {
+          return snap.docs.map((d) {
+            final data = d.data();
 
-    // ========== UPCOMING - ACCEPTED (Always Scheduled) ==========
-    TrackingRequest(
-      id: '4',
-      trackedUserName: 'Sarah Johnson',
-      trackedUserPhone: '+966505555555',
-      status: 'accepted', // ACCEPTED status (but not active yet)
-      scheduledDate: DateTime.now().add(const Duration(days: 3)),
-      startTime: '6:00 PM',
-      endTime: '9:00 PM',
-      venueName: 'Red Sea Mall',
-      venueId: 'venue4',
-      isFavorite: true,
-    ),
+            final startAt = (data['startAt'] as Timestamp).toDate();
+            final endAt = (data['endAt'] as Timestamp).toDate();
 
-    // ========== UPCOMING - DECLINED (Always Scheduled) ==========
-    TrackingRequest(
-      id: '5',
-      trackedUserName: 'John Smith',
-      trackedUserPhone: '+966506666666',
-      status: 'declined', // DECLINED status
-      scheduledDate: DateTime.now().add(const Duration(days: 1)),
-      startTime: '3:00 PM',
-      endTime: '6:00 PM',
-      venueName: 'Al Noor Mall',
-      venueId: 'venue5',
-      isFavorite: false,
-    ),
+            final startStr = TimeOfDay.fromDateTime(startAt).format(context);
+            final endStr = TimeOfDay.fromDateTime(endAt).format(context);
 
-    // ========== BONUS: Another Active Request ==========
-    TrackingRequest(
-      id: '6',
-      trackedUserName: 'Alex Chen',
-      trackedUserPhone: '+966507777777',
-      status: 'accepted',
-      scheduledDate: DateTime.now(),
-      startTime: '12:00 AM', // Started at midnight
-      endTime: '11:59 PM', // Ends at end of day
-      venueName: 'Nakheel Mall',
-      venueId: 'venue6',
-      isFavorite: true,
-      lastSeen: '10 mins ago',
-    ),
-  ];
+            return TrackingRequest(
+              id: d.id,
+              trackedUserName: (data['receiverName'] ?? '').toString(),
+              trackedUserPhone: (data['receiverPhone'] ?? '').toString(),
+              status: (data['status'] ?? '').toString(),
+
+              startAt: startAt,
+              endAt: endAt,
+
+              startTime: startStr,
+              endTime: endStr,
+
+              venueName: (data['venueName'] ?? '').toString(),
+              venueId: (data['venueId'] ?? '').toString(),
+              isFavorite: false,
+              lastSeen: _timeAgo(startAt),
+            );
+          }).toList();
+        });
+  }
+
+  List<TrackingRequest> _upcomingFrom(List<TrackingRequest> all) {
+    final now = DateTime.now();
+
+    final upcoming = all.where((r) {
+      final start = r.startAt;
+      final end = r.endAt;
+
+      // انتهى وقتها؟ تختفي
+      if (now.isAfter(end)) return false;
+
+      // لازم تكون pending أو accepted
+      if (r.status != 'pending' && r.status != 'accepted') return false;
+
+      // Upcoming فقط قبل البداية
+      return now.isBefore(start);
+    }).toList();
+
+    upcoming.sort((a, b) => a.startAt.compareTo(b.startAt));
+    return upcoming;
+  }
+
+  List<TrackingRequest> _activeFrom(List<TrackingRequest> all) {
+    final now = DateTime.now();
+
+    final active = all.where((r) {
+      if (r.status != 'accepted') return false;
+
+      final start = r.startAt;
+      final end = r.endAt;
+
+      return now.isAfter(start) && now.isBefore(end);
+    }).toList();
+
+    active.sort((a, b) => a.startAt.compareTo(b.startAt));
+    return active;
+  }
+
+  String _timeAgo(DateTime dateTime) {
+    final diff = DateTime.now().difference(dateTime);
+
+    if (diff.inSeconds < 60) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
+    if (diff.inHours < 24) {
+      return '${diff.inHours} hour${diff.inHours == 1 ? '' : 's'} ago';
+    }
+    return '${diff.inDays} day${diff.inDays == 1 ? '' : 's'} ago';
+  }
 
   // Meeting point data
   final List<Participant> meetingParticipants = [
@@ -122,17 +127,16 @@ class _TrackPageState extends State<TrackPage> {
   void initState() {
     super.initState();
     _loadVenueMaps();
+
+    _clockTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) setState(() {}); // بس عشان يعيد حساب upcoming/active
+    });
   }
 
-  List<TrackingRequest> get _upcomingRequests {
-    return _trackingRequests
-        .where((r) => !r.isActive && !r.shouldRemove)
-        .toList()
-      ..sort((a, b) => a.scheduledDate.compareTo(b.scheduledDate));
-  }
-
-  List<TrackingRequest> get _activeRequests {
-    return _trackingRequests.where((r) => r.isActive).toList();
+  @override
+  void dispose() {
+    _clockTimer?.cancel();
+    super.dispose();
   }
 
   void _toggleExpand(String requestId) {
@@ -142,13 +146,15 @@ class _TrackPageState extends State<TrackPage> {
   }
 
   void _toggleFavorite(String requestId) {
-    setState(() {
+    // TODO: implement favorites later using Firestore (users/{uid}/favorites)
+    // keeping it here to avoid UI changes/errors.
+    /*setState(() {
       final index = _trackingRequests.indexWhere((r) => r.id == requestId);
       if (index != -1) {
         _trackingRequests[index].isFavorite =
             !_trackingRequests[index].isFavorite;
       }
-    });
+    });*/
   }
 
   Future<void> _loadVenueMaps() async {
@@ -257,59 +263,84 @@ class _TrackPageState extends State<TrackPage> {
           _buildTrackRequestButton(),
           const SizedBox(height: 24),
 
-          if (_upcomingRequests.isNotEmpty) ...[
-            _buildSectionHeader(
-              icon: Icons.schedule,
-              title: 'Upcoming Requests',
-              subtitle: 'Scheduled tracking',
-              count: _upcomingRequests.length,
-            ),
-            const SizedBox(height: 12),
-            ..._upcomingRequests.map(
-              (r) => Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: _buildUpcomingTile(r),
-              ),
-            ),
-            const SizedBox(height: 24),
-          ],
+          StreamBuilder<List<TrackingRequest>>(
+            stream: _sentRequestsStream(),
+            builder: (context, snapshot) {
+              final all = snapshot.data ?? [];
+              final upcoming = _upcomingFrom(all);
+              final active = _activeFrom(all);
 
-          if (_activeRequests.isNotEmpty) ...[
-            _buildSectionHeader(
-              icon: Icons.access_time,
-              title: 'Active Tracking',
-              subtitle: 'Location sharing active',
-              count: _activeRequests.length,
-            ),
-            const SizedBox(height: 12),
-            ..._activeRequests.map(
-              (r) => Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: _buildActiveTile(r),
-              ),
-            ),
-          ],
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // -------- Upcoming (always visible) --------
+                  _buildSectionHeader(
+                    icon: Icons.schedule,
+                    title: 'Upcoming Requests',
+                    subtitle: 'Scheduled tracking',
+                    count: upcoming.length,
+                  ),
+                  const SizedBox(height: 12),
 
-          if (_upcomingRequests.isEmpty && _activeRequests.isEmpty)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.all(40),
-                child: Column(
-                  children: [
-                    Icon(
-                      Icons.person_search_outlined,
-                      size: 64,
-                      color: Colors.grey[300],
+                  if (upcoming.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 24, top: 8),
+                      child: Center(
+                        child: Text(
+                          'No upcoming requests',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey[600],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    )
+                  else ...[
+                    ...upcoming.map(
+                      (r) => Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: _buildUpcomingTile(r),
+                      ),
                     ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'No tracking requests',
-                      style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+                    const SizedBox(height: 24),
+                  ],
+
+                  // -------- Active (always visible) --------
+                  _buildSectionHeader(
+                    icon: Icons.access_time,
+                    title: 'Active Tracking',
+                    subtitle: 'Location sharing active',
+                    count: active.length,
+                  ),
+                  const SizedBox(height: 12),
+
+                  if (active.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8, top: 8),
+                      child: Center(
+                        child: Text(
+                          'No active requests',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey[600],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    )
+                  else ...[
+                    ...active.map(
+                      (r) => Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: _buildActiveTile(r),
+                      ),
                     ),
                   ],
-                ),
-              ),
-            ),
+                ],
+              );
+            },
+          ),
         ] else ...[
           // Meeting Point View - ENTIRE SECTION
           Row(
@@ -469,13 +500,29 @@ class _TrackPageState extends State<TrackPage> {
                       color: AppColors.kGreen,
                     ),
                     const SizedBox(width: 6),
-                    Text(
-                      '${_isTrackingView ? _activeRequests.length : meetingParticipants.length + 1}',
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
+                    _isTrackingView
+                        ? StreamBuilder<List<TrackingRequest>>(
+                            stream: _sentRequestsStream(),
+                            builder: (context, snapshot) {
+                              final all = snapshot.data ?? [];
+                              final active = _activeFrom(all);
+
+                              return Text(
+                                active.length.toString(),
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              );
+                            },
+                          )
+                        : Text(
+                            (meetingParticipants.length + 1).toString(),
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
                   ],
                 ),
               ),
@@ -822,11 +869,6 @@ class _TrackPageState extends State<TrackPage> {
         text = AppColors.kGreen;
         label = 'Accepted';
         break;
-      case 'declined':
-        bg = Colors.red.withOpacity(0.1);
-        text = Colors.red;
-        label = 'Declined';
-        break;
       default:
         bg = Colors.orange.withOpacity(0.1);
         text = Colors.orange.shade700;
@@ -873,7 +915,7 @@ class _TrackPageState extends State<TrackPage> {
                 const SizedBox(height: 8),
                 _detailRow(
                   'Duration: ',
-                  '${_formatDate(r.scheduledDate)} • ${r.startTime} - ${r.endTime}',
+                  '${_formatDate(DateTime(r.startAt.year, r.startAt.month, r.startAt.day))} • ${r.startTime} - ${r.endTime}',
                 ),
                 const SizedBox(height: 8),
                 _detailRow('Venue: ', r.venueName),
@@ -961,7 +1003,7 @@ class _TrackPageState extends State<TrackPage> {
   }
 
   String _formatRequestTime(TrackingRequest r) =>
-      '${_formatDate(r.scheduledDate)} • ${r.startTime} - ${r.endTime}';
+      '${_formatDate(DateTime(r.startAt.year, r.startAt.month, r.startAt.day))} • ${r.startTime} - ${r.endTime}';
 
   String _formatDate(DateTime d) {
     final now = DateTime.now();
@@ -1224,6 +1266,42 @@ class TrackingRequest {
   final String trackedUserName;
   final String trackedUserPhone;
   final String status;
+
+  final DateTime startAt;
+  final DateTime endAt;
+
+  final String startTime; // للعرض فقط
+  final String endTime; // للعرض فقط
+
+  final String venueName;
+  final String venueId;
+  bool isFavorite;
+  final String? lastSeen;
+
+  TrackingRequest({
+    required this.id,
+    required this.trackedUserName,
+    required this.trackedUserPhone,
+    required this.status,
+    required this.startAt,
+    required this.endAt,
+    required this.startTime,
+    required this.endTime,
+    required this.venueName,
+    required this.venueId,
+    this.isFavorite = false,
+    this.lastSeen,
+  });
+
+  DateTime get startDateTime => startAt;
+  DateTime get endDateTime => endAt;
+}
+
+/*class TrackingRequest {
+  final String id;
+  final String trackedUserName;
+  final String trackedUserPhone;
+  final String status;
   final DateTime scheduledDate;
   final String startTime;
   final String endTime;
@@ -1245,6 +1323,8 @@ class TrackingRequest {
     this.isFavorite = false,
     this.lastSeen,
   });
+  DateTime get startDateTime => _parseTime(scheduledDate, startTime);
+  DateTime get endDateTime => _parseTime(scheduledDate, endTime);
 
   bool get isActive {
     if (status != 'accepted') return false;
@@ -1272,7 +1352,7 @@ class TrackingRequest {
     return DateTime(date.year, date.month, date.day, hour, minute);
   }
 }
-
+*/
 class Participant {
   final String name;
   final String status;

@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/cupertino.dart';
 
 // ----------------------------------------------------------------------------
 // Track Request Dialog
@@ -21,6 +22,10 @@ class TrackRequestDialog extends StatefulWidget {
 class _TrackRequestDialogState extends State<TrackRequestDialog> {
   final _phoneController = TextEditingController();
   final List<Friend> _selectedFriends = [];
+  bool _isPhoneInputValid = true;
+  String? _phoneInputError;
+  bool _isTimeValid = true;
+  String? _timeError;
 
   DateTime? _selectedDate;
   TimeOfDay? _startTime;
@@ -40,10 +45,32 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
     _getCurrentLocation();
   }
 
+  String _formatTime12h(TimeOfDay t) {
+    final now = DateTime.now();
+    final dt = DateTime(now.year, now.month, now.day, t.hour, t.minute);
+    return DateFormat('h:mm a').format(dt); // 1:35 AM
+  }
+
   @override
   void dispose() {
     _phoneController.dispose();
     super.dispose();
+  }
+
+  void _setTimeError(String msg) {
+    setState(() {
+      _isTimeValid = false;
+      _timeError = msg;
+    });
+  }
+
+  void _clearTimeError() {
+    if (!_isTimeValid || _timeError != null) {
+      setState(() {
+        _isTimeValid = true;
+        _timeError = null;
+      });
+    }
   }
 
   Future<String?> _getUserIdByPhone(String phone) async {
@@ -145,19 +172,42 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
   }
 
   Future<void> _addPhoneNumber() async {
-    if (!_canAddPhone) return;
-
-    final phone = '+966${_phoneController.text.trim()}';
-
-    // Check if already added
-    if (_selectedFriends.any((f) => f.phone == phone)) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Friend already added')));
+    if (!_canAddPhone) {
+      setState(() {
+        _isPhoneInputValid = false;
+        _phoneInputError = 'Enter 9 digits';
+      });
       return;
     }
 
-    // Fetch user from Firestore
+    final phone = '+966${_phoneController.text.trim()}';
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      final myDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      final myPhone = (myDoc.data()?['phone'] ?? '').toString();
+
+      if (myPhone.isNotEmpty && myPhone == phone) {
+        setState(() {
+          _isPhoneInputValid = false;
+          _phoneInputError = 'You can’t send a request to yourself';
+        });
+        return;
+      }
+    }
+
+    // already added
+    if (_selectedFriends.any((f) => f.phone == phone)) {
+      setState(() {
+        _isPhoneInputValid = false;
+        _phoneInputError = 'Friend already added';
+      });
+      return;
+    }
+
     try {
       final query = await FirebaseFirestore.instance
           .collection('users')
@@ -165,14 +215,20 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
           .limit(1)
           .get();
 
-      String displayName = phone;
-      if (query.docs.isNotEmpty) {
-        final userData = query.docs.first.data();
-        final firstName = userData['firstName'] ?? '';
-        final lastName = userData['lastName'] ?? '';
-        displayName = '$firstName $lastName'.trim();
-        if (displayName.isEmpty) displayName = phone;
+      // ✅ أهم سطر: إذا مو موجود لا تضيفه
+      if (query.docs.isEmpty) {
+        setState(() {
+          _isPhoneInputValid = false;
+          _phoneInputError = 'User not exist';
+        });
+        return;
       }
+
+      final userData = query.docs.first.data();
+      final firstName = (userData['firstName'] ?? '').toString();
+      final lastName = (userData['lastName'] ?? '').toString();
+      var displayName = '$firstName $lastName'.trim();
+      if (displayName.isEmpty) displayName = phone;
 
       setState(() {
         _selectedFriends.add(
@@ -184,18 +240,15 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
           ),
         );
         _phoneController.clear();
+
+        // ✅ reset error state
+        _isPhoneInputValid = true;
+        _phoneInputError = null;
       });
     } catch (e) {
       setState(() {
-        _selectedFriends.add(
-          Friend(
-            name: phone,
-            phone: phone,
-            isFavorite: false,
-            isFromPhoneInput: true,
-          ),
-        );
-        _phoneController.clear();
+        _isPhoneInputValid = false;
+        _phoneInputError = 'Could not verify this number. Try again.';
       });
     }
   }
@@ -288,57 +341,224 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
   }
 
   Future<void> _selectStartTime() async {
-    final now = TimeOfDay.now();
+    if (_selectedDate == null) return;
 
-    final picked = await showTimePicker(
-      context: context,
-      initialTime: _startTime ?? now,
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(
-              primary: AppColors.kGreen,
-              onPrimary: Colors.white,
-              onSurface: Colors.black87,
-            ),
-          ),
-          child: child!,
-        );
-      },
+    final date = _selectedDate!;
+    final dayStart = DateTime(date.year, date.month, date.day, 0, 0);
+    final dayEnd = DateTime(date.year, date.month, date.day, 23, 59);
+
+    final now = DateTime.now();
+    final isToday =
+        now.year == date.year && now.month == date.month && now.day == date.day;
+
+    // ✅ minimum = الآن (إذا اليوم) وإلا بداية اليوم
+    final min = isToday ? now : dayStart;
+
+    // initial = الوقت المختار سابقاً أو min
+    DateTime initial;
+    if (_startTime != null) {
+      initial = DateTime(
+        date.year,
+        date.month,
+        date.day,
+        _startTime!.hour,
+        _startTime!.minute,
+      );
+    } else {
+      initial = min;
+    }
+
+    final picked = await _showCupertinoDateTimePicker(
+      title: 'Select Time',
+      initial: initial,
+      minimum: min,
+      maximum: dayEnd,
     );
 
-    if (picked != null) {
-      setState(() {
-        _startTime = picked;
-      });
-    }
+    if (picked == null) return;
+
+    setState(() {
+      _startTime = TimeOfDay(hour: picked.hour, minute: picked.minute);
+
+      // ✅ إذا end موجود وصار قبل/يساوي start → صفري end (عشان ما يصير اختيار غلط)
+      if (_endTime != null) {
+        final end = DateTime(
+          date.year,
+          date.month,
+          date.day,
+          _endTime!.hour,
+          _endTime!.minute,
+        );
+        if (!end.isAfter(picked)) _endTime = null;
+      }
+    });
   }
 
   Future<void> _selectEndTime() async {
-    final now = TimeOfDay.now();
+    if (_selectedDate == null || _startTime == null) return;
 
-    final picked = await showTimePicker(
+    final date = _selectedDate!;
+    final dayEnd = DateTime(date.year, date.month, date.day, 23, 59);
+
+    final start = DateTime(
+      date.year,
+      date.month,
+      date.day,
+      _startTime!.hour,
+      _startTime!.minute,
+    );
+
+    // ✅ minimum end لازم يكون بعد start (دقيقة على الأقل)
+    final minEnd = start.add(const Duration(minutes: 1));
+
+    // إذا start قرب آخر اليوم، ما عاد فيه end صالح
+    if (minEnd.isAfter(dayEnd)) {
+      // هنا تقدرين تحطين نفس error تحت الوقت إذا تبين
+      return;
+    }
+
+    DateTime initial;
+    if (_endTime != null) {
+      initial = DateTime(
+        date.year,
+        date.month,
+        date.day,
+        _endTime!.hour,
+        _endTime!.minute,
+      );
+    } else {
+      initial = minEnd;
+    }
+
+    final picked = await _showCupertinoDateTimePicker(
+      title: 'Select Time',
+      initial: initial,
+      minimum: minEnd,
+      maximum: dayEnd,
+    );
+
+    if (picked == null) return;
+
+    setState(() {
+      _endTime = TimeOfDay(hour: picked.hour, minute: picked.minute);
+    });
+  }
+
+  Future<DateTime?> _showCupertinoDateTimePicker({
+    required DateTime initial,
+    required DateTime minimum,
+    required DateTime maximum,
+    required String title,
+  }) async {
+    DateTime temp = initial.isBefore(minimum) ? minimum : initial;
+
+    return showModalBottomSheet<DateTime?>(
       context: context,
-      initialTime: _endTime ?? now,
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(
-              primary: AppColors.kGreen,
-              onPrimary: Colors.white,
-              onSurface: Colors.black87,
-            ),
-          ),
-          child: child!,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final okEnabled = !temp.isBefore(minimum) && !temp.isAfter(maximum);
+
+            return SafeArea(
+              top: false,
+              child: Container(
+                height: 420,
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(24),
+                    topRight: Radius.circular(24),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Title (مثل الصورة)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 18, 20, 10),
+                      child: Text(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.black87,
+                        ),
+                      ),
+                    ),
+
+                    // Picker
+                    Expanded(
+                      child: CupertinoDatePicker(
+                        mode: CupertinoDatePickerMode.time,
+                        use24hFormat: false,
+                        minimumDate: minimum,
+                        maximumDate: maximum,
+                        initialDateTime: temp,
+                        onDateTimeChanged: (d) {
+                          // iOS picker بنفسه ما يسمح ينزل تحت minimumDate
+                          // بس نخليها احتياط:
+                          if (d.isBefore(minimum)) d = minimum;
+                          if (d.isAfter(maximum)) d = maximum;
+
+                          setModalState(() => temp = d);
+                        },
+                      ),
+                    ),
+
+                    // OK Button (disabled لين يصير Valid)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+                      child: SizedBox(
+                        width: double.infinity,
+                        height: 54,
+                        child: ElevatedButton(
+                          onPressed: okEnabled
+                              ? () => Navigator.pop(context, temp)
+                              : null,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.kGreen,
+                            // قريب من لون الصورة
+                            disabledBackgroundColor: Colors.grey.shade300,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
+                          child: Text(
+                            'Ok',
+                            style: TextStyle(
+                              color: okEnabled
+                                  ? Colors.white
+                                  : Colors.grey.shade600,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // Cancel
+                    Center(
+                      child: TextButton(
+                        onPressed: () => Navigator.pop(context, null),
+                        child: const Text(
+                          'Cancel',
+                          style: TextStyle(fontSize: 18, color: Colors.black87),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                ),
+              ),
+            );
+          },
         );
       },
     );
-
-    if (picked != null) {
-      setState(() {
-        _endTime = picked;
-      });
-    }
   }
 
   bool get _canSubmit {
@@ -473,12 +693,9 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
       if (!mounted) return;
       Navigator.pop(context);
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Tracking request sent to ${resolved.length} friend(s).',
-          ),
-        ),
+      SnackbarHelper.showSuccess(
+        context,
+        'Tracking request sent to ${resolved.length} friend(s).',
       );
     } catch (e) {
       ScaffoldMessenger.of(
@@ -620,99 +837,136 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                   const SizedBox(height: 16),
 
                   // Phone Number Input with Add Button
-                  Row(
+                  // Phone Number Input with Add Button + Fixed Error Space
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _phoneController,
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [
-                            FilteringTextInputFormatter.digitsOnly,
-                            LengthLimitingTextInputFormatter(9),
-                          ],
-                          onChanged: (value) => setState(() {}),
-                          decoration: InputDecoration(
-                            hintText: 'Phone number',
-                            hintStyle: TextStyle(
-                              color: Colors.grey[400],
-                              fontWeight: FontWeight.w400,
-                            ),
-                            prefixText: _phoneController.text.isEmpty
-                                ? null
-                                : '+966 ',
-                            prefixStyle: const TextStyle(
-                              color: Colors.black87,
-                              fontWeight: FontWeight.w500,
-                            ),
-                            filled: true,
-                            fillColor: Colors.grey[50],
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide(
-                                color: Colors.grey.shade300,
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _phoneController,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.digitsOnly,
+                                LengthLimitingTextInputFormatter(9),
+                              ],
+                              onChanged: (value) {
+                                setState(() {
+                                  _isPhoneInputValid = true;
+                                  _phoneInputError = null;
+                                });
+                              },
+                              decoration: InputDecoration(
+                                hintText: 'Phone number',
+                                hintStyle: TextStyle(
+                                  color: Colors.grey[400],
+                                  fontWeight: FontWeight.w400,
+                                ),
+                                prefixText: _phoneController.text.isEmpty
+                                    ? null
+                                    : '+966 ',
+                                prefixStyle: const TextStyle(
+                                  color: Colors.black87,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                filled: true,
+                                fillColor: Colors.grey[50],
+
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(
+                                    color: Colors.grey.shade300,
+                                  ),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(
+                                    color: _isPhoneInputValid
+                                        ? Colors.grey.shade300
+                                        : AppColors.kError,
+                                    width: 1,
+                                  ),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide(
+                                    color: _isPhoneInputValid
+                                        ? AppColors.kGreen
+                                        : AppColors.kError,
+                                    width: 2,
+                                  ),
+                                ),
+
+                                // ❌ احذفي errorText و errorStyle من هنا
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 14,
+                                ),
                               ),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide(
-                                color: Colors.grey.shade300,
-                              ),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: const BorderSide(
-                                color: AppColors.kGreen,
-                                width: 2,
-                              ),
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 14,
                             ),
                           ),
-                        ),
+                          const SizedBox(width: 12),
+
+                          GestureDetector(
+                            onTap: _canAddPhone ? _addPhoneNumber : null,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 20,
+                                vertical: 14,
+                              ),
+                              decoration: BoxDecoration(
+                                color: _canAddPhone
+                                    ? AppColors.kGreen
+                                    : Colors.grey[300],
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                'Add',
+                                style: TextStyle(
+                                  color: _canAddPhone
+                                      ? Colors.white
+                                      : Colors.grey[500],
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 15,
+                                ),
+                              ),
+                            ),
+                          ),
+
+                          const SizedBox(width: 8),
+
+                          IconButton(
+                            onPressed: _showFavoritesList,
+                            icon: const Icon(
+                              Icons.favorite_border,
+                              color: AppColors.kGreen,
+                              size: 28,
+                            ),
+                            padding: const EdgeInsets.all(12),
+                            style: IconButton.styleFrom(
+                              backgroundColor: Colors.grey[100],
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 12),
-                      GestureDetector(
-                        onTap: _canAddPhone ? _addPhoneNumber : null,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 20,
-                            vertical: 14,
-                          ),
-                          decoration: BoxDecoration(
-                            color: _canAddPhone
-                                ? AppColors.kGreen
-                                : Colors.grey[300],
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            'Add',
-                            style: TextStyle(
-                              color: _canAddPhone
-                                  ? Colors.white
-                                  : Colors.grey[500],
-                              fontWeight: FontWeight.w600,
-                              fontSize: 15,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      IconButton(
-                        onPressed: _showFavoritesList,
-                        icon: const Icon(
-                          Icons.favorite_border,
-                          color: AppColors.kGreen,
-                          size: 28,
-                        ),
-                        padding: const EdgeInsets.all(12),
-                        style: IconButton.styleFrom(
-                          backgroundColor: Colors.grey[100],
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
+
+                      // ✅ مكان ثابت للخطأ (ما يزحزح الـ Row)
+                      const SizedBox(height: 6),
+                      SizedBox(
+                        height: 18, // مساحة ثابتة حتى لو ما فيه خطأ
+                        child: (!_isPhoneInputValid && _phoneInputError != null)
+                            ? Text(
+                                _phoneInputError!,
+                                style: const TextStyle(
+                                  color: AppColors.kError,
+                                  fontSize: 13,
+                                ),
+                              )
+                            : null,
                       ),
                     ],
                   ),
@@ -886,7 +1140,15 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                     children: [
                       Expanded(
                         child: GestureDetector(
-                          onTap: _selectStartTime,
+                          onTap: () {
+                            if (_selectedDate == null) {
+                              // _setTimeError('Please select a date first');
+                              return;
+                            }
+                            _clearTimeError();
+                            _selectStartTime();
+                          },
+
                           child: Container(
                             padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
@@ -917,8 +1179,9 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                                 const SizedBox(height: 8),
                                 Text(
                                   _startTime != null
-                                      ? _startTime!.format(context)
+                                      ? _formatTime12h(_startTime!)
                                       : '--:--',
+
                                   style: TextStyle(
                                     fontSize: 18,
                                     fontWeight: FontWeight.w700,
@@ -935,7 +1198,19 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: GestureDetector(
-                          onTap: _selectEndTime,
+                          onTap: () {
+                            if (_selectedDate == null) {
+                              // _setTimeError('Please select a date first');
+                              return;
+                            }
+                            if (_startTime == null) {
+                              //_setTimeError('Please select start time first');
+                              return;
+                            }
+                            _clearTimeError();
+                            _selectEndTime();
+                          },
+
                           child: Container(
                             padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
@@ -966,7 +1241,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                                 const SizedBox(height: 8),
                                 Text(
                                   _endTime != null
-                                      ? _endTime!.format(context)
+                                      ? _formatTime12h(_endTime!)
                                       : '--:--',
                                   style: TextStyle(
                                     fontSize: 18,
@@ -983,6 +1258,20 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 6),
+                  SizedBox(
+                    height: 18,
+                    child: (!_isTimeValid && _timeError != null)
+                        ? Text(
+                            _timeError!,
+                            style: const TextStyle(
+                              color: AppColors.kError,
+                              fontSize: 13,
+                            ),
+                          )
+                        : null,
+                  ),
+
                   const SizedBox(height: 32),
                 ],
               ),

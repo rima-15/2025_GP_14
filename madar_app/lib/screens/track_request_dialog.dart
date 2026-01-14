@@ -215,7 +215,6 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
           .limit(1)
           .get();
 
-      // ✅ أهم سطر: إذا مو موجود لا تضيفه
       if (query.docs.isEmpty) {
         setState(() {
           _isPhoneInputValid = false;
@@ -241,7 +240,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
         );
         _phoneController.clear();
 
-        // ✅ reset error state
+        // reset error state
         _isPhoneInputValid = true;
         _phoneInputError = null;
       });
@@ -351,10 +350,8 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
     final isToday =
         now.year == date.year && now.month == date.month && now.day == date.day;
 
-    // ✅ minimum = الآن (إذا اليوم) وإلا بداية اليوم
     final min = isToday ? now : dayStart;
 
-    // initial = الوقت المختار سابقاً أو min
     DateTime initial;
     if (_startTime != null) {
       initial = DateTime(
@@ -380,7 +377,6 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
     setState(() {
       _startTime = TimeOfDay(hour: picked.hour, minute: picked.minute);
 
-      // ✅ إذا end موجود وصار قبل/يساوي start → صفري end (عشان ما يصير اختيار غلط)
       if (_endTime != null) {
         final end = DateTime(
           date.year,
@@ -408,12 +404,9 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
       _startTime!.minute,
     );
 
-    // ✅ minimum end لازم يكون بعد start (دقيقة على الأقل)
     final minEnd = start.add(const Duration(minutes: 1));
 
-    // إذا start قرب آخر اليوم، ما عاد فيه end صالح
     if (minEnd.isAfter(dayEnd)) {
-      // هنا تقدرين تحطين نفس error تحت الوقت إذا تبين
       return;
     }
 
@@ -475,7 +468,6 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Title (مثل الصورة)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(20, 18, 20, 10),
                       child: Text(
@@ -497,8 +489,6 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                         maximumDate: maximum,
                         initialDateTime: temp,
                         onDateTimeChanged: (d) {
-                          // iOS picker بنفسه ما يسمح ينزل تحت minimumDate
-                          // بس نخليها احتياط:
                           if (d.isBefore(minimum)) d = minimum;
                           if (d.isAfter(maximum)) d = maximum;
 
@@ -507,7 +497,6 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                       ),
                     ),
 
-                    // OK Button (disabled لين يصير Valid)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
                       child: SizedBox(
@@ -580,7 +569,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
       return;
     }
 
-    // ✅ Validate time
+    //  Validate time
     final date = _selectedDate!;
     final start = DateTime(
       date.year,
@@ -606,7 +595,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
 
     final durationMinutes = end.difference(start).inMinutes;
 
-    // ✅ Get sender info (name/phone) from users/{uid}
+    // Get sender info (name/phone) from users/{uid}
     final senderDoc = await FirebaseFirestore.instance
         .collection('users')
         .doc(user.uid)
@@ -626,7 +615,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
       return;
     }
 
-    // ✅ Resolve receivers (UIDs)
+    // Resolve receivers (UIDs)
     final List<Friend> friends = List.from(_selectedFriends);
     final List<Map<String, String>> resolved = []; // {uid, phone, name}
 
@@ -639,7 +628,6 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
         return;
       }
 
-      // ✅ جيبي اسم المستقبل من users/{uid}
       final receiverDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(receiverUid)
@@ -657,7 +645,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
       });
     }
 
-    // ✅ Create one request per receiver but same batchId
+    // Create one request per receiver but same batchId
     final batchId = '${user.uid}_${DateTime.now().millisecondsSinceEpoch}';
     final col = FirebaseFirestore.instance.collection('trackRequests');
     final batch = FirebaseFirestore.instance.batch();
@@ -898,7 +886,6 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                                   ),
                                 ),
 
-                                // ❌ احذفي errorText و errorStyle من هنا
                                 contentPadding: const EdgeInsets.symmetric(
                                   horizontal: 16,
                                   vertical: 14,
@@ -954,10 +941,9 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                         ],
                       ),
 
-                      // ✅ مكان ثابت للخطأ (ما يزحزح الـ Row)
                       const SizedBox(height: 6),
                       SizedBox(
-                        height: 18, // مساحة ثابتة حتى لو ما فيه خطأ
+                        height: 18,
                         child: (!_isPhoneInputValid && _phoneInputError != null)
                             ? Text(
                                 _phoneInputError!,
@@ -1142,7 +1128,6 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                         child: GestureDetector(
                           onTap: () {
                             if (_selectedDate == null) {
-                              // _setTimeError('Please select a date first');
                               return;
                             }
                             _clearTimeError();
@@ -1200,11 +1185,9 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                         child: GestureDetector(
                           onTap: () {
                             if (_selectedDate == null) {
-                              // _setTimeError('Please select a date first');
                               return;
                             }
                             if (_startTime == null) {
-                              //_setTimeError('Please select start time first');
                               return;
                             }
                             _clearTimeError();

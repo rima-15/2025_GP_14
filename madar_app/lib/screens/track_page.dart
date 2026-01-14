@@ -32,7 +32,6 @@ class _TrackPageState extends State<TrackPage> {
     return FirebaseFirestore.instance
         .collection('trackRequests')
         .where('senderId', isEqualTo: uid)
-        // نجيب بس pending/accepted (declined ما نعرضه)
         .where('status', whereIn: ['pending', 'accepted'])
         .orderBy('startAt')
         .snapshots()
@@ -74,13 +73,10 @@ class _TrackPageState extends State<TrackPage> {
       final start = r.startAt;
       final end = r.endAt;
 
-      // انتهى وقتها؟ تختفي
       if (now.isAfter(end)) return false;
 
-      // لازم تكون pending أو accepted
       if (r.status != 'pending' && r.status != 'accepted') return false;
 
-      // Upcoming فقط قبل البداية
       return now.isBefore(start);
     }).toList();
 
@@ -129,7 +125,7 @@ class _TrackPageState extends State<TrackPage> {
     _loadVenueMaps();
 
     _clockTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (mounted) setState(() {}); // بس عشان يعيد حساب upcoming/active
+      if (mounted) setState(() {});
     });
   }
 
@@ -1270,8 +1266,8 @@ class TrackingRequest {
   final DateTime startAt;
   final DateTime endAt;
 
-  final String startTime; // للعرض فقط
-  final String endTime; // للعرض فقط
+  final String startTime;
+  final String endTime;
 
   final String venueName;
   final String venueId;

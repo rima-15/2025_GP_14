@@ -196,7 +196,6 @@ class _NotificationsPageState extends State<NotificationsPage> {
             return NotificationItem(
               id: doc.id,
 
-              // 👇 نستخدم نفس الأنواع الموجودة عندك
               type: d['status'] == 'accepted'
                   ? NotificationType.trackAccepted
                   : NotificationType.trackRejected,
@@ -205,13 +204,12 @@ class _NotificationsPageState extends State<NotificationsPage> {
                   ? 'Track Request Accepted'
                   : 'Track Request Declined',
 
-              message: '', // UI عندك ما يعتمد عليه
+              message: '',
 
               timestamp: createdAt,
               isRead: false,
 
-              // 👇 نخلي نفس الحقول اللي UI يستخدمها
-              senderName: d['receiverName'], // أو اسم لو أضفتيه لاحقًا
+              senderName: d['receiverName'],
               senderPhone: d['receiverPhone'],
               venueName: d['venueName'],
 
@@ -280,16 +278,16 @@ class _NotificationsPageState extends State<NotificationsPage> {
         ),
       ),
       body: StreamBuilder<List<NotificationItem>>(
-        stream: _incomingTrackRequestsStream(), // للمستقبل (pending)
+        stream: _incomingTrackRequestsStream(),
         builder: (context, incomingSnap) {
           final incomingTrack = incomingSnap.data ?? [];
 
           return StreamBuilder<List<NotificationItem>>(
-            stream: _senderResponsesStream(), // للمرسل (accepted/declined)
+            stream: _senderResponsesStream(),
             builder: (context, senderSnap) {
               final senderResponses = senderSnap.data ?? [];
 
-              // ✅ ندمج: incoming + senderResponses + mock
+              // incoming + senderResponses + mock
               final merged = [
                 ...incomingTrack,
                 ...senderResponses,

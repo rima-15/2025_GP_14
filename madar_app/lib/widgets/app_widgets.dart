@@ -443,6 +443,9 @@ class PrimaryButton extends StatelessWidget {
   final VoidCallback? onPressed;
   final bool isLoading;
   final bool enabled;
+  final IconData? icon; // Optional icon
+  final double iconSize; // Optional icon size
+  final double iconSpacing; // Space between icon and text
 
   const PrimaryButton({
     super.key,
@@ -450,6 +453,9 @@ class PrimaryButton extends StatelessWidget {
     required this.onPressed,
     this.isLoading = false,
     this.enabled = true,
+    this.icon, // Nullable by default
+    this.iconSize = 20.0,
+    this.iconSpacing = 12.0,
   });
 
   @override
@@ -480,8 +486,26 @@ class PrimaryButton extends StatelessWidget {
                   strokeWidth: 2.5,
                 ),
               )
-            : Text(text, style: AppTextStyles.button),
+            : _buildContent(),
       ),
+    );
+  }
+
+  Widget _buildContent() {
+    if (icon == null) {
+      // If no icon, just return text
+      return Text(text, style: AppTextStyles.button);
+    }
+
+    // If icon exists, return Row with icon and text
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: iconSize),
+        SizedBox(width: iconSpacing),
+        Text(text, style: AppTextStyles.button),
+      ],
     );
   }
 }
@@ -492,12 +516,18 @@ class SecondaryButton extends StatelessWidget {
   final String text;
   final VoidCallback? onPressed;
   final bool isLoading;
+  final IconData? icon; // Optional icon
+  final double iconSize; // Optional icon size
+  final double iconSpacing; // Space between icon and text
 
   const SecondaryButton({
     super.key,
     required this.text,
     required this.onPressed,
     this.isLoading = false,
+    this.icon, // Nullable by default
+    this.iconSize = 20.0,
+    this.iconSpacing = 12.0,
   });
 
   @override
@@ -524,8 +554,26 @@ class SecondaryButton extends StatelessWidget {
                   strokeWidth: 2.5,
                 ),
               )
-            : Text(text, style: AppTextStyles.button),
+            : _buildContent(),
       ),
+    );
+  }
+
+  Widget _buildContent() {
+    if (icon == null) {
+      // If no icon, just return text
+      return Text(text, style: AppTextStyles.button);
+    }
+
+    // If icon exists, return Row with icon and text
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: iconSize),
+        SizedBox(width: iconSpacing),
+        Text(text, style: AppTextStyles.button),
+      ],
     );
   }
 }

@@ -6,7 +6,7 @@ import 'package:madar_app/screens/AR_page.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:madar_app/theme/theme.dart';
 import 'package:madar_app/api/place_rating_service.dart';
-
+import 'navigation_flow_complete.dart';
 // ----------------------------------------------------------------------------
 // Category Page - Shows places within a specific category
 // ----------------------------------------------------------------------------
@@ -237,48 +237,16 @@ class _CategoryPageState extends State<CategoryPage>
     );
   }
 
-  // Open AR navigation with validation
-  Future<void> _openNavigationAR(String placeId, String placeName) async {
-    // Validate world position before proceeding
+  Future<void> _openNavigationFlow(String placeId, String placeName) async {
     final hasPosition = await _hasWorldPosition(placeId);
-
     if (!hasPosition) {
       if (!mounted) return;
       _showNoPositionDialog(placeName);
       return;
     }
-
-    // Request camera permission
-    final status = await Permission.camera.request();
-
-    if (status.isGranted) {
-      if (!mounted) return;
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => UnityCameraPage(isNavigation: true, placeId: placeId),
-        ),
-      );
-    } else if (status.isPermanentlyDenied) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Camera permission is permanently denied. Please enable it from Settings.',
-          ),
-        ),
-      );
-      openAppSettings();
-    } else {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Camera permission is required to use AR.'),
-        ),
-      );
-    }
+    if (!mounted) return;
+    showNavigationDialog(context, placeName, placeId);
   }
-
   // ---------- Build ----------
 
   @override
@@ -453,7 +421,7 @@ class _CategoryPageState extends State<CategoryPage>
     final img = data['placeImage'] ?? '';
 
     return InkWell(
-      onTap: () => _openNavigationAR(placeId, placeName),
+      onTap: () => _openNavigationFlow(placeId, placeName),
       borderRadius: BorderRadius.circular(12),
       child: Container(
         decoration: BoxDecoration(

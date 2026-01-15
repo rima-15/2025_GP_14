@@ -880,7 +880,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
                         Expanded(
                           child: _preferenceButtonHorizontal(
                             'Escalator',
-                            Icons.escalator_warning,
+                            Icons.escalator,
                             'escalator',
                           ),
                         ),

@@ -11,7 +11,10 @@ import 'package:madar_app/theme/theme.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
+import 'package:webview_flutter/webview_flutter.dart' show JavaScriptMessage;
 import 'category_page.dart';
+import 'navigation_flow_complete.dart';
+
 
 // ----------------------------------------------------------------------------
 // Constants
@@ -1586,35 +1589,663 @@ class _ImageOverlayState extends State<_ImageOverlay> {
 // Floor Map Widgets
 // ----------------------------------------------------------------------------
 
-class _FloorMapViewer extends StatelessWidget {
+
+class _FloorMapViewer extends StatefulWidget {
   final String currentFloor;
 
-  const _FloorMapViewer({required this.currentFloor});
+  const _FloorMapViewer({super.key, required this.currentFloor});
+
+  @override
+  State<_FloorMapViewer> createState() => _FloorMapViewerState();
+}
+
+class _FloorMapViewerState extends State<_FloorMapViewer> {
+Size _viewerSize = Size.zero;
+bool _showPopup = false;
+final TransformationController _tc = TransformationController();
+
+Future<void> _handlePoiMessage(String raw) async {
+  Map<String, dynamic>? data;
+  try {
+    data = jsonDecode(raw) as Map<String, dynamic>;
+  } catch (_) {
+    return;
+  }
+
+  // When hotspot "Navigate" is clicked inside the 3D view
+  if (data["type"] == "navigate") {
+    final dest = (data["destinationPoi"] as String?)?.trim();
+    if (dest == null || dest.isEmpty) return;
+
+    final displayName = dest
+        .replaceFirst('POIMAT_', '')
+        .replaceAll(RegExp(r'\.\d+\$'), '')
+        .trim();
+    showNavigationDialog(
+      context,
+      displayName.isEmpty ? dest : displayName,
+      dest,
+    );
+    return;
+  }
+
+  // (Optional) keep tap logs if you want
+  if (data["type"] == "tap") {
+    // debugPrint("🟦 POI tap: $data");
+    return;
+  }
+}
+
+
+  void _showNavigateChoiceSheet(String destinationPoi) {
+  showModalBottomSheet(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) {
+      final shopName = destinationPoi.replaceFirst('POIMAT_', '').trim().isEmpty
+          ? destinationPoi
+          : destinationPoi.replaceFirst('POIMAT_', '').trim();
+
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              "Set your location",
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+
+            ListTile(
+              leading: const Icon(Icons.location_pin),
+              title: const Text("Use Pin on Map"),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => PathOverviewScreen(
+                      shopName: shopName,
+                      shopId: destinationPoi,
+                      startingMethod: 'pin',
+                    ),
+                  ),
+                );
+              },
+            ),
+
+            ListTile(
+              leading: const Icon(Icons.camera_alt),
+              title: const Text("Use Camera"),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => PathOverviewScreen(
+                      shopName: shopName,
+                      shopId: destinationPoi,
+                      startingMethod: 'camera',
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
 
   @override
   Widget build(BuildContext context) {
+    final currentFloor = widget.currentFloor;
+
     if (currentFloor.isEmpty) {
       return _buildError('No map selected');
     }
 
-    try {
-      return ModelViewer(
-        key: ValueKey(currentFloor),
-        src: currentFloor,
-        alt: "3D Floor Map",
-        ar: false,
-        autoRotate: false,
-        cameraControls: true,
-        backgroundColor: Colors.white,
-        cameraOrbit: "0deg 65deg 2.5m",
-        minCameraOrbit: "auto 0deg auto",
-        maxCameraOrbit: "auto 90deg auto",
-        cameraTarget: "0m 0m 0m",
-      );
-    } catch (e) {
-      return _buildError('Failed to load 3D map');
+      return Stack(
+            clipBehavior: Clip.none,
+            children: [
+              ModelViewer(
+                key: ValueKey(currentFloor),
+                src: currentFloor,
+                alt: "3D Floor Map",
+                ar: false,
+                autoRotate: false,
+                cameraControls: true,
+                backgroundColor: Colors.white,
+                cameraOrbit: "0deg 65deg 2.5m",
+                minCameraOrbit: "auto 0deg auto",
+                maxCameraOrbit: "auto 90deg auto",
+                cameraTarget: "0m 0m 0m",
+                relatedJs: '''console.log("✅ relatedJs injected");
+
+// ---------------------------
+// Channels
+// ---------------------------
+function postToPOI(msg) {
+  try { POI_CHANNEL.postMessage(msg); return true; } catch (e) { return false; }
+}
+function postToTest(msg) {
+  try { JS_TEST_CHANNEL.postMessage(msg); return true; } catch (e) { return false; }
+}
+
+// ---------------------------
+// Helpers
+// ---------------------------
+function getViewer() { return document.querySelector('model-viewer'); }
+
+function cssPointFromEvent(viewer, event) {
+  const rect = viewer.getBoundingClientRect();
+  return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+}
+
+function getPointFromTouchEnd(viewer, e) {
+  const t = (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : null;
+  if (!t) return null;
+  const rect = viewer.getBoundingClientRect();
+  return { x: t.clientX - rect.left, y: t.clientY - rect.top };
+}
+
+// Normalize names: "POIMAT_DIOR fashion.001" -> "POIMAT_DIOR fashion"
+function stripDotNumber(name) {
+  if (!name) return name;
+  return name.replace(/\.\d+\$/, '');
+}
+
+// ---------------------------
+// Hotspot bubble (moves with camera)
+// ---------------------------
+var __navHotspot = null;
+var __lastTouchEndAt = 0;
+
+function ensureHotspotStyle() {
+  if (document.getElementById("poi_hotspot_style")) return;
+
+  var style = document.createElement("style");
+  style.id = "poi_hotspot_style";
+
+  // Important:
+  // - model-viewer hotspots are positioned via CSS variables: --hotspot-x / --hotspot-y / --hotspot-visibility
+  // - DO NOT put our own "transform" on the inner bubble root that would fight those variables.
+  //   We keep the hotspot root at the exact hotspot point, then shift the bubble inside it.
+  style.textContent = `
+  .poiHotspotRoot{
+    pointer-events:auto;
+    position:absolute;
+    left:0; top:0;
+    width:1px; height:1px;
+    transform: translate3d(var(--hotspot-x), var(--hotspot-y), 0px);
+    will-change: transform;
+    z-index: 1000;
+  }
+
+  .poiHotspotWrap{
+    pointer-events:auto;
+    transform: translate(-50%, -110%);
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+  }
+
+  .poiBubble{
+    background: rgba(255,255,255,0.95);
+    color:#111;
+    padding:8px 10px;
+    border-radius:12px;
+    box-shadow:0 10px 24px rgba(0,0,0,0.18);
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    font-size:12px;
+    max-width:200px;
+    min-width:160px;
+  }
+  .poiRow{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;}
+  .poiTitle{font-weight:700;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .poiClose{cursor:pointer;opacity:.7;font-size:18px;line-height:18px;}
+  .poiClose:hover{opacity:1;}
+  .poiBtn{
+    width:100%;
+    border:0;
+    padding:8px 10px;
+    border-radius:10px;
+    background:#1e88e5;
+    color:#fff;
+    font-weight:700;
+    cursor:pointer;
+  }
+  .poiBtn:active{transform:scale(.98);}
+  .poiTri{
+    width:0;height:0;
+    border-left:8px solid transparent;
+    border-right:8px solid transparent;
+    border-top:10px solid rgba(255,255,255,0.95);
+    margin-top:-1px;
+    filter: drop-shadow(0 2px 2px rgba(0,0,0,0.15));
+  }
+`;
+
+  document.head.appendChild(style);
+}
+
+function ensureNavHotspot(viewer) {
+  ensureHotspotStyle();
+  if (__navHotspot) return __navHotspot;
+
+  var el = document.createElement("div");
+  el.setAttribute("slot", "hotspot-nav");
+  el.className = "poiHotspotRoot";
+  el.style.display = "none";
+
+  el.innerHTML =
+    '<div class="poiHotspotWrap">' +
+      '<div class="poiBubble">' +
+        '<div class="poiRow">' +
+          '<div class="poiTitle">Selected</div>' +
+          '<div class="poiClose" aria-label="Close">×</div>' +
+        '</div>' +
+        '<button type="button" class="poiBtn">Navigate</button>' +
+      '</div>' +
+      '<div class="poiTri"></div>' +
+    '</div>';
+
+  // Only the bubble should capture taps; everything else should fall through to model-viewer.
+  var wrap = el.querySelector(".poiHotspotWrap");
+
+  // stop the click from also triggering model-viewer click
+  wrap.addEventListener("pointerdown", function(e){ e.stopPropagation(); }, true);
+  wrap.addEventListener("click", function(e){ e.stopPropagation(); }, true);
+
+  viewer.appendChild(el);
+
+  // Close
+  el.querySelector(".poiClose").addEventListener("click", function(e){
+    e.stopPropagation();
+    el.style.display = "none";
+  });
+
+  // Navigate button
+    var __btn = el.querySelector(".poiBtn");
+  function __navActivate(e){
+    if (e){ e.stopPropagation(); if (e.preventDefault) e.preventDefault(); }
+    var dest = el.getAttribute("data-dest") || "";
+    if (dest) {
+      postToPOI(JSON.stringify({ type: "navigate", destinationPoi: dest }));
     }
   }
+  __btn.addEventListener("click", __navActivate);
+  __btn.addEventListener("pointerup", __navActivate);
+  __btn.addEventListener("touchend", __navActivate, { passive: false });
+
+__navHotspot = el;
+  return el;
+}
+
+function showNavHotspot(viewer, position, normal, destBase) {
+  var el = ensureNavHotspot(viewer);
+  el.setAttribute("data-dest", destBase || "");
+
+  // label (optional)
+  var t = destBase ? destBase.replace("POIMAT_", "").trim() : "Selected";
+  el.querySelector(".poiTitle").textContent = t || "Selected";
+
+  // Force a full re-anchor every time:
+  // 1) hide
+  // 2) clear old attrs
+  // 3) set new attrs
+  // 4) re-attach node (forces model-viewer to recalc hotspot)
+  // 5) requestUpdate + show next frame
+  el.style.display = "none";
+
+  try { el.removeAttribute("data-position"); } catch(e) {}
+  try { el.removeAttribute("data-normal"); } catch(e) {}
+
+  var posStr = position.x + " " + position.y + " " + position.z;
+  el.setAttribute("data-position", posStr);
+
+  var normStr = null;
+  if (normal) {
+    normStr = normal.x + " " + normal.y + " " + normal.z;
+    el.setAttribute("data-normal", normStr);
+  }
+
+  // Re-attach (keeps listeners, but forces slot update)
+  try {
+    if (el.parentNode === viewer) viewer.removeChild(el);
+    viewer.appendChild(el);
+  } catch(e) {}
+
+  // If updateHotspot API exists, call it too (safe-guarded)
+  try {
+    if (typeof viewer.updateHotspot === "function") {
+      viewer.updateHotspot({
+        name: "nav",
+        position: posStr,
+        normal: normStr || undefined
+      });
+    }
+  } catch(e) {}
+
+  try { if (viewer.requestUpdate) viewer.requestUpdate(); } catch(e) {}
+
+  requestAnimationFrame(function() {
+    el.style.display = "block";
+    try { if (viewer.requestUpdate) viewer.requestUpdate(); } catch(e) {}
+  });
+}
+
+function hideNavHotspot() {
+  if (__navHotspot) __navHotspot.style.display = "none";
+}
+
+// ---------------------------
+// Material cache + highlight
+// ---------------------------
+var __orig = new Map();
+var __lastHighlighted = null;
+
+function hasModelAndMaterials(viewer) {
+  return !!(viewer && viewer.model && viewer.model.materials && viewer.model.materials.length);
+}
+
+function cacheOriginalPoiMaterials(viewer) {
+  if (!hasModelAndMaterials(viewer)) return false;
+
+  let cached = 0;
+  viewer.model.materials.forEach(function(m) {
+    if (!m || !m.name) return;
+    if (m.name.indexOf("POIMAT_") !== 0) return;
+
+    if (!__orig.has(m.name)) {
+      __orig.set(m.name, {
+        baseColorFactor: m.pbrMetallicRoughness.baseColorFactor.slice(),
+        emissiveFactor: (m.emissiveFactor ? m.emissiveFactor.slice() : [0,0,0]),
+        metallicFactor: m.pbrMetallicRoughness.metallicFactor,
+        roughnessFactor: m.pbrMetallicRoughness.roughnessFactor,
+        alphaMode: m.alphaMode
+      });
+      cached++;
+    }
+  });
+
+  try { viewer.requestUpdate(); } catch(e) {}
+  postToPOI(JSON.stringify({ type:"debug", step:"cacheOriginalPoiMaterials", ok:true, cachedTotal: __orig.size, cachedThisCall: cached }));
+  return true;
+}
+
+function resetAllHighlights(viewer) {
+  if (!hasModelAndMaterials(viewer)) return;
+
+  viewer.model.materials.forEach(function(m) {
+    if (!m || !m.name) return;
+    if (m.name.indexOf("POIMAT_") !== 0) return;
+
+    const o = __orig.get(m.name);
+    if (!o) return;
+
+    m.pbrMetallicRoughness.setBaseColorFactor(o.baseColorFactor);
+    if (m.setEmissiveFactor) m.setEmissiveFactor(o.emissiveFactor);
+    m.pbrMetallicRoughness.metallicFactor = o.metallicFactor;
+    m.pbrMetallicRoughness.roughnessFactor = o.roughnessFactor;
+    m.alphaMode = o.alphaMode;
+  });
+
+  __lastHighlighted = null;
+  try { viewer.requestUpdate(); } catch(e) {}
+}
+
+function findMaterialByName(viewer, name) {
+  if (!hasModelAndMaterials(viewer)) return null;
+  for (let i = 0; i < viewer.model.materials.length; i++) {
+    const m = viewer.model.materials[i];
+    if (m && m.name === name) return m;
+  }
+  return null;
+}
+
+function highlightMaterial(viewer, matName) {
+  if (!hasModelAndMaterials(viewer)) return { ok:false, reason:"no_model" };
+  if (!matName) return { ok:false, reason:"no_matName" };
+
+  const mat = findMaterialByName(viewer, matName);
+  if (!mat) return { ok:false, reason:"mat_not_found", wanted: matName };
+
+  if (__lastHighlighted === matName) {
+    resetAllHighlights(viewer);
+    return { ok:true, action:"toggle_off", highlighted:null };
+  }
+
+  resetAllHighlights(viewer);
+
+  mat.pbrMetallicRoughness.setBaseColorFactor([0.10, 1.00, 0.20, 1.0]);
+  if (mat.setEmissiveFactor) mat.setEmissiveFactor([0.25, 1.00, 0.35]);
+  mat.pbrMetallicRoughness.metallicFactor = 0.0;
+  mat.pbrMetallicRoughness.roughnessFactor = 0.6;
+
+  __lastHighlighted = matName;
+
+  try { viewer.requestUpdate(); } catch(e) {}
+  return { ok:true, action:"highlight_on", highlighted: matName };
+}
+
+// ---------------------------
+// Picking material from tap
+// ---------------------------
+function pickPoiMaterialName(viewer, cssX, cssY) {
+  try {
+    if (typeof viewer.materialFromPoint === "function") {
+      const m = viewer.materialFromPoint(cssX, cssY);
+      if (m && m.name) return m.name;
+    }
+  } catch (e) { return null; }
+  return null;
+}
+
+function doPickAt(viewer, x, y, modeLabel) {
+  // Pick material by point
+  const pickedName = pickPoiMaterialName(viewer, x, y);
+  const pickedBase = pickedName ? stripDotNumber(pickedName) : null;
+
+  // Prefer anchoring the bubble at the MATERIAL center (in screen space),
+  // so the user doesn't have to tap the exact middle.
+  let ax = x, ay = y;
+  if (pickedName && pickedName.indexOf("POIMAT_") === 0) {
+    const c = findRegionCenterCss(viewer, x, y, pickedName);
+    ax = c.x; ay = c.y;
+  }
+
+  // Hit test (3D position) using the anchor point
+  let hit = null;
+  let position = null;
+  let normal = null;
+
+  try {
+    hit = viewer.positionAndNormalFromPoint(ax, ay);
+    if (hit) {
+      position = { x: hit.position.x, y: hit.position.y, z: hit.position.z };
+      normal   = { x: hit.normal.x,   y: hit.normal.y,   z: hit.normal.z };
+    }
+  } catch (e) {}
+
+  // Only allow POIMAT_*
+  let highlightResult = { ok:false, reason:"no_POIMAT" };
+  if (pickedName && pickedName.indexOf("POIMAT_") === 0) {
+    highlightResult = highlightMaterial(viewer, pickedName);
+  } else {
+    // if not POIMAT, just reset highlight
+    resetAllHighlights(viewer);
+    if (!pickedName) highlightResult = { ok:false, reason:"no_material" };
+    else highlightResult = { ok:false, reason:"not_POIMAT", pickedName: pickedName };
+  }
+
+  // Show moving hotspot only when a POI is highlighted AND we have a hit position.
+  // NOTE: We use the anchored hit position (ax, ay) so the bubble appears centered.
+  if (highlightResult && highlightResult.ok && highlightResult.action === "highlight_on" && position && pickedBase) {
+    showNavHotspot(viewer, position, normal, pickedBase);
+  } else {
+    hideNavHotspot();
+  }
+
+  // Tell Flutter to temporarily ignore taps while the user is rotating the model (prevents WebView scroll conflicts)
+  try { viewer.dispatchEvent(new CustomEvent("poi-tap-block", { detail: { x: x, y: y } })); } catch(e) {}
+
+  postToPOI(JSON.stringify({
+    type: "tap",
+    mode: modeLabel,
+    tap: { x: x, y: y },
+    anchor: { x: ax, y: ay },
+    hit: !!hit,
+    position: position,
+    normal: normal,
+    pickedName: pickedName,
+    pickedBase: pickedBase,
+    highlight: highlightResult
+  }));
+}
+
+
+// Try to find the CENTER of the tapped material region in screen-space (CSS pixels).
+// This makes the bubble appear near the middle of the POI even if the user tapped a corner.
+function findRegionCenterCss(viewer, startX, startY, matName) {
+  try {
+    if (!viewer || typeof viewer.materialFromPoint !== "function" || !matName) {
+      return { x: startX, y: startY };
+    }
+
+    const rect = viewer.getBoundingClientRect();
+    const maxX = rect.width;
+    const maxY = rect.height;
+
+    const step = 6;      // px per probe
+    const maxDist = 140; // px max search radius
+
+    function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+    function sameAt(x, y) {
+      x = clamp(x, 0, maxX - 1);
+      y = clamp(y, 0, maxY - 1);
+      const m = viewer.materialFromPoint(x, y);
+      return !!(m && m.name === matName);
+    }
+
+    // If the starting point isn't the same material, don't try.
+    if (!sameAt(startX, startY)) return { x: startX, y: startY };
+
+    let left = startX, right = startX, up = startY, down = startY;
+
+    for (let d = step; d <= maxDist; d += step) {
+      const x = startX - d;
+      if (x < 0 || !sameAt(x, startY)) break;
+      left = x;
+    }
+    for (let d = step; d <= maxDist; d += step) {
+      const x = startX + d;
+      if (x > maxX - 1 || !sameAt(x, startY)) break;
+      right = x;
+    }
+    for (let d = step; d <= maxDist; d += step) {
+      const y = startY - d;
+      if (y < 0 || !sameAt(startX, y)) break;
+      up = y;
+    }
+    for (let d = step; d <= maxDist; d += step) {
+      const y = startY + d;
+      if (y > maxY - 1 || !sameAt(startX, y)) break;
+      down = y;
+    }
+
+    const cx = (left + right) / 2;
+    const cy = (up + down) / 2;
+
+    return { x: cx, y: cy };
+  } catch (e) {
+    return { x: startX, y: startY };
+  }
+}
+
+
+// ---------------------------
+// Main setup
+// ---------------------------
+function setupViewer() {
+  const viewer = getViewer();
+  if (!viewer) return false;
+
+  if (viewer.__poiBound) return true;
+  viewer.__poiBound = true;
+
+  viewer.addEventListener("load", function() {
+    const ok = cacheOriginalPoiMaterials(viewer);
+    let sample = [];
+    try {
+      if (hasModelAndMaterials(viewer)) {
+        sample = viewer.model.materials.slice(0, 15).map(m => m && m.name).filter(Boolean);
+      }
+    } catch(e) {}
+
+    postToPOI(JSON.stringify({
+      type: "debug",
+      step: "materials",
+      ok: ok,
+      count: hasModelAndMaterials(viewer) ? viewer.model.materials.length : 0,
+      sample: sample
+    }));
+  });
+
+  // Native click (some devices fire this)
+  viewer.addEventListener("click", function(event) {
+    // On mobile WebView we often get BOTH: touchend then click.
+    // If we process both, it toggles OFF immediately and feels "stuck".
+    if (Date.now() - __lastTouchEndAt < 450) return;
+
+    const p = cssPointFromEvent(viewer, event);
+    doPickAt(viewer, p.x, p.y, "click");
+  });
+
+  // Touch fallback (WebView sometimes doesn't emit click)
+  viewer.addEventListener("touchend", function(event) {
+    __lastTouchEndAt = Date.now();
+
+    const p = getPointFromTouchEnd(viewer, event);
+    if (!p) return;
+    doPickAt(viewer, p.x, p.y, "touchend");
+  }, { passive: true });
+
+  postToPOI(JSON.stringify({ type: "ready" }));
+  return true;
+}
+
+var tries = 0;
+var timer = setInterval(function() {
+  tries++;
+  var ok1 = postToTest("✅ JS is alive");
+  var ok2 = setupViewer();
+  if ((ok1 && ok2) || tries > 30) clearInterval(timer);
+}, 300);
+''',
+                javascriptChannels: {
+                  JavascriptChannel(
+                    'JS_TEST_CHANNEL',
+                    onMessageReceived: (JavaScriptMessage message) {
+                      debugPrint("✅ JS_TEST_CHANNEL: ${message.message}");
+                    },
+                  ),
+                  JavascriptChannel(
+                    'POI_CHANNEL',
+                    onMessageReceived: (JavaScriptMessage message) {
+                      debugPrint("🟦 POI_CHANNEL: ${message.message}");
+                      _handlePoiMessage(message.message);
+                    },
+                  ),
+                },
+              ),            
+            ],
+          );
+        }
 
   Widget _buildError(String message) {
     return Container(
@@ -1632,6 +2263,27 @@ class _FloorMapViewer extends StatelessWidget {
     );
   }
 }
+class _TrianglePainter extends CustomPainter {
+  final Color color;
+  const _TrianglePainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final p = Paint()..color = color;
+    final path = Path()
+      ..moveTo(0, 0)
+      ..lineTo(size.width, 0)
+      ..lineTo(size.width / 2, size.height)
+      ..close();
+
+    canvas.drawPath(path, p);
+  }
+
+  @override
+  bool shouldRepaint(covariant _TrianglePainter oldDelegate) =>
+      oldDelegate.color != color;
+}
+
 
 class _FloorMapSection extends StatefulWidget {
   final List<Map<String, String>> venueMaps;
@@ -1654,6 +2306,28 @@ class _FloorMapSectionState extends State<_FloorMapSection> {
 
   @override
   Widget build(BuildContext context) {
+    final sortedMaps = [...widget.venueMaps];
+
+int floorRank(String floor) {
+  final f = floor.trim().toUpperCase();
+
+  if (f == 'GF' || f == 'G' || f == 'GROUND') return 0; // Ground first
+  if (f == 'B1') return -1; // if you ever add basements, put them before GF
+
+  // F1, F2, F3...
+  final m = RegExp(r'F(\d+)').firstMatch(f);
+  if (m != null) return int.parse(m.group(1)!);
+
+  return 999; // unknown floors go last
+}
+
+// If you want GF at the bottom and F1 above it, sort DESCENDING
+sortedMaps.sort((a, b) {
+  final ra = floorRank(a['floorNumber'] ?? '');
+  final rb = floorRank(b['floorNumber'] ?? '');
+  return rb.compareTo(ra); // ✅ reverse order: F1 above GF
+});
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -1672,7 +2346,12 @@ class _FloorMapSectionState extends State<_FloorMapSection> {
             ),
             child: Stack(
               children: [
-                _FloorMapViewer(currentFloor: _currentFloor),
+                _FloorMapViewer(
+                  key: ValueKey(
+                    _currentFloor,
+                  ), // ✅ forces rebuild when floor changes
+                  currentFloor: _currentFloor,
+                ),
                 if (widget.venueMaps.length > 1)
                   Positioned(
                     top: 12,
@@ -1691,7 +2370,7 @@ class _FloorMapSectionState extends State<_FloorMapSection> {
                         ],
                       ),
                       child: Column(
-                        children: widget.venueMaps.map((map) {
+                        children: sortedMaps.map((map) {
                           final floorNumber = map['floorNumber'] ?? '';
                           final mapURL = map['mapURL'] ?? '';
                           return Padding(

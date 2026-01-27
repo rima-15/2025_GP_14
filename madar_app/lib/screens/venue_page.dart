@@ -2,6 +2,7 @@ import 'dart:io' show Platform;
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:firebase_storage/firebase_storage.dart' as storage;
 import 'package:cached_network_image/cached_network_image.dart';
@@ -1665,10 +1666,10 @@ Future<void> _handlePoiMessage(String raw) async {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => PathOverviewScreen(
+                    builder: (_) => PinStartLocationScreen(
+                      floorSrc: widget.currentFloor,
+                      destinationPoi: destinationPoi,
                       shopName: shopName,
-                      shopId: destinationPoi,
-                      startingMethod: 'pin',
                     ),
                   ),
                 );
@@ -1813,7 +1814,7 @@ function ensureHotspotStyle() {
     border:0;
     padding:8px 10px;
     border-radius:10px;
-    background:#1e88e5;
+    background:#787E65;
     color:#fff;
     font-weight:700;
     cursor:pointer;
@@ -2263,6 +2264,305 @@ var timer = setInterval(function() {
     );
   }
 }
+
+
+// ----------------------------------------------------------------------------
+// Pin Start Location Screen (tap to set user location on 3D map)
+// ----------------------------------------------------------------------------
+
+class PinStartLocationScreen extends StatefulWidget {
+  final String floorSrc; // GLB url/path for the currently selected floor
+  final String destinationPoi; // POIMAT_* id
+  final String shopName; // display name
+
+  const PinStartLocationScreen({
+    super.key,
+    required this.floorSrc,
+    required this.destinationPoi,
+    required this.shopName,
+  });
+
+  @override
+  State<PinStartLocationScreen> createState() => _PinStartLocationScreenState();
+}
+
+class _PinStartLocationScreenState extends State<PinStartLocationScreen> {
+  Map<String, dynamic>? _picked; // {x,y,z,floor}
+  bool _saving = false;
+  String? _saveError;
+
+  String _inferFloorLabel(String src) {
+    // Try to infer a human-readable floor label from the GLB src (URL or asset).
+    final uri = Uri.tryParse(src);
+    final last = (uri?.pathSegments.isNotEmpty ?? false)
+        ? uri!.pathSegments.last
+        : src.split('/').last;
+    final name = last.split('?').first;
+
+    final m = RegExp(r'(floor|level|lvl|f)\s*([0-9]+)', caseSensitive: false)
+        .firstMatch(name);
+    if (m != null) return '${m.group(1)!.toLowerCase()}${m.group(2)}';
+
+    // Fallback: filename without extension
+    return name.replaceAll(RegExp(r'\.(glb|gltf)\b', caseSensitive: false), '');
+  }
+
+  Future<void> _saveBlenderPosition({
+    required double x,
+    required double y,
+    required double z,
+    required String floor,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      throw Exception('No signed-in user. Please sign in first.');
+    }
+
+    await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
+      {
+        'BlenderPosition': {
+          'x': x,
+          'y': y,
+          'z': z,
+          'floor': floor,
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+      },
+      SetOptions(merge: true),
+    );
+  }
+
+  void _handlePoiMessage(String raw) {
+    Map<String, dynamic>? data;
+    try {
+      data = jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      return;
+    }
+
+    if (data['type'] == 'user_pin') {
+      final pos = data['position'];
+      if (pos is Map) {
+        final floor = (data['floor'] as String?) ?? _inferFloorLabel(widget.floorSrc);
+        setState(() {
+          _picked = {
+            'x': (pos['x'] as num).toDouble(),
+            'y': (pos['y'] as num).toDouble(),
+            'z': (pos['z'] as num).toDouble(),
+            'floor': floor,
+          };
+          _saveError = null;
+        });
+      }
+    }
+  }
+
+  Future<void> _confirmAndProceed() async {
+    final picked = _picked;
+    if (picked == null || _saving) return;
+
+    setState(() {
+      _saving = true;
+      _saveError = null;
+    });
+
+    try {
+      await _saveBlenderPosition(
+        x: (picked['x'] as double),
+        y: (picked['y'] as double),
+        z: (picked['z'] as double),
+        floor: (picked['floor'] as String),
+      );
+
+      if (!mounted) return;
+
+      // Proceed to your existing navigation flow screen.
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => PathOverviewScreen(
+            shopName: widget.shopName,
+            shopId: widget.destinationPoi,
+            startingMethod: 'pin',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _saveError = e.toString());
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final floorLabel = _inferFloorLabel(widget.floorSrc);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Set your location'),
+      ),
+      body: Stack(
+        children: [
+          // 3D map: tap anywhere to set starting location
+          ModelViewer(
+            key: ValueKey('pin_${widget.floorSrc}'),
+            src: widget.floorSrc,
+            alt: "3D Floor Map",
+            ar: false,
+            autoRotate: false,
+            cameraControls: true,
+            backgroundColor: Colors.white,
+            cameraOrbit: "0deg 65deg 2.5m",
+            minCameraOrbit: "auto 0deg auto",
+            maxCameraOrbit: "auto 90deg auto",
+            cameraTarget: "0m 0m 0m",
+            relatedJs: '''
+console.log("✅ PinStartLocation relatedJs injected");
+
+function postToPOI(msg) {
+  try { POI_CHANNEL.postMessage(msg); return true; } catch (e) { return false; }
+}
+function postToTest(msg) {
+  try { JS_TEST_CHANNEL.postMessage(msg); return true; } catch (e) { return false; }
+}
+
+function getViewer() { return document.querySelector('model-viewer'); }
+
+function cssPointFromEvent(viewer, event) {
+  const rect = viewer.getBoundingClientRect();
+  return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+}
+
+function doPickStart(viewer, x, y, srcEvent) {
+  const hit = viewer.positionAndNormalFromPoint(x, y);
+  if (!hit || !hit.position) return;
+
+  postToPOI(JSON.stringify({
+    type: "user_pin",
+    srcEvent: srcEvent || "",
+    floor: "\${floorLabel}",
+    position: { x: hit.position.x, y: hit.position.y, z: hit.position.z },
+    normal: hit.normal ? { x: hit.normal.x, y: hit.normal.y, z: hit.normal.z } : null
+  }));
+}
+
+function setupPinMode() {
+  const viewer = getViewer();
+  if (!viewer) return false;
+
+  viewer.addEventListener("pointerup", function(event) {
+    const p = cssPointFromEvent(viewer, event);
+    if (!p) return;
+    doPickStart(viewer, p.x, p.y, "pointerup");
+  });
+
+  viewer.addEventListener("touchend", function(event) {
+    const t = event.changedTouches && event.changedTouches[0];
+    if (!t) return;
+    const rect = viewer.getBoundingClientRect();
+    const x = t.clientX - rect.left;
+    const y = t.clientY - rect.top;
+    doPickStart(viewer, x, y, "touchend");
+  }, { passive: true });
+
+  postToPOI(JSON.stringify({ type: "ready_pin" }));
+  return true;
+}
+
+var tries = 0;
+var timer = setInterval(function() {
+  tries++;
+  var ok1 = postToTest("✅ PinStartLocation JS alive");
+  var ok2 = setupPinMode();
+  if ((ok1 && ok2) || tries > 30) clearInterval(timer);
+}, 300);
+''',
+            javascriptChannels: {
+              JavascriptChannel(
+                'JS_TEST_CHANNEL',
+                onMessageReceived: (JavaScriptMessage message) {
+                  debugPrint("✅ JS_TEST_CHANNEL (pin): ${message.message}");
+                },
+              ),
+              JavascriptChannel(
+                'POI_CHANNEL',
+                onMessageReceived: (JavaScriptMessage message) {
+                  debugPrint("🟦 POI_CHANNEL (pin): ${message.message}");
+                  _handlePoiMessage(message.message);
+                },
+              ),
+            },
+          ),
+
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: 16,
+            child: SafeArea(
+              top: false,
+              child: Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: const [
+                    BoxShadow(
+                      blurRadius: 16,
+                      offset: Offset(0, 8),
+                      color: Color(0x22000000),
+                    )
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text(
+                      'Tap on the map to set your starting location.',
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _picked == null
+                          ? 'Floor: $floorLabel'
+                          : 'Selected: x=${(_picked!['x'] as double).toStringAsFixed(3)}, '
+                            'y=${(_picked!['y'] as double).toStringAsFixed(3)}, '
+                            'z=${(_picked!['z'] as double).toStringAsFixed(3)}  |  floor=${_picked!['floor']}',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    if (_saveError != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        _saveError!,
+                        style: const TextStyle(fontSize: 12, color: Colors.red),
+                      ),
+                    ],
+                    const SizedBox(height: 10),
+                    ElevatedButton(
+                      onPressed: (_picked == null || _saving) ? null : _confirmAndProceed,
+                      child: _saving
+                          ? const SizedBox(
+                              height: 18,
+                              width: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('Confirm location'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+
 class _TrianglePainter extends CustomPainter {
   final Color color;
   const _TrianglePainter({required this.color});

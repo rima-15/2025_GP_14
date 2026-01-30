@@ -29,6 +29,7 @@ environment:
 # versions available, run `flutter pub outdated`.
 dependencies:
 # date in track request 
+  flutter_contacts: ^1.1.7
   intl: ^0.18.0
   flutter:
     sdk: flutter

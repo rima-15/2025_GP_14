@@ -7,6 +7,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter_contacts/flutter_contacts.dart';
 
 // ----------------------------------------------------------------------------
 // Track Request Dialog
@@ -20,6 +21,8 @@ class TrackRequestDialog extends StatefulWidget {
 }
 
 class _TrackRequestDialogState extends State<TrackRequestDialog> {
+  final FocusNode _phoneFocusNode = FocusNode();
+  bool _isPhoneFocused = false;
   final _phoneController = TextEditingController();
   final List<Friend> _selectedFriends = [];
   bool _isPhoneInputValid = true;
@@ -43,6 +46,12 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
     super.initState();
     _loadVenues();
     _getCurrentLocation();
+
+    _phoneFocusNode.addListener(() {
+      setState(() {
+        _isPhoneFocused = _phoneFocusNode.hasFocus;
+      });
+    });
   }
 
   String _formatTime12h(TimeOfDay t) {
@@ -54,6 +63,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
   @override
   void dispose() {
     _phoneController.dispose();
+    _phoneFocusNode.dispose();
     super.dispose();
   }
 
@@ -834,6 +844,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                           Expanded(
                             child: TextField(
                               controller: _phoneController,
+                              focusNode: _phoneFocusNode,
                               keyboardType: TextInputType.number,
                               inputFormatters: [
                                 FilteringTextInputFormatter.digitsOnly,
@@ -858,6 +869,15 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                                   color: Colors.black87,
                                   fontWeight: FontWeight.w500,
                                 ),
+                                suffixIcon: _isPhoneFocused
+                                    ? IconButton(
+                                        icon: const Icon(
+                                          Icons.contacts,
+                                          color: AppColors.kGreen,
+                                        ),
+                                        onPressed: _pickContact,
+                                      )
+                                    : null,
                                 filled: true,
                                 fillColor: Colors.grey[50],
 
@@ -1295,6 +1315,45 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
         ],
       ),
     );
+  }
+
+  Future<void> _pickContact() async {
+    // Request permission
+    if (!await FlutterContacts.requestPermission()) return;
+
+    final contact = await FlutterContacts.openExternalPick();
+
+    if (contact == null || contact.phones.isEmpty) return;
+
+    // Take first phone number
+    String phone = contact.phones.first.number;
+
+    // Clean phone number
+    phone = phone.replaceAll(RegExp(r'\s+'), '');
+    phone = phone.replaceAll('-', '');
+
+    // Normalize Saudi numbers
+    if (phone.startsWith('+966')) {
+      phone = phone.replaceFirst('+966', '');
+    } else if (phone.startsWith('966')) {
+      phone = phone.replaceFirst('966', '');
+    } else if (phone.startsWith('05')) {
+      phone = phone.substring(1);
+    }
+
+    if (phone.length != 9) {
+      setState(() {
+        _isPhoneInputValid = false;
+        _phoneInputError = 'Invalid Saudi phone number';
+      });
+      return;
+    }
+
+    setState(() {
+      _phoneController.text = phone;
+      _isPhoneInputValid = true;
+      _phoneInputError = null;
+    });
   }
 }
 

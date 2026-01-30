@@ -8,6 +8,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:madar_app/api/seed_venues.dart';
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:madar_app/api/seed_venue_contacts.dart';
+import 'services/notification_service.dart';
 
 // ----------------------------------------------------------------------------
 // Main Entry Point
@@ -21,6 +22,9 @@ Future<void> main() async {
 
   // Initialize Firebase
   await Firebase.initializeApp();
+
+  //Notification
+  await NotificationService.init();
 
   // DEV-ONLY: Run the venue seeder (controlled by DEV_SEED=true in .env)
   final devSeedRaw = dotenv.maybeGet('DEV_SEED');

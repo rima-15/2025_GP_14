@@ -24,13 +24,15 @@ android {
         }
     }
 
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_11.toString()
-    }
-
+    // ✅ Java 11 + Desugaring (صيغة Kotlin الصح)
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+        isCoreLibraryDesugaringEnabled = true
+    }
+
+    kotlinOptions {
+        jvmTarget = "11"
     }
 }
 
@@ -41,9 +43,12 @@ flutter {
 dependencies {
     implementation(project(":unityLibrary"))
 
-    // ========== Firebase Android (Flutter) ==========
+    // Firebase
     implementation(platform("com.google.firebase:firebase-bom:33.6.0"))
     implementation("com.google.firebase:firebase-firestore")
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-analytics")
+
+    // ✅ Required for flutter_local_notifications
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 }

@@ -59,6 +59,11 @@ dependencies:
   shared_preferences: ^2.3.2
   firebase_storage: ^12.4.10
 
+   #Notification
+  firebase_messaging: ^15.2.10
+  flutter_local_notifications: ^17.0.0
+
+
   # 3D map 
   model_viewer_plus: ^1.0.2
 

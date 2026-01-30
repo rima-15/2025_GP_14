@@ -1,32 +1,70 @@
-/**
- * Import function triggers from their respective submodules:
- *
- * import {onCall} from "firebase-functions/v2/https";
- * import {onDocumentWritten} from "firebase-functions/v2/firestore";
- *
- * See a full list of supported triggers at https://firebase.google.com/docs/functions
- */
+import * as admin from "firebase-admin";
+import { setGlobalOptions } from "firebase-functions";
+import { onDocumentCreated } from "firebase-functions/v2/firestore";
 
-import {setGlobalOptions} from "firebase-functions";
-import {onRequest} from "firebase-functions/https";
-import * as logger from "firebase-functions/logger";
-
-// Start writing functions
-// https://firebase.google.com/docs/functions/typescript
-
-// For cost control, you can set the maximum number of containers that can be
-// running at the same time. This helps mitigate the impact of unexpected
-// traffic spikes by instead downgrading performance. This limit is a
-// per-function limit. You can override the limit for each function using the
-// `maxInstances` option in the function's options, e.g.
-// `onRequest({ maxInstances: 5 }, (req, res) => { ... })`.
-// NOTE: setGlobalOptions does not apply to functions using the v1 API. V1
-// functions should each use functions.runWith({ maxInstances: 10 }) instead.
-// In the v1 API, each function can only serve one request per container, so
-// this will be the maximum concurrent request count.
 setGlobalOptions({ maxInstances: 10 });
 
-// export const helloWorld = onRequest((request, response) => {
-//   logger.info("Hello logs!", {structuredData: true});
-//   response.send("Hello from Firebase!");
-// });
+// 🔥 Initialize Firebase Admin
+admin.initializeApp();
+const db = admin.firestore();
+
+/* ------------------------------------------------------------------
+   🔔 Track Request Push Notification
+-------------------------------------------------------------------*/
+export const onTrackRequestCreated = onDocumentCreated(
+  "trackRequests/{requestId}",
+  async (event) => {
+    try {
+      const data = event.data?.data();
+      if (!data) {
+        console.log("❌ No data in track request");
+        return;
+      }
+
+      // نرسل الإشعار فقط عند إنشاء الطلب
+      if (data.status !== "pending") {
+        console.log("ℹ️ Track request not pending, skipping");
+        return;
+      }
+
+      const receiverId = data.receiverId;
+      if (!receiverId) {
+        console.log("❌ No receiverId");
+        return;
+      }
+
+      // جلب FCM Tokens للمستقبل
+      const userDoc = await db.collection("users").doc(receiverId).get();
+      if (!userDoc.exists) {
+        console.log("❌ Receiver user not found");
+        return;
+      }
+
+      const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
+      if (tokens.length === 0) {
+        console.log("❌ No FCM tokens for receiver");
+        return;
+      }
+
+      const message = {
+        notification: {
+          title: "New Track Request",
+          body: `${data.senderName} wants to track your location`,
+        },
+        data: {
+          type: "trackRequest",
+          requestId: event.params.requestId,
+        },
+        tokens: tokens,
+      };
+
+      const response = await admin.messaging().sendEachForMulticast(message);
+
+      console.log(
+        `🔔 Notification sent | success: ${response.successCount}, failure: ${response.failureCount}`
+      );
+    } catch (error) {
+      console.error("🔥 Error sending track request notification:", error);
+    }
+  }
+);

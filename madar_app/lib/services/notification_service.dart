@@ -10,9 +10,24 @@ class NotificationService {
     // Permission
     await _fcm.requestPermission(alert: true, badge: true, sound: true);
 
+    // 🔥 ANDROID CHANNEL (THIS IS THE FIX)
+    const AndroidNotificationChannel channel = AndroidNotificationChannel(
+      'madar_channel', // نفس اللي في AndroidManifest
+      'Madar Notifications',
+      description: 'All Madar notifications',
+      importance: Importance.max,
+      playSound: true,
+    );
+
+    await _local
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >()
+        ?.createNotificationChannel(channel);
+
     // Local notification init
-    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const settings = InitializationSettings(android: android);
+    const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const settings = InitializationSettings(android: androidInit);
     await _local.initialize(settings);
 
     // Foreground notifications
@@ -27,6 +42,7 @@ class NotificationService {
       'Madar Notifications',
       importance: Importance.max,
       priority: Priority.high,
+      playSound: true,
     );
 
     const details = NotificationDetails(android: androidDetails);

@@ -10,7 +10,6 @@ import 'package:madar_app/screens/settings_page.dart';
 import 'package:madar_app/screens/notifications_page.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
 import 'package:madar_app/theme/theme.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
 
 // ----------------------------------------------------------------------------
 // Main Layout
@@ -65,22 +64,6 @@ class _MainLayoutState extends State<MainLayout> {
     }
   }
 
-  // remove token
-  Future<void> _removeFcmToken(String uid) async {
-    try {
-      final token = await FirebaseMessaging.instance.getToken();
-      if (token == null) return;
-
-      await FirebaseFirestore.instance.collection('users').doc(uid).update({
-        'fcmTokens': FieldValue.arrayRemove([token]),
-      });
-
-      debugPrint('FCM token removed on logout');
-    } catch (e) {
-      debugPrint('Error removing FCM token: $e');
-    }
-  }
-
   // ---------- Actions ----------
 
   Future<void> _logout(BuildContext context) async {
@@ -92,11 +75,6 @@ class _MainLayoutState extends State<MainLayout> {
     );
 
     if (!confirmed) return;
-    final user = FirebaseAuth.instance.currentUser;
-
-    if (user != null) {
-      await _removeFcmToken(user.uid);
-    }
 
     await FirebaseAuth.instance.signOut();
     if (context.mounted) {

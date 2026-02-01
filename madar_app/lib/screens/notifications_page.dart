@@ -471,158 +471,99 @@ class _NotificationsPageState extends State<NotificationsPage> {
             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
             child: Stack(
               children: [
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
+                Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () => _onNotificationTap(notification),
                     borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.03),
-                        blurRadius: 4,
-                        offset: const Offset(0, 1),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Header Row
-                      Row(
-                        children: [
-                          // Circular Icon
-                          Container(
-                            width: 40,
-                            height: 40,
-                            decoration: BoxDecoration(
-                              color: _getNotificationColor(
-                                notification.type,
-                              ).withOpacity(0.1),
-                              shape: BoxShape.circle,
-                            ),
-                            child: Icon(
-                              _getNotificationIcon(notification.type),
-                              color: _getNotificationColor(notification.type),
-                              size: 20,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-
-                          // Title and Time
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        notification.title,
-                                        style: const TextStyle(
-                                          fontSize: 15,
-                                          fontWeight: FontWeight.w600,
-                                          color: Colors.black87,
-                                        ),
-                                      ),
-                                    ),
-                                    // Status Labels (Expired, Accepted, or Declined)
-                                    if (notification.isExpired ||
-                                        notification.actionLabel != null)
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 8,
-                                          vertical: 3,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: Colors.grey[200],
-                                          borderRadius: BorderRadius.circular(
-                                            6,
-                                          ),
-                                        ),
-                                        child: Text(
-                                          notification.actionLabel ?? 'Expired',
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w600,
-                                            color: Colors.grey[600],
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-
-                                const SizedBox(height: 2),
-                                Text(
-                                  _formatTimestamp(notification.timestamp),
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.grey[500],
-                                  ),
-                                ),
-                              ],
-                            ),
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.03),
+                            blurRadius: 4,
+                            offset: const Offset(0, 1),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 12),
-
-                      // Message and Details for Track Request
-                      if (notification.type ==
-                          NotificationType.trackRequest) ...[
-                        // STYLE 1: Incoming Track Request (The one with the green bar)
-                        RichText(
-                          text: TextSpan(
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.grey[700],
-                              height: 1.4,
-                            ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Header Row
+                          Row(
                             children: [
-                              TextSpan(
-                                text: notification.senderName ?? '',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.black87,
-                                ),
-                              ),
-                              TextSpan(
-                                text: ' (${notification.senderPhone ?? ""}) ',
-                              ),
-                              const TextSpan(
-                                text: 'is asking to track your location',
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        IntrinsicHeight(
-                          child: Row(
-                            children: [
+                              // Circular Icon
                               Container(
-                                width: 3,
+                                width: 40,
+                                height: 40,
                                 decoration: BoxDecoration(
-                                  color: AppColors.kGreen,
-                                  borderRadius: BorderRadius.circular(2),
+                                  color: _getNotificationColor(
+                                    notification.type,
+                                  ).withOpacity(0.1),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(
+                                  _getNotificationIcon(notification.type),
+                                  color: _getNotificationColor(
+                                    notification.type,
+                                  ),
+                                  size: 20,
                                 ),
                               ),
                               const SizedBox(width: 12),
+
+                              // Title and Time
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(
-                                      'Duration: ${notification.date} • ${notification.startTime} - ${notification.endTime}',
-                                      style: const TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w600,
-                                      ),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            notification.title,
+                                            style: const TextStyle(
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w600,
+                                              color: Colors.black87,
+                                            ),
+                                          ),
+                                        ),
+                                        // Status Labels (Expired, Accepted, or Declined)
+                                        if (notification.isExpired ||
+                                            notification.actionLabel != null)
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 3,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Colors.grey[200],
+                                              borderRadius:
+                                                  BorderRadius.circular(6),
+                                            ),
+                                            child: Text(
+                                              notification.actionLabel ??
+                                                  'Expired',
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w600,
+                                                color: Colors.grey[600],
+                                              ),
+                                            ),
+                                          ),
+                                      ],
                                     ),
-                                    const SizedBox(height: 4),
+
+                                    const SizedBox(height: 2),
                                     Text(
-                                      'Venue: ${notification.venueName ?? ''}',
-                                      style: const TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w600,
+                                      _formatTimestamp(notification.timestamp),
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey[500],
                                       ),
                                     ),
                                   ],
@@ -630,79 +571,110 @@ class _NotificationsPageState extends State<NotificationsPage> {
                               ),
                             ],
                           ),
-                        ),
-                      ] else if (notification.type ==
-                              NotificationType.trackRejected ||
-                          notification.type ==
-                              NotificationType.trackAccepted) ...[
-                        // STYLE 2: Request Result (Matches your photo with more/less)
-                        ExpandableNotificationBody(
-                          text:
-                              "${notification.senderName} (${notification.senderPhone ?? ""}) "
-                              "${notification.type == NotificationType.trackRejected ? 'declined' : 'accepted'} "
-                              "your track request at ${notification.venueName ?? 'Venue'} "
-                              "on ${notification.date ?? ''} from ${notification.startTime ?? ''} "
-                              "to ${notification.endTime ?? ''}.",
-                        ),
-                      ] else ...[
-                        // STYLE 3: All other simple notifications
-                        Text(
-                          notification.message,
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey[700],
-                            height: 1.4,
-                          ),
-                        ),
-                      ],
+                          const SizedBox(height: 12),
 
-                      // Auto-accept timer
-                      if (notification.autoAcceptTime != null &&
-                          notification.autoAcceptTime!.isAfter(
-                            DateTime.now(),
-                          )) ...[
-                        const SizedBox(height: 12),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.orange[50],
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.timer_outlined,
-                                size: 16,
-                                color: Colors.orange[700],
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                'Auto-accept in ${_getTimeRemaining(notification.autoAcceptTime!)}',
+                          // Message for Track Request: only "First name last name (phone) is asking to track your location"
+                          if (notification.type ==
+                              NotificationType.trackRequest) ...[
+                            RichText(
+                              text: TextSpan(
                                 style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500,
-                                  color: Colors.orange[700],
+                                  fontSize: 14,
+                                  color: Colors.grey[700],
+                                  height: 1.4,
                                 ),
+                                children: [
+                                  TextSpan(
+                                    text: notification.senderName ?? '',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.black87,
+                                    ),
+                                  ),
+                                  TextSpan(
+                                    text:
+                                        ' (${notification.senderPhone ?? ""}) ',
+                                  ),
+                                  const TextSpan(
+                                    text: 'is asking to track your location',
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
-                        ),
-                      ],
+                            ),
+                          ] else if (notification.type ==
+                                  NotificationType.trackRejected ||
+                              notification.type ==
+                                  NotificationType.trackAccepted) ...[
+                            // Short: First Last (phone) accepted/declined your request
+                            Text(
+                              _formatAcceptDeclineMessage(notification),
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey[700],
+                                height: 1.4,
+                              ),
+                            ),
+                          ] else ...[
+                            // STYLE 3: All other simple notifications
+                            Text(
+                              notification.message,
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey[700],
+                                height: 1.4,
+                              ),
+                            ),
+                          ],
 
-                      // Action Buttons
-                      if (notification.actionLabel == null &&
-                          _shouldShowActions(notification)) ...[
-                        const SizedBox(height: 14),
-                        _buildActionButtons(notification),
-                      ] else if (_shouldShowActions(notification)) ...[
-                        const SizedBox(height: 14),
-                        _buildActionButtons(notification),
-                      ],
-                    ],
+                          // Auto-accept timer
+                          if (notification.autoAcceptTime != null &&
+                              notification.autoAcceptTime!.isAfter(
+                                DateTime.now(),
+                              )) ...[
+                            const SizedBox(height: 12),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.orange[50],
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.timer_outlined,
+                                    size: 16,
+                                    color: Colors.orange[700],
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Auto-accept in ${_getTimeRemaining(notification.autoAcceptTime!)}',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                      color: Colors.orange[700],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+
+                          // Action Buttons
+                          if (notification.actionLabel == null &&
+                              _shouldShowActions(notification)) ...[
+                            const SizedBox(height: 14),
+                            _buildActionButtons(notification),
+                          ] else if (_shouldShowActions(notification)) ...[
+                            const SizedBox(height: 14),
+                            _buildActionButtons(notification),
+                          ],
+                        ],
+                      ),
+                    ),
                   ),
                 ),
 
@@ -1071,15 +1043,176 @@ class _NotificationsPageState extends State<NotificationsPage> {
     }
   }
 
+  String _formatAcceptDeclineMessage(NotificationItem notification) {
+    final name = notification.senderName?.isNotEmpty == true
+        ? notification.senderName!
+        : 'Someone';
+    final phone = notification.senderPhone?.isNotEmpty == true
+        ? ' (${notification.senderPhone})'
+        : '';
+    final action = notification.type == NotificationType.trackRejected
+        ? 'declined'
+        : 'accepted';
+    return '$name$phone $action your request.';
+  }
+
+  /// Navigate to source: track request -> Received; accepted/declined -> Sent. Request expanded.
+  void _onNotificationTap(NotificationItem notification) {
+    if (notification.type == NotificationType.trackRequest ||
+        notification.type == NotificationType.trackAccepted ||
+        notification.type == NotificationType.trackRejected) {
+      // 0 = Received (incoming request), 1 = Sent (accepted/declined response)
+      final filterIndex = notification.type == NotificationType.trackRequest
+          ? 0
+          : 1;
+      Navigator.pop(context, {
+        'tab': 2,
+        'expandRequestId': notification.id,
+        'filterIndex': filterIndex,
+      });
+    }
+    // Other notification types can be handled here later (e.g. meeting point -> Meet Up tab)
+  }
+
+  /// Date only: strip day name if present (e.g. "Tue, Jan 31" -> "Jan 31").
+  String _dateOnly(String? dateStr) {
+    if (dateStr == null || dateStr.isEmpty) return '';
+    final comma = dateStr.indexOf(', ');
+    return comma >= 0 ? dateStr.substring(comma + 2).trim() : dateStr;
+  }
+
+  static const TextStyle _acceptDialogLineStyle = TextStyle(
+    fontSize: 13,
+    fontWeight: FontWeight.w500,
+    color: Colors.black87,
+  );
+
+  Widget _acceptDialogLine(String? value) {
+    if (value == null || value.isEmpty) return const SizedBox.shrink();
+    return Text(value, style: _acceptDialogLineStyle);
+  }
+
+  /// Shows Accept Track Request dialog: "Are you sure..." + details with vertical green line (same as Request design).
+  Future<bool> _showAcceptTrackRequestDialog(
+    NotificationItem notification,
+  ) async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierColor: Colors.black54,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Accept Track Request',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Are you sure you want to accept this tracking request?',
+                style: TextStyle(fontSize: 15, height: 1.4),
+              ),
+              const SizedBox(height: 16),
+              // Details with vertical green line (same as track page request design)
+              IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 3,
+                      decoration: BoxDecoration(
+                        color: AppColors.kGreen,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _acceptDialogLine(
+                            notification.senderName != null &&
+                                    notification.senderName!.isNotEmpty
+                                ? (notification.senderPhone != null &&
+                                          notification.senderPhone!.isNotEmpty
+                                      ? '${notification.senderName} (${notification.senderPhone})'
+                                      : notification.senderName!)
+                                : null,
+                          ),
+                          if (notification.date != null &&
+                              notification.startTime != null &&
+                              notification.endTime != null) ...[
+                            const SizedBox(height: 8),
+                            _acceptDialogLine(
+                              _dateOnly(notification.date) +
+                                  ', ${notification.startTime} - ${notification.endTime}',
+                            ),
+                          ],
+                          if (notification.venueName != null &&
+                              notification.venueName!.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            _acceptDialogLine(notification.venueName),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            style: TextButton.styleFrom(
+              backgroundColor: Colors.grey[200],
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(
+                color: Colors.black87,
+                fontWeight: FontWeight.w600,
+                fontSize: 15,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(
+              backgroundColor: AppColors.kGreen,
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: const Text(
+              'Accept',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 15,
+              ),
+            ),
+          ),
+        ],
+        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      ),
+    );
+    return result ?? false;
+  }
+
   // ---------- Action Handlers ----------
 
   void _handleAccept(NotificationItem notification) async {
-    final confirmed = await ConfirmationDialog.showPositiveConfirmation(
-      context,
-      title: 'Accept Request',
-      message: 'Are you sure you want to accept this request?',
-      confirmText: 'Accept',
-    );
+    final confirmed = await _showAcceptTrackRequestDialog(notification);
 
     if (confirmed && mounted) {
       try {

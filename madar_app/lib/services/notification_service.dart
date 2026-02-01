@@ -1,6 +1,8 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/material.dart';
+import 'package:madar_app/screens/notifications_page.dart';
+import '../main.dart'; //  navigatorKey
 
 class NotificationService {
   static final _fcm = FirebaseMessaging.instance;
@@ -10,9 +12,9 @@ class NotificationService {
     // Permission
     await _fcm.requestPermission(alert: true, badge: true, sound: true);
 
-    // 🔥 ANDROID CHANNEL (THIS IS THE FIX)
+    // ANDROID CHANNEL (THIS IS THE FIX)
     const AndroidNotificationChannel channel = AndroidNotificationChannel(
-      'madar_channel', // نفس اللي في AndroidManifest
+      'madar_channel', //AndroidManifest
       'Madar Notifications',
       description: 'All Madar notifications',
       importance: Importance.max,
@@ -28,12 +30,26 @@ class NotificationService {
     // Local notification init
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
     const settings = InitializationSettings(android: androidInit);
-    await _local.initialize(settings);
+    await _local.initialize(
+      settings,
+      onDidReceiveNotificationResponse: (response) {
+        _goToNotificationsPage();
+      },
+    );
 
-    // Foreground notifications
     FirebaseMessaging.onMessage.listen((message) {
       _showLocalNotification(message);
     });
+
+    FirebaseMessaging.onMessageOpenedApp.listen((message) {
+      _goToNotificationsPage();
+    });
+  }
+
+  static void _goToNotificationsPage() {
+    navigatorKey.currentState?.push(
+      MaterialPageRoute(builder: (_) => const NotificationsPage()),
+    );
   }
 
   static Future<void> _showLocalNotification(RemoteMessage message) async {

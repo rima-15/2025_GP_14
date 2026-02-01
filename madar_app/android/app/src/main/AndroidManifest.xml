@@ -12,7 +12,7 @@
     <uses-permission android:name="android.permission.WRITE_CONTACTS"/>
 
 
-    <!-- AR optional feature (لن تمنع التطبيق من العمل لو الجهاز غير مدعوم) -->
+    <!-- AR optional feature -->
     <uses-feature
         android:name="android.hardware.camera.ar"
         android:required="false" />

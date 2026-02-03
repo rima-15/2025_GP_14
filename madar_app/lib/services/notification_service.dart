@@ -71,4 +71,8 @@ class NotificationService {
       payload: message.data['type'],
     );
   }
+
+  static Future<void> clearAllSystemNotifications() async {
+    await _local.cancelAll();
+  }
 }

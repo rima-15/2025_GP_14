@@ -86,7 +86,22 @@ class _MainLayoutState extends State<MainLayout> {
     }
   }
 
+  //Notification read or not
   void _openMenu() => _scaffoldKey.currentState?.openDrawer();
+  //count unread notifications
+  Stream<int> _unreadNotificationsCount() {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      return Stream.value(0);
+    }
+
+    return FirebaseFirestore.instance
+        .collection('notifications')
+        .where('userId', isEqualTo: user.uid)
+        .where('isRead', isEqualTo: false)
+        .snapshots()
+        .map((snapshot) => snapshot.docs.length);
+  }
 
   // ---------- Build ----------
 
@@ -134,20 +149,63 @@ class _MainLayoutState extends State<MainLayout> {
             ),
       actions: index == 0
           ? [
-              IconButton(
-                icon: const Icon(
-                  Icons.notifications_outlined,
-                  color: AppColors.kGreen,
-                ),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const NotificationsPage(),
+              StreamBuilder<int>(
+                stream: _unreadNotificationsCount(),
+                builder: (context, snapshot) {
+                  final count = snapshot.data ?? 0;
+
+                  return IconButton(
+                    padding: const EdgeInsets.only(right: 16),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const NotificationsPage(),
+                        ),
+                      );
+                    },
+                    icon: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        const Icon(
+                          Icons.notifications_outlined,
+                          color: AppColors.kGreen,
+                        ),
+
+                        // 🔴
+                        if (count > 0)
+                          Positioned(
+                            right: -6,
+                            top: -6,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 3,
+                                vertical: 0.5,
+                              ),
+                              constraints: const BoxConstraints(
+                                minWidth: 16,
+                                minHeight: 16,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.red,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  count > 9 ? '+9' : count.toString(),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   );
                 },
-                padding: const EdgeInsets.only(right: 16),
               ),
             ]
           : null,

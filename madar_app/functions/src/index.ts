@@ -63,8 +63,26 @@ export const onTrackRequestCreated = onDocumentCreated(
       console.log(
         `🔔 Notification sent | success: ${response.successCount}, failure: ${response.failureCount}`
       );
+      // 🔔 Save notification in Firestore (Unread)
+await db.collection("notifications").add({
+  userId: receiverId,
+  type: "track_request",
+  title: "New Track Request",
+  body: `${data.senderName} wants to track your location`,
+  data: {
+    requestId: event.params.requestId,
+    senderId: data.senderId,
+    venueId: data.venueId ?? null,
+  },
+  isRead: false,
+  createdAt: admin.firestore.FieldValue.serverTimestamp(),
+});
+
+console.log("📦 Notification document created (unread)");
+
     } catch (error) {
       console.error("🔥 Error sending track request notification:", error);
     }
   }
 );
+

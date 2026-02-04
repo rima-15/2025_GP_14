@@ -7,6 +7,7 @@ import 'package:flutter/gestures.dart'; // Required for TapGestureRecognizer
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
+import 'package:madar_app/services/notification_service.dart';
 
 // ----------------------------------------------------------------------------
 // Notifications Page
@@ -118,6 +119,63 @@ class _NotificationsPageState extends State<NotificationsPage> {
   bool _showAll = false;
   final List<String> _respondedNotifications = [];
   final Map<String, double> _notificationOffsets = {};
+  // Read or Unread notifications
+  @override
+  void initState() {
+    super.initState();
+    _onOpenNotificationsPage();
+  }
+
+  Future<void> _onOpenNotificationsPage() async {
+    // 1️⃣
+    await _markAllNotificationsAsRead();
+
+    // 2️⃣
+    await NotificationService.clearAllSystemNotifications();
+  }
+
+  Future<void> _markAllNotificationsAsRead() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final batch = FirebaseFirestore.instance.batch();
+
+    final unread = await FirebaseFirestore.instance
+        .collection('notifications')
+        .where('userId', isEqualTo: user.uid)
+        .where('isRead', isEqualTo: false)
+        .get();
+
+    for (final doc in unread.docs) {
+      batch.update(doc.reference, {'isRead': true});
+    }
+
+    await batch.commit();
+  }
+
+  //dot of notification
+  Stream<Map<String, bool>> _notificationsReadMap() {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return const Stream.empty();
+
+    return FirebaseFirestore.instance
+        .collection('notifications')
+        .where('userId', isEqualTo: user.uid)
+        .snapshots()
+        .map((snap) {
+          final Map<String, bool> result = {};
+
+          for (final doc in snap.docs) {
+            final data = doc.data();
+            final key = data['data']?['requestId'] ?? doc.id;
+            final isRead = data['isRead'] ?? true;
+
+            result[key] = isRead;
+          }
+
+          return result;
+        });
+  }
 
   Stream<List<NotificationItem>> _incomingTrackRequestsStream() {
     final user = FirebaseAuth.instance.currentUser;
@@ -277,73 +335,81 @@ class _NotificationsPageState extends State<NotificationsPage> {
           child: Container(height: 1, color: Colors.grey[300]),
         ),
       ),
-      body: StreamBuilder<List<NotificationItem>>(
-        stream: _incomingTrackRequestsStream(),
-        builder: (context, incomingSnap) {
-          final incomingTrack = incomingSnap.data ?? [];
+
+      body: StreamBuilder<Map<String, bool>>(
+        stream: _notificationsReadMap(), // ← جديد
+        builder: (context, notifSnap) {
+          final readMap = notifSnap.data ?? {};
 
           return StreamBuilder<List<NotificationItem>>(
-            stream: _senderResponsesStream(),
-            builder: (context, senderSnap) {
-              final senderResponses = senderSnap.data ?? [];
+            stream: _incomingTrackRequestsStream(),
+            builder: (context, incomingSnap) {
+              final incomingTrack = incomingSnap.data ?? [];
 
-              // incoming + senderResponses + mock
-              final merged = [
-                ...incomingTrack,
-                ...senderResponses,
-                ..._notifications,
-              ];
-              merged.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+              return StreamBuilder<List<NotificationItem>>(
+                stream: _senderResponsesStream(),
+                builder: (context, senderSnap) {
+                  final senderResponses = senderSnap.data ?? [];
 
-              final visible = _showAll ? merged : merged.take(5).toList();
+                  final merged = [
+                    ...incomingTrack,
+                    ...senderResponses,
+                    ..._notifications,
+                  ];
 
-              if (merged.isEmpty) return _buildEmptyState();
+                  merged.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+                  final visible = _showAll ? merged : merged.take(5).toList();
 
-              return ListView(
-                children: [
-                  // Clear All Button
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 1, 10, 1),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        TextButton(
-                          onPressed: _clearAllNotifications,
-                          child: Text(
-                            'Clear all',
-                            style: TextStyle(
-                              color: Colors.grey[600],
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
+                  if (merged.isEmpty) return _buildEmptyState();
+
+                  return ListView(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 1, 10, 1),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            TextButton(
+                              onPressed: _clearAllNotifications,
+                              child: Text(
+                                'Clear all',
+                                style: TextStyle(
+                                  color: Colors.grey[600],
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      // 🔥 هنا الربط المهم
+                      ...visible.map((notif) {
+                        notif.isRead = readMap[notif.id] ?? true;
+                        return _buildNotificationItem(notif);
+                      }),
+
+                      if (!_showAll && merged.length > 5)
+                        Padding(
+                          padding: const EdgeInsets.all(5),
+                          child: TextButton(
+                            onPressed: () => setState(() => _showAll = true),
+                            child: const Text(
+                              'View All Notifications',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.kGreen,
+                              ),
                             ),
                           ),
                         ),
-                      ],
-                    ),
-                  ),
 
-                  // Notifications List
-                  ...visible.map((notif) => _buildNotificationItem(notif)),
-
-                  // View All Button
-                  if (!_showAll && merged.length > 5)
-                    Padding(
-                      padding: const EdgeInsets.all(5),
-                      child: TextButton(
-                        onPressed: () => setState(() => _showAll = true),
-                        child: const Text(
-                          'View All Notifications',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.kGreen,
-                          ),
-                        ),
-                      ),
-                    ),
-
-                  const SizedBox(height: 20),
-                ],
+                      const SizedBox(height: 20),
+                    ],
+                  );
+                },
               );
             },
           );

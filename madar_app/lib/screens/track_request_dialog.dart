@@ -8,6 +8,9 @@ import 'package:geolocator/geolocator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:icons_plus/icons_plus.dart';
 
 // ----------------------------------------------------------------------------
 // Track Request Dialog
@@ -226,10 +229,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
           .get();
 
       if (query.docs.isEmpty) {
-        setState(() {
-          _isPhoneInputValid = false;
-          _phoneInputError = 'User not exist';
-        });
+        _showInviteToMadarDialog(phone);
         return;
       }
 
@@ -260,6 +260,142 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
         _phoneInputError = 'Could not verify this number. Try again.';
       });
     }
+  }
+
+  static const String _inviteMessage =
+      "Hey! I'm using Madar for location sharing.\n"
+      "Join me using this invite link:\n"
+      "https://madar.app/invite";
+  static const String _inviteLink = 'https://madar.app/invite';
+
+  void _showInviteToMadarDialog(String phone) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final dialogPadding = screenWidth < 360 ? 20.0 : 28.0;
+
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (BuildContext dialogContext) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          elevation: 0,
+          backgroundColor: Colors.transparent,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Container(
+                padding: EdgeInsets.all(dialogPadding),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(24),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.15),
+                      blurRadius: 20,
+                      offset: const Offset(0, 10),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(height: 8),
+                    // Icon
+                    Container(
+                      width: 80,
+                      height: 80,
+                      decoration: BoxDecoration(
+                        color: AppColors.kGreen.withOpacity(0.15),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Center(
+                        child: Icon(
+                          Icons.person_add_rounded,
+                          size: 42,
+                          color: AppColors.kGreen,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    const Text(
+                      'Invite to Madar?',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.kGreen,
+                        height: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      "This person isn’t on Madar yet."
+                      "Invite them to start sharing location.",
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 15,
+                        height: 1.5,
+                        color: Colors.grey[700],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () {
+                          Navigator.of(dialogContext).pop();
+                          _showInviteShareBottomSheet(phone);
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.kGreen,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          elevation: 0,
+                        ),
+                        child: const Text(
+                          'Send Invite',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.3,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Positioned(
+                top: 12,
+                right: 12,
+                child: GestureDetector(
+                  onTap: () => Navigator.of(dialogContext).pop(),
+                  child: Icon(Icons.close, size: 22, color: Colors.grey[500]),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showInviteShareBottomSheet(String phone) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => _InviteShareSheet(
+        phone: phone,
+        inviteMessage: _inviteMessage,
+        inviteLink: _inviteLink,
+      ),
+    );
   }
 
   void _removeFriend(Friend friend) {
@@ -1354,6 +1490,408 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
       _isPhoneInputValid = true;
       _phoneInputError = null;
     });
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Invite Share Bottom Sheet (message preview + only installed app icons + More + Copy)
+// ----------------------------------------------------------------------------
+
+enum _ShareAppId { sms, whatsapp, instagram, snapchat, more }
+
+class _InviteShareSheet extends StatefulWidget {
+  final String phone;
+  final String inviteMessage;
+  final String inviteLink;
+
+  const _InviteShareSheet({
+    required this.phone,
+    required this.inviteMessage,
+    required this.inviteLink,
+  });
+
+  @override
+  State<_InviteShareSheet> createState() => _InviteShareSheetState();
+}
+
+class _InviteShareSheetState extends State<_InviteShareSheet> {
+  List<_ShareAppId> _availableApps = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkAvailableApps();
+  }
+
+  Future<void> _checkAvailableApps() async {
+    final list = <_ShareAppId>[];
+    try {
+      final smsOk = await canLaunchUrl(Uri(scheme: 'sms', path: widget.phone));
+      if (smsOk) list.add(_ShareAppId.sms);
+
+      final waOk = await canLaunchUrl(Uri.parse('https://wa.me/'));
+      if (waOk) list.add(_ShareAppId.whatsapp);
+
+      final igOk = await canLaunchUrl(Uri.parse('instagram://app'));
+      if (igOk) list.add(_ShareAppId.instagram);
+
+      final snapOk = await canLaunchUrl(Uri.parse('snapchat://'));
+      if (snapOk) list.add(_ShareAppId.snapchat);
+    } catch (_) {}
+    if (mounted) {
+      setState(() {
+        _availableApps = list;
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _shareViaSms(BuildContext context) async {
+    final uri = Uri(
+      scheme: 'sms',
+      path: widget.phone,
+      queryParameters: {'body': widget.inviteMessage},
+    );
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else {
+      _copyAndShow(
+        context,
+        widget.inviteMessage,
+        'Message copied. Paste into SMS.',
+      );
+    }
+  }
+
+  Future<void> _shareViaWhatsApp(BuildContext context) async {
+    final number = widget.phone.replaceAll(RegExp(r'[^\d]'), '');
+    final uri = Uri.parse(
+      'https://wa.me/$number?text=${Uri.encodeComponent(widget.inviteMessage)}',
+    );
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else {
+      _copyAndShow(
+        context,
+        widget.inviteMessage,
+        'Message copied. Paste into WhatsApp.',
+      );
+    }
+  }
+
+  void _copyAndShow(BuildContext context, String text, String snackbarMessage) {
+    Clipboard.setData(ClipboardData(text: text));
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(snackbarMessage),
+          backgroundColor: AppColors.kGreen,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  void _copyLink(BuildContext context) {
+    Clipboard.setData(ClipboardData(text: widget.inviteMessage));
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Link copied to clipboard!'),
+          backgroundColor: AppColors.kGreen,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      Navigator.pop(context);
+    }
+  }
+
+  void _shareViaInstagram(BuildContext context) {
+    _shareViaSystemSheet(context);
+  }
+
+  void _shareViaSnapchat(BuildContext context) {
+    _shareViaSystemSheet(context);
+  }
+
+  (String, Color, Widget, VoidCallback) _shareAppData(
+    BuildContext context,
+    _ShareAppId id,
+  ) {
+    const whiteFilter = ColorFilter.mode(Colors.white, BlendMode.srcIn);
+    switch (id) {
+      case _ShareAppId.sms:
+        return (
+          'SMS',
+          const Color(0xFF5C9EFF),
+          Icon(Icons.sms_outlined, size: 28, color: Colors.white),
+          () => _shareViaSms(context),
+        );
+      case _ShareAppId.whatsapp:
+        return (
+          'WhatsApp',
+          const Color(0xFF25D366),
+          Brand(Brands.whatsapp, size: 28, colorFilter: whiteFilter),
+          () => _shareViaWhatsApp(context),
+        );
+      case _ShareAppId.instagram:
+        return (
+          'Instagram',
+          const Color(0xFFE4405F),
+          Brand(Brands.instagram, size: 28, colorFilter: whiteFilter),
+          () => _shareViaInstagram(context),
+        );
+      case _ShareAppId.snapchat:
+        return (
+          'Snapchat',
+          const Color(0xFFFFFC00),
+          Brand(Brands.snapchat, size: 28, colorFilter: whiteFilter),
+          () => _shareViaSnapchat(context),
+        );
+      case _ShareAppId.more:
+        return (
+          'More',
+          Colors.grey.shade600,
+          Icon(Icons.more_horiz_rounded, size: 28, color: Colors.white),
+          () => _shareViaSystemSheet(context),
+        );
+    }
+  }
+
+  Future<void> _shareViaSystemSheet(BuildContext context) async {
+    try {
+      await Share.share(widget.inviteMessage, subject: 'Invite to Madar');
+    } catch (e) {
+      debugPrint('Share error: $e');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not open share. Try Copy instead.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(24),
+          topRight: Radius.circular(24),
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            16,
+            20,
+            MediaQuery.of(context).padding.bottom + 20,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Share invite',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Send this invite so they can join Madar',
+                style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+              ),
+              const SizedBox(height: 16),
+              // Message preview (grey box with invite text + icon)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.grey[200],
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.send_rounded, size: 22, color: AppColors.kGreen),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        widget.inviteMessage,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey[800],
+                          height: 1.4,
+                        ),
+                        maxLines: 4,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              // Horizontal row: only apps available on device + More
+              _loading
+                  ? const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(24),
+                        child: SizedBox(
+                          width: 28,
+                          height: 28,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppColors.kGreen,
+                          ),
+                        ),
+                      ),
+                    )
+                  : SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          ..._availableApps.map((id) {
+                            final (label, bg, iconWidget, onTap) =
+                                _shareAppData(context, id);
+                            return Padding(
+                              padding: const EdgeInsets.only(right: 20),
+                              child: _ShareAppIcon(
+                                label: label,
+                                backgroundColor: bg,
+                                iconWidget: iconWidget,
+                                onTap: onTap,
+                              ),
+                            );
+                          }),
+                          Padding(
+                            padding: const EdgeInsets.only(right: 0),
+                            child: _ShareAppIcon(
+                              label: 'More',
+                              backgroundColor: Colors.grey.shade600,
+                              iconWidget: Icon(
+                                Icons.more_horiz_rounded,
+                                size: 28,
+                                color: Colors.white,
+                              ),
+                              onTap: () => _shareViaSystemSheet(context),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+              const SizedBox(height: 24),
+              // Copy row
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () => _copyLink(context),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 12,
+                      horizontal: 4,
+                    ),
+                    child: Row(
+                      children: [
+                        const Text(
+                          'Copy',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black87,
+                          ),
+                        ),
+                        const Spacer(),
+                        Icon(
+                          Icons.copy_rounded,
+                          size: 22,
+                          color: Colors.grey[600],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ShareAppIcon extends StatelessWidget {
+  final String label;
+  final Color backgroundColor;
+  final Widget iconWidget;
+  final VoidCallback onTap;
+
+  const _ShareAppIcon({
+    required this.label,
+    required this.backgroundColor,
+    required this.iconWidget,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: backgroundColor,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.08),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Center(child: iconWidget),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey[700],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

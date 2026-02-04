@@ -8,6 +8,7 @@ import 'package:madar_app/screens/signin_page.dart';
 import 'package:madar_app/screens/profile_page.dart';
 import 'package:madar_app/screens/settings_page.dart';
 import 'package:madar_app/screens/notifications_page.dart';
+import 'package:madar_app/screens/history_page.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
 import 'package:madar_app/theme/theme.dart';
 
@@ -105,7 +106,7 @@ class _MainLayoutState extends State<MainLayout> {
   // ---------- App Bar ----------
 
   PreferredSizeWidget _buildAppBar(int index) {
-    final titles = ['Home', 'Explore', 'Track'];
+    final titles = ['Home', 'Explore', 'Social'];
 
     return AppBar(
       backgroundColor: Colors.white,
@@ -150,8 +151,21 @@ class _MainLayoutState extends State<MainLayout> {
                 padding: const EdgeInsets.only(right: 16),
               ),
             ]
+          : index == 2
+          ? [
+              IconButton(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const HistoryPage()),
+                  );
+                },
+                icon: Icon(Icons.history, size: 22, color: Colors.grey[600]),
+                padding: const EdgeInsets.only(right: 16),
+              ),
+            ]
           : null,
-      bottom: (index == 1 || index == 2)
+      bottom: index == 1
           ? PreferredSize(
               preferredSize: const Size.fromHeight(1),
               child: Container(height: 1, color: Colors.black12),
@@ -237,6 +251,19 @@ class _MainLayoutState extends State<MainLayout> {
                         },
                       ),
                       _buildMenuItem(
+                        icon: Icons.history,
+                        title: 'Requests History',
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const HistoryPage(),
+                            ),
+                          );
+                        },
+                      ),
+                      _buildMenuItem(
                         icon: Icons.help_outline,
                         title: 'Help & Support',
                         onTap: () {},
@@ -316,7 +343,7 @@ class _MainLayoutState extends State<MainLayout> {
               ),
               _buildNavItem(
                 icon: Icons.group_outlined,
-                label: 'Track',
+                label: 'Social',
                 index: 2,
               ),
             ],

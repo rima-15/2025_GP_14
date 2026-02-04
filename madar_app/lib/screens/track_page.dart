@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
+import 'package:madar_app/theme/theme.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
+import 'package:webview_flutter/webview_flutter.dart'
+    show JavaScriptMessage, JavascriptChannel, WebViewController;
 import 'track_request_dialog.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:async';
 
 const bool kFeatureEnabled = true;
-const String kSolitaireVenueId = 'ChIJ_WZ_Y1iXwxUR_U6jcP83SIg';
+const String kSolitaireVenueId = 'ChIJcYTQDwDjLj4RZEiboV6gZzM';
 
 class TrackPage extends StatefulWidget {
   const TrackPage({
@@ -27,16 +30,19 @@ class TrackPage extends StatefulWidget {
 }
 
 class _TrackPageState extends State<TrackPage> {
+  bool _pendingPinApply = false;
   bool _isTrackingView = true;
   String _currentFloor = '';
   List<Map<String, String>> _venueMaps = [];
   bool _mapsLoading = false;
   String? _expandedRequestId;
   Timer? _clockTimer;
+  // ===== Track Map (Pin JS) =====
+  WebViewController? _trackMapController;
 
-  /// 0 = Received, 1 = Sent (no "All")
+  /// 0 = Sent, 1 = Received (same order as History page)
   int _selectedFilterIndex = 0;
-  static const List<String> _requestFilters = ['Received', 'Sent'];
+  static const List<String> _requestFilters = ['Sent', 'Received'];
   final ScrollController _scrollController = ScrollController();
 
   /// Key for the tile to scroll to when opening from notification (by request ID).
@@ -54,6 +60,7 @@ class _TrackPageState extends State<TrackPage> {
         .orderBy('startAt')
         .snapshots()
         .map((snap) {
+          _markStaleRequestsIfNeeded(snap.docs);
           return snap.docs.map((d) {
             final data = d.data();
 
@@ -94,13 +101,11 @@ class _TrackPageState extends State<TrackPage> {
 
     return FirebaseFirestore.instance
         .collection('trackRequests')
-        .where(
-          'receiverId',
-          isEqualTo: uid,
-        ) // Assuming you store receiver's UID
+        .where('receiverId', isEqualTo: uid)
         .where('status', whereIn: ['pending', 'accepted'])
         .snapshots()
         .map((snap) {
+          _markStaleRequestsIfNeeded(snap.docs);
           return snap.docs.map((d) {
             final data = d.data();
             final startAt = (data['startAt'] as Timestamp).toDate();
@@ -187,6 +192,61 @@ class _TrackPageState extends State<TrackPage> {
     return '${diff.inDays} day${diff.inDays == 1 ? '' : 's'} ago';
   }
 
+  // =======================
+  // [TRACK PIN JS] (NO TAP)
+  // =======================
+  String get _trackPinJs => r'''
+function getViewer(){ return document.querySelector('model-viewer'); }
+
+function ensurePin(viewer){
+  let hs = viewer.querySelector('#trackedUserPin');
+  if(!hs){
+    hs = document.createElement('div');
+    hs.id = 'trackedUserPin';
+    hs.slot = 'hotspot-trackpin';
+    hs.innerHTML = '<div style="font-size:34px">📍</div>';
+    viewer.appendChild(hs);
+  }
+  return hs;
+}
+
+window.setTrackedPin = function(x,y,z){
+  const viewer = getViewer();
+  if(!viewer) return false;
+  const hs = ensurePin(viewer);
+  hs.setAttribute('data-position', `${x} ${y} ${z}`);
+  hs.setAttribute('data-normal', '0 1 0');
+  viewer.requestUpdate();
+  return true;
+};
+
+window.setTrackedPinSafe = function(x,y,z){
+  let t=0;
+  const i=setInterval(()=>{
+    t++;
+    if(window.setTrackedPin(x,y,z) || t>20) clearInterval(i);
+  },150);
+};
+
+window.hideTrackedPin = function(){
+  const viewer = getViewer();
+  if(!viewer) return false;
+  const hs = viewer.querySelector('#trackedUserPin');
+  if(hs) hs.style.display = 'none';
+  return true;
+};
+
+window.showTrackedPin = function(){
+  const viewer = getViewer();
+  if(!viewer) return false;
+  const hs = ensurePin(viewer);
+  hs.style.display = 'block';
+  viewer.requestUpdate();
+  return true;
+};
+
+''';
+
   // Meeting point data
   final List<Participant> meetingParticipants = [
     Participant(name: 'Alex Chen', status: 'On the way', isHost: false),
@@ -194,6 +254,13 @@ class _TrackPageState extends State<TrackPage> {
   ];
   final String currentUserName = 'Ahmed Hassan';
   bool isArrived = false;
+  // =======================
+  // LIVE LOCATION (TRACKING)
+  // =======================
+
+  Map<String, double>? _trackedPos; // {x,y,z}
+  String _trackedFloorLabel = '';
+  StreamSubscription<DocumentSnapshot>? _liveLocSub;
 
   @override
   void initState() {
@@ -201,14 +268,48 @@ class _TrackPageState extends State<TrackPage> {
     _loadVenueMaps();
     if (widget.initialExpandRequestId != null) {
       _expandedRequestId = widget.initialExpandRequestId;
-      _selectedFilterIndex =
-          widget.initialFilterIndex ?? 0; // 0 = Received, 1 = Sent
+      // Notification passes 0 = Received, 1 = Sent; we use 0 = Sent, 1 = Received
+      _selectedFilterIndex = widget.initialFilterIndex != null
+          ? 1 - widget.initialFilterIndex!
+          : 0;
       _isTrackingView = true; // Tracking tab
       _startScrollToTargetWhenReady();
     }
     _clockTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (mounted) setState(() {});
     });
+    _startLiveLocationTracking();
+  }
+
+  void _startLiveLocationTracking() {
+    const docId = 'demo_user';
+
+    _liveLocSub = FirebaseFirestore.instance
+        .collection('liveLocations')
+        .doc(docId)
+        .snapshots()
+        .listen((snap) {
+          final data = snap.data();
+          if (data == null) return;
+
+          final pos = data['blenderPosition'];
+          if (pos is! Map) return;
+
+          final xRaw = (pos['x'] as num?)?.toDouble();
+          final x = (xRaw == null) ? null : -xRaw;
+          final y = (pos['y'] as num?)?.toDouble();
+          final z = (pos['z'] as num?)?.toDouble();
+          final floor = data['floor'];
+
+          if (x == null || y == null || z == null) return;
+
+          setState(() {
+            _trackedPos = {'x': x, 'y': y, 'z': z};
+            _trackedFloorLabel = floor?.toString() ?? '';
+          });
+
+          _applyTrackedPinToViewer();
+        });
   }
 
   /// Retry until the target tile (by request ID) is built, then scroll so it's visible.
@@ -247,6 +348,7 @@ class _TrackPageState extends State<TrackPage> {
   @override
   void dispose() {
     _clockTimer?.cancel();
+    _liveLocSub?.cancel();
     _scrollToTargetTimer?.cancel();
     _scrollController.dispose();
     super.dispose();
@@ -293,7 +395,12 @@ class _TrackPageState extends State<TrackPage> {
           setState(() {
             _venueMaps = convertedMaps;
             if (convertedMaps.isNotEmpty) {
-              _currentFloor = convertedMaps.first['mapURL'] ?? '';
+              final firstValid = convertedMaps.firstWhere(
+                (m) => (m['mapURL'] ?? '').toString().trim().isNotEmpty,
+                orElse: () => const {'mapURL': ''},
+              );
+
+              _currentFloor = (firstValid['mapURL'] ?? '').toString();
             }
           });
         }
@@ -305,6 +412,97 @@ class _TrackPageState extends State<TrackPage> {
     } finally {
       if (mounted) setState(() => _mapsLoading = false);
     }
+    _pendingPinApply = true;
+  }
+
+  int? _parseFloorToIndex(String floorRaw) {
+    final s = floorRaw.trim().toUpperCase();
+    if (s.isEmpty) return null;
+
+    // "1", "2"
+    final n1 = int.tryParse(s);
+    if (n1 != null) return n1 - 1;
+
+    // "F1", "F2"
+    final m = RegExp(r'(\d+)').firstMatch(s);
+    if (m != null) return int.parse(m.group(1)!) - 1;
+
+    if (s == 'GF' || s == 'G' || s == 'GROUND') return 0;
+    return null;
+  }
+
+  String _currentFloorLabel() {
+    final m = _venueMaps.firstWhere(
+      (x) => (x['mapURL'] ?? '') == _currentFloor,
+      orElse: () => const {'floorNumber': ''},
+    );
+    return (m['floorNumber'] ?? '').toString().trim().toUpperCase();
+  }
+
+  /// يحول floor القادم من Unity/Firestore (1/2 أو "F1") إلى label قريب من الموجود عندك (GF/F1)
+  String _normalizeTrackedFloorLabel(String raw) {
+    final s = raw.trim().toUpperCase();
+    if (s.isEmpty) return '';
+
+    final n = int.tryParse(s);
+    if (n != null) {
+      // ✅ mapping حسب أزرارك GF / F1
+      if (n == 1) return 'GF';
+      if (n == 2) return 'F1';
+      return 'F$n';
+    }
+
+    return s; // لو جا "GF" أو "F1"
+  }
+
+  bool _floorsMatch(String trackedRaw, String currentLabel) {
+    final tracked = _normalizeTrackedFloorLabel(trackedRaw); // "F1"
+    final cur = currentLabel.trim().toUpperCase(); // "GF" or "F1"
+
+    if (tracked.isEmpty || cur.isEmpty)
+      return true; // إذا ما نعرف، لا نخفي البن
+
+    // لو current هو GF، لا يطابق F1 (واضح)
+    // لو current هو F1 يطابق tracked F1
+    if (cur == tracked) return true;
+
+    // fallback ذكي: إذا current يحتوي نفس الرقم (مثلاً F1)
+    final tNum = RegExp(r'\d+').firstMatch(tracked)?.group(0);
+    if (tNum != null && cur.contains(tNum)) return true;
+
+    return false;
+  }
+
+  void _applyTrackedPinToViewer() {
+    // إذا ما عندنا موقع: اخفي البن فقط
+    if (_trackedPos == null) {
+      _pendingPinApply = false; // ✅ لا ننتظر رسم
+      _trackMapController?.runJavaScript('hideTrackedPin();');
+      return;
+    }
+
+    // إذا الكنترولر مو جاهز: خزن طلب رسم
+    if (_trackMapController == null) {
+      _pendingPinApply = true;
+      return;
+    }
+
+    // (اختياري) إذا تبين مقارنة الدور قبل الرسم:
+    final currentLabel = _currentFloorLabel(); // GF / F1
+    final ok = _floorsMatch(_trackedFloorLabel, currentLabel);
+    if (!ok) {
+      _pendingPinApply = false;
+      _trackMapController!.runJavaScript('hideTrackedPin();');
+      return;
+    }
+
+    final x = _trackedPos!['x']!;
+    final y = _trackedPos!['y']!;
+    final z = _trackedPos!['z']!;
+
+    _pendingPinApply = false;
+    _trackMapController!.runJavaScript('showTrackedPin();');
+    _trackMapController!.runJavaScript('setTrackedPinSafe($x,$y,$z);');
   }
 
   void _useFallbackMaps() {
@@ -363,21 +561,25 @@ class _TrackPageState extends State<TrackPage> {
     );
   }
 
+  static const List<String> _mainTabs = ['Tracking', 'Meeting point'];
+
   Widget _buildFullContent() {
     return ListView(
       controller: _scrollController,
       key: const ValueKey<String>('track_requests_list'),
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       children: [
-        _buildViewToggle(),
-        const SizedBox(height: 20),
+        _buildMainTabs(),
+        Container(height: 1, color: Colors.black12),
+        const SizedBox(height: 12),
+
+        // Map visible for both Tracking and Meeting point
         _buildMapPreview(),
         const SizedBox(height: 16),
 
         if (_isTrackingView) ...[
           _buildTrackRequestButton(),
           const SizedBox(height: 24),
-          // Title and filter tabs: Received | Sent only
           const Text(
             'Tracking Requests',
             style: TextStyle(
@@ -387,20 +589,10 @@ class _TrackPageState extends State<TrackPage> {
             ),
           ),
           const SizedBox(height: 12),
-          _buildFilterTabs(),
+          _buildFilterPills(),
           const SizedBox(height: 20),
 
           if (_selectedFilterIndex == 0)
-            StreamBuilder<List<TrackingRequest>>(
-              stream: _incomingRequestsStream(),
-              builder: (context, snapshot) {
-                final incoming = snapshot.data ?? [];
-                final scheduled = _receivedScheduledFrom(incoming);
-                final active = _receivedActiveFrom(incoming);
-                return _buildReceivedContent(scheduled, active);
-              },
-            )
-          else
             StreamBuilder<List<TrackingRequest>>(
               stream: _sentRequestsStream(),
               builder: (context, snapshot) {
@@ -409,9 +601,19 @@ class _TrackPageState extends State<TrackPage> {
                 final active = _activeFrom(all);
                 return _buildSentContent(upcoming, active);
               },
+            )
+          else
+            StreamBuilder<List<TrackingRequest>>(
+              stream: _incomingRequestsStream(),
+              builder: (context, snapshot) {
+                final incoming = snapshot.data ?? [];
+                final scheduled = _receivedScheduledFrom(incoming);
+                final active = _receivedActiveFrom(incoming);
+                return _buildReceivedContent(scheduled, active);
+              },
             ),
         ] else ...[
-          // Meeting Point View - ENTIRE SECTION
+          // Meeting point view (same as before)
           Row(
             children: [
               Expanded(
@@ -427,7 +629,6 @@ class _TrackPageState extends State<TrackPage> {
           ),
           const SizedBox(height: 20),
 
-          // Meeting Point Participants Section Header
           _buildSectionHeader(
             icon: Icons.place_outlined,
             title: 'Meeting Point Participants',
@@ -436,11 +637,9 @@ class _TrackPageState extends State<TrackPage> {
           ),
           const SizedBox(height: 12),
 
-          // Host (Current User) Card
           _buildHostCard(),
           const SizedBox(height: 8),
 
-          // Meeting Participants
           for (final p in meetingParticipants) ...[
             _buildParticipantTile(p),
             const SizedBox(height: 8),
@@ -450,61 +649,77 @@ class _TrackPageState extends State<TrackPage> {
     );
   }
 
-  Widget _buildViewToggle() {
-    return Container(
-      height: 50,
-      decoration: BoxDecoration(
-        color: Colors.grey[100],
-        borderRadius: BorderRadius.circular(12),
-      ),
-      padding: const EdgeInsets.all(4),
+  /// Main tabs: Tracking | Meeting point (compact like History — text + underline).
+  Widget _buildMainTabs() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
-        children: [
-          Expanded(
-            child: _toggleButton(
-              'Tracking',
-              _isTrackingView,
-              () => setState(() => _isTrackingView = true),
+        children: List.generate(_mainTabs.length, (i) {
+          final isSelected = i == 0 ? _isTrackingView : !_isTrackingView;
+          return Expanded(
+            child: GestureDetector(
+              onTap: () => setState(() => _isTrackingView = (i == 0)),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _mainTabs[i],
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: isSelected ? AppColors.kGreen : Colors.grey,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    height: 2,
+                    decoration: BoxDecoration(
+                      color: isSelected ? AppColors.kGreen : Colors.transparent,
+                      borderRadius: BorderRadius.circular(1),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          Expanded(
-            child: _toggleButton(
-              'Meet Up',
-              !_isTrackingView,
-              () => setState(() => _isTrackingView = false),
-            ),
-          ),
-        ],
+          );
+        }),
       ),
     );
   }
 
-  Widget _toggleButton(String label, bool isSelected, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          color: isSelected ? AppColors.kGreen : Colors.transparent,
-          borderRadius: BorderRadius.circular(10),
-          boxShadow: isSelected
-              ? [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.1),
-                    blurRadius: 4,
-                    offset: const Offset(0, 2),
+  /// Sent | Received filter pills (same style as History page — grey container, green selected pill).
+  Widget _buildFilterPills() {
+    return Container(
+      height: 40,
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        borderRadius: BorderRadius.circular(20),
+      ),
+      padding: const EdgeInsets.all(4),
+      child: Row(
+        children: List.generate(_requestFilters.length, (i) {
+          final isSelected = i == _selectedFilterIndex;
+          return Expanded(
+            child: GestureDetector(
+              onTap: () => setState(() => _selectedFilterIndex = i),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: isSelected ? AppColors.kGreen : Colors.transparent,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  _requestFilters[i],
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: isSelected ? Colors.white : Colors.grey[600],
                   ),
-                ]
-              : null,
-        ),
-        alignment: Alignment.center,
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-            color: isSelected ? Colors.white : Colors.grey[600],
-          ),
-        ),
+                ),
+              ),
+            ),
+          );
+        }),
       ),
     );
   }
@@ -680,46 +895,6 @@ class _TrackPageState extends State<TrackPage> {
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildFilterTabs() {
-    return SizedBox(
-      height: 40,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        itemCount: _requestFilters.length,
-        itemBuilder: (context, idx) {
-          final isSelected = idx == _selectedFilterIndex;
-          return GestureDetector(
-            onTap: () {
-              setState(() => _selectedFilterIndex = idx);
-            },
-            child: Container(
-              margin: const EdgeInsets.only(right: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-              decoration: BoxDecoration(
-                color: isSelected ? AppColors.kGreen : Colors.white,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: isSelected ? AppColors.kGreen : Colors.grey.shade300,
-                  width: 1,
-                ),
-              ),
-              child: Center(
-                child: Text(
-                  _requestFilters[idx],
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                    color: isSelected ? Colors.white : Colors.grey.shade500,
-                  ),
-                ),
-              ),
-            ),
-          );
-        },
       ),
     );
   }
@@ -969,7 +1144,7 @@ class _TrackPageState extends State<TrackPage> {
                   if (isPending)
                     _buildIncomingActionButtons(context, r)
                   else if (isAcceptedScheduled)
-                    _buildCancelTrackingButton(context, r.id),
+                    _buildCancelTrackingButton(context, r),
                 ],
               ),
             ),
@@ -1070,7 +1245,7 @@ class _TrackPageState extends State<TrackPage> {
                 children: [
                   _buildReceivedDetails(r),
                   const SizedBox(height: 16),
-                  _buildStopTrackingButton(context, r.id),
+                  _buildStopTrackingButton(context, r),
                 ],
               ),
             ),
@@ -1080,23 +1255,27 @@ class _TrackPageState extends State<TrackPage> {
     );
   }
 
-  Widget _buildStopTrackingButton(BuildContext context, String requestId) {
+  Widget _buildStopTrackingButton(BuildContext context, TrackingRequest r) {
+    final senderName = r.senderName ?? 'this person';
     return SizedBox(
       width: double.infinity,
       child: OutlinedButton.icon(
         onPressed: () async {
           final confirmed = await ConfirmationDialog.showDeleteConfirmation(
             context,
-            title: 'Stop Tracking',
+            title: 'Stop Sharing',
             message:
-                'Do you want to stop sharing your location with this person?',
-            confirmText: 'Stop Tracking',
+                'Are you sure you want to stop sharing your location with $senderName?',
+            cancelText: 'Keep',
+            confirmText: 'Stop Sharing',
           );
-          if (confirmed && mounted)
-            _updateRequestStatus(requestId, 'cancelled');
+          if (confirmed && mounted) _updateRequestStatus(r.id, 'terminated');
         },
         icon: const Icon(Icons.stop_circle_outlined, size: 18),
-        label: const Text('Stop Tracking'),
+        label: const Text(
+          'Stop Tracking',
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
         style: OutlinedButton.styleFrom(
           foregroundColor: AppColors.kError,
           side: const BorderSide(color: AppColors.kError),
@@ -1354,7 +1533,8 @@ class _TrackPageState extends State<TrackPage> {
     );
   }
 
-  Widget _buildCancelTrackingButton(BuildContext context, String requestId) {
+  Widget _buildCancelTrackingButton(BuildContext context, TrackingRequest r) {
+    final senderName = r.senderName ?? 'this person';
     return SizedBox(
       width: double.infinity,
       child: OutlinedButton.icon(
@@ -1362,11 +1542,12 @@ class _TrackPageState extends State<TrackPage> {
           final confirmed = await ConfirmationDialog.showDeleteConfirmation(
             context,
             title: 'Cancel Tracking',
-            message: 'Do you want to cancel this scheduled tracking?',
+            message:
+                'Are you sure you want to cancel this tracking request with $senderName?',
+            cancelText: 'Keep',
             confirmText: 'Cancel Tracking',
           );
-          if (confirmed && mounted)
-            _updateRequestStatus(requestId, 'cancelled');
+          if (confirmed && mounted) _updateRequestStatus(r.id, 'declined');
         },
 
         icon: const Icon(Icons.cancel_outlined, size: 18),
@@ -1384,6 +1565,30 @@ class _TrackPageState extends State<TrackPage> {
         ),
       ),
     );
+  }
+
+  /// Mark requests that are past endAt as expired (pending) or completed (accepted) so they appear in History.
+  void _markStaleRequestsIfNeeded(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  ) {
+    final now = DateTime.now();
+    for (final d in docs) {
+      final data = d.data();
+      final status = (data['status'] ?? '').toString();
+      final endAt = data['endAt'] is Timestamp
+          ? (data['endAt'] as Timestamp).toDate()
+          : null;
+      if (endAt == null || endAt.isAfter(now)) continue;
+      if (status == 'pending') {
+        FirebaseFirestore.instance.collection('trackRequests').doc(d.id).update(
+          {'status': 'expired'},
+        );
+      } else if (status == 'accepted') {
+        FirebaseFirestore.instance.collection('trackRequests').doc(d.id).update(
+          {'status': 'completed'},
+        );
+      }
+    }
   }
 
   // Logic to update Firestore

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:madar_app/services/fcm_token_service.dart';
 import 'package:madar_app/widgets/custom_scaffold.dart';
 import 'package:madar_app/screens/signup_page.dart';
 import 'package:madar_app/screens/forgot_password_page.dart';
@@ -94,6 +95,8 @@ class _SignInScreenState extends State<SignInScreen> {
         setState(() => _loading = false);
         return;
       }
+      //FCM token
+      await FcmTokenService.saveToken(user.uid);
 
       if (mounted) {
         await Navigator.pushReplacement(

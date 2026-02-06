@@ -29,6 +29,7 @@ environment:
 # versions available, run `flutter pub outdated`.
 dependencies:
 # date in track request 
+  flutter_contacts: ^1.1.7
   intl: ^0.18.0
   flutter:
     sdk: flutter
@@ -44,6 +45,7 @@ dependencies:
   firebase_auth: ^5.3.0
   cloud_firestore: ^5.5.0
   url_launcher: ^6.3.0
+  share_plus: ^10.0.2
 
 
 
@@ -58,6 +60,12 @@ dependencies:
   flutter_native_splash: ^2.4.6
   shared_preferences: ^2.3.2
   firebase_storage: ^12.4.10
+
+   #Notification
+  firebase_messaging: ^15.2.10
+  flutter_local_notifications: ^17.0.0
+
+
 
   # 3D map 
   model_viewer_plus: ^1.0.2

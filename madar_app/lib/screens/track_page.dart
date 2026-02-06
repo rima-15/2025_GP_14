@@ -17,7 +17,17 @@ const String kSolitaireVenueId =
     'ChIJcYTQDwDjLj4RZEiboV6gZzM';
 
 class TrackPage extends StatefulWidget {
-  const TrackPage({super.key});
+  const TrackPage({
+    super.key,
+    this.initialExpandRequestId,
+    this.initialFilterIndex,
+  });
+
+  /// When set (e.g. from notification tap), open with this request expanded.
+  final String? initialExpandRequestId;
+
+  /// 0 = Received, 1 = Sent. When opening from notification, which filter tab to show.
+  final int? initialFilterIndex;
 
   @override
   State<TrackPage> createState() =>
@@ -37,6 +47,22 @@ class _TrackPageState
   // ===== Track Map (Pin JS) =====
   WebViewController?
   _trackMapController;
+
+  /// 0 = Sent, 1 = Received (same order as History page)
+  int _selectedFilterIndex = 0;
+  static const List<String>
+  _requestFilters = [
+    'Sent',
+    'Received',
+  ];
+  final ScrollController
+  _scrollController =
+      ScrollController();
+
+  /// Key for the tile to scroll to when opening from notification (by request ID).
+  final GlobalKey _scrollToTargetKey =
+      GlobalKey();
+  Timer? _scrollToTargetTimer;
 
   Stream<List<TrackingRequest>>
   _sentRequestsStream() {
@@ -63,6 +89,9 @@ class _TrackPageState
         .orderBy('startAt')
         .snapshots()
         .map((snap) {
+          _markStaleRequestsIfNeeded(
+            snap.docs,
+          );
           return snap.docs.map((d) {
             final data = d.data();
 
@@ -116,6 +145,98 @@ class _TrackPageState
               lastSeen: _timeAgo(
                 startAt,
               ),
+              // Add these two lines to satisfy the constructor:
+              senderName:
+                  (data['senderName'] ??
+                          '')
+                      .toString(),
+              senderPhone:
+                  (data['senderPhone'] ??
+                          '')
+                      .toString(),
+            );
+          }).toList();
+        });
+  }
+
+  Stream<List<TrackingRequest>>
+  _incomingRequestsStream() {
+    final uid = FirebaseAuth
+        .instance
+        .currentUser
+        ?.uid;
+    // You might want to filter by receiverPhone if you store it that way
+    if (uid == null)
+      return Stream.value([]);
+
+    return FirebaseFirestore.instance
+        .collection('trackRequests')
+        .where(
+          'receiverId',
+          isEqualTo: uid,
+        )
+        .where(
+          'status',
+          whereIn: [
+            'pending',
+            'accepted',
+          ],
+        )
+        .snapshots()
+        .map((snap) {
+          _markStaleRequestsIfNeeded(
+            snap.docs,
+          );
+          return snap.docs.map((d) {
+            final data = d.data();
+            final startAt =
+                (data['startAt']
+                        as Timestamp)
+                    .toDate();
+            final endAt =
+                (data['endAt']
+                        as Timestamp)
+                    .toDate();
+
+            return TrackingRequest(
+              id: d.id,
+              trackedUserName:
+                  (data['receiverName'] ??
+                          '')
+                      .toString(),
+              trackedUserPhone:
+                  (data['receiverPhone'] ??
+                          '')
+                      .toString(),
+              senderName:
+                  (data['senderName'] ??
+                          'Someone')
+                      .toString(),
+              senderPhone:
+                  (data['senderPhone'] ??
+                          '')
+                      .toString(),
+              status:
+                  (data['status'] ?? '')
+                      .toString(),
+              startAt: startAt,
+              endAt: endAt,
+              startTime:
+                  TimeOfDay.fromDateTime(
+                    startAt,
+                  ).format(context),
+              endTime:
+                  TimeOfDay.fromDateTime(
+                    endAt,
+                  ).format(context),
+              venueName:
+                  (data['venueName'] ??
+                          '')
+                      .toString(),
+              venueId:
+                  (data['venueId'] ??
+                          '')
+                      .toString(),
             );
           }).toList();
         });
@@ -172,6 +293,39 @@ class _TrackPageState
     return active;
   }
 
+  /// Received: scheduled = pending (before end) or accepted but not started yet
+  List<TrackingRequest>
+  _receivedScheduledFrom(
+    List<TrackingRequest> incoming,
+  ) {
+    final now = DateTime.now();
+    final scheduled = incoming.where((
+      r,
+    ) {
+      if (now.isAfter(r.endAt))
+        return false;
+      if (r.status == 'pending')
+        return true;
+      if (r.status == 'accepted')
+        return now.isBefore(r.startAt);
+      return false;
+    }).toList();
+    scheduled.sort(
+      (a, b) => a.startAt.compareTo(
+        b.startAt,
+      ),
+    );
+    return scheduled;
+  }
+
+  /// Received: active = accepted and in time window
+  List<TrackingRequest>
+  _receivedActiveFrom(
+    List<TrackingRequest> incoming,
+  ) {
+    return _activeFrom(incoming);
+  }
+
   String _timeAgo(DateTime dateTime) {
     final diff = DateTime.now()
         .difference(dateTime);
@@ -207,22 +361,13 @@ function ensurePin(viewer){
 window.setTrackedPin = function(x,y,z){
   const viewer = getViewer();
   if(!viewer) return false;
-
   const hs = ensurePin(viewer);
-
-  // force refresh: detach/attach
-  if (hs.parentElement) {
-    hs.parentElement.removeChild(hs);
-    viewer.appendChild(hs);
-  }
-
-  hs.setAttribute('data-position', `${Number(x)} ${Number(y)} ${Number(z)}`);
+  hs.setAttribute('data-position', `${x} ${y} ${z}`);
   hs.setAttribute('data-normal', '0 1 0');
-
   viewer.requestUpdate();
-  requestAnimationFrame(() => viewer.requestUpdate());
   return true;
 };
+
 window.setTrackedPinSafe = function(x,y,z){
   let t=0;
   const i=setInterval(()=>{
@@ -267,7 +412,6 @@ window.showTrackedPin = function(){
   final String currentUserName =
       'Ahmed Hassan';
   bool isArrived = false;
-
   // =======================
   // LIVE LOCATION (TRACKING)
   // =======================
@@ -282,7 +426,22 @@ window.showTrackedPin = function(){
   void initState() {
     super.initState();
     _loadVenueMaps();
-
+    if (widget.initialExpandRequestId !=
+        null) {
+      _expandedRequestId =
+          widget.initialExpandRequestId;
+      // Notification passes 0 = Received, 1 = Sent; we use 0 = Sent, 1 = Received
+      _selectedFilterIndex =
+          widget.initialFilterIndex !=
+              null
+          ? 1 -
+                widget
+                    .initialFilterIndex!
+          : 0;
+      _isTrackingView =
+          true; // Tracking tab
+      _startScrollToTargetWhenReady();
+    }
     _clockTimer = Timer.periodic(
       const Duration(seconds: 30),
       (_) {
@@ -293,101 +452,105 @@ window.showTrackedPin = function(){
   }
 
   void _startLiveLocationTracking() {
-    const docId =
-        'demo_user'; // تأكدي Unity تكتب بنفس الـ docId بالضبط
+    const docId = 'demo_user';
 
     _liveLocSub = FirebaseFirestore
         .instance
         .collection('liveLocations')
         .doc(docId)
         .snapshots()
-        .listen(
-          (snap) {
-            debugPrint(
-              'LIVELOC: exists=${snap.exists} id=${snap.id}',
-            );
+        .listen((snap) {
+          final data = snap.data();
+          if (data == null) return;
 
-            final data = snap.data();
-            if (data == null) {
-              debugPrint(
-                'LIVELOC: data is null',
-              );
-              return;
-            }
+          final pos =
+              data['blenderPosition'];
+          if (pos is! Map) return;
 
-            debugPrint(
-              'LIVELOC: data keys=${data.keys.toList()}',
-            );
+          final xRaw =
+              (pos['x'] as num?)
+                  ?.toDouble();
+          final x = (xRaw == null)
+              ? null
+              : -xRaw;
+          final y = (pos['y'] as num?)
+              ?.toDouble();
+          final z = (pos['z'] as num?)
+              ?.toDouble();
+          final floor = data['floor'];
 
-            final pos =
-                data['blenderPosition'];
-            if (pos is! Map) {
-              debugPrint(
-                'LIVELOC: blenderPosition is not a Map => $pos',
-              );
-              return;
-            }
+          if (x == null ||
+              y == null ||
+              z == null)
+            return;
 
-            debugPrint(
-              'LIVELOC: pos=$pos',
-            );
+          setState(() {
+            _trackedPos = {
+              'x': x,
+              'y': y,
+              'z': z,
+            };
+            _trackedFloorLabel =
+                floor?.toString() ?? '';
+          });
 
-            final xRaw =
-                (pos['x'] as num?)
-                    ?.toDouble();
-            final yRaw =
-                (pos['y'] as num?)
-                    ?.toDouble();
-            final zRaw =
-                (pos['z'] as num?)
-                    ?.toDouble();
+          _applyTrackedPinToViewer();
+        });
+  }
 
-            if (xRaw == null ||
-                yRaw == null ||
-                zRaw == null) {
-              debugPrint(
-                'LIVELOC: null axis values x=$xRaw y=$yRaw z=$zRaw',
-              );
-              return;
-            }
-
-            // ✅ هنا انعكاس الاكس
-            final x = xRaw;
-            final y = yRaw;
-            final z = zRaw;
-
-            final floor =
-                data['floor']
-                    ?.toString() ??
-                '';
-            debugPrint(
-              'LIVELOC: final(x,y,z)=($x,$y,$z) floor=$floor',
-            );
-
-            setState(() {
-              _trackedPos = {
-                'x': x,
-                'y': y,
-                'z': z,
-              };
-              _trackedFloorLabel =
-                  floor;
-            });
-
-            _applyTrackedPinToViewer();
-          },
-          onError: (e) {
-            debugPrint(
-              'LIVELOC: ERROR $e',
-            );
-          },
-        );
+  /// Retry until the target tile (by request ID) is built, then scroll so it's visible.
+  void _startScrollToTargetWhenReady() {
+    int attempts = 0;
+    const maxAttempts =
+        25; // ~2.5 seconds
+    _scrollToTargetTimer?.cancel();
+    _scrollToTargetTimer = Timer.periodic(
+      const Duration(milliseconds: 100),
+      (_) {
+        if (!mounted ||
+            attempts >= maxAttempts) {
+          _scrollToTargetTimer
+              ?.cancel();
+          _scrollToTargetTimer = null;
+          return;
+        }
+        attempts++;
+        final ctx = _scrollToTargetKey
+            .currentContext;
+        if (ctx != null) {
+          _scrollToTargetTimer
+              ?.cancel();
+          _scrollToTargetTimer = null;
+          WidgetsBinding.instance
+              .addPostFrameCallback((
+                _,
+              ) {
+                if (!mounted) return;
+                try {
+                  Scrollable.ensureVisible(
+                    ctx,
+                    alignment: 0.15,
+                    duration:
+                        const Duration(
+                          milliseconds:
+                              450,
+                        ),
+                    curve: Curves
+                        .easeInOutCubic,
+                  );
+                } catch (_) {}
+              });
+        }
+      },
+    );
   }
 
   @override
   void dispose() {
     _clockTimer?.cancel();
     _liveLocSub?.cancel();
+    _scrollToTargetTimer?.cancel();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -587,9 +750,10 @@ window.showTrackedPin = function(){
   }
 
   void _applyTrackedPinToViewer() {
-    // 1) ما عندنا إحداثيات؟ نخفي البن
+    // إذا ما عندنا موقع: اخفي البن فقط
     if (_trackedPos == null) {
-      _pendingPinApply = false;
+      _pendingPinApply =
+          false; // ✅ لا ننتظر رسم
       _trackMapController
           ?.runJavaScript(
             'hideTrackedPin();',
@@ -597,20 +761,19 @@ window.showTrackedPin = function(){
       return;
     }
 
-    // 2) الكنترولر مو جاهز؟ انتظري
+    // إذا الكنترولر مو جاهز: خزن طلب رسم
     if (_trackMapController == null) {
       _pendingPinApply = true;
       return;
     }
 
-    // 3) تحقق من الدور
+    // (اختياري) إذا تبين مقارنة الدور قبل الرسم:
     final currentLabel =
-        _currentFloorLabel();
+        _currentFloorLabel(); // GF / F1
     final ok = _floorsMatch(
       _trackedFloorLabel,
       currentLabel,
     );
-
     if (!ok) {
       _pendingPinApply = false;
       _trackMapController!
@@ -620,22 +783,11 @@ window.showTrackedPin = function(){
       return;
     }
 
-    // 4) الإحداثيات (مع عكس X)
-    final double xRaw =
-        (_trackedPos!['x'] ?? 0)
-            .toDouble();
-    final double x =
-        -xRaw; // ❗️نعكس X هنا
-    final double y =
-        (_trackedPos!['y'] ?? 0)
-            .toDouble();
-    final double z =
-        (_trackedPos!['z'] ?? 0)
-            .toDouble();
+    final x = _trackedPos!['x']!;
+    final y = _trackedPos!['y']!;
+    final z = _trackedPos!['z']!;
 
     _pendingPinApply = false;
-
-    // 5) ⬅️⬅️⬅️ هنا مكان السطرين اللي سألتي عنهم
     _trackMapController!.runJavaScript(
       'showTrackedPin();',
     );
@@ -714,149 +866,94 @@ window.showTrackedPin = function(){
     );
   }
 
+  static const List<String> _mainTabs =
+      ['Tracking', 'Meeting point'];
+
   Widget _buildFullContent() {
     return ListView(
-      padding: const EdgeInsets.all(16),
+      controller: _scrollController,
+      key: const ValueKey<String>(
+        'track_requests_list',
+      ),
+      padding:
+          const EdgeInsets.fromLTRB(
+            16,
+            8,
+            16,
+            16,
+          ),
       children: [
-        _buildViewToggle(),
-        const SizedBox(height: 20),
+        _buildMainTabs(),
+        Container(
+          height: 1,
+          color: Colors.black12,
+        ),
+        const SizedBox(height: 12),
+
+        // Map visible for both Tracking and Meeting point
         _buildMapPreview(),
         const SizedBox(height: 16),
 
         if (_isTrackingView) ...[
           _buildTrackRequestButton(),
           const SizedBox(height: 24),
-
-          StreamBuilder<
-            List<TrackingRequest>
-          >(
-            stream:
-                _sentRequestsStream(),
-            builder: (context, snapshot) {
-              final all =
-                  snapshot.data ?? [];
-              final upcoming =
-                  _upcomingFrom(all);
-              final active =
-                  _activeFrom(all);
-
-              return Column(
-                crossAxisAlignment:
-                    CrossAxisAlignment
-                        .start,
-                children: [
-                  // -------- Upcoming (always visible) --------
-                  _buildSectionHeader(
-                    icon:
-                        Icons.schedule,
-                    title:
-                        'Upcoming Requests',
-                    subtitle:
-                        'Scheduled tracking',
-                    count:
-                        upcoming.length,
-                  ),
-                  const SizedBox(
-                    height: 12,
-                  ),
-
-                  if (upcoming.isEmpty)
-                    Padding(
-                      padding:
-                          const EdgeInsets.only(
-                            bottom: 24,
-                            top: 8,
-                          ),
-                      child: Center(
-                        child: Text(
-                          'No upcoming requests',
-                          style: TextStyle(
-                            fontSize:
-                                14,
-                            color: Colors
-                                .grey[600],
-                            fontWeight:
-                                FontWeight
-                                    .w500,
-                          ),
-                        ),
-                      ),
-                    )
-                  else ...[
-                    ...upcoming.map(
-                      (r) => Padding(
-                        padding:
-                            const EdgeInsets.only(
-                              bottom: 8,
-                            ),
-                        child:
-                            _buildUpcomingTile(
-                              r,
-                            ),
-                      ),
-                    ),
-                    const SizedBox(
-                      height: 24,
-                    ),
-                  ],
-
-                  // -------- Active (always visible) --------
-                  _buildSectionHeader(
-                    icon: Icons
-                        .access_time,
-                    title:
-                        'Active Tracking',
-                    subtitle:
-                        'Location sharing active',
-                    count:
-                        active.length,
-                  ),
-                  const SizedBox(
-                    height: 12,
-                  ),
-
-                  if (active.isEmpty)
-                    Padding(
-                      padding:
-                          const EdgeInsets.only(
-                            bottom: 8,
-                            top: 8,
-                          ),
-                      child: Center(
-                        child: Text(
-                          'No active requests',
-                          style: TextStyle(
-                            fontSize:
-                                14,
-                            color: Colors
-                                .grey[600],
-                            fontWeight:
-                                FontWeight
-                                    .w500,
-                          ),
-                        ),
-                      ),
-                    )
-                  else ...[
-                    ...active.map(
-                      (r) => Padding(
-                        padding:
-                            const EdgeInsets.only(
-                              bottom: 8,
-                            ),
-                        child:
-                            _buildActiveTile(
-                              r,
-                            ),
-                      ),
-                    ),
-                  ],
-                ],
-              );
-            },
+          const Text(
+            'Tracking Requests',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight:
+                  FontWeight.w700,
+              color: Colors.black87,
+            ),
           ),
+          const SizedBox(height: 12),
+          _buildFilterPills(),
+          const SizedBox(height: 20),
+
+          if (_selectedFilterIndex == 0)
+            StreamBuilder<
+              List<TrackingRequest>
+            >(
+              stream:
+                  _sentRequestsStream(),
+              builder: (context, snapshot) {
+                final all =
+                    snapshot.data ?? [];
+                final upcoming =
+                    _upcomingFrom(all);
+                final active =
+                    _activeFrom(all);
+                return _buildSentContent(
+                  upcoming,
+                  active,
+                );
+              },
+            )
+          else
+            StreamBuilder<
+              List<TrackingRequest>
+            >(
+              stream:
+                  _incomingRequestsStream(),
+              builder: (context, snapshot) {
+                final incoming =
+                    snapshot.data ?? [];
+                final scheduled =
+                    _receivedScheduledFrom(
+                      incoming,
+                    );
+                final active =
+                    _receivedActiveFrom(
+                      incoming,
+                    );
+                return _buildReceivedContent(
+                  scheduled,
+                  active,
+                );
+              },
+            ),
         ] else ...[
-          // Meeting Point View - ENTIRE SECTION
+          // Meeting point view (same as before)
           Row(
             children: [
               Expanded(
@@ -874,7 +971,6 @@ window.showTrackedPin = function(){
           ),
           const SizedBox(height: 20),
 
-          // Meeting Point Participants Section Header
           _buildSectionHeader(
             icon: Icons.place_outlined,
             title:
@@ -888,11 +984,9 @@ window.showTrackedPin = function(){
           ),
           const SizedBox(height: 12),
 
-          // Host (Current User) Card
           _buildHostCard(),
           const SizedBox(height: 8),
 
-          // Meeting Participants
           for (final p
               in meetingParticipants) ...[
             _buildParticipantTile(p),
@@ -903,83 +997,129 @@ window.showTrackedPin = function(){
     );
   }
 
-  Widget _buildViewToggle() {
-    return Container(
-      height: 50,
-      decoration: BoxDecoration(
-        color: Colors.grey[100],
-        borderRadius:
-            BorderRadius.circular(12),
-      ),
-      padding: const EdgeInsets.all(4),
+  /// Main tabs: Tracking | Meeting point (compact like History — text + underline).
+  Widget _buildMainTabs() {
+    return Padding(
+      padding:
+          const EdgeInsets.symmetric(
+            vertical: 6,
+          ),
       child: Row(
-        children: [
-          Expanded(
-            child: _toggleButton(
-              'Tracking',
-              _isTrackingView,
-              () => setState(
-                () => _isTrackingView =
-                    true,
+        children: List.generate(
+          _mainTabs.length,
+          (i) {
+            final isSelected = i == 0
+                ? _isTrackingView
+                : !_isTrackingView;
+            return Expanded(
+              child: GestureDetector(
+                onTap: () => setState(
+                  () =>
+                      _isTrackingView =
+                          (i == 0),
+                ),
+                child: Column(
+                  mainAxisSize:
+                      MainAxisSize.min,
+                  children: [
+                    Text(
+                      _mainTabs[i],
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight:
+                            FontWeight
+                                .w600,
+                        color:
+                            isSelected
+                            ? AppColors
+                                  .kGreen
+                            : Colors
+                                  .grey,
+                      ),
+                    ),
+                    const SizedBox(
+                      height: 6,
+                    ),
+                    Container(
+                      height: 2,
+                      decoration: BoxDecoration(
+                        color:
+                            isSelected
+                            ? AppColors
+                                  .kGreen
+                            : Colors
+                                  .transparent,
+                        borderRadius:
+                            BorderRadius.circular(
+                              1,
+                            ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ),
-          Expanded(
-            child: _toggleButton(
-              'Meeting Point',
-              !_isTrackingView,
-              () => setState(
-                () => _isTrackingView =
-                    false,
-              ),
-            ),
-          ),
-        ],
+            );
+          },
+        ),
       ),
     );
   }
 
-  Widget _toggleButton(
-    String label,
-    bool isSelected,
-    VoidCallback onTap,
-  ) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          color: isSelected
-              ? AppColors.kGreen
-              : Colors.transparent,
-          borderRadius:
-              BorderRadius.circular(10),
-          boxShadow: isSelected
-              ? [
-                  BoxShadow(
-                    color: Colors.black
-                        .withOpacity(
-                          0.1,
-                        ),
-                    blurRadius: 4,
-                    offset:
-                        const Offset(
-                          0,
-                          2,
+  /// Sent | Received filter pills (same style as History page — grey container, green selected pill).
+  Widget _buildFilterPills() {
+    return Container(
+      height: 40,
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        borderRadius:
+            BorderRadius.circular(20),
+      ),
+      padding: const EdgeInsets.all(4),
+      child: Row(
+        children: List.generate(
+          _requestFilters.length,
+          (i) {
+            final isSelected =
+                i ==
+                _selectedFilterIndex;
+            return Expanded(
+              child: GestureDetector(
+                onTap: () => setState(
+                  () =>
+                      _selectedFilterIndex =
+                          i,
+                ),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? AppColors
+                              .kGreen
+                        : Colors
+                              .transparent,
+                    borderRadius:
+                        BorderRadius.circular(
+                          18,
                         ),
                   ),
-                ]
-              : null,
-        ),
-        alignment: Alignment.center,
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-            color: isSelected
-                ? Colors.white
-                : Colors.grey[600],
-          ),
+                  alignment:
+                      Alignment.center,
+                  child: Text(
+                    _requestFilters[i],
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight:
+                          FontWeight
+                              .w600,
+                      color: isSelected
+                          ? Colors.white
+                          : Colors
+                                .grey[600],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
         ),
       ),
     );
@@ -1272,6 +1412,620 @@ window.showTrackedPin = function(){
     );
   }
 
+  /// Light grey text only, no background, no icon
+  Widget _buildSubsectionLabel(
+    String title,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.only(
+        bottom: 8,
+      ),
+      child: Text(
+        title,
+        style: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w500,
+          color: Colors.grey[600],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReceivedContent(
+    List<TrackingRequest> scheduled,
+    List<TrackingRequest> active,
+  ) {
+    return Column(
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
+      children: [
+        // -------- Scheduled Tracking (always show title) --------
+        _buildSubsectionLabel(
+          'Scheduled Tracking',
+        ),
+        const SizedBox(height: 4),
+        if (scheduled.isEmpty)
+          Padding(
+            padding:
+                const EdgeInsets.only(
+                  bottom: 24,
+                  top: 0,
+                ),
+            child: Center(
+              child: Text(
+                'No Scheduled Requests',
+                style: TextStyle(
+                  fontSize: 14,
+                  color:
+                      Colors.grey[600],
+                  fontWeight:
+                      FontWeight.w500,
+                ),
+              ),
+            ),
+          )
+        else
+          ...scheduled.map(
+            (r) => Padding(
+              key:
+                  widget.initialExpandRequestId !=
+                          null &&
+                      r.id ==
+                          widget
+                              .initialExpandRequestId
+                  ? _scrollToTargetKey
+                  : null,
+              padding:
+                  const EdgeInsets.only(
+                    bottom: 8,
+                  ),
+              child:
+                  _buildReceivedScheduledTile(
+                    r,
+                  ),
+            ),
+          ),
+        const SizedBox(height: 24),
+        // -------- Active Tracking (always show title) --------
+        _buildSubsectionLabel(
+          'Active Tracking',
+        ),
+        const SizedBox(height: 4),
+        if (active.isEmpty)
+          Padding(
+            padding:
+                const EdgeInsets.only(
+                  bottom: 8,
+                  top: 0,
+                ),
+            child: Center(
+              child: Text(
+                'No Active Requests',
+                style: TextStyle(
+                  fontSize: 14,
+                  color:
+                      Colors.grey[600],
+                  fontWeight:
+                      FontWeight.w500,
+                ),
+              ),
+            ),
+          )
+        else
+          ...active.map(
+            (r) => Padding(
+              key:
+                  widget.initialExpandRequestId !=
+                          null &&
+                      r.id ==
+                          widget
+                              .initialExpandRequestId
+                  ? _scrollToTargetKey
+                  : null,
+              padding:
+                  const EdgeInsets.only(
+                    bottom: 8,
+                  ),
+              child:
+                  _buildReceivedActiveTile(
+                    r,
+                  ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildSentContent(
+    List<TrackingRequest> upcoming,
+    List<TrackingRequest> active,
+  ) {
+    return Column(
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
+      children: [
+        _buildSubsectionLabel(
+          'Scheduled Tracking',
+        ),
+        const SizedBox(height: 4),
+        if (upcoming.isEmpty)
+          Padding(
+            padding:
+                const EdgeInsets.only(
+                  bottom: 24,
+                  top: 0,
+                ),
+            child: Center(
+              child: Text(
+                'No Scheduled Requests',
+                style: TextStyle(
+                  fontSize: 14,
+                  color:
+                      Colors.grey[600],
+                  fontWeight:
+                      FontWeight.w500,
+                ),
+              ),
+            ),
+          )
+        else
+          ...upcoming.map(
+            (r) => Padding(
+              key:
+                  widget.initialExpandRequestId !=
+                          null &&
+                      r.id ==
+                          widget
+                              .initialExpandRequestId
+                  ? _scrollToTargetKey
+                  : null,
+              padding:
+                  const EdgeInsets.only(
+                    bottom: 8,
+                  ),
+              child: _buildUpcomingTile(
+                r,
+              ),
+            ),
+          ),
+        const SizedBox(height: 24),
+        _buildSubsectionLabel(
+          'Active Tracking',
+        ),
+        const SizedBox(height: 4),
+        if (active.isEmpty)
+          Padding(
+            padding:
+                const EdgeInsets.only(
+                  bottom: 8,
+                  top: 0,
+                ),
+            child: Center(
+              child: Text(
+                'No Active Requests',
+                style: TextStyle(
+                  fontSize: 14,
+                  color:
+                      Colors.grey[600],
+                  fontWeight:
+                      FontWeight.w500,
+                ),
+              ),
+            ),
+          )
+        else
+          ...active.map(
+            (r) => Padding(
+              key:
+                  widget.initialExpandRequestId !=
+                          null &&
+                      r.id ==
+                          widget
+                              .initialExpandRequestId
+                  ? _scrollToTargetKey
+                  : null,
+              padding:
+                  const EdgeInsets.only(
+                    bottom: 8,
+                  ),
+              child: _buildActiveTile(
+                r,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// Received scheduled tile: same design as Sent _buildUpcomingTile (heart, no divider). Pending → Accept/Decline; Accepted (not started) → Cancel Tracking.
+  Widget _buildReceivedScheduledTile(
+    TrackingRequest r,
+  ) {
+    final isExpanded =
+        _expandedRequestId == r.id;
+    final now = DateTime.now();
+    final bool isPending =
+        r.status == 'pending' &&
+        now.isBefore(r.endAt);
+    final bool isAcceptedScheduled =
+        r.status == 'accepted' &&
+        now.isBefore(r.startAt);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius:
+            BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.grey.shade200,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black
+                .withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          InkWell(
+            onTap: () =>
+                _toggleExpand(r.id),
+            borderRadius:
+                BorderRadius.circular(
+                  16,
+                ),
+            child: Padding(
+              padding:
+                  const EdgeInsets.all(
+                    16,
+                  ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration:
+                        BoxDecoration(
+                          color: Colors
+                              .grey[200],
+                          shape: BoxShape
+                              .circle,
+                        ),
+                    child: Icon(
+                      Icons.person,
+                      color: Colors
+                          .grey[600],
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(
+                    width: 12,
+                  ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment:
+                          CrossAxisAlignment
+                              .start,
+                      children: [
+                        Text(
+                          r.senderName ??
+                              'Unknown',
+                          style: const TextStyle(
+                            fontSize:
+                                16,
+                            fontWeight:
+                                FontWeight
+                                    .w700,
+                          ),
+                        ),
+                        const SizedBox(
+                          height: 4,
+                        ),
+                        _statusBadge(
+                          r.status,
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () =>
+                        _toggleFavorite(
+                          r.id,
+                        ),
+                    icon: Icon(
+                      r.isFavorite
+                          ? Icons
+                                .favorite
+                          : Icons
+                                .favorite_border,
+                      color:
+                          r.isFavorite
+                          ? Colors.red
+                          : Colors
+                                .grey[400],
+                      size: 24,
+                    ),
+                  ),
+                  AnimatedRotation(
+                    turns: isExpanded
+                        ? 0.5
+                        : 0,
+                    duration:
+                        const Duration(
+                          milliseconds:
+                              200,
+                        ),
+                    child: Icon(
+                      Icons
+                          .keyboard_arrow_down,
+                      color: Colors
+                          .grey[600],
+                      size: 24,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (isExpanded) ...[
+            Padding(
+              padding:
+                  const EdgeInsets.all(
+                    16,
+                  ),
+              child: Column(
+                crossAxisAlignment:
+                    CrossAxisAlignment
+                        .start,
+                children: [
+                  _buildReceivedDetails(
+                    r,
+                  ),
+                  const SizedBox(
+                    height: 16,
+                  ),
+                  if (isPending)
+                    _buildIncomingActionButtons(
+                      context,
+                      r,
+                    )
+                  else if (isAcceptedScheduled)
+                    _buildCancelTrackingButton(
+                      context,
+                      r,
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Received active tile: same design as Sent _buildActiveTile (heart, same container) but only "Stop Tracking" button. Show lastSeen (e.g. "2 min ago").
+  Widget _buildReceivedActiveTile(
+    TrackingRequest r,
+  ) {
+    final isExpanded =
+        _expandedRequestId == r.id;
+    final lastSeen = _timeAgo(
+      r.startAt,
+    );
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius:
+            BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.grey.shade200,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black
+                .withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          InkWell(
+            onTap: () =>
+                _toggleExpand(r.id),
+            borderRadius:
+                BorderRadius.circular(
+                  16,
+                ),
+            child: Padding(
+              padding:
+                  const EdgeInsets.all(
+                    16,
+                  ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration:
+                        BoxDecoration(
+                          color: Colors
+                              .grey[200],
+                          shape: BoxShape
+                              .circle,
+                        ),
+                    child: Icon(
+                      Icons.person,
+                      color: Colors
+                          .grey[600],
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(
+                    width: 12,
+                  ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment:
+                          CrossAxisAlignment
+                              .start,
+                      children: [
+                        Text(
+                          r.senderName ??
+                              'Unknown',
+                          style: const TextStyle(
+                            fontSize:
+                                16,
+                            fontWeight:
+                                FontWeight
+                                    .w700,
+                          ),
+                        ),
+                        const SizedBox(
+                          height: 4,
+                        ),
+                        Text(
+                          lastSeen,
+                          style: TextStyle(
+                            fontSize:
+                                13,
+                            color: Colors
+                                .grey[600],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () =>
+                        _toggleFavorite(
+                          r.id,
+                        ),
+                    icon: Icon(
+                      r.isFavorite
+                          ? Icons
+                                .favorite
+                          : Icons
+                                .favorite_border,
+                      color:
+                          r.isFavorite
+                          ? Colors.red
+                          : Colors
+                                .grey[400],
+                      size: 24,
+                    ),
+                  ),
+                  AnimatedRotation(
+                    turns: isExpanded
+                        ? 0.5
+                        : 0,
+                    duration:
+                        const Duration(
+                          milliseconds:
+                              200,
+                        ),
+                    child: Icon(
+                      Icons
+                          .keyboard_arrow_down,
+                      color: Colors
+                          .grey[600],
+                      size: 24,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (isExpanded) ...[
+            Padding(
+              padding:
+                  const EdgeInsets.all(
+                    16,
+                  ),
+              child: Column(
+                children: [
+                  _buildReceivedDetails(
+                    r,
+                  ),
+                  const SizedBox(
+                    height: 16,
+                  ),
+                  _buildStopTrackingButton(
+                    context,
+                    r,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStopTrackingButton(
+    BuildContext context,
+    TrackingRequest r,
+  ) {
+    final senderName =
+        r.senderName ?? 'this person';
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: () async {
+          final confirmed =
+              await ConfirmationDialog.showDeleteConfirmation(
+                context,
+                title: 'Stop Sharing',
+                message:
+                    'Are you sure you want to stop sharing your location with $senderName?',
+                cancelText: 'Keep',
+                confirmText:
+                    'Stop Sharing',
+              );
+          if (confirmed && mounted)
+            _updateRequestStatus(
+              r.id,
+              'terminated',
+            );
+        },
+        icon: const Icon(
+          Icons.stop_circle_outlined,
+          size: 18,
+        ),
+        label: const Text(
+          'Stop Tracking',
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        style: OutlinedButton.styleFrom(
+          foregroundColor:
+              AppColors.kError,
+          side: const BorderSide(
+            color: AppColors.kError,
+          ),
+          padding:
+              const EdgeInsets.symmetric(
+                vertical: 12,
+              ),
+          shape: RoundedRectangleBorder(
+            borderRadius:
+                BorderRadius.circular(
+                  12,
+                ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildSectionHeader({
     required IconData icon,
     required String title,
@@ -1437,7 +2191,8 @@ window.showTrackedPin = function(){
                               .start,
                       children: [
                         Text(
-                          r.trackedUserName,
+                          r.senderName ??
+                              'Unknown',
                           style: const TextStyle(
                             fontSize:
                                 16,
@@ -1574,7 +2329,8 @@ window.showTrackedPin = function(){
                               .start,
                       children: [
                         Text(
-                          r.trackedUserName,
+                          r.senderName ??
+                              'Unknown',
                           style: const TextStyle(
                             fontSize:
                                 16,
@@ -1663,6 +2419,293 @@ window.showTrackedPin = function(){
     );
   }
 
+  Widget _buildCancelTrackingButton(
+    BuildContext context,
+    TrackingRequest r,
+  ) {
+    final senderName =
+        r.senderName ?? 'this person';
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: () async {
+          final confirmed =
+              await ConfirmationDialog.showDeleteConfirmation(
+                context,
+                title:
+                    'Cancel Tracking',
+                message:
+                    'Are you sure you want to cancel this tracking request with $senderName?',
+                cancelText: 'Keep',
+                confirmText:
+                    'Cancel Tracking',
+              );
+          if (confirmed && mounted)
+            _updateRequestStatus(
+              r.id,
+              'declined',
+            );
+        },
+
+        icon: const Icon(
+          Icons.cancel_outlined,
+          size: 18,
+        ),
+        label: const Text(
+          'Cancel Tracking',
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        style: OutlinedButton.styleFrom(
+          foregroundColor:
+              AppColors.kError,
+          side: const BorderSide(
+            color: AppColors.kError,
+          ),
+          padding:
+              const EdgeInsets.symmetric(
+                vertical: 12,
+              ),
+          shape: RoundedRectangleBorder(
+            borderRadius:
+                BorderRadius.circular(
+                  12,
+                ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Mark requests that are past endAt as expired (pending) or completed (accepted) so they appear in History.
+  void _markStaleRequestsIfNeeded(
+    List<
+      QueryDocumentSnapshot<
+        Map<String, dynamic>
+      >
+    >
+    docs,
+  ) {
+    final now = DateTime.now();
+    for (final d in docs) {
+      final data = d.data();
+      final status =
+          (data['status'] ?? '')
+              .toString();
+      final endAt =
+          data['endAt'] is Timestamp
+          ? (data['endAt'] as Timestamp)
+                .toDate()
+          : null;
+      if (endAt == null ||
+          endAt.isAfter(now))
+        continue;
+      if (status == 'pending') {
+        FirebaseFirestore.instance
+            .collection('trackRequests')
+            .doc(d.id)
+            .update({
+              'status': 'expired',
+            });
+      } else if (status == 'accepted') {
+        FirebaseFirestore.instance
+            .collection('trackRequests')
+            .doc(d.id)
+            .update({
+              'status': 'completed',
+            });
+      }
+    }
+  }
+
+  // Logic to update Firestore
+  Future<void> _updateRequestStatus(
+    String requestId,
+    String newStatus,
+  ) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('trackRequests')
+          .doc(requestId)
+          .update({
+            'status': newStatus,
+          });
+      if (mounted) {
+        setState(
+          () =>
+              _expandedRequestId = null,
+        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(
+          SnackBar(
+            content: Text(
+              _statusUpdateMessage(
+                newStatus,
+              ),
+            ),
+            backgroundColor:
+                AppColors.kGreen,
+            behavior: SnackBarBehavior
+                .floating,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint(
+        'Error updating request: $e',
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Failed to update: ${e.toString()}',
+            ),
+            backgroundColor:
+                AppColors.kError,
+            behavior: SnackBarBehavior
+                .floating,
+          ),
+        );
+      }
+    }
+  }
+
+  String _statusUpdateMessage(
+    String status,
+  ) {
+    switch (status) {
+      case 'accepted':
+        return 'Request accepted';
+      case 'declined':
+        return 'Request declined';
+      case 'cancelled':
+        return 'Tracking cancelled';
+      default:
+        return 'Updated';
+    }
+  }
+
+  Widget _buildIncomingActionButtons(
+    BuildContext context,
+    TrackingRequest r,
+  ) {
+    return Row(
+      children: [
+        // Decline = same design as "Navigate to friend" (outlined)
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: () async {
+              final confirmed =
+                  await ConfirmationDialog.showDeleteConfirmation(
+                    context,
+                    title:
+                        'Decline Request',
+                    message:
+                        'Are you sure you want to decline this request?',
+                    confirmText:
+                        'Decline',
+                  );
+              if (confirmed && mounted)
+                _updateRequestStatus(
+                  r.id,
+                  'declined',
+                );
+            },
+            icon: Icon(
+              Icons.cancel_outlined,
+              size: 18,
+              color: AppColors.kGreen,
+            ),
+            label: const Text(
+              'Decline',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight:
+                    FontWeight.w600,
+              ),
+            ),
+            style: OutlinedButton.styleFrom(
+              foregroundColor:
+                  AppColors.kGreen,
+              side: BorderSide(
+                color: AppColors.kGreen,
+                width: 2,
+              ),
+              padding:
+                  const EdgeInsets.symmetric(
+                    vertical: 12,
+                  ),
+              shape: RoundedRectangleBorder(
+                borderRadius:
+                    BorderRadius.circular(
+                      12,
+                    ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        // Accept = same design as "Refresh Location" (filled green)
+        Expanded(
+          child: ElevatedButton.icon(
+            onPressed: () async {
+              final confirmed =
+                  await ConfirmationDialog.showPositiveConfirmation(
+                    context,
+                    title:
+                        'Accept Track Request',
+                    message:
+                        'Are you sure you want to accept this tracking request?',
+                    confirmText:
+                        'Accept',
+                  );
+              if (confirmed && mounted)
+                _updateRequestStatus(
+                  r.id,
+                  'accepted',
+                );
+            },
+            icon: const Icon(
+              Icons
+                  .check_circle_outline,
+              size: 18,
+            ),
+            label: const Text(
+              'Accept',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight:
+                    FontWeight.w600,
+              ),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor:
+                  AppColors.kGreen,
+              foregroundColor:
+                  Colors.white,
+              padding:
+                  const EdgeInsets.symmetric(
+                    vertical: 12,
+                  ),
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius:
+                    BorderRadius.circular(
+                      12,
+                    ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _statusBadge(String status) {
     Color bg, text;
     String label;
@@ -1705,6 +2748,51 @@ window.showTrackedPin = function(){
   Widget _buildDetails(
     TrackingRequest r,
   ) {
+    final dateStr =
+        _formatDateForDuration(
+          DateTime(
+            r.startAt.year,
+            r.startAt.month,
+            r.startAt.day,
+          ),
+        );
+    final durationStr =
+        '$dateStr, ${r.startTime} - ${r.endTime}';
+    return _buildDetailsColumn(
+      name: r.trackedUserName,
+      phone: r.trackedUserPhone,
+      duration: durationStr,
+      venue: r.venueName,
+    );
+  }
+
+  Widget _buildReceivedDetails(
+    TrackingRequest r,
+  ) {
+    final dateStr =
+        _formatDateForDuration(
+          DateTime(
+            r.startAt.year,
+            r.startAt.month,
+            r.startAt.day,
+          ),
+        );
+    final durationStr =
+        '$dateStr, ${r.startTime} - ${r.endTime}';
+    return _buildDetailsColumn(
+      name: r.senderName ?? 'Unknown',
+      phone: r.senderPhone ?? '',
+      duration: durationStr,
+      venue: r.venueName,
+    );
+  }
+
+  Widget _buildDetailsColumn({
+    required String name,
+    required String phone,
+    required String duration,
+    required String venue,
+  }) {
     return IntrinsicHeight(
       child: Row(
         crossAxisAlignment:
@@ -1727,24 +2815,19 @@ window.showTrackedPin = function(){
                   CrossAxisAlignment
                       .start,
               children: [
-                _detailRow(
-                  'Tracked user: ',
-                  '${r.trackedUserName} (${r.trackedUserPhone})',
+                _detailLine(
+                  phone.isEmpty
+                      ? name
+                      : '$name ($phone)',
                 ),
                 const SizedBox(
                   height: 8,
                 ),
-                _detailRow(
-                  'Duration: ',
-                  '${_formatDate(DateTime(r.startAt.year, r.startAt.month, r.startAt.day))} • ${r.startTime} - ${r.endTime}',
-                ),
+                _detailLine(duration),
                 const SizedBox(
                   height: 8,
                 ),
-                _detailRow(
-                  'Venue: ',
-                  r.venueName,
-                ),
+                _detailLine(venue),
               ],
             ),
           ),
@@ -1753,40 +2836,48 @@ window.showTrackedPin = function(){
     );
   }
 
-  Widget _detailRow(
-    String label,
-    String value,
-  ) {
-    return Row(
-      crossAxisAlignment:
-          CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: RichText(
-            text: TextSpan(
-              style: TextStyle(
-                fontSize: 13,
-                color: Colors.grey[700],
-              ),
-              children: [
-                TextSpan(text: label),
-                TextSpan(
-                  text: value,
-                  style:
-                      const TextStyle(
-                        fontWeight:
-                            FontWeight
-                                .w600,
-                        color: Colors
-                            .black87,
-                      ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
+  Widget _detailLine(String value) {
+    return Text(
+      value,
+      style: const TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w500,
+        color: Colors.black87,
+      ),
     );
+  }
+
+  /// For duration: "Today" (no date) or "Jan 31" (date only, no day name). Yesterday/Tomorrow left for later.
+  String _formatDateForDuration(
+    DateTime d,
+  ) {
+    final now = DateTime.now();
+    final today = DateTime(
+      now.year,
+      now.month,
+      now.day,
+    );
+    final target = DateTime(
+      d.year,
+      d.month,
+      d.day,
+    );
+    if (target == today) return 'Today';
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return '${months[d.month - 1]} ${d.day}';
   }
 
   // ========== ACTION BUTTONS - UPDATED ==========
@@ -1868,32 +2959,6 @@ window.showTrackedPin = function(){
         ),
       ],
     );
-  }
-
-  String _formatRequestTime(
-    TrackingRequest r,
-  ) =>
-      '${_formatDate(DateTime(r.startAt.year, r.startAt.month, r.startAt.day))} • ${r.startTime} - ${r.endTime}';
-
-  String _formatDate(DateTime d) {
-    final now = DateTime.now();
-    final today = DateTime(
-      now.year,
-      now.month,
-      now.day,
-    );
-    final target = DateTime(
-      d.year,
-      d.month,
-      d.day,
-    );
-    if (target == today) return 'Today';
-    if (target ==
-        today.add(
-          const Duration(days: 1),
-        ))
-      return 'Tomorrow';
-    return '${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][d.weekday - 1]}, ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.month - 1]} ${d.day}';
   }
 
   // ---------- Host Card ----------
@@ -2272,6 +3337,9 @@ class TrackingRequest {
   final String trackedUserPhone;
   final String status;
 
+  final String? senderName; // Add this
+  final String? senderPhone; // Add this
+
   final DateTime startAt;
   final DateTime endAt;
 
@@ -2287,6 +3355,8 @@ class TrackingRequest {
     required this.id,
     required this.trackedUserName,
     required this.trackedUserPhone,
+    required this.senderName, // Add this
+    required this.senderPhone, // Add this
     required this.status,
     required this.startAt,
     required this.endAt,

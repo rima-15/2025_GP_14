@@ -8,6 +8,7 @@ import 'package:madar_app/screens/signin_page.dart';
 import 'package:madar_app/screens/profile_page.dart';
 import 'package:madar_app/screens/settings_page.dart';
 import 'package:madar_app/screens/notifications_page.dart';
+import 'package:madar_app/screens/history_page.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
 import 'package:madar_app/theme/theme.dart';
 
@@ -86,7 +87,22 @@ class _MainLayoutState extends State<MainLayout> {
     }
   }
 
+  //Notification read or not
   void _openMenu() => _scaffoldKey.currentState?.openDrawer();
+  //count unread notifications
+  Stream<int> _unreadNotificationsCount() {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      return Stream.value(0);
+    }
+
+    return FirebaseFirestore.instance
+        .collection('notifications')
+        .where('userId', isEqualTo: user.uid)
+        .where('isRead', isEqualTo: false)
+        .snapshots()
+        .map((snapshot) => snapshot.docs.length);
+  }
 
   // ---------- Build ----------
 
@@ -105,7 +121,7 @@ class _MainLayoutState extends State<MainLayout> {
   // ---------- App Bar ----------
 
   PreferredSizeWidget _buildAppBar(int index) {
-    final titles = ['Home', 'Explore', 'Track'];
+    final titles = ['Home', 'Explore', 'Social'];
 
     return AppBar(
       backgroundColor: Colors.white,
@@ -134,24 +150,80 @@ class _MainLayoutState extends State<MainLayout> {
             ),
       actions: index == 0
           ? [
-              IconButton(
-                icon: const Icon(
-                  Icons.notifications_outlined,
-                  color: AppColors.kGreen,
-                ),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const NotificationsPage(),
+              StreamBuilder<int>(
+                stream: _unreadNotificationsCount(),
+                builder: (context, snapshot) {
+                  final count = snapshot.data ?? 0;
+
+                  return IconButton(
+                    padding: const EdgeInsets.only(right: 16),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const NotificationsPage(),
+                        ),
+                      );
+                    },
+                    icon: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        const Icon(
+                          Icons.notifications_outlined,
+                          color: AppColors.kGreen,
+                        ),
+
+                        // 🔴
+                        if (count > 0)
+                          Positioned(
+                            right: -6,
+                            top: -6,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 3,
+                                vertical: 0.5,
+                              ),
+                              constraints: const BoxConstraints(
+                                minWidth: 16,
+                                minHeight: 16,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.red,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  count > 9 ? '+9' : count.toString(),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   );
                 },
+              ),
+            ]
+          : index == 2
+          ? [
+              IconButton(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const HistoryPage()),
+                  );
+                },
+                icon: Icon(Icons.history, size: 22, color: Colors.grey[600]),
                 padding: const EdgeInsets.only(right: 16),
               ),
             ]
           : null,
-      bottom: (index == 1 || index == 2)
+      bottom: index == 1
           ? PreferredSize(
               preferredSize: const Size.fromHeight(1),
               child: Container(height: 1, color: Colors.black12),
@@ -237,6 +309,19 @@ class _MainLayoutState extends State<MainLayout> {
                         },
                       ),
                       _buildMenuItem(
+                        icon: Icons.history,
+                        title: 'Requests History',
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const HistoryPage(),
+                            ),
+                          );
+                        },
+                      ),
+                      _buildMenuItem(
                         icon: Icons.help_outline,
                         title: 'Help & Support',
                         onTap: () {},
@@ -316,7 +401,7 @@ class _MainLayoutState extends State<MainLayout> {
               ),
               _buildNavItem(
                 icon: Icons.group_outlined,
-                label: 'Track',
+                label: 'Social',
                 index: 2,
               ),
             ],

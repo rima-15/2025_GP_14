@@ -1,146 +1,268 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_embed_unity/flutter_embed_unity.dart';
 import 'package:madar_app/theme/theme.dart';
+import 'dart:async';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
-// ----------------------------------------------------------------------------
-// Unity Camera Page - AR experience using Unity
-// ----------------------------------------------------------------------------
-
-class UnityCameraPage extends StatefulWidget {
+class UnityCameraPage
+    extends StatefulWidget {
   final bool isNavigation;
   final String? placeId;
+  final bool isScanOnly;
 
-  const UnityCameraPage({super.key, this.isNavigation = false, this.placeId});
+  const UnityCameraPage({
+    super.key,
+    this.isNavigation = false,
+    this.placeId,
+    this.isScanOnly = false,
+  });
 
   @override
-  State<UnityCameraPage> createState() => _UnityCameraPageState();
+  State<UnityCameraPage>
+  createState() =>
+      _UnityCameraPageState();
 }
 
-class _UnityCameraPageState extends State<UnityCameraPage>
+class _UnityCameraPageState
+    extends State<UnityCameraPage>
     with WidgetsBindingObserver {
-  // Track Unity initialization state
   bool _isUnityReady = false;
-  String _statusMessage = "Initializing AR...";
+  String _statusMessage =
+      "Initializing AR...";
+
+  String?
+  _cachedUserDocId; // ✅ نخزنها عشان ما نسوي query كل مرة
+
+  // --------------------------------------------------------------------------
+  // ✅ Resolve Firestore user docId (your model: users docId is NOT uid)
+  // --------------------------------------------------------------------------
+  Future<String?>
+  _resolveUserDocIdByEmail() async {
+    final user = FirebaseAuth
+        .instance
+        .currentUser;
+    if (user == null) return null;
+
+    final email = user.email;
+    if (email == null || email.isEmpty)
+      return null;
+
+    final snap = await FirebaseFirestore
+        .instance
+        .collection('users')
+        .where(
+          'email',
+          isEqualTo: email,
+        )
+        .limit(1)
+        .get();
+
+    if (snap.docs.isEmpty) return null;
+    return snap
+        .docs
+        .first
+        .id; // ✅ real Firestore docId
+  }
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addObserver(
+      this,
+    );
     _initializeUnity();
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
+    WidgetsBinding.instance
+        .removeObserver(this);
     super.dispose();
   }
 
-  // Handle app lifecycle changes (when returning from another page)
   @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    super.didChangeAppLifecycleState(state);
+  void didChangeAppLifecycleState(
+    AppLifecycleState state,
+  ) {
+    super.didChangeAppLifecycleState(
+      state,
+    );
 
-    if (state == AppLifecycleState.resumed) {
-      // App resumed - send mode message again
-      _sendModeMessage();
+    if (state ==
+        AppLifecycleState.resumed) {
+      _sendHandshakeAndMode(); // ✅ resend when coming back
     }
   }
 
-  // Detect when this widget becomes visible again (after popping another page)
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
 
-    // If Unity is already ready and we're becoming visible again, resend message
-    if (_isUnityReady && ModalRoute.of(context)?.isCurrent == true) {
-      // Small delay to ensure Unity is ready to receive
-      Future.delayed(const Duration(milliseconds: 200), () {
-        if (mounted) {
-          _sendModeMessage();
-        }
-      });
+    if (_isUnityReady &&
+        ModalRoute.of(
+              context,
+            )?.isCurrent ==
+            true) {
+      Future.delayed(
+        const Duration(
+          milliseconds: 200,
+        ),
+        () {
+          if (mounted)
+            _sendHandshakeAndMode();
+        },
+      );
     }
   }
 
-  // Initialize Unity with proper timing
-  void _initializeUnity() async {
-    setState(() {
-      _statusMessage = "Loading AR environment...";
-    });
+  Future<void>
+  _initializeUnity() async {
+    setState(
+      () => _statusMessage =
+          "Loading AR environment...",
+    );
 
     // Wait for Unity to initialize
-    await Future.delayed(const Duration(milliseconds: 600));
+    await Future.delayed(
+      const Duration(milliseconds: 600),
+    );
 
-    // Send initial mode message
-    _sendModeMessage();
+    // Mark as ready BEFORE sending (so future calls won't skip)
+    if (mounted) {
+      setState(() {
+        _isUnityReady = true;
+        _statusMessage =
+            widget.isNavigation
+            ? "Starting navigation..."
+            : (widget.isScanOnly
+                  ? "Scanning location..."
+                  : "AR Ready");
+      });
+    }
 
-    setState(() {
-      _isUnityReady = true;
-      _statusMessage = widget.isNavigation
-          ? "Starting navigation..."
-          : "AR Ready";
-    });
+    await _sendHandshakeAndMode();
   }
 
-  // Send mode message to Unity (can be called multiple times)
-  void _sendModeMessage() {
-    String message;
+  // --------------------------------------------------------------------------
+  // ✅ 1) Send USER_DOC_ID
+  // ✅ 2) Then send SCAN_ONLY / NAVIGATION / EXPLORE
+  // --------------------------------------------------------------------------
+  Future<void>
+  _sendHandshakeAndMode() async {
+    if (!_isUnityReady) return;
 
+    // 1) Resolve docId once (cache)
+    _cachedUserDocId ??=
+        await _resolveUserDocIdByEmail();
+
+    if (_cachedUserDocId == null ||
+        _cachedUserDocId!.isEmpty) {
+      debugPrint(
+        "❌ Could not resolve Firestore user docId (users docId is not uid). "
+        "Make sure users collection has a document with field email == currentUser.email",
+      );
+      // هنا نوقف: لا نرسل وضع التشغيل لأن Unity ما يعرف يكتب فين
+      return;
+    }
+
+    // Send USER_DOC_ID
+    try {
+      sendToUnity(
+        "FlutterListener",
+        "OnFlutterMessage",
+        "USER_DOC_ID:${_cachedUserDocId!}",
+      );
+      debugPrint(
+        "✅ Sent USER_DOC_ID to Unity: ${_cachedUserDocId!}",
+      );
+    } catch (e) {
+      debugPrint(
+        "❌ Failed to send USER_DOC_ID: $e",
+      );
+      return;
+    }
+
+    // small delay so Unity receives docId before mode
+    await Future.delayed(
+      const Duration(milliseconds: 150),
+    );
+
+    // 2) Send mode
+    final String modeMessage;
     if (widget.isNavigation &&
         widget.placeId != null &&
         widget.placeId!.isNotEmpty) {
-      // Send navigation message with placeId
-      message = "NAVIGATION:${widget.placeId}";
+      modeMessage =
+          "NAVIGATION:${widget.placeId}";
+    } else if (widget.isScanOnly) {
+      modeMessage = "SCAN_ONLY";
     } else {
-      // Send exploration message
-      message = "EXPLORE";
+      modeMessage = "EXPLORE";
     }
 
-    // Send message to Unity
     try {
-      sendToUnity("FlutterListener", "OnFlutterMessage", message);
+      sendToUnity(
+        "FlutterListener",
+        "OnFlutterMessage",
+        modeMessage,
+      );
+      debugPrint(
+        "✅ Sent mode to Unity: $modeMessage",
+      );
     } catch (e) {
-      debugPrint("Failed to send message to Unity: $e");
+      debugPrint(
+        "❌ Failed to send mode message to Unity: $e",
+      );
     }
   }
 
-  // ---------- Build ----------
-
   @override
   Widget build(BuildContext context) {
-    // Responsive back button position
-    final topPadding = MediaQuery.of(context).padding.top;
+    final topPadding = MediaQuery.of(
+      context,
+    ).padding.top;
 
     return Scaffold(
       resizeToAvoidBottomInset: false,
       body: Stack(
         children: [
-          // Unity View
           EmbedUnity(
             onMessageFromUnity: (msg) {
-              debugPrint("Message from Unity: $msg");
+              debugPrint(
+                "Message from Unity: $msg",
+              );
             },
           ),
 
-          // Loading overlay (shown until Unity is ready)
           if (!_isUnityReady)
             Container(
-              color: Colors.black.withOpacity(0.7),
+              color: Colors.black
+                  .withOpacity(0.7),
               child: Center(
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
+                  mainAxisSize:
+                      MainAxisSize.min,
                   children: [
                     const CircularProgressIndicator(
-                      valueColor: AlwaysStoppedAnimation<Color>(kGreen),
+                      valueColor:
+                          AlwaysStoppedAnimation<
+                            Color
+                          >(kGreen),
                       strokeWidth: 3,
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(
+                      height: 20,
+                    ),
                     Text(
                       _statusMessage,
                       style: const TextStyle(
-                        color: Colors.white,
+                        color: Colors
+                            .white,
                         fontSize: 16,
-                        fontWeight: FontWeight.w500,
+                        fontWeight:
+                            FontWeight
+                                .w500,
                       ),
                     ),
                   ],
@@ -148,20 +270,32 @@ class _UnityCameraPageState extends State<UnityCameraPage>
               ),
             ),
 
-          // Back button (always visible)
           Positioned(
             top: topPadding + 12,
             left: 12,
             child: GestureDetector(
-              onTap: () => Navigator.pop(context),
+              onTap: () =>
+                  Navigator.pop(
+                    context,
+                  ),
               child: Container(
                 width: 44,
                 height: 44,
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.85),
-                  shape: BoxShape.circle,
+                decoration:
+                    BoxDecoration(
+                      color: Colors
+                          .white
+                          .withOpacity(
+                            0.85,
+                          ),
+                      shape: BoxShape
+                          .circle,
+                    ),
+                child: const Icon(
+                  Icons.arrow_back,
+                  color: kGreen,
+                  size: 22,
                 ),
-                child: const Icon(Icons.arrow_back, color: kGreen, size: 22),
               ),
             ),
           ),

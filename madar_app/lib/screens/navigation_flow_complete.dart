@@ -14,13 +14,43 @@ import 'package:model_viewer_plus/model_viewer_plus.dart';
 import 'package:webview_flutter/webview_flutter.dart'
     show
         JavaScriptMessage,
-        JavascriptChannel;
+        JavascriptChannel,
+        WebViewController;
+
 import 'package:madar_app/screens/AR_page.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'dart:async';
 
 // ============================================================================
 // 1. TRIGGER: Navigation Arrow Click Handler
 // ============================================================================
+Future<
+  DocumentReference<
+    Map<String, dynamic>
+  >
+>
+_resolveUserDocRef(User user) async {
+  final users = FirebaseFirestore
+      .instance
+      .collection('users');
+
+  final email = user.email;
+  if (email != null &&
+      email.isNotEmpty) {
+    final snap = await users
+        .where(
+          'email',
+          isEqualTo: email,
+        )
+        .limit(1)
+        .get();
+    if (snap.docs.isNotEmpty) {
+      return snap.docs.first.reference;
+    }
+  }
+
+  return users.doc(user.uid);
+}
 
 void showNavigationDialog(
   BuildContext context,
@@ -141,6 +171,9 @@ class NavigateToShopDialog
 
           const SizedBox(height: 30),
 
+          // ------------------------------------------------------------------
+          // [PATCH A] Pin on Map = Manual mode (شغل صديقتك)
+          // ------------------------------------------------------------------
           Padding(
             padding:
                 const EdgeInsets.symmetric(
@@ -164,6 +197,8 @@ class NavigateToShopDialog
                         shopName:
                             shopName,
                         shopId: shopId,
+                        autoFromScan:
+                            false, // [PATCH A] manual/tap
                       ),
                 );
               },
@@ -182,12 +217,20 @@ class NavigateToShopDialog
               icon: Icons
                   .camera_alt_outlined,
               onPressed: () async {
-                Navigator.pop(context);
-                await _handleScanWithCamera(
+                final rootCtx =
+                    Navigator.of(
+                      context,
+                      rootNavigator:
+                          true,
+                    ).context; // ✅ أهم سطر
+                Navigator.pop(
                   context,
+                ); // يقفل الـ sheet
+                await _handleScanWithCamera(
+                  rootCtx,
                   shopName,
                   shopId,
-                );
+                ); // ✅ مرري rootCtx
               },
             ),
           ),
@@ -211,72 +254,243 @@ class NavigateToShopDialog
     final status = await Permission
         .camera
         .request();
-
     if (!context.mounted) return;
 
-    if (status.isGranted) {
-      final result =
-          await Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) =>
-                  const UnityCameraPage(
-                    isNavigation: true,
-                  ),
+    if (!status.isGranted) {
+      if (status.isPermanentlyDenied) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Camera permission required. Please enable in Settings.',
             ),
-          );
-
-      if (!context.mounted) return;
-
-      if (result == true) {
-        await showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => ARSuccessDialog(
-            onOkPressed: () {
-              Navigator.pop(context);
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(
-                  builder: (_) =>
-                      PathOverviewScreen(
-                        shopName:
-                            shopName,
-                        shopId: shopId,
-                        startingMethod:
-                            'scan',
-                      ),
-                ),
-              );
-            },
+          ),
+        );
+        openAppSettings();
+      } else {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Camera permission is required to use AR.',
+            ),
           ),
         );
       }
-    } else if (status
-        .isPermanentlyDenied) {
+      return;
+    }
+
+    // ✅ IMPORTANT: docId لازم يطابق اللي Unity يكتب فيه
+    const docId = "demo_user";
+
+    await _openScanAndReturnToMapWithConfirm(
+      context: context,
+      docId: docId,
+      shopName: shopName,
+      shopId: shopId,
+    );
+  }
+
+  Future<void>
+  _openScanAndReturnToMapWithConfirm({
+    required BuildContext context,
+    required String docId,
+    required String shopName,
+    required String shopId,
+  }) async {
+    final user = FirebaseAuth
+        .instance
+        .currentUser;
+    if (user == null) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(
         const SnackBar(
           content: Text(
-            'Camera permission required. Please enable in Settings.',
+            'You must be signed in.',
           ),
         ),
       );
-      openAppSettings();
+      return;
+    }
+
+    final docRef = FirebaseFirestore
+        .instance
+        .collection('liveLocations')
+        .doc(docId);
+
+    final scanStartUtc = DateTime.now()
+        .toUtc();
+
+    // Baseline قبل ما نفتح Unity (عشان ما نلتقط بيانات قديمة)
+    /* final beforeSnap = await docRef
+        .get();
+    final beforePos =
+        (beforeSnap
+                .data()?['blenderPosition']
+            as Map?) ??
+        {};
+    final beforeUpdatedAt = beforeSnap
+        .data()?['updatedAt'];*/
+
+    late final StreamSubscription sub;
+    bool didReturn = false;
+
+    DateTime? _toUtcDate(dynamic v) {
+      if (v == null) return null;
+
+      if (v is Timestamp)
+        return v.toDate().toUtc();
+
+      // لو Unity تكتب رقم milliseconds
+      if (v is int) {
+        return DateTime.fromMillisecondsSinceEpoch(
+          v,
+          isUtc: true,
+        );
+      }
+      if (v is num) {
+        return DateTime.fromMillisecondsSinceEpoch(
+          v.toInt(),
+          isUtc: true,
+        );
+      }
+
+      // لو بالغلط جا String ISO
+      if (v is String) {
+        final dt = DateTime.tryParse(v);
+        return dt?.toUtc();
+      }
+
+      return null;
+    }
+
+    sub = docRef.snapshots().listen((
+      snap,
+    ) async {
+      if (didReturn) return;
+      final data = snap.data();
+      if (data == null) return;
+
+      final pos =
+          (data['blenderPosition']
+              as Map?) ??
+          {};
+      final updatedAtUtc = _toUtcDate(
+        data['updatedAt'],
+      );
+
+      // ✅ أهم سطر: تجاهل أي شيء مكتوب قبل بداية السكان الحالي
+      if (updatedAtUtc == null) return;
+      if (!updatedAtUtc.isAfter(
+        scanStartUtc,
+      ))
+        return;
+
+      // الآن هذا تحديث “جديد” تابع لهذا السكان
+      final x = (pos['x'] as num?)
+          ?.toDouble();
+      final y = (pos['y'] as num?)
+          ?.toDouble();
+      final z = (pos['z'] as num?)
+          ?.toDouble();
+      final floor = data['floor'];
+
+      if (x == null ||
+          y == null ||
+          z == null)
+        return;
+
+      didReturn = true;
+
+      try {
+        final userDocRef =
+            await _resolveUserDocRef(
+              user,
+            );
+        await userDocRef.set({
+          'location': {
+            'blenderPosition': {
+              'x': x,
+              'y': y,
+              'z': z,
+              'floor': floor ?? '',
+            },
+            'updatedAt':
+                FieldValue.serverTimestamp(),
+          },
+        }, SetOptions(merge: true));
+      } catch (e) {
+        debugPrint(
+          '❌ Failed saving scanned location to users: $e',
+        );
+      }
+
+      if (context.mounted) {
+        Navigator.of(
+          context,
+        ).pop(); // closes UnityCameraPage
+      }
+
+      await sub.cancel();
+
+      if (!context.mounted) return;
+
+      showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor:
+            Colors.transparent,
+        builder: (_) =>
+            SetYourLocationDialog(
+              shopName: shopName,
+              shopId: shopId,
+              autoFromScan: true,
+            ),
+      );
+    });
+
+    // ✅ افتح Unity ScanOnly
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            const UnityCameraPage(
+              isScanOnly: true,
+            ),
+      ),
+    );
+
+    if (!didReturn) {
+      await sub.cancel();
     }
   }
 }
+
+// ============================================================================
+// 3. SET YOUR LOCATION DIALOG (ستكملينه في PART 2)
+// ============================================================================
 
 class SetYourLocationDialog
     extends StatefulWidget {
   final String shopName;
   final String shopId;
 
+  // --------------------------------------------------------------------------
+  // [PATCH D] هذا الفلاغ يفرق بين:
+  // - false: Pin on Map (manual tap) = شغل صديقتك
+  // - true : Scan with camera (auto pin) = شغلك
+  // --------------------------------------------------------------------------
+  final bool autoFromScan;
+
   const SetYourLocationDialog({
     super.key,
     required this.shopName,
     required this.shopId,
+    this.autoFromScan =
+        false, // [PATCH D]
   });
 
   @override
@@ -288,21 +502,274 @@ class SetYourLocationDialog
 class _SetYourLocationDialogState
     extends
         State<SetYourLocationDialog> {
+  bool _pendingAutoPin = false;
+  bool _pendingPinApply = false;
   String _currentFloorURL = '';
   List<Map<String, String>> _venueMaps =
       [];
   bool _mapsLoading = true;
+  WebViewController? _mvController;
 
-  // User-picked start location (BlenderPosition)
   Map<String, double>?
   _pickedPos; // {x,y,z}
   String _pickedFloorLabel = '';
 
+  // ✅ QUICK TEST (remove/comment later)
+  final _testXCtrl =
+      TextEditingController();
+  final _testYCtrl =
+      TextEditingController();
+  final _testZCtrl =
+      TextEditingController();
+  final _testFloorCtrl =
+      TextEditingController();
+
+  bool _showQuickTest = true;
+
   @override
   void initState() {
     super.initState();
-    _loadUserBlenderPosition();
+
+    // ------------------------------------------------------------------------
+    // [PATCH E] مهم: لا نخرب شغل صديقتك
+    // - manual (autoFromScan=false): لا نقرأ شيء تلقائي
+    // - scan   (autoFromScan=true) : سنقرأ من users ونرسم pin تلقائي (في PART 2)
+    // ------------------------------------------------------------------------
+    if (widget.autoFromScan) {
+      _loadUserBlenderPosition(); // في PART 2 سنضيف رسم pin تلقائي
+    }
+
     _loadVenueMaps();
+  }
+
+  @override
+  void dispose() {
+    _testXCtrl.dispose();
+    _testYCtrl.dispose();
+    _testZCtrl.dispose();
+    _testFloorCtrl.dispose();
+    super.dispose();
+  }
+
+  // ... (يكمل في PART 2)
+
+  Widget _quickTestSection() {
+    if (!_showQuickTest)
+      return const SizedBox.shrink();
+
+    InputDecoration deco(
+      String hint,
+    ) => InputDecoration(
+      hintText: hint,
+      isDense: true,
+      border: OutlineInputBorder(
+        borderRadius:
+            BorderRadius.circular(10),
+      ),
+      contentPadding:
+          const EdgeInsets.symmetric(
+            horizontal: 10,
+            vertical: 10,
+          ),
+    );
+
+    double? parseD(String s) =>
+        double.tryParse(s.trim());
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(
+        16,
+        10,
+        16,
+        0,
+      ),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.amber.withOpacity(
+          0.08,
+        ),
+        borderRadius:
+            BorderRadius.circular(14),
+        border: Border.all(
+          color: Colors.amber
+              .withOpacity(0.35),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment:
+            CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Quick Test (temporary)',
+            style: TextStyle(
+              fontWeight:
+                  FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller:
+                      _testXCtrl,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(
+                        decimal: true,
+                        signed: true,
+                      ),
+                  decoration: deco('x'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  controller:
+                      _testYCtrl,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(
+                        decimal: true,
+                        signed: true,
+                      ),
+                  decoration: deco('y'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  controller:
+                      _testZCtrl,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(
+                        decimal: true,
+                        signed: true,
+                      ),
+                  decoration: deco('z'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller:
+                      _testFloorCtrl,
+                  decoration: deco(
+                    'floor (optional) e.g. GF/F1',
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              ElevatedButton.icon(
+                onPressed: () async {
+                  final x = parseD(
+                    _testXCtrl.text,
+                  );
+                  final y = parseD(
+                    _testYCtrl.text,
+                  );
+                  final z = parseD(
+                    _testZCtrl.text,
+                  );
+
+                  if (x == null ||
+                      y == null ||
+                      z == null) {
+                    ScaffoldMessenger.of(
+                      context,
+                    ).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Enter valid numbers for x, y, z',
+                        ),
+                      ),
+                    );
+                    return;
+                  }
+
+                  setState(() {
+                    _pickedPos = {
+                      'x': x,
+                      'y': y,
+                      'z': z,
+                    };
+                    _pickedFloorLabel =
+                        _testFloorCtrl
+                            .text
+                            .trim();
+                  });
+
+                  // ✅ NEW: update the visual pin
+                  final c =
+                      _mvController;
+                  if (c != null) {
+                    await c.runJavaScript(
+                      'setUserPinFromFlutterSafe($x, $y, $z);',
+                    );
+                  }
+                },
+
+                icon: const Icon(
+                  Icons
+                      .play_circle_outline,
+                ),
+                label: const Text(
+                  'Test',
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor:
+                      AppColors.kGreen,
+                  foregroundColor:
+                      Colors.white,
+                  padding:
+                      const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 12,
+                      ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius:
+                        BorderRadius.circular(
+                          12,
+                        ),
+                  ),
+                  elevation: 0,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Tip: after testing, Confirm will be enabled because _pickedPos is set.',
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey[700],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _normalizeFloorLabel(
+    dynamic floorRaw,
+  ) {
+    if (floorRaw == null) return '';
+    final s = floorRaw
+        .toString()
+        .trim()
+        .toUpperCase();
+    if (s.isEmpty) return '';
+
+    final n = int.tryParse(s);
+    if (n != null) {
+      // نفس مابينغ أزرارك: 1=GF ، 2=F1
+      if (n == 1) return 'GF';
+      if (n == 2) return 'F1';
+      return 'F$n';
+    }
+    return s; // لو جا "GF" أو "F1"
   }
 
   /// Loads the last saved user location (if any). It reads from:
@@ -316,17 +783,16 @@ class _SetYourLocationDialogState
     if (user == null) return;
 
     try {
-      final doc =
-          await FirebaseFirestore
-              .instance
-              .collection('users')
-              .doc(user.uid)
-              .get(
-                const GetOptions(
-                  source: Source
-                      .serverAndCache,
-                ),
-              );
+      final userDocRef =
+          await _resolveUserDocRef(
+            user,
+          );
+
+      final doc = await userDocRef.get(
+        const GetOptions(
+          source: Source.serverAndCache,
+        ),
+      );
 
       final data = doc.data();
       if (data == null) return;
@@ -344,18 +810,17 @@ class _SetYourLocationDialogState
           ?.toDouble();
       final z = (bp['z'] as num?)
           ?.toDouble();
-      final floorRaw = bp['floor'];
+      final floorLabel =
+          _normalizeFloorLabel(
+            bp['floor'],
+          );
+
       if (x == null ||
           y == null ||
           z == null)
         return;
-
-      final floorLabel =
-          floorRaw == null
-          ? ''
-          : floorRaw.toString();
-
       if (!mounted) return;
+
       setState(() {
         _pickedPos = {
           'x': x,
@@ -363,23 +828,31 @@ class _SetYourLocationDialogState
           'z': z,
         };
         _pickedFloorLabel = floorLabel;
+        _pendingAutoPin =
+            true; // نطلب رسم البن
       });
 
-      // If we already have maps loaded, switch to the saved floor.
+      // لو الخرائط جاهزة: بدّل للدور المطابق
       if (floorLabel.isNotEmpty &&
           _venueMaps.isNotEmpty) {
         final match = _venueMaps
             .firstWhere(
               (m) =>
                   (m['floorNumber'] ??
-                      '') ==
+                          '')
+                      .toString()
+                      .trim()
+                      .toUpperCase() ==
                   floorLabel,
               orElse: () => const {
                 'mapURL': '',
               },
             );
+
         final url =
-            match['mapURL'] ?? '';
+            (match['mapURL'] ?? '')
+                .toString()
+                .trim();
         if (url.isNotEmpty && mounted) {
           setState(
             () =>
@@ -387,6 +860,9 @@ class _SetYourLocationDialogState
           );
         }
       }
+
+      // جرّبي ترسمين (إذا الويبفيو جاهز بيرسم، إذا لا بيظل pending)
+      await _applyPinToViewerIfReady();
     } catch (e) {
       debugPrint(
         'Error loading user blenderPosition: $e',
@@ -548,6 +1024,24 @@ const timer = setInterval(function() {
   postToTest("✅ PinPicker JS alive");
   if (setupViewer() || tries > 30) clearInterval(timer);
 }, 250);
+// ✅ Allow Flutter to move the pin programmatically:
+window.setUserPinFromFlutter = function(x, y, z) {
+  const viewer = getViewer();
+  if (!viewer) return false;
+  setUserPin(viewer, { x: Number(x), y: Number(y), z: Number(z) });
+  return true;
+};
+
+// ✅ Safer: retry until model-viewer is ready
+window.setUserPinFromFlutterSafe = function(x, y, z) {
+  let tries = 0;
+  const t = setInterval(() => {
+    tries++;
+    const ok = window.setUserPinFromFlutter(x, y, z);
+    if (ok || tries > 20) clearInterval(t);
+  }, 150);
+};
+
 ''';
 
   void _handleJsMessage(String raw) {
@@ -600,38 +1094,31 @@ const timer = setInterval(function() {
     }
   }
 
-  Future<
-    DocumentReference<
-      Map<String, dynamic>
-    >
-  >
-  _resolveUserDocRef(User user) async {
-    final users = FirebaseFirestore
-        .instance
-        .collection('users');
-
-    // If your users collection uses auto-generated document IDs (as in your screenshot),
-    // we find the doc by email and update that doc instead of creating a new {uid} doc.
-    final email = user.email;
-    if (email != null &&
-        email.isNotEmpty) {
-      final snap = await users
-          .where(
-            'email',
-            isEqualTo: email,
-          )
-          .limit(1)
-          .get();
-      if (snap.docs.isNotEmpty) {
-        return snap
-            .docs
-            .first
-            .reference;
-      }
+  // ---------------------------------------------------------------------------
+  // [PATCH F] Apply pin visually to ModelViewer (USED ONLY FOR SCAN MODE)
+  // ---------------------------------------------------------------------------
+  Future<void>
+  _applyPinToViewerIfReady() async {
+    if (!widget.autoFromScan) return;
+    if (_pickedPos == null) {
+      _pendingAutoPin = false;
+      return;
     }
 
-    // Fallback: use uid as doc id.
-    return users.doc(user.uid);
+    // لو الويبفيو ماجهز، نخزن طلب الرسم
+    if (_mvController == null) {
+      _pendingAutoPin = true;
+      return;
+    }
+
+    final x = -(_pickedPos!['x']!);
+    final y = _pickedPos!['y']!;
+    final z = _pickedPos!['z']!;
+
+    _pendingAutoPin = false;
+    await _mvController!.runJavaScript(
+      'setUserPinFromFlutterSafe($x, $y, $z);',
+    );
   }
 
   Future<bool>
@@ -682,16 +1169,18 @@ const timer = setInterval(function() {
 
       // Save under location.{blenderPosition,updatedAt}
       // Using dotted keys avoids overwriting future location.multisetPosition.
-      await userDocRef.update({
-        'location.blenderPosition': {
-          'x': pos['x'],
-          'y': pos['y'],
-          'z': pos['z'],
-          'floor': floorValue,
+      await userDocRef.set({
+        'location': {
+          'blenderPosition': {
+            'x': pos['x'],
+            'y': pos['y'],
+            'z': pos['z'],
+            'floor': floorValue,
+          },
+          'updatedAt':
+              FieldValue.serverTimestamp(),
         },
-        'location.updatedAt':
-            FieldValue.serverTimestamp(),
-      });
+      }, SetOptions(merge: true));
 
       if (!mounted) return true;
       return true;
@@ -771,6 +1260,37 @@ const timer = setInterval(function() {
                   convertedMaps
                       .first['mapURL'] ??
                   '';
+              // ✅ لو عندنا دور محفوظ (جا من scan) خليه الافتراضي
+              if (_pickedFloorLabel
+                  .isNotEmpty) {
+                final match = convertedMaps.firstWhere(
+                  (m) =>
+                      (m['floorNumber'] ??
+                              '')
+                          .toString()
+                          .trim()
+                          .toUpperCase() ==
+                      _pickedFloorLabel
+                          .trim()
+                          .toUpperCase(),
+                  orElse: () => const {
+                    'mapURL': '',
+                  },
+                );
+
+                final url =
+                    (match['mapURL'] ??
+                            '')
+                        .toString();
+                if (url.isNotEmpty)
+                  _currentFloorURL =
+                      url;
+              }
+
+              // ✅ بعد تحميل الخرائط، لو كنا في scan mode جرّبي ترسمين البن
+              if (widget.autoFromScan) {
+                _applyPinToViewerIfReady();
+              }
 
               // If we already loaded a saved floor, prefer that.
               if (_pickedFloorLabel
@@ -906,6 +1426,7 @@ const timer = setInterval(function() {
               ],
             ),
           ),
+          _quickTestSection(),
           Expanded(
             child: Padding(
               padding:
@@ -1009,6 +1530,29 @@ const timer = setInterval(function() {
               cameraOrbit:
                   "0deg 65deg 2.5m",
               relatedJs: _pinPickerJs,
+              onWebViewCreated: (controller) {
+                _mvController =
+                    controller;
+
+                if (widget
+                    .autoFromScan) {
+                  Future.delayed(
+                    const Duration(
+                      milliseconds: 150,
+                    ),
+                    () {
+                      if (!mounted)
+                        return;
+                      if (_pendingAutoPin ||
+                          _pickedPos !=
+                              null) {
+                        _applyPinToViewerIfReady(); // ✅ هنا
+                      }
+                    },
+                  );
+                }
+              },
+
               javascriptChannels: {
                 JavascriptChannel(
                   'JS_TEST_CHANNEL',
@@ -1179,9 +1723,13 @@ const timer = setInterval(function() {
         ),
         onPressed: () => setState(() {
           _currentFloorURL = url;
-          _pickedPos = null;
-          _pickedFloorLabel = '';
+
+          if (!widget.autoFromScan) {
+            _pickedPos = null;
+            _pickedFloorLabel = '';
+          }
         }),
+
         child: Text(
           label,
           style: const TextStyle(
@@ -1255,17 +1803,17 @@ class _PathOverviewScreenState
     if (user == null) return;
 
     try {
-      final doc =
-          await FirebaseFirestore
-              .instance
-              .collection('users')
-              .doc(user.uid)
-              .get(
-                const GetOptions(
-                  source: Source
-                      .serverAndCache,
-                ),
-              );
+      // نفس المرجع اللي نكتب فيه (email أو uid)
+      final userDocRef =
+          await _resolveUserDocRef(
+            user,
+          );
+
+      final doc = await userDocRef.get(
+        const GetOptions(
+          source: Source.serverAndCache,
+        ),
+      );
 
       final data = doc.data();
       if (data == null) return;
@@ -1280,8 +1828,22 @@ class _PathOverviewScreenState
       final floorRaw = bp['floor'];
       if (floorRaw == null) return;
 
-      final floorLabel = floorRaw
-          .toString();
+      // طبّعي الدور لنفس صيغة أزرارك GF / F1
+      String floorLabel = floorRaw
+          .toString()
+          .trim()
+          .toUpperCase();
+      final n = int.tryParse(
+        floorLabel,
+      );
+      if (n != null) {
+        if (n == 1)
+          floorLabel = 'GF';
+        else if (n == 2)
+          floorLabel = 'F1';
+        else
+          floorLabel = 'F$n';
+      }
 
       if (!mounted) return;
       setState(() {

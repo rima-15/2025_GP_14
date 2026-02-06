@@ -1573,10 +1573,10 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     var pts = path;
 
     // 1) Chaikin corner-cutting (smooths jagged A* polylines).
-    pts = _chaikinSmooth(pts, iterations: 1); // Funnel output is already smooth; keep this light
+    //pts = _chaikinSmooth(pts, iterations: 1); // Funnel output is already smooth; keep this light
 
     // 2) Snap each point back onto the navmesh (keeps the path on corridors).
-    pts = pts.map((p) => nm.snapPointXY(p)).toList();
+    //pts = pts.map((p) => nm.snapPointXY(p)).toList();
 
     // 3) Resample: keep one point every ~0.25 units (tune for your scale).
     pts = _resampleByDistance(pts, step: 0.06);
@@ -1683,6 +1683,107 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
   return pts;
 }
 
+  bool _pointInTri2D(
+  double px,
+  double py,
+  double ax,
+  double ay,
+  double bx,
+  double by,
+  double cx,
+  double cy,
+) {
+  // Barycentric technique
+  final v0x = cx - ax;
+  final v0y = cy - ay;
+  final v1x = bx - ax;
+  final v1y = by - ay;
+  final v2x = px - ax;
+  final v2y = py - ay;
+
+  final dot00 = v0x * v0x + v0y * v0y;
+  final dot01 = v0x * v1x + v0y * v1y;
+  final dot02 = v0x * v2x + v0y * v2y;
+  final dot11 = v1x * v1x + v1y * v1y;
+  final dot12 = v1x * v2x + v1y * v2y;
+
+  final denom = (dot00 * dot11 - dot01 * dot01);
+  if (denom.abs() < 1e-12) return false;
+
+  final inv = 1.0 / denom;
+  final u = (dot11 * dot02 - dot01 * dot12) * inv;
+  final v = (dot00 * dot12 - dot01 * dot02) * inv;
+
+  return (u >= -1e-9) && (v >= -1e-9) && (u + v <= 1.0 + 1e-9);
+}
+
+int? _findContainingTriXY(NavMesh nm, double x, double y) {
+  // O(numTriangles) but OK for shortcut sampling.
+  for (int ti = 0; ti < nm.t.length; ti++) {
+    final tri = nm.t[ti];
+    final a = nm.v[tri[0]];
+    final b = nm.v[tri[1]];
+    final c = nm.v[tri[2]];
+
+    if (_pointInTri2D(
+      x, y,
+      a[0], a[1],
+      b[0], b[1],
+      c[0], c[1],
+    )) {
+      return ti;
+    }
+  }
+  return null;
+}
+
+  List<List<double>> _shortcutPathBySampling(NavMesh nm, List<List<double>> pts) {
+    if (pts.length <= 2) return pts;
+
+    const double sampleStep = 0.06; // smaller = stricter
+
+    bool segmentWalkable(List<double> a, List<double> b) {
+      final ax = a[0], ay = a[1];
+      final bx = b[0], by = b[1];
+      final dx = bx - ax;
+      final dy = by - ay;
+      final len = math.sqrt(dx * dx + dy * dy);
+      if (len < 1e-6) return true;
+
+      final steps = math.max(2, (len / sampleStep).ceil());
+      for (int i = 0; i <= steps; i++) {
+        final t = i / steps;
+        final x = ax + dx * t;
+        final y = ay + dy * t;
+
+              // Strict: the sample point must actually be inside the navmesh surface
+      final triId = _findContainingTriXY(nm, x, y);
+      if (triId == null) return false;
+
+      }
+      return true;
+    }
+
+    final out = <List<double>>[];
+    int i = 0;
+    out.add(pts.first);
+
+    while (i < pts.length - 1) {
+      int best = i + 1;
+
+      for (int j = pts.length - 1; j > i + 1; j--) {
+        if (segmentWalkable(pts[i], pts[j])) {
+          best = j;
+          break;
+        }
+      }
+
+      out.add(pts[best]);
+      i = best;
+    }
+
+    return out;
+  }
 
   double _distXY(List<double> a, List<double> b) {
     final dx = a[0] - b[0];
@@ -1723,17 +1824,33 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     // Snap both endpoints to navmesh in Blender XY.
     final uSnap = nm.snapPointXY([u['x']!, u['y']!, u['z']!]);
     final dSnap = nm.snapPointXY([d['x']!, d['y']!, d['z']!]);
-
+    
     _userSnappedBlender = {'x': uSnap[0], 'y': uSnap[1], 'z': uSnap[2]};
     _destSnappedBlender = {'x': dSnap[0], 'y': dSnap[1], 'z': dSnap[2]};
+
+        // ---- DEBUG: raw vs snapped (Blender space) ----
+    final uRaw = [u['x']!, u['y']!, u['z']!];
+    final dRaw = [d['x']!, d['y']!, d['z']!];
+
+    final uDx = uRaw[0] - uSnap[0];
+    final uDy = uRaw[1] - uSnap[1];
+    final uDist = math.sqrt(uDx * uDx + uDy * uDy);
+
+    final dDx = dRaw[0] - dSnap[0];
+    final dDy = dRaw[1] - dSnap[1];
+    final dDist = math.sqrt(dDx * dDx + dDy * dDy);
+
+    debugPrint("🟩 startRawB=$uRaw  startSnapB=$uSnap  Δxy=$uDist");
+    debugPrint("🟥 destRawB=$dRaw   destSnapB=$dSnap   Δxy=$dDist");
 
     // Compute path as Blender polyline.
     var pathB = nm.findPathFunnelBlenderXY(
       start: uSnap,
       goal: dSnap,
     );
-    // --- center bias (makes path less wall-hugging) ---
+
     pathB = _pullPathTowardCenter(pathB, strength: 0.45);
+    pathB = _shortcutPathBySampling(nm, pathB);
 
     if (pathB.isEmpty) {
       debugPrint('⚠️ Navmesh returned empty path');
@@ -1754,7 +1871,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     }
   }
 
-
+  
   void _handlePoiMessage(String raw) {
     // Path viewer JS posts a small set of messages. We keep this tolerant and
     // non-breaking.
@@ -2759,7 +2876,7 @@ if (_jsReady) {
       ],
     );
   }
-
+  
   // Horizontal preference button (icon next to text)
   Widget _preferenceButtonHorizontal(
     String label,

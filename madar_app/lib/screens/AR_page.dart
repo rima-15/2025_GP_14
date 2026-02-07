@@ -31,12 +31,9 @@ class _UnityCameraPageState
   String _statusMessage =
       "Initializing AR...";
 
-  String?
-  _cachedUserDocId; // ✅ نخزنها عشان ما نسوي query كل مرة
+  String? _cachedUserDocId;
 
-  // --------------------------------------------------------------------------
-  // ✅ Resolve Firestore user docId (your model: users docId is NOT uid)
-  // --------------------------------------------------------------------------
+  // Resolve Firestore user docId by email (your model: users docId != uid)
   Future<String?>
   _resolveUserDocIdByEmail() async {
     final user = FirebaseAuth
@@ -62,7 +59,27 @@ class _UnityCameraPageState
     return snap
         .docs
         .first
-        .id; // ✅ real Firestore docId
+        .id; // real Firestore docId
+  }
+
+  // Get a fresh Firebase Auth ID token
+  Future<String?>
+  _getFreshIdToken() async {
+    final user = FirebaseAuth
+        .instance
+        .currentUser;
+    if (user == null) return null;
+
+    try {
+      return await user.getIdToken(
+        true,
+      ); // force refresh
+    } catch (e) {
+      debugPrint(
+        "❌ Failed to get ID token: $e",
+      );
+      return null;
+    }
   }
 
   @override
@@ -91,7 +108,7 @@ class _UnityCameraPageState
 
     if (state ==
         AppLifecycleState.resumed) {
-      _sendHandshakeAndMode(); // ✅ resend when coming back
+      _sendHandshakeAndMode();
     }
   }
 
@@ -123,46 +140,48 @@ class _UnityCameraPageState
           "Loading AR environment...",
     );
 
-    // Wait for Unity to initialize
     await Future.delayed(
       const Duration(milliseconds: 600),
     );
 
-    // Mark as ready BEFORE sending (so future calls won't skip)
-    if (mounted) {
-      setState(() {
-        _isUnityReady = true;
-        _statusMessage =
-            widget.isNavigation
-            ? "Starting navigation..."
-            : (widget.isScanOnly
-                  ? "Scanning location..."
-                  : "AR Ready");
-      });
-    }
+    if (!mounted) return;
+    setState(() {
+      _isUnityReady = true;
+      _statusMessage =
+          widget.isNavigation
+          ? "Starting navigation..."
+          : (widget.isScanOnly
+                ? "Scanning location..."
+                : "AR Ready");
+    });
 
     await _sendHandshakeAndMode();
   }
 
-  // --------------------------------------------------------------------------
-  // ✅ 1) Send USER_DOC_ID
-  // ✅ 2) Then send SCAN_ONLY / NAVIGATION / EXPLORE
-  // --------------------------------------------------------------------------
+  // 1) Send USER_DOC_ID
+  // 2) Send ID_TOKEN
+  // 3) Then send SCAN_ONLY / NAVIGATION / EXPLORE
   Future<void>
   _sendHandshakeAndMode() async {
     if (!_isUnityReady) return;
 
-    // 1) Resolve docId once (cache)
     _cachedUserDocId ??=
         await _resolveUserDocIdByEmail();
-
     if (_cachedUserDocId == null ||
         _cachedUserDocId!.isEmpty) {
       debugPrint(
-        "❌ Could not resolve Firestore user docId (users docId is not uid). "
-        "Make sure users collection has a document with field email == currentUser.email",
+        "❌ Could not resolve Firestore user docId. Ensure users has a document where email == currentUser.email",
       );
-      // هنا نوقف: لا نرسل وضع التشغيل لأن Unity ما يعرف يكتب فين
+      return;
+    }
+
+    final idToken =
+        await _getFreshIdToken();
+    if (idToken == null ||
+        idToken.isEmpty) {
+      debugPrint(
+        "❌ Could not get Firebase Auth ID token.",
+      );
       return;
     }
 
@@ -183,12 +202,32 @@ class _UnityCameraPageState
       return;
     }
 
-    // small delay so Unity receives docId before mode
     await Future.delayed(
-      const Duration(milliseconds: 150),
+      const Duration(milliseconds: 120),
     );
 
-    // 2) Send mode
+    // Send ID_TOKEN
+    try {
+      sendToUnity(
+        "FlutterListener",
+        "OnFlutterMessage",
+        "ID_TOKEN:$idToken",
+      );
+      debugPrint(
+        "✅ Sent ID_TOKEN to Unity (len=${idToken.length})",
+      );
+    } catch (e) {
+      debugPrint(
+        "❌ Failed to send ID_TOKEN: $e",
+      );
+      return;
+    }
+
+    await Future.delayed(
+      const Duration(milliseconds: 120),
+    );
+
+    // Send mode
     final String modeMessage;
     if (widget.isNavigation &&
         widget.placeId != null &&
@@ -212,7 +251,7 @@ class _UnityCameraPageState
       );
     } catch (e) {
       debugPrint(
-        "❌ Failed to send mode message to Unity: $e",
+        "❌ Failed to send mode message: $e",
       );
     }
   }

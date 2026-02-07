@@ -1,16 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
-import 'package:madar_app/theme/theme.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:icons_plus/icons_plus.dart';
+
+// ----------------------------------------------------------------------------
+// Contact Item Model (for pre-loading)
+// ----------------------------------------------------------------------------
+
+class _ContactItem {
+  final String name;
+  final String phone;
+  _ContactItem({required this.name, required this.phone});
+}
 
 // ----------------------------------------------------------------------------
 // Track Request Dialog
@@ -32,6 +39,8 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
   String? _phoneInputError;
   bool _isTimeValid = true;
   String? _timeError;
+  bool _isAddingPhone = false; // Prevent multiple clicks on Add button
+  bool _isSubmitting = false; // Prevent multiple clicks on Send Request
 
   DateTime? _selectedDate;
   TimeOfDay? _startTime;
@@ -44,17 +53,115 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
   bool _loadingVenues = false;
   Position? _currentPosition;
 
+  // Pre-loaded contacts data (loaded when dialog opens for fast access)
+  List<_ContactItem> _preloadedContacts = [];
+  Map<String, bool> _preloadedInDbStatus = {};
+
+  // Cached current user info (loaded once in initState to avoid repeated queries)
+  String? _cachedMyPhone;
+  String? _cachedMyName;
+
   @override
   void initState() {
     super.initState();
     _loadVenues();
     _getCurrentLocation();
+    _preloadContacts(); // Pre-load contacts and DB status
+    _loadCurrentUserInfo(); // Cache current user's phone/name for fast lookups
 
     _phoneFocusNode.addListener(() {
       setState(() {
         _isPhoneFocused = _phoneFocusNode.hasFocus;
       });
     });
+  }
+
+  /// Cache current user's phone and name to avoid repeated Firestore queries
+  Future<void> _loadCurrentUserInfo() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      final data = doc.data();
+      if (data != null && mounted) {
+        _cachedMyPhone = (data['phone'] ?? '').toString();
+        _cachedMyName = ('${data['firstName'] ?? ''} ${data['lastName'] ?? ''}').trim();
+      }
+    } catch (_) {
+      // Ignore - will fall back to querying if needed
+    }
+  }
+
+  /// Pre-load contacts and check DB status in background
+  Future<void> _preloadContacts() async {
+    try {
+      if (!await FlutterContacts.requestPermission()) {
+        return;
+      }
+      final contacts = await FlutterContacts.getContacts(withProperties: true);
+      final List<_ContactItem> items = [];
+      for (final c in contacts) {
+        if (c.phones.isEmpty) continue;
+        final name = c.displayName.trim().isEmpty ? 'Unknown' : c.displayName;
+        for (final p in c.phones) {
+          final phone = _normalizePhone(p.number);
+          if (phone.isNotEmpty)
+            items.add(_ContactItem(name: name, phone: phone));
+        }
+      }
+      final seen = <String>{};
+      final deduped = <_ContactItem>[];
+      for (final i in items) {
+        if (seen.add(i.phone)) deduped.add(i);
+      }
+      deduped.sort(
+        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _preloadedContacts = deduped;
+      });
+
+      // Check DB status in batches
+      const batchSize = 20;
+      for (var i = 0; i < deduped.length; i += batchSize) {
+        if (!mounted) return;
+        final batch = deduped.skip(i).take(batchSize).toList();
+        for (final item in batch) {
+          if (!mounted) return;
+          try {
+            final uid = await _getUserIdByPhone(item.phone);
+            if (mounted) {
+              setState(() {
+                _preloadedInDbStatus[item.phone] = uid != null;
+              });
+            }
+          } catch (_) {
+            if (mounted) {
+              setState(() {
+                _preloadedInDbStatus[item.phone] = false;
+              });
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // Ignore errors - contacts will show loading state for unchecked items
+    }
+  }
+
+  static String _normalizePhone(String raw) {
+    String phone = raw.replaceAll(RegExp(r'\s+'), '').replaceAll('-', '');
+    if (phone.startsWith('+966')) phone = phone.replaceFirst('+966', '');
+    if (phone.startsWith('966')) phone = phone.replaceFirst('966', '');
+    if (phone.startsWith('05') && phone.length >= 9) phone = phone.substring(2);
+    phone = phone.replaceAll(RegExp(r'[^\d]'), '');
+    if (phone.length >= 9) phone = phone.substring(phone.length - 9);
+    return phone.length == 9 ? '+966$phone' : '';
   }
 
   String _formatTime12h(TimeOfDay t) {
@@ -185,6 +292,9 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
   }
 
   Future<void> _addPhoneNumber() async {
+    // Prevent multiple clicks while processing
+    if (_isAddingPhone) return;
+
     if (!_canAddPhone) {
       setState(() {
         _isPhoneInputValid = false;
@@ -194,25 +304,8 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
     }
 
     final phone = '+966${_phoneController.text.trim()}';
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      final myDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
 
-      final myPhone = (myDoc.data()?['phone'] ?? '').toString();
-
-      if (myPhone.isNotEmpty && myPhone == phone) {
-        setState(() {
-          _isPhoneInputValid = false;
-          _phoneInputError = 'You can’t send a request to yourself';
-        });
-        return;
-      }
-    }
-
-    // already added
+    // Check if already added (instant check, no network)
     if (_selectedFriends.any((f) => f.phone == phone)) {
       setState(() {
         _isPhoneInputValid = false;
@@ -221,7 +314,16 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
       return;
     }
 
-    try {
+    // Check self-request using cached phone (instant, no network)
+    if (_cachedMyPhone != null && _cachedMyPhone!.isNotEmpty && _cachedMyPhone == phone) {
+      setState(() {
+        _isPhoneInputValid = false;
+        _phoneInputError = 'You can’t send a request to yourself';
+          });
+          return;
+        }
+      }
+
       final query = await FirebaseFirestore.instance
           .collection('users')
           .where('phone', isEqualTo: phone)
@@ -229,6 +331,15 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
           .get();
 
       if (query.docs.isEmpty) {
+        // Unfocus phone field to hide keyboard
+        _phoneFocusNode.unfocus();
+        // Clear field and show invite dialog
+        setState(() {
+          _isAddingPhone = false;
+          _phoneController.clear();
+          _isPhoneInputValid = true;
+          _phoneInputError = null;
+        });
         _showInviteToMadarDialog(phone);
         return;
       }
@@ -239,7 +350,9 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
       var displayName = '$firstName $lastName'.trim();
       if (displayName.isEmpty) displayName = phone;
 
+      // Keep keyboard open for adding more numbers
       setState(() {
+        _isAddingPhone = false;
         _selectedFriends.add(
           Friend(
             name: displayName,
@@ -249,13 +362,12 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
           ),
         );
         _phoneController.clear();
-
-        // reset error state
         _isPhoneInputValid = true;
         _phoneInputError = null;
       });
     } catch (e) {
       setState(() {
+        _isAddingPhone = false;
         _isPhoneInputValid = false;
         _phoneInputError = 'Could not verify this number. Try again.';
       });
@@ -266,8 +378,8 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
       "Hey! I'm using Madar for location sharing.\n"
       "Join me using this invite link:\n"
       "https://madar.app/invite";
-  static const String _inviteLink = 'https://madar.app/invite';
 
+  /// Shows "Invite to Madar?" popup when phone number not in DB
   void _showInviteToMadarDialog(String phone) {
     final screenWidth = MediaQuery.of(context).size.width;
     final dialogPadding = screenWidth < 360 ? 20.0 : 28.0;
@@ -302,7 +414,6 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     const SizedBox(height: 8),
-                    // Icon
                     Container(
                       width: 80,
                       height: 80,
@@ -331,8 +442,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      "This person isn’t on Madar yet."
-                      "Invite them to start sharing location.",
+                      "This person isn't on Madar yet.\nInvite them to start sharing location.",
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 15,
@@ -346,7 +456,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                       child: ElevatedButton(
                         onPressed: () {
                           Navigator.of(dialogContext).pop();
-                          _showInviteShareBottomSheet(phone);
+                          _shareInvite(phone);
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppColors.kGreen,
@@ -385,17 +495,21 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
     );
   }
 
-  void _showInviteShareBottomSheet(String phone) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (context) => _InviteShareSheet(
-        phone: phone,
-        inviteMessage: _inviteMessage,
-        inviteLink: _inviteLink,
-      ),
-    );
+  /// Opens the system share sheet directly with the invite message
+  Future<void> _shareInvite(String phone) async {
+    try {
+      await Share.share(_inviteMessage, subject: 'Invite to Madar');
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not open share. Link copied instead.'),
+            backgroundColor: AppColors.kGreen,
+          ),
+        );
+        Clipboard.setData(ClipboardData(text: _inviteMessage));
+      }
+    }
   }
 
   void _removeFriend(Friend friend) {
@@ -419,6 +533,9 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
   }
 
   Future<void> _showFavoritesList() async {
+    // Dismiss keyboard when opening favorites list
+    FocusScope.of(context).unfocus();
+    
     final result = await showModalBottomSheet<List<Friend>>(
       context: context,
       isScrollControlled: true,
@@ -439,6 +556,9 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
   }
 
   Future<void> _showVenueSelection() async {
+    // Dismiss keyboard when opening venue selector
+    FocusScope.of(context).unfocus();
+    
     final result = await showModalBottomSheet<VenueOption>(
       context: context,
       isScrollControlled: true,
@@ -455,6 +575,9 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
   }
 
   Future<void> _selectDate() async {
+    // Dismiss keyboard when opening date picker
+    FocusScope.of(context).unfocus();
+    
     final now = DateTime.now();
     final firstDate = now;
     final lastDate = now.add(const Duration(days: 30));
@@ -486,6 +609,9 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
   }
 
   Future<void> _selectStartTime() async {
+    // Dismiss keyboard when opening time picker
+    FocusScope.of(context).unfocus();
+    
     if (_selectedDate == null) return;
 
     final date = _selectedDate!;
@@ -537,6 +663,9 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
   }
 
   Future<void> _selectEndTime() async {
+    // Dismiss keyboard when opening time picker
+    FocusScope.of(context).unfocus();
+    
     if (_selectedDate == null || _startTime == null) return;
 
     final date = _selectedDate!;
@@ -705,17 +834,20 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
   }
 
   Future<void> _submitRequest() async {
-    if (!_canSubmit) return;
+    // Prevent multiple clicks
+    if (_isSubmitting || !_canSubmit) return;
+    _isSubmitting = true;
 
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
+      _isSubmitting = false;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('You must be signed in')));
       return;
     }
 
-    //  Validate time
+    // Validate time
     final date = _selectedDate!;
     final start = DateTime(
       date.year,
@@ -733,6 +865,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
     );
 
     if (!end.isAfter(start)) {
+      _isSubmitting = false;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('End time must be after start time')),
       );
@@ -741,87 +874,100 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
 
     final durationMinutes = end.difference(start).inMinutes;
 
-    // Get sender info (name/phone) from users/{uid}
-    final senderDoc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .get();
-    final senderData = senderDoc.data() ?? {};
-    final senderName =
-        ('${senderData['firstName'] ?? ''} ${senderData['lastName'] ?? ''}')
-            .trim();
-    final senderPhone = (senderData['phone'] ?? '').toString();
+    try {
+      // Run sender fetch and all receiver lookups in PARALLEL
+      final List<Friend> friends = List.from(_selectedFriends);
+      
+      // Start all queries at once
+      final senderFuture = FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      
+      // For each friend, query by phone (returns doc with uid and name)
+      final receiverFutures = friends.map((f) async {
+        final q = await FirebaseFirestore.instance
+            .collection('users')
+            .where('phone', isEqualTo: f.phone)
+            .limit(1)
+            .get();
+        if (q.docs.isEmpty) return null;
+        final doc = q.docs.first;
+        final data = doc.data();
+        final name = ('${data['firstName'] ?? ''} ${data['lastName'] ?? ''}').trim();
+        return {
+          'uid': doc.id,
+          'phone': f.phone,
+          'name': name.isEmpty ? f.phone : name,
+        };
+      }).toList();
 
-    if (senderPhone.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Your phone number is missing in your profile'),
-        ),
-      );
-      return;
-    }
+      // Wait for all queries in parallel
+      final results = await Future.wait([
+        senderFuture,
+        ...receiverFutures,
+      ]);
 
-    // Resolve receivers (UIDs)
-    final List<Friend> friends = List.from(_selectedFriends);
-    final List<Map<String, String>> resolved = []; // {uid, phone, name}
+      final senderDoc = results[0] as DocumentSnapshot;
+      final senderData = senderDoc.data() as Map<String, dynamic>? ?? {};
+      final senderName =
+          ('${senderData['firstName'] ?? ''} ${senderData['lastName'] ?? ''}').trim();
+      final senderPhone = (senderData['phone'] ?? '').toString();
 
-    for (final f in friends) {
-      final receiverUid = await _getUserIdByPhone(f.phone);
-      if (receiverUid == null) {
+      if (senderPhone.isEmpty) {
+        _isSubmitting = false;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('User not found for ${f.phone}')),
+          const SnackBar(
+            content: Text('Your phone number is missing in your profile'),
+          ),
         );
         return;
       }
 
-      final receiverDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(receiverUid)
-          .get();
+      // Check receiver results
+      final resolved = <Map<String, String>>[];
+      for (var i = 1; i < results.length; i++) {
+        final r = results[i] as Map<String, String>?;
+        if (r == null) {
+          _isSubmitting = false;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('User not found for ${friends[i - 1].phone}')),
+          );
+          return;
+        }
+        resolved.add(r);
+      }
 
-      final receiverData = receiverDoc.data() ?? {};
-      final receiverName =
-          ('${receiverData['firstName'] ?? ''} ${receiverData['lastName'] ?? ''}')
-              .trim();
+      // Create one request per receiver but same batchId
+      final batchId = '${user.uid}_${DateTime.now().millisecondsSinceEpoch}';
+      final col = FirebaseFirestore.instance.collection('trackRequests');
+      final batch = FirebaseFirestore.instance.batch();
+      final now = FieldValue.serverTimestamp();
 
-      resolved.add({
-        'uid': receiverUid,
-        'phone': f.phone,
-        'name': receiverName.isEmpty ? f.phone : receiverName,
-      });
-    }
+      for (final r in resolved) {
+        final docRef = col.doc();
+        batch.set(docRef, {
+          'senderId': user.uid,
+          'senderName': senderName.isEmpty ? senderPhone : senderName,
+          'senderPhone': senderPhone,
 
-    // Create one request per receiver but same batchId
-    final batchId = '${user.uid}_${DateTime.now().millisecondsSinceEpoch}';
-    final col = FirebaseFirestore.instance.collection('trackRequests');
-    final batch = FirebaseFirestore.instance.batch();
-    final now = FieldValue.serverTimestamp();
+          'receiverId': r['uid'],
+          'receiverPhone': r['phone'],
+          'receiverName': r['name'],
 
-    for (final r in resolved) {
-      final docRef = col.doc();
-      batch.set(docRef, {
-        'senderId': user.uid,
-        'senderName': senderName.isEmpty ? senderPhone : senderName,
-        'senderPhone': senderPhone,
+          'venueId': _selectedVenueId,
+          'venueName': _selectedVenue,
 
-        'receiverId': r['uid'],
-        'receiverPhone': r['phone'],
-        'receiverName': r['name'],
+          'startAt': Timestamp.fromDate(start),
+          'endAt': Timestamp.fromDate(end),
+          'durationMinutes': durationMinutes,
 
-        'venueId': _selectedVenueId,
-        'venueName': _selectedVenue,
+          'status': 'pending',
+          'createdAt': now,
+          'batchId': batchId,
+        });
+      }
 
-        'startAt': Timestamp.fromDate(start),
-        'endAt': Timestamp.fromDate(end),
-        'durationMinutes': durationMinutes,
-
-        'status': 'pending',
-        'createdAt': now,
-        'batchId': batchId,
-      });
-    }
-
-    try {
       await batch.commit();
 
       if (!mounted) return;
@@ -832,6 +978,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
         'Tracking request sent to ${resolved.length} friend(s).',
       );
     } catch (e) {
+      _isSubmitting = false;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Failed to send request: $e')));
@@ -1001,8 +1148,9 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                                 prefixText: _phoneController.text.isEmpty
                                     ? null
                                     : '+966 ',
-                                prefixStyle: const TextStyle(
-                                  color: Colors.black87,
+                                prefixStyle: TextStyle(
+                                  color: Colors.grey[600],
+                                  fontSize: 16,
                                   fontWeight: FontWeight.w500,
                                 ),
                                 suffixIcon: _isPhoneFocused
@@ -1454,443 +1602,425 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
   }
 
   Future<void> _pickContact() async {
-    // Request permission
-    if (!await FlutterContacts.requestPermission()) return;
+    // Unfocus phone field before opening contact picker
+    _phoneFocusNode.unfocus();
+    
+    final result = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => SelectContactPage(
+          contacts: _preloadedContacts,
+          inDbStatus: _preloadedInDbStatus,
+          onInvite: _shareInvite,
+        ),
+      ),
+    );
 
-    final contact = await FlutterContacts.openExternalPick();
-
-    if (contact == null || contact.phones.isEmpty) return;
-
-    // Take first phone number
-    String phone = contact.phones.first.number;
-
-    // Clean phone number
-    phone = phone.replaceAll(RegExp(r'\s+'), '');
-    phone = phone.replaceAll('-', '');
-
-    // Normalize Saudi numbers
-    if (phone.startsWith('+966')) {
-      phone = phone.replaceFirst('+966', '');
-    } else if (phone.startsWith('966')) {
-      phone = phone.replaceFirst('966', '');
-    } else if (phone.startsWith('05')) {
-      phone = phone.substring(1);
-    }
-
-    if (phone.length != 9) {
+    // If a phone number was returned, fill the phone field
+    if (result != null && result.isNotEmpty) {
+      // Remove +966 prefix for the text field (it shows +966 as prefix)
+      String phoneDigits = result;
+      if (phoneDigits.startsWith('+966')) {
+        phoneDigits = phoneDigits.substring(4);
+      }
       setState(() {
-        _isPhoneInputValid = false;
-        _phoneInputError = 'Invalid Saudi phone number';
+        _phoneController.text = phoneDigits;
       });
-      return;
     }
-
-    setState(() {
-      _phoneController.text = phone;
-      _isPhoneInputValid = true;
-      _phoneInputError = null;
-    });
   }
 }
 
 // ----------------------------------------------------------------------------
-// Invite Share Bottom Sheet (message preview + only installed app icons + More + Copy)
+// Select Contact Page – Full page with pre-loaded data, "Invite" for non-DB contacts
 // ----------------------------------------------------------------------------
 
-enum _ShareAppId { sms, whatsapp, instagram, snapchat, more }
+class SelectContactPage extends StatefulWidget {
+  final List<_ContactItem> contacts;
+  final Map<String, bool> inDbStatus;
+  final void Function(String phone) onInvite;
 
-class _InviteShareSheet extends StatefulWidget {
-  final String phone;
-  final String inviteMessage;
-  final String inviteLink;
-
-  const _InviteShareSheet({
-    required this.phone,
-    required this.inviteMessage,
-    required this.inviteLink,
+  const SelectContactPage({
+    super.key,
+    required this.contacts,
+    required this.inDbStatus,
+    required this.onInvite,
   });
 
   @override
-  State<_InviteShareSheet> createState() => _InviteShareSheetState();
+  State<SelectContactPage> createState() => _SelectContactPageState();
 }
 
-class _InviteShareSheetState extends State<_InviteShareSheet> {
-  List<_ShareAppId> _availableApps = [];
-  bool _loading = true;
+class _SelectContactPageState extends State<SelectContactPage> {
+  final _searchController = TextEditingController();
+  // Local copy of inDbStatus that we can update
+  late Map<String, bool> _localInDbStatus;
+  bool _isCheckingDb = false;
 
   @override
   void initState() {
     super.initState();
-    _checkAvailableApps();
+    // Copy the pre-loaded status
+    _localInDbStatus = Map.from(widget.inDbStatus);
+    _searchController.addListener(() => setState(() {}));
+    // Check remaining contacts that don't have status yet
+    _checkRemainingContacts();
   }
 
-  Future<void> _checkAvailableApps() async {
-    final list = <_ShareAppId>[];
-    try {
-      final smsOk = await canLaunchUrl(Uri(scheme: 'sms', path: widget.phone));
-      if (smsOk) list.add(_ShareAppId.sms);
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
-      final waOk = await canLaunchUrl(Uri.parse('https://wa.me/'));
-      if (waOk) list.add(_ShareAppId.whatsapp);
+  /// Check DB status for contacts that weren't checked during pre-loading
+  Future<void> _checkRemainingContacts() async {
+    if (_isCheckingDb) return;
+    _isCheckingDb = true;
 
-      final igOk = await canLaunchUrl(Uri.parse('instagram://app'));
-      if (igOk) list.add(_ShareAppId.instagram);
+    // Find contacts without status
+    final toCheck = widget.contacts
+        .where((c) => !_localInDbStatus.containsKey(c.phone))
+        .toList();
 
-      final snapOk = await canLaunchUrl(Uri.parse('snapchat://'));
-      if (snapOk) list.add(_ShareAppId.snapchat);
-    } catch (_) {}
-    if (mounted) {
-      setState(() {
-        _availableApps = list;
-        _loading = false;
-      });
+    if (toCheck.isEmpty) {
+      _isCheckingDb = false;
+      return;
     }
-  }
 
-  Future<void> _shareViaSms(BuildContext context) async {
-    final uri = Uri(
-      scheme: 'sms',
-      path: widget.phone,
-      queryParameters: {'body': widget.inviteMessage},
-    );
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } else {
-      _copyAndShow(
-        context,
-        widget.inviteMessage,
-        'Message copied. Paste into SMS.',
+    // Check in batches
+    const batchSize = 10;
+    for (var i = 0; i < toCheck.length; i += batchSize) {
+      if (!mounted) return;
+      final batch = toCheck.skip(i).take(batchSize).toList();
+
+      // Check all in batch concurrently
+      await Future.wait(
+        batch.map((item) async {
+          try {
+            final query = await FirebaseFirestore.instance
+                .collection('users')
+                .where('phone', isEqualTo: item.phone)
+                .limit(1)
+                .get();
+            if (mounted) {
+              setState(() {
+                _localInDbStatus[item.phone] = query.docs.isNotEmpty;
+              });
+            }
+          } catch (_) {
+            if (mounted) {
+              setState(() {
+                _localInDbStatus[item.phone] = false;
+              });
+            }
+          }
+        }),
       );
     }
+
+    _isCheckingDb = false;
   }
 
-  Future<void> _shareViaWhatsApp(BuildContext context) async {
-    final number = widget.phone.replaceAll(RegExp(r'[^\d]'), '');
-    final uri = Uri.parse(
-      'https://wa.me/$number?text=${Uri.encodeComponent(widget.inviteMessage)}',
-    );
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } else {
-      _copyAndShow(
-        context,
-        widget.inviteMessage,
-        'Message copied. Paste into WhatsApp.',
-      );
+  List<_ContactItem> get _filteredItems {
+    final q = _searchController.text.trim().toLowerCase();
+    if (q.isEmpty) return widget.contacts;
+    return widget.contacts
+        .where((i) => i.name.toLowerCase().contains(q) || i.phone.contains(q))
+        .toList();
+  }
+
+  Map<String, List<_ContactItem>> get _grouped {
+    final map = <String, List<_ContactItem>>{};
+    for (final i in _filteredItems) {
+      final letter = i.name.isNotEmpty ? i.name[0].toUpperCase() : '#';
+      map.putIfAbsent(letter, () => []).add(i);
     }
+    return map;
   }
 
-  void _copyAndShow(BuildContext context, String text, String snackbarMessage) {
-    Clipboard.setData(ClipboardData(text: text));
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(snackbarMessage),
-          backgroundColor: AppColors.kGreen,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+  Color _avatarColor(String name) {
+    const colors = [
+      Color(0xFF4CAF50),
+      Color(0xFF2196F3),
+      Color(0xFF9C27B0),
+      Color(0xFF009688),
+      Color(0xFFE91E63),
+      Color(0xFFFF5722),
+    ];
+    return colors[name.hashCode.abs() % colors.length];
+  }
+
+  String _initial(String name) {
+    final parts = name.trim().split(RegExp(r'\s+'));
+    if (parts.length >= 2) {
+      final a = parts[0].isNotEmpty ? parts[0][0] : '';
+      final b = parts[1].isNotEmpty ? parts[1][0] : '';
+      return (a + b).toUpperCase();
     }
-  }
-
-  void _copyLink(BuildContext context) {
-    Clipboard.setData(ClipboardData(text: widget.inviteMessage));
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Link copied to clipboard!'),
-          backgroundColor: AppColors.kGreen,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      Navigator.pop(context);
-    }
-  }
-
-  void _shareViaInstagram(BuildContext context) {
-    _shareViaSystemSheet(context);
-  }
-
-  void _shareViaSnapchat(BuildContext context) {
-    _shareViaSystemSheet(context);
-  }
-
-  (String, Color, Widget, VoidCallback) _shareAppData(
-    BuildContext context,
-    _ShareAppId id,
-  ) {
-    const whiteFilter = ColorFilter.mode(Colors.white, BlendMode.srcIn);
-    switch (id) {
-      case _ShareAppId.sms:
-        return (
-          'SMS',
-          const Color(0xFF5C9EFF),
-          Icon(Icons.sms_outlined, size: 28, color: Colors.white),
-          () => _shareViaSms(context),
-        );
-      case _ShareAppId.whatsapp:
-        return (
-          'WhatsApp',
-          const Color(0xFF25D366),
-          Brand(Brands.whatsapp, size: 28, colorFilter: whiteFilter),
-          () => _shareViaWhatsApp(context),
-        );
-      case _ShareAppId.instagram:
-        return (
-          'Instagram',
-          const Color(0xFFE4405F),
-          Brand(Brands.instagram, size: 28, colorFilter: whiteFilter),
-          () => _shareViaInstagram(context),
-        );
-      case _ShareAppId.snapchat:
-        return (
-          'Snapchat',
-          const Color(0xFFFFFC00),
-          Brand(Brands.snapchat, size: 28, colorFilter: whiteFilter),
-          () => _shareViaSnapchat(context),
-        );
-      case _ShareAppId.more:
-        return (
-          'More',
-          Colors.grey.shade600,
-          Icon(Icons.more_horiz_rounded, size: 28, color: Colors.white),
-          () => _shareViaSystemSheet(context),
-        );
-    }
-  }
-
-  Future<void> _shareViaSystemSheet(BuildContext context) async {
-    try {
-      await Share.share(widget.inviteMessage, subject: 'Invite to Madar');
-    } catch (e) {
-      debugPrint('Share error: $e');
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Could not open share. Try Copy instead.'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    }
+    return name.isNotEmpty ? name[0].toUpperCase() : '?';
   }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(24),
-          topRight: Radius.circular(24),
+    final grouped = _grouped;
+    final keys = grouped.keys.toList()..sort();
+
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: AppColors.kGreen),
+          onPressed: () => Navigator.pop(context),
+        ),
+        centerTitle: true,
+        title: const Text(
+          'Select a contact',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            color: Colors.black87,
+          ),
         ),
       ),
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(
-            20,
-            16,
-            20,
-            MediaQuery.of(context).padding.bottom + 20,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[300],
-                    borderRadius: BorderRadius.circular(2),
-                  ),
+      body: Column(
+        children: [
+          // Search Bar - matching Favorites list style
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: 'Search',
+                hintStyle: TextStyle(color: Colors.grey[400]),
+                prefixIcon: Icon(Icons.search, color: Colors.grey.shade600),
+                filled: true,
+                fillColor: Colors.white,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
                 ),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Share invite',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.black87,
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
                 ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Send this invite so they can join Madar',
-                style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-              ),
-              const SizedBox(height: 16),
-              // Message preview (grey box with invite text + icon)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
                   vertical: 12,
                 ),
-                decoration: BoxDecoration(
-                  color: Colors.grey[200],
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(Icons.send_rounded, size: 22, color: AppColors.kGreen),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        widget.inviteMessage,
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey[800],
-                          height: 1.4,
-                        ),
-                        maxLines: 4,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
               ),
-              const SizedBox(height: 20),
-              // Horizontal row: only apps available on device + More
-              _loading
-                  ? const Center(
-                      child: Padding(
-                        padding: EdgeInsets.all(24),
-                        child: SizedBox(
-                          width: 28,
-                          height: 28,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: AppColors.kGreen,
-                          ),
+              cursorColor: AppColors.kGreen,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Expanded(
+            child: widget.contacts.isEmpty
+                ? const Center(
+                    child: CircularProgressIndicator(color: AppColors.kGreen),
+                  )
+                : keys.isEmpty
+                ? Center(
+                    child: Text(
+                      'No contacts',
+                      style: TextStyle(color: Colors.grey[600]),
+                    ),
+                  )
+                : Stack(
+                    children: [
+                      ListView.builder(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        itemCount: keys.fold<int>(
+                          0,
+                          (sum, k) => sum + 1 + grouped[k]!.length,
                         ),
+                        itemBuilder: (context, index) {
+                          int total = 0;
+                          for (final k in keys) {
+                            final list = grouped[k]!;
+                            if (index == total) {
+                              return Padding(
+                                padding: const EdgeInsets.only(
+                                  top: 8,
+                                  bottom: 4,
+                                ),
+                                child: Text(
+                                  k,
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.grey[600],
+                                  ),
+                                ),
+                              );
+                            }
+                            total += 1;
+                            final rowIndex = index - total;
+                            if (rowIndex < list.length) {
+                              final item = list[rowIndex];
+                              final inDb = _localInDbStatus[item.phone];
+                              // Show loading only if status not yet determined
+                              final loading = !_localInDbStatus.containsKey(
+                                item.phone,
+                              );
+                              return _ContactRow(
+                                name: item.name,
+                                phone: item.phone,
+                                avatarColor: _avatarColor(item.name),
+                                initial: _initial(item.name),
+                                inDb: inDb,
+                                loading: loading,
+                                onInvite: () => widget.onInvite(item.phone),
+                                onTap: () {
+                                  // If contact is in DB, return phone to fill field
+                                  if (inDb == true) {
+                                    Navigator.pop(context, item.phone);
+                                  }
+                                },
+                              );
+                            }
+                            total += list.length;
+                          }
+                          return const SizedBox.shrink();
+                        },
                       ),
-                    )
-                  : SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: [
-                          ..._availableApps.map((id) {
-                            final (label, bg, iconWidget, onTap) =
-                                _shareAppData(context, id);
-                            return Padding(
-                              padding: const EdgeInsets.only(right: 20),
-                              child: _ShareAppIcon(
-                                label: label,
-                                backgroundColor: bg,
-                                iconWidget: iconWidget,
-                                onTap: onTap,
-                              ),
-                            );
-                          }),
-                          Padding(
-                            padding: const EdgeInsets.only(right: 0),
-                            child: _ShareAppIcon(
-                              label: 'More',
-                              backgroundColor: Colors.grey.shade600,
-                              iconWidget: Icon(
-                                Icons.more_horiz_rounded,
-                                size: 28,
-                                color: Colors.white,
-                              ),
-                              onTap: () => _shareViaSystemSheet(context),
+                      // Alphabet sidebar
+                      Positioned(
+                        right: 4,
+                        top: 0,
+                        bottom: 0,
+                        child: Center(
+                          child: SingleChildScrollView(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ#'
+                                  .split('')
+                                  .map(
+                                    (c) => Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 1,
+                                      ),
+                                      child: Text(
+                                        c,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.grey[500],
+                                        ),
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
                             ),
                           ),
-                        ],
+                        ),
                       ),
-                    ),
-              const SizedBox(height: 24),
-              // Copy row
-              Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: () => _copyLink(context),
-                  borderRadius: BorderRadius.circular(12),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      vertical: 12,
-                      horizontal: 4,
-                    ),
-                    child: Row(
-                      children: [
-                        const Text(
-                          'Copy',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.black87,
-                          ),
-                        ),
-                        const Spacer(),
-                        Icon(
-                          Icons.copy_rounded,
-                          size: 22,
-                          color: Colors.grey[600],
-                        ),
-                      ],
-                    ),
+                    ],
                   ),
-                ),
-              ),
-            ],
           ),
-        ),
+        ],
       ),
     );
   }
 }
 
-class _ShareAppIcon extends StatelessWidget {
-  final String label;
-  final Color backgroundColor;
-  final Widget iconWidget;
+class _ContactRow extends StatelessWidget {
+  final String name;
+  final String phone;
+  final Color avatarColor;
+  final String initial;
+  final bool? inDb;
+  final bool loading;
+  final VoidCallback onInvite;
   final VoidCallback onTap;
 
-  const _ShareAppIcon({
-    required this.label,
-    required this.backgroundColor,
-    required this.iconWidget,
+  const _ContactRow({
+    required this.name,
+    required this.phone,
+    required this.avatarColor,
+    required this.initial,
+    required this.inDb,
+    required this.loading,
+    required this.onInvite,
     required this.onTap,
   });
 
+  /// Format phone for display (e.g., +966 5XX XXX XXX)
+  String get _displayPhone {
+    if (phone.startsWith('+966') && phone.length == 13) {
+      final digits = phone.substring(4);
+      return '+966 ${digits.substring(0, 2)} ${digits.substring(2, 5)} ${digits.substring(5)}';
+    }
+    return phone;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              color: backgroundColor,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.08),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Center(child: iconWidget),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
+    final showInvite = inDb == false && !loading;
+
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(vertical: 4),
+      leading: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(color: avatarColor, shape: BoxShape.circle),
+        child: Center(
+          child: Text(
+            initial,
+            style: const TextStyle(
+              color: Colors.white,
               fontWeight: FontWeight.w600,
-              color: Colors.grey[700],
+              fontSize: 16,
             ),
           ),
-        ],
+        ),
       ),
+      title: Text(
+        name,
+        style: const TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.w500,
+          color: Colors.black87,
+        ),
+      ),
+      subtitle: Text(
+        _displayPhone,
+        style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+      ),
+      trailing: loading
+          ? SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: AppColors.kGreen,
+              ),
+            )
+          : showInvite
+          ? OutlinedButton(
+              onPressed: onInvite,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.kGreen,
+                side: const BorderSide(color: AppColors.kGreen),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 6,
+                ),
+                minimumSize: Size.zero,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              ),
+              child: const Text('Invite'),
+            )
+          : null, // No trailing widget for contacts in DB
+      onTap: inDb == true
+          ? onTap
+          : null, // Only tap to select for contacts in DB
     );
   }
 }

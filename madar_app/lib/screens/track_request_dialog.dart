@@ -88,7 +88,8 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
       final data = doc.data();
       if (data != null && mounted) {
         _cachedMyPhone = (data['phone'] ?? '').toString();
-        _cachedMyName = ('${data['firstName'] ?? ''} ${data['lastName'] ?? ''}').trim();
+        _cachedMyName = ('${data['firstName'] ?? ''} ${data['lastName'] ?? ''}')
+            .trim();
       }
     } catch (_) {
       // Ignore - will fall back to querying if needed
@@ -315,15 +316,17 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
     }
 
     // Check self-request using cached phone (instant, no network)
-    if (_cachedMyPhone != null && _cachedMyPhone!.isNotEmpty && _cachedMyPhone == phone) {
+    if (_cachedMyPhone != null &&
+        _cachedMyPhone!.isNotEmpty &&
+        _cachedMyPhone == phone) {
       setState(() {
         _isPhoneInputValid = false;
-        _phoneInputError = 'You can’t send a request to yourself';
-          });
-          return;
-        }
-      }
+        _phoneInputError = 'You can\'t send a request to yourself';
+      });
+      return;
+    }
 
+    try {
       final query = await FirebaseFirestore.instance
           .collection('users')
           .where('phone', isEqualTo: phone)
@@ -535,7 +538,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
   Future<void> _showFavoritesList() async {
     // Dismiss keyboard when opening favorites list
     FocusScope.of(context).unfocus();
-    
+
     final result = await showModalBottomSheet<List<Friend>>(
       context: context,
       isScrollControlled: true,
@@ -558,7 +561,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
   Future<void> _showVenueSelection() async {
     // Dismiss keyboard when opening venue selector
     FocusScope.of(context).unfocus();
-    
+
     final result = await showModalBottomSheet<VenueOption>(
       context: context,
       isScrollControlled: true,
@@ -577,7 +580,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
   Future<void> _selectDate() async {
     // Dismiss keyboard when opening date picker
     FocusScope.of(context).unfocus();
-    
+
     final now = DateTime.now();
     final firstDate = now;
     final lastDate = now.add(const Duration(days: 30));
@@ -611,7 +614,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
   Future<void> _selectStartTime() async {
     // Dismiss keyboard when opening time picker
     FocusScope.of(context).unfocus();
-    
+
     if (_selectedDate == null) return;
 
     final date = _selectedDate!;
@@ -665,7 +668,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
   Future<void> _selectEndTime() async {
     // Dismiss keyboard when opening time picker
     FocusScope.of(context).unfocus();
-    
+
     if (_selectedDate == null || _startTime == null) return;
 
     final date = _selectedDate!;
@@ -877,13 +880,13 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
     try {
       // Run sender fetch and all receiver lookups in PARALLEL
       final List<Friend> friends = List.from(_selectedFriends);
-      
+
       // Start all queries at once
       final senderFuture = FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .get();
-      
+
       // For each friend, query by phone (returns doc with uid and name)
       final receiverFutures = friends.map((f) async {
         final q = await FirebaseFirestore.instance
@@ -894,7 +897,8 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
         if (q.docs.isEmpty) return null;
         final doc = q.docs.first;
         final data = doc.data();
-        final name = ('${data['firstName'] ?? ''} ${data['lastName'] ?? ''}').trim();
+        final name = ('${data['firstName'] ?? ''} ${data['lastName'] ?? ''}')
+            .trim();
         return {
           'uid': doc.id,
           'phone': f.phone,
@@ -903,15 +907,13 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
       }).toList();
 
       // Wait for all queries in parallel
-      final results = await Future.wait([
-        senderFuture,
-        ...receiverFutures,
-      ]);
+      final results = await Future.wait([senderFuture, ...receiverFutures]);
 
       final senderDoc = results[0] as DocumentSnapshot;
       final senderData = senderDoc.data() as Map<String, dynamic>? ?? {};
       final senderName =
-          ('${senderData['firstName'] ?? ''} ${senderData['lastName'] ?? ''}').trim();
+          ('${senderData['firstName'] ?? ''} ${senderData['lastName'] ?? ''}')
+              .trim();
       final senderPhone = (senderData['phone'] ?? '').toString();
 
       if (senderPhone.isEmpty) {
@@ -931,7 +933,9 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
         if (r == null) {
           _isSubmitting = false;
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('User not found for ${friends[i - 1].phone}')),
+            SnackBar(
+              content: Text('User not found for ${friends[i - 1].phone}'),
+            ),
           );
           return;
         }
@@ -1078,7 +1082,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                           const Icon(
                             Icons.place,
                             color: AppColors.kGreen,
-                            size: 20,
+                            size: 21,
                           ),
                           const SizedBox(width: 12),
                           Expanded(
@@ -1604,7 +1608,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
   Future<void> _pickContact() async {
     // Unfocus phone field before opening contact picker
     _phoneFocusNode.unfocus();
-    
+
     final result = await Navigator.push<String>(
       context,
       MaterialPageRoute(

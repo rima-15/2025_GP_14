@@ -10,7 +10,7 @@ import 'package:http/http.dart' as http;
 // ----------------------------------------------------------------------------
 
 /// Refresh rating if older than 7 days
-const int _kCacheMaxAgeDays = 7;
+const int _kCacheMaxAgeDays = 30;
 
 class PlaceRatingService {
   final FirebaseFirestore _db;
@@ -21,8 +21,8 @@ class PlaceRatingService {
   static final Map<String, DateTime> _memoryCacheTime = {};
 
   PlaceRatingService([FirebaseFirestore? db])
-      : _db = db ?? FirebaseFirestore.instance,
-        _apiKey = dotenv.maybeGet('GOOGLE_API_KEY') ?? '';
+    : _db = db ?? FirebaseFirestore.instance,
+      _apiKey = dotenv.maybeGet('GOOGLE_API_KEY') ?? '';
 
   /// Get cached rating for a place from Firestore, refreshing if stale
   /// Returns null if no rating available
@@ -62,7 +62,8 @@ class PlaceRatingService {
       }
 
       // Check if cache is fresh (within 7 days)
-      final isFresh = lastUpdateTime != null &&
+      final isFresh =
+          lastUpdateTime != null &&
           DateTime.now().difference(lastUpdateTime).inDays < _kCacheMaxAgeDays;
 
       if (cachedRating != null && isFresh) {
@@ -175,4 +176,3 @@ class PlaceRatingService {
     _memoryCacheTime.clear();
   }
 }
-

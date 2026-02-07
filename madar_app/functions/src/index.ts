@@ -1,6 +1,8 @@
 import * as admin from "firebase-admin";
 import { setGlobalOptions } from "firebase-functions";
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
+import { onDocumentUpdated } from "firebase-functions/v2/firestore";
+
 
 setGlobalOptions({ maxInstances: 10 });
 
@@ -67,16 +69,22 @@ export const onTrackRequestCreated = onDocumentCreated(
 await db.collection("notifications").add({
   userId: receiverId,
   type: "track_request",
+
+  requiresAction: true, // 🔥 هذا المفتاح المهم
+
   title: "New Track Request",
   body: `${data.senderName} wants to track your location`,
+
   data: {
     requestId: event.params.requestId,
     senderId: data.senderId,
     venueId: data.venueId ?? null,
   },
+
   isRead: false,
   createdAt: admin.firestore.FieldValue.serverTimestamp(),
 });
+
 
 console.log("📦 Notification document created (unread)");
 
@@ -85,4 +93,79 @@ console.log("📦 Notification document created (unread)");
     }
   }
 );
+/* ------------------------------------------------------------------
+   🔔 Track Request Accepted / Declined
+-------------------------------------------------------------------*/
+export const onTrackRequestStatusChanged = onDocumentUpdated(
+  "trackRequests/{requestId}",
+  async (event) => {
+    try {
+      const before = event.data?.before.data();
+      const after = event.data?.after.data();
 
+      if (!before || !after) return;
+
+      // لا نسوي شيء إذا الحالة ما تغيرت
+      if (before.status === after.status) return;
+
+      if (after.status !== "accepted" && after.status !== "declined") return;
+
+      const senderId = after.senderId;
+      if (!senderId) return;
+
+      const senderDoc = await db.collection("users").doc(senderId).get();
+      if (!senderDoc.exists) return;
+
+      const tokens: string[] = senderDoc.data()?.fcmTokens ?? [];
+      if (tokens.length === 0) return;
+
+      const accepted = after.status === "accepted";
+
+      const message = {
+        notification: {
+          title: accepted
+            ? "Track Request Accepted"
+            : "Track Request Declined",
+          body: accepted
+            ? `${after.receiverName} accepted your tracking request`
+            : `${after.receiverName} declined your tracking request`,
+        },
+        data: {
+          type: accepted ? "trackAccepted" : "trackDeclined",
+          requestId: event.params.requestId,
+        },
+        tokens,
+      };
+
+      await admin.messaging().sendEachForMulticast(message);
+
+     await db.collection("notifications").add({
+  userId: senderId,
+  type: accepted ? "trackAccepted" : "trackRejected",
+  requiresAction:false,
+
+
+  data: {
+    requestId: event.params.requestId,   // ⭐ هذا المهم
+  },
+
+  title: accepted
+    ? "Track Request Accepted"
+    : "Track Request Declined",
+
+  body: accepted
+    ? `${after.receiverName} accepted your tracking request`
+    : `${after.receiverName} declined your tracking request`,
+
+  isRead: false,
+  createdAt: admin.firestore.FieldValue.serverTimestamp(),
+});
+
+
+      console.log("✅ Accept / Decline notification sent");
+
+    } catch (e) {
+      console.error("🔥 Error:", e);
+    }
+  }
+);

@@ -1594,6 +1594,56 @@ window.showTrackedPin = function(){
   // Logic to update Firestore
   Future<void> _updateRequestStatus(String requestId, String newStatus) async {
     try {
+      // 1️⃣ تحديث حالة الطلب
+      await FirebaseFirestore.instance
+          .collection('trackRequests')
+          .doc(requestId)
+          .update({
+            'status': newStatus,
+            'respondedAt': FieldValue.serverTimestamp(), // 🔥 وقت الرد الحقيقي
+          });
+
+      // 2️⃣ 🔥 تعليم الإشعار كمقروء
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+
+      final notifSnap = await FirebaseFirestore.instance
+          .collection('notifications')
+          .where('data.requestId', isEqualTo: requestId)
+          .where('userId', isEqualTo: uid) // 🔥🔥 هذا السطر المهم
+          .get();
+
+      for (final doc in notifSnap.docs) {
+        await doc.reference.update({'isRead': true});
+      }
+
+      if (mounted) {
+        setState(() => _expandedRequestId = null);
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_statusUpdateMessage(newStatus)),
+            backgroundColor: AppColors.kGreen,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error updating request: $e');
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to update: ${e.toString()}'),
+            backgroundColor: AppColors.kError,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  /*Future<void> _updateRequestStatus(String requestId, String newStatus) async {
+    try {
       await FirebaseFirestore.instance
           .collection('trackRequests')
           .doc(requestId)
@@ -1621,7 +1671,7 @@ window.showTrackedPin = function(){
       }
     }
   }
-
+*/
   String _statusUpdateMessage(String status) {
     switch (status) {
       case 'accepted':

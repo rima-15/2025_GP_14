@@ -2322,6 +2322,25 @@ class _PinStartLocationScreenState extends State<PinStartLocationScreen> {
     return name.replaceAll(RegExp(r'\.(glb|gltf)\b', caseSensitive: false), '');
   }
 
+  /// Normalize floor label for database storage.
+  /// - "GF" -> "F0"
+  /// - "f1"/"floor1"/"level1" -> "F1"
+  String _normalizeFloorForDb(String floorLabel) {
+    final f = floorLabel.trim();
+    if (f.isEmpty) return f;
+    final up = f.toUpperCase();
+    if (up == 'GF') return 'F0';
+
+    final m1 = RegExp(r'^F\s*(\d+)$', caseSensitive: false).firstMatch(f);
+    if (m1 != null) return 'F${m1.group(1)}';
+
+    final m2 = RegExp(r'(?:FLOOR|LEVEL|LVL|F)\s*(\d+)', caseSensitive: false).firstMatch(f);
+    if (m2 != null) return 'F${m2.group(1)}';
+
+    return up;
+  }
+
+
   Future<void> _saveBlenderPosition({
     required double x,
     required double y,
@@ -2335,13 +2354,15 @@ class _PinStartLocationScreenState extends State<PinStartLocationScreen> {
 
     await FirebaseFirestore.instance.collection('users').doc(user.uid).set(
       {
-        'BlenderPosition': {
+        'location': {
+          'blenderPosition': {
           'x': x,
           'y': y,
           'z': z,
           'floor': floor,
           'updatedAt': FieldValue.serverTimestamp(),
         },
+      },
       },
       SetOptions(merge: true),
     );
@@ -2358,7 +2379,8 @@ class _PinStartLocationScreenState extends State<PinStartLocationScreen> {
     if (data['type'] == 'user_pin') {
       final pos = data['position'];
       if (pos is Map) {
-        final floor = (data['floor'] as String?) ?? _inferFloorLabel(widget.floorSrc);
+        final floorRaw = (data['floor'] as String?) ?? _inferFloorLabel(widget.floorSrc);
+        final floor = _normalizeFloorForDb(floorRaw);
         setState(() {
           _picked = {
             'x': (pos['x'] as num).toDouble(),

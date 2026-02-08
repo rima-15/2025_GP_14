@@ -237,7 +237,11 @@ class _CategoryPageState extends State<CategoryPage>
     );
   }
 
-  Future<void> _openNavigationFlow(String placeId, String placeName) async {
+  Future<void> _openNavigationFlow(
+    String placeId,
+    String placeName,
+    String? poiMaterial,
+  ) async {
     final hasPosition = await _hasWorldPosition(placeId);
     if (!hasPosition) {
       if (!mounted) return;
@@ -245,8 +249,29 @@ class _CategoryPageState extends State<CategoryPage>
       return;
     }
     if (!mounted) return;
-    showNavigationDialog(context, placeName, placeId);
+
+    final material = (poiMaterial?.trim().isNotEmpty ?? false)
+        ? poiMaterial!.trim()
+        : 'POIMAT_${placeName.trim()}';
+
+    debugPrint(
+      '🧾 Category selected: name="$placeName" -> material="$material"',
+    );
+
+    if (material == null || material.isEmpty) {
+      debugPrint('❌ No material field found in Firestore for "$placeName"');
+      return;
+    }
+
+    showNavigationDialog(
+      context,
+      placeName,
+      placeId,
+      destinationPoiMaterial: material,
+    );
+
   }
+
   // ---------- Build ----------
 
   @override
@@ -419,9 +444,14 @@ class _CategoryPageState extends State<CategoryPage>
     final name = data['placeName'] ?? '';
     final desc = data['placeDescription'] ?? '';
     final img = data['placeImage'] ?? '';
+    final poiMaterial =
+        (data['poiMaterial'] ?? data['material'] ?? data['poiMat'])
+            ?.toString()
+            .trim();
 
     return InkWell(
-      onTap: () => _openNavigationFlow(placeId, placeName),
+      onTap: () => _openNavigationFlow(placeId, placeName, poiMaterial),
+
       borderRadius: BorderRadius.circular(12),
       child: Container(
         decoration: BoxDecoration(

@@ -1,6 +1,6 @@
 import * as admin from "firebase-admin";
 import { setGlobalOptions } from "firebase-functions";
-import { onDocumentCreated } from "firebase-functions/v2/firestore";
+import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { onRequest } from "firebase-functions/v2/https";
 
 setGlobalOptions({ maxInstances: 10 });
@@ -10,7 +10,7 @@ admin.initializeApp();
 const db = admin.firestore();
 
 /* ------------------------------------------------------------------
-   Track Request Push Notification
+   Track Request Push Notification (Created)
 -------------------------------------------------------------------*/
 export const onTrackRequestCreated = onDocumentCreated(
   "trackRequests/{requestId}",
@@ -22,7 +22,7 @@ export const onTrackRequestCreated = onDocumentCreated(
         return;
       }
 
-      // Send notification only when the request is created (pending)
+      // Send notification only when created as pending
       if (data.status !== "pending") {
         console.log("Track request not pending, skipping");
         return;
@@ -34,7 +34,7 @@ export const onTrackRequestCreated = onDocumentCreated(
         return;
       }
 
-      // Get FCM tokens of the receiver
+      // Get receiver FCM tokens
       const userDoc = await db.collection("users").doc(receiverId).get();
       if (!userDoc.exists) {
         console.log("Receiver user not found");
@@ -65,10 +65,11 @@ export const onTrackRequestCreated = onDocumentCreated(
         `Notification sent | success: ${response.successCount}, failure: ${response.failureCount}`
       );
 
-      // Save notification in Firestore (unread)
+      // Save notification in Firestore (Unread)
       await db.collection("notifications").add({
         userId: receiverId,
         type: "track_request",
+        requiresAction: true, // IMPORTANT: UI can show action buttons
         title: "New Track Request",
         body: `${data.senderName} wants to track your location`,
         data: {
@@ -88,8 +89,74 @@ export const onTrackRequestCreated = onDocumentCreated(
 );
 
 /* ------------------------------------------------------------------
-   Unity -> HTTPS Function -> writes to users/{docId}.location
-   Purpose: allow Unity to update user location without direct Firestore access
+   Track Request Push Notification (Accepted / Declined)
+-------------------------------------------------------------------*/
+export const onTrackRequestStatusChanged = onDocumentUpdated(
+  "trackRequests/{requestId}",
+  async (event) => {
+    try {
+      const before = event.data?.before.data();
+      const after = event.data?.after.data();
+      if (!before || !after) return;
+
+      // Do nothing if status did not change
+      if (before.status === after.status) return;
+
+      // Only handle accepted/declined
+      if (after.status !== "accepted" && after.status !== "declined") return;
+
+      const senderId = after.senderId;
+      if (!senderId) return;
+
+      const senderDoc = await db.collection("users").doc(senderId).get();
+      if (!senderDoc.exists) return;
+
+      const tokens: string[] = senderDoc.data()?.fcmTokens ?? [];
+      if (tokens.length === 0) return;
+
+      const accepted = after.status === "accepted";
+
+      const message = {
+        notification: {
+          title: accepted ? "Track Request Accepted" : "Track Request Declined",
+          body: accepted
+            ? `${after.receiverName} accepted your tracking request`
+            : `${after.receiverName} declined your tracking request`,
+        },
+        data: {
+          type: accepted ? "trackAccepted" : "trackDeclined",
+          requestId: event.params.requestId,
+        },
+        tokens,
+      };
+
+      await admin.messaging().sendEachForMulticast(message);
+
+      await db.collection("notifications").add({
+        userId: senderId,
+        type: accepted ? "trackAccepted" : "trackRejected",
+        requiresAction: false,
+        data: {
+          requestId: event.params.requestId,
+        },
+        title: accepted ? "Track Request Accepted" : "Track Request Declined",
+        body: accepted
+          ? `${after.receiverName} accepted your tracking request`
+          : `${after.receiverName} declined your tracking request`,
+        isRead: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      console.log("Accept/Decline notification sent");
+    } catch (e) {
+      console.error("Error:", e);
+    }
+  }
+);
+
+/* ------------------------------------------------------------------
+   Unity Location Writer (HTTPS)
+   Unity -> POST -> Cloud Function -> writes to users/{docId}.location
 -------------------------------------------------------------------*/
 export const setUserLocation = onRequest({ cors: true }, async (req, res) => {
   try {
@@ -106,35 +173,32 @@ export const setUserLocation = onRequest({ cors: true }, async (req, res) => {
     }
 
     if (!location?.blenderPosition) {
-      res
-        .status(400)
-        .json({ ok: false, error: "Missing location.blenderPosition" });
+      res.status(400).json({ ok: false, error: "Missing location.blenderPosition" });
       return;
     }
 
-    // Verify Firebase Auth ID token (sent from Flutter via Unity)
+    // Verify Firebase Auth ID token
     const decoded = await admin.auth().verifyIdToken(idToken);
 
-    // Decide which user document to write to
-    let docRef: admin.firestore.DocumentReference | null = null;
+    // Decide which users doc to write
+    let docRef: FirebaseFirestore.DocumentReference | null = null;
 
     if (typeof userDocId === "string" && userDocId.trim().length > 0) {
       docRef = db.collection("users").doc(userDocId.trim());
     } else if (decoded.email) {
-      // Fallback: resolve user document by email
+      // Fallback: resolve by email (same logic as Flutter)
       const snap = await db
         .collection("users")
         .where("email", "==", decoded.email)
         .limit(1)
         .get();
-
       if (!snap.empty) docRef = snap.docs[0].ref;
     }
 
-    // Last fallback: use uid as document id
+    // Last fallback: uid doc
     if (!docRef) docRef = db.collection("users").doc(decoded.uid);
 
-    // Write location in the expected shape
+    // Write location in the exact shape your Flutter reads
     await docRef.set(
       {
         location: {

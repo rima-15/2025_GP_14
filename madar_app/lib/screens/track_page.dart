@@ -15,6 +15,28 @@ import 'dart:async';
 const bool kFeatureEnabled = true;
 const String kSolitaireVenueId =
     'ChIJcYTQDwDjLj4RZEiboV6gZzM';
+final Map<String, Map<String, double>>
+_trackedPosByUser =
+    {}; // userDocId -> {x,y,z}
+final Map<String, String>
+_trackedFloorByUser =
+    {}; // userDocId -> floorLabel
+final Map<String, String>
+_trackedNameByUser =
+    {}; // userDocId -> displayName
+final Map<
+  String,
+  StreamSubscription<
+    DocumentSnapshot<
+      Map<String, dynamic>
+    >
+  >
+>
+_userLocSubs = {};
+StreamSubscription<
+  QuerySnapshot<Map<String, dynamic>>
+>?
+_activeReqSub;
 
 class TrackPage extends StatefulWidget {
   const TrackPage({
@@ -346,53 +368,65 @@ class _TrackPageState
   String get _trackPinJs => r'''
 function getViewer(){ return document.querySelector('model-viewer'); }
 
-function ensurePin(viewer){
-  let hs = viewer.querySelector('#trackedUserPin');
+function pinId(userId){ return `trackedPin_${userId}`; }
+function labelId(userId){ return `trackedLabel_${userId}`; }
+
+function ensurePin(viewer, userId, label){
+  const id = pinId(userId);
+  let hs = viewer.querySelector(`#${id}`);
   if(!hs){
     hs = document.createElement('div');
-    hs.id = 'trackedUserPin';
-    hs.slot = 'hotspot-trackpin';
-    hs.innerHTML = '<div style="font-size:34px">📍</div>';
+    hs.id = id;
+    hs.slot = `hotspot-${id}`;
+    hs.style.display = 'block';
+    hs.innerHTML = `
+      <div style="display:flex;flex-direction:column;align-items:center;gap:2px;">
+        <div style="font-size:34px;line-height:34px;">📍</div>
+        <div id="${labelId(userId)}"
+             style="padding:2px 6px;border-radius:10px;background:rgba(0,0,0,0.55);
+                    color:#fff;font-size:11px;max-width:120px;white-space:nowrap;
+                    overflow:hidden;text-overflow:ellipsis;">
+          ${label || ''}
+        </div>
+      </div>
+    `;
     viewer.appendChild(hs);
+  }else{
+    // update label if provided
+    const el = hs.querySelector(`#${labelId(userId)}`);
+    if(el && typeof label === 'string') el.textContent = label;
   }
   return hs;
 }
 
-window.setTrackedPin = function(x,y,z){
+window.upsertTrackedPin = function(userId,x,y,z,label){
   const viewer = getViewer();
-  if(!viewer) return false;
-  const hs = ensurePin(viewer);
+  if(!viewer || !userId) return false;
+  const hs = ensurePin(viewer, userId, label);
   hs.setAttribute('data-position', `${x} ${y} ${z}`);
   hs.setAttribute('data-normal', '0 1 0');
-  viewer.requestUpdate();
-  return true;
-};
-
-window.setTrackedPinSafe = function(x,y,z){
-  let t=0;
-  const i=setInterval(()=>{
-    t++;
-    if(window.setTrackedPin(x,y,z) || t>20) clearInterval(i);
-  },150);
-};
-
-window.hideTrackedPin = function(){
-  const viewer = getViewer();
-  if(!viewer) return false;
-  const hs = viewer.querySelector('#trackedUserPin');
-  if(hs) hs.style.display = 'none';
-  return true;
-};
-
-window.showTrackedPin = function(){
-  const viewer = getViewer();
-  if(!viewer) return false;
-  const hs = ensurePin(viewer);
   hs.style.display = 'block';
   viewer.requestUpdate();
   return true;
 };
 
+window.hideTrackedPin = function(userId){
+  const viewer = getViewer();
+  if(!viewer || !userId) return false;
+  const hs = viewer.querySelector(`#${pinId(userId)}`);
+  if(hs) hs.style.display = 'none';
+  viewer.requestUpdate();
+  return true;
+};
+
+window.removeTrackedPin = function(userId){
+  const viewer = getViewer();
+  if(!viewer || !userId) return false;
+  const hs = viewer.querySelector(`#${pinId(userId)}`);
+  if(hs) hs.remove();
+  viewer.requestUpdate();
+  return true;
+};
 ''';
 
   // Meeting point data
@@ -448,54 +482,166 @@ window.showTrackedPin = function(){
         if (mounted) setState(() {});
       },
     );
-    _startLiveLocationTracking();
+    _listenToActiveTrackedUsers();
   }
 
-  void _startLiveLocationTracking() {
-    const docId = 'demo_user';
-
-    _liveLocSub = FirebaseFirestore
+  void
+  _listenToActiveTrackedUsers() async {
+    final user = FirebaseAuth
         .instance
-        .collection('liveLocations')
-        .doc(docId)
-        .snapshots()
-        .listen((snap) {
-          final data = snap.data();
-          if (data == null) return;
+        .currentUser;
+    if (user == null) return;
 
-          final pos =
-              data['blenderPosition'];
-          if (pos is! Map) return;
+    // This assumes trackRequests stores senderId = auth uid
+    // and receiverId = Firestore users docId
+    final q = FirebaseFirestore.instance
+        .collection('trackRequests')
+        .where(
+          'senderId',
+          isEqualTo: user.uid,
+        )
+        .where(
+          'status',
+          isEqualTo: 'accepted',
+        );
 
-          final xRaw =
-              (pos['x'] as num?)
-                  ?.toDouble();
-          final x = (xRaw == null)
-              ? null
-              : -xRaw;
-          final y = (pos['y'] as num?)
-              ?.toDouble();
-          final z = (pos['z'] as num?)
-              ?.toDouble();
-          final floor = data['floor'];
+    _activeReqSub?.cancel();
+    _activeReqSub = q.snapshots().listen((
+      snap,
+    ) {
+      final activeReceiverIds =
+          <String>{};
 
-          if (x == null ||
-              y == null ||
-              z == null)
-            return;
+      for (final d in snap.docs) {
+        final startAt =
+            (d.data()['startAt']
+                    as Timestamp?)
+                ?.toDate();
+        final endAt =
+            (d.data()['endAt']
+                    as Timestamp?)
+                ?.toDate();
+        final now = DateTime.now();
+        final isActiveNow =
+            startAt != null &&
+            endAt != null &&
+            now.isAfter(startAt) &&
+            now.isBefore(endAt);
+        if (!isActiveNow) continue;
 
-          setState(() {
-            _trackedPos = {
-              'x': x,
-              'y': y,
-              'z': z,
-            };
-            _trackedFloorLabel =
-                floor?.toString() ?? '';
-          });
+        final data = d.data();
+        final rid =
+            (data['receiverId'] ?? '')
+                .toString()
+                .trim();
+        if (rid.isNotEmpty)
+          activeReceiverIds.add(rid);
+      }
 
-          _applyTrackedPinToViewer();
-        });
+      // Remove subscriptions that are no longer active
+      final currentIds = _userLocSubs
+          .keys
+          .toSet();
+      final toRemove = currentIds
+          .difference(
+            activeReceiverIds,
+          );
+      for (final id in toRemove) {
+        _userLocSubs[id]?.cancel();
+        _userLocSubs.remove(id);
+
+        _trackedPosByUser.remove(id);
+        _trackedFloorByUser.remove(id);
+        _trackedNameByUser.remove(id);
+
+        // remove pin in viewer
+        _trackMapController
+            ?.runJavaScript(
+              "removeTrackedPin('$id');",
+            );
+      }
+
+      // Add new subscriptions
+      final toAdd = activeReceiverIds
+          .difference(currentIds);
+      for (final id in toAdd) {
+        _userLocSubs[id] = FirebaseFirestore
+            .instance
+            .collection('users')
+            .doc(id)
+            .snapshots()
+            .listen((docSnap) {
+              final u = docSnap.data();
+              if (u == null) return;
+
+              final location =
+                  (u['location']
+                      as Map?) ??
+                  {};
+              final blender =
+                  (location['blenderPosition']
+                      as Map?) ??
+                  {};
+
+              final x =
+                  (blender['x'] as num?)
+                      ?.toDouble();
+              final y =
+                  (blender['y'] as num?)
+                      ?.toDouble();
+              final z =
+                  (blender['z'] as num?)
+                      ?.toDouble();
+
+              // floor might be "1"/"2" or "GF"/"F1"
+              final floorRaw =
+                  (blender['floor'] ??
+                          '')
+                      .toString();
+
+              // name (optional)
+              final displayName =
+                  (u['name'] ??
+                          u['fullName'] ??
+                          u['email'] ??
+                          'User')
+                      .toString();
+
+              if (x == null ||
+                  y == null ||
+                  z == null) {
+                // if location missing -> hide pin
+                _trackedPosByUser
+                    .remove(id);
+                _trackedFloorByUser
+                    .remove(id);
+                _trackedNameByUser
+                    .remove(id);
+                _trackMapController
+                    ?.runJavaScript(
+                      "hideTrackedPin('$id');",
+                    );
+                return;
+              }
+
+              _trackedPosByUser[id] = {
+                'x': x,
+                'y': y,
+                'z': z,
+              };
+              _trackedFloorByUser[id] =
+                  floorRaw;
+              _trackedNameByUser[id] =
+                  displayName;
+
+              // Apply pins to current floor
+              _applyAllTrackedPinsToViewer();
+            });
+      }
+
+      // After changes, re-apply (important when floor changes)
+      _applyAllTrackedPinsToViewer();
+    });
   }
 
   /// Retry until the target tile (by request ID) is built, then scroll so it's visible.
@@ -546,10 +692,19 @@ window.showTrackedPin = function(){
   }
 
   @override
+  @override
   void dispose() {
     _clockTimer?.cancel();
-    _liveLocSub?.cancel();
     _scrollToTargetTimer?.cancel();
+    _activeReqSub?.cancel();
+
+    // cancel all tracked-users subscriptions
+    for (final sub
+        in _userLocSubs.values) {
+      sub.cancel();
+    }
+    _userLocSubs.clear();
+
     _scrollController.dispose();
     super.dispose();
   }
@@ -701,7 +856,6 @@ window.showTrackedPin = function(){
         .toUpperCase();
   }
 
-  /// يحول floor القادم من Unity/Firestore (1/2 أو "F1") إلى label قريب من الموجود عندك (GF/F1)
   String _normalizeTrackedFloorLabel(
     String raw,
   ) {
@@ -710,13 +864,12 @@ window.showTrackedPin = function(){
 
     final n = int.tryParse(s);
     if (n != null) {
-      // ✅ mapping حسب أزرارك GF / F1
-      if (n == 1) return 'GF';
-      if (n == 2) return 'F1';
+      if (n == 0) return 'GF';
+      if (n == 1) return 'F1';
       return 'F$n';
     }
 
-    return s; // لو جا "GF" أو "F1"
+    return s;
   }
 
   bool _floorsMatch(
@@ -726,19 +879,16 @@ window.showTrackedPin = function(){
     final tracked =
         _normalizeTrackedFloorLabel(
           trackedRaw,
-        ); // "F1"
+        );
     final cur = currentLabel
         .trim()
-        .toUpperCase(); // "GF" or "F1"
+        .toUpperCase();
 
     if (tracked.isEmpty || cur.isEmpty)
-      return true; // إذا ما نعرف، لا نخفي البن
+      return true;
 
-    // لو current هو GF، لا يطابق F1 (واضح)
-    // لو current هو F1 يطابق tracked F1
     if (cur == tracked) return true;
 
-    // fallback ذكي: إذا current يحتوي نفس الرقم (مثلاً F1)
     final tNum = RegExp(
       r'\d+',
     ).firstMatch(tracked)?.group(0);
@@ -749,51 +899,56 @@ window.showTrackedPin = function(){
     return false;
   }
 
-  void _applyTrackedPinToViewer() {
-    // إذا ما عندنا موقع: اخفي البن فقط
-    if (_trackedPos == null) {
-      _pendingPinApply =
-          false; // ✅ لا ننتظر رسم
-      _trackMapController
-          ?.runJavaScript(
-            'hideTrackedPin();',
-          );
-      return;
-    }
-
-    // إذا الكنترولر مو جاهز: خزن طلب رسم
+  void _applyAllTrackedPinsToViewer() {
     if (_trackMapController == null) {
       _pendingPinApply = true;
       return;
     }
 
-    // (اختياري) إذا تبين مقارنة الدور قبل الرسم:
     final currentLabel =
-        _currentFloorLabel(); // GF / F1
-    final ok = _floorsMatch(
-      _trackedFloorLabel,
-      currentLabel,
-    );
-    if (!ok) {
+        _currentFloorLabel(); // GF / F1 (or whatever you have)
+
+    // If nothing tracked -> just do nothing
+    if (_trackedPosByUser.isEmpty) {
       _pendingPinApply = false;
-      _trackMapController!
-          .runJavaScript(
-            'hideTrackedPin();',
-          );
       return;
     }
 
-    final x = _trackedPos!['x']!;
-    final y = _trackedPos!['y']!;
-    final z = _trackedPos!['z']!;
+    for (final entry
+        in _trackedPosByUser.entries) {
+      final userId = entry.key;
+      final pos = entry.value;
+
+      final trackedFloorLabel =
+          _trackedFloorByUser[userId] ??
+          '';
+      final ok = _floorsMatch(
+        trackedFloorLabel,
+        currentLabel,
+      );
+
+      if (!ok) {
+        _trackMapController!.runJavaScript(
+          "hideTrackedPin('$userId');",
+        );
+        continue;
+      }
+      final double xRaw =
+          (pos['x'] ?? 0).toDouble();
+      final double x = -xRaw;
+      final y = pos['y']!;
+      final z = pos['z']!;
+      final label =
+          (_trackedNameByUser[userId] ??
+                  'User')
+              .replaceAll("'", "\\'");
+
+      _trackMapController!.runJavaScript(
+        "upsertTrackedPin('$userId',$x,$y,$z,'$label');",
+      );
+    }
 
     _pendingPinApply = false;
-    _trackMapController!.runJavaScript(
-      'showTrackedPin();',
-    );
-    _trackMapController!.runJavaScript(
-      'setTrackedPinSafe($x,$y,$z);',
-    );
   }
 
   void _useFallbackMaps() {
@@ -1174,28 +1329,26 @@ window.showTrackedPin = function(){
 
                 // ===== NEW: JS pin + controller =====
                 relatedJs: _trackPinJs,
-                onWebViewCreated: (controller) {
-                  _trackMapController =
-                      controller;
+                onWebViewCreated:
+                    (controller) {
+                      _trackMapController =
+                          controller;
 
-                  _pendingPinApply =
-                      true; // ✅ مهم
+                      _pendingPinApply =
+                          true; // ✅ مهم
 
-                  Future.delayed(
-                    const Duration(
-                      milliseconds: 150,
-                    ),
-                    () {
-                      if (!mounted)
-                        return;
-                      if (_pendingPinApply ||
-                          _trackedPos !=
-                              null) {
-                        _applyTrackedPinToViewer();
-                      }
+                      Future.delayed(
+                        const Duration(
+                          milliseconds:
+                              150,
+                        ),
+                        () {
+                          if (!mounted)
+                            return;
+                          _applyAllTrackedPinsToViewer();
+                        },
+                      );
                     },
-                  );
-                },
               ),
             Positioned(
               top: 16,
@@ -1303,12 +1456,12 @@ window.showTrackedPin = function(){
                             () {
                               setState(() {
                                 _trackMapController =
-                                    null; // مهم عشان الكنترولر يتجدد مع الموديل الجديد
+                                    null;
                                 _currentFloor =
                                     m['mapURL'] ??
                                     '';
                                 _pendingPinApply =
-                                    true; // ✅ مهم
+                                    true;
                               });
                             },
                           ),
@@ -2526,17 +2679,51 @@ window.showTrackedPin = function(){
     String newStatus,
   ) async {
     try {
+      // 1️⃣ تحديث حالة الطلب
       await FirebaseFirestore.instance
           .collection('trackRequests')
           .doc(requestId)
           .update({
             'status': newStatus,
+            'respondedAt':
+                FieldValue.serverTimestamp(), // 🔥 وقت الرد الحقيقي
           });
+
+      // 2️⃣ 🔥 تعليم الإشعار كمقروء
+      final uid = FirebaseAuth
+          .instance
+          .currentUser!
+          .uid;
+
+      final notifSnap =
+          await FirebaseFirestore
+              .instance
+              .collection(
+                'notifications',
+              )
+              .where(
+                'data.requestId',
+                isEqualTo: requestId,
+              )
+              .where(
+                'userId',
+                isEqualTo: uid,
+              ) // 🔥🔥 هذا السطر المهم
+              .get();
+
+      for (final doc
+          in notifSnap.docs) {
+        await doc.reference.update({
+          'isRead': true,
+        });
+      }
+
       if (mounted) {
         setState(
           () =>
               _expandedRequestId = null,
         );
+
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(
@@ -2557,6 +2744,7 @@ window.showTrackedPin = function(){
       debugPrint(
         'Error updating request: $e',
       );
+
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -2575,6 +2763,36 @@ window.showTrackedPin = function(){
     }
   }
 
+  /*Future<void> _updateRequestStatus(String requestId, String newStatus) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('trackRequests')
+          .doc(requestId)
+          .update({'status': newStatus});
+      if (mounted) {
+        setState(() => _expandedRequestId = null);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_statusUpdateMessage(newStatus)),
+            backgroundColor: AppColors.kGreen,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error updating request: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to update: ${e.toString()}'),
+            backgroundColor: AppColors.kError,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+*/
   String _statusUpdateMessage(
     String status,
   ) {

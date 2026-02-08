@@ -1620,14 +1620,27 @@ Future<void> _handlePoiMessage(String raw) async {
 
     final displayName = dest
         .replaceFirst('POIMAT_', '')
-        .replaceAll(RegExp(r'\.\d+\$'), '')
+        .replaceAll(RegExp(r'\.\d+$'), '')
         .trim();
     showNavigationDialog(
       context,
       displayName.isEmpty ? dest : displayName,
       dest,
+      destinationPoiMaterial: dest,
+      floorSrc: widget.currentFloor,
+      destinationHitGltf: (() {
+        final posStr = (data?["position"] as String?)?.trim() ?? "";
+        if (posStr.isEmpty) return null;
+        final parts = posStr.split(RegExp(r"\s+"));
+        if (parts.length < 3) return null;
+        final x = double.tryParse(parts[0]);
+        final y = double.tryParse(parts[1]);
+        final z = double.tryParse(parts[2]);
+        if (x == null || y == null || z == null) return null;
+        return {"x": x, "y": y, "z": z};
+      })(),
     );
-    return;
+return;
   }
 
   // (Optional) keep tap logs if you want
@@ -1875,7 +1888,8 @@ function ensureNavHotspot(viewer) {
     if (e){ e.stopPropagation(); if (e.preventDefault) e.preventDefault(); }
     var dest = el.getAttribute("data-dest") || "";
     if (dest) {
-      postToPOI(JSON.stringify({ type: "navigate", destinationPoi: dest }));
+      var pos = el.getAttribute("data-position") || "";
+      postToPOI(JSON.stringify({ type: "navigate", destinationPoi: dest, position: pos }));
     }
   }
   __btn.addEventListener("click", __navActivate);
@@ -2022,8 +2036,9 @@ function highlightMaterial(viewer, matName) {
 
   resetAllHighlights(viewer);
 
-  mat.pbrMetallicRoughness.setBaseColorFactor([0.10, 1.00, 0.20, 1.0]);
-  if (mat.setEmissiveFactor) mat.setEmissiveFactor([0.25, 1.00, 0.35]);
+ mat.pbrMetallicRoughness.setBaseColorFactor([0.4353, 0.2941, 0.1608, 1.0]);
+if (mat.setEmissiveFactor) mat.setEmissiveFactor([0.2612, 0.1765, 0.0965]);
+
   mat.pbrMetallicRoughness.metallicFactor = 0.0;
   mat.pbrMetallicRoughness.roughnessFactor = 0.6;
 

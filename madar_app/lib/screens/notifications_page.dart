@@ -22,7 +22,7 @@ class NotificationsPage extends StatefulWidget {
 
 class _NotificationsPageState extends State<NotificationsPage> {
   // Mock notifications data
-  final List<NotificationItem> _notifications = [
+  /*final List<NotificationItem> _notifications = [
     // Track Request with full details
 
     // Location Refresh
@@ -114,24 +114,54 @@ class _NotificationsPageState extends State<NotificationsPage> {
       isRead: true,
       senderName: 'Adel',
     ),
-  ];
+  ];*/
 
   bool _showAll = false;
   final List<String> _respondedNotifications = [];
   final Map<String, double> _notificationOffsets = {};
+  bool _freezeReadUI = true; // نخليها true طول ما الصفحة مفتوحة
+  Map<String, bool> _frozenReadMap = {};
+  final Map<String, bool> _localReadOverride = {}; // للي تبينه يختفي فوراً
+
   // Read or Unread notifications
   @override
   void initState() {
     super.initState();
-    _onOpenNotificationsPage();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _onOpenNotificationsPage();
+    });
   }
 
   Future<void> _onOpenNotificationsPage() async {
-    // 1️⃣
-    await _markAllNotificationsAsRead();
+    await _freezeCurrentReadMap(); // 1) جمدي الحالة الحالية (قبل التحديث)
+    await _markAllNotificationsAsRead(); // 2) حدّثي Firestore (بس UI ما يتغير)
+    await NotificationService.clearAllSystemNotifications(); // 3) امسحي badge
+  }
 
-    // 2️⃣
-    await NotificationService.clearAllSystemNotifications();
+  Future<void> _freezeCurrentReadMap() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final snap = await FirebaseFirestore.instance
+        .collection('notifications')
+        .where('userId', isEqualTo: user.uid)
+        .get();
+
+    final Map<String, bool> map = {};
+
+    for (final doc in snap.docs) {
+      final data = doc.data();
+      final requestId = data['data']?['requestId'];
+      final isRead = data['isRead'] ?? false;
+      if (requestId != null) map[requestId] = isRead;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _frozenReadMap = map;
+      _freezeReadUI = true;
+    });
   }
 
   Future<void> _markAllNotificationsAsRead() async {
@@ -140,13 +170,19 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
     final batch = FirebaseFirestore.instance.batch();
 
-    final unread = await FirebaseFirestore.instance
+    final unreadSnap = await FirebaseFirestore.instance
         .collection('notifications')
         .where('userId', isEqualTo: user.uid)
         .where('isRead', isEqualTo: false)
         .get();
 
-    for (final doc in unread.docs) {
+    for (final doc in unreadSnap.docs) {
+      final data = doc.data();
+
+      final requiresAction =
+          (data['requiresAction'] == true); // إذا مو موجود = false
+      if (requiresAction) continue; // لا نلمس اللي يتطلب أكشن
+
       batch.update(doc.reference, {'isRead': true});
     }
 
@@ -167,13 +203,35 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
           for (final doc in snap.docs) {
             final data = doc.data();
-            final key = data['data']?['requestId'] ?? doc.id;
-            final isRead = data['isRead'] ?? true;
 
-            result[key] = isRead;
+            final key = data['data']?['requestId']; // ✅ نفس notif.id
+            final isRead = data['isRead'] ?? false;
+
+            if (key != null) {
+              result[key] = isRead;
+            }
           }
-
           return result;
+        });
+  }
+
+  Stream<Map<String, String>> _notificationDocMap() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return const Stream.empty();
+
+    return FirebaseFirestore.instance
+        .collection('notifications')
+        .where('userId', isEqualTo: uid)
+        .snapshots()
+        .map((snap) {
+          final Map<String, String> map = {};
+          for (final d in snap.docs) {
+            final requestId = d.data()['data']?['requestId'];
+            if (requestId != null) {
+              map[requestId] = d.id; // 🔥 requestId → notificationDocId
+            }
+          }
+          return map;
         });
   }
 
@@ -214,11 +272,12 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
             return NotificationItem(
               id: doc.id,
+
               type: NotificationType.trackRequest,
               title: 'Track Request',
               message: '',
               timestamp: createdAt,
-              isRead: status != 'pending',
+              isRead: false,
               isExpired: isExpired,
               senderName: (d['senderName'] ?? '').toString(),
               senderPhone: (d['senderPhone'] ?? '').toString(),
@@ -246,8 +305,11 @@ class _NotificationsPageState extends State<NotificationsPage> {
           return snap.docs.map((doc) {
             final d = doc.data();
 
-            final createdAt =
-                (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+            final respondedAt =
+                (d['respondedAt'] as Timestamp?)?.toDate() ??
+                (d['createdAt'] as Timestamp?)?.toDate() ??
+                DateTime.now();
+
             final startAt = (d['startAt'] as Timestamp?)?.toDate();
             final endAt = (d['endAt'] as Timestamp?)?.toDate();
 
@@ -264,8 +326,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
               message: '',
 
-              timestamp: createdAt,
-              isRead: false,
+              timestamp: respondedAt,
+              isRead: true,
 
               senderName: d['receiverName'],
               senderPhone: d['receiverPhone'],
@@ -283,19 +345,19 @@ class _NotificationsPageState extends State<NotificationsPage> {
         });
   }
 
-  List<NotificationItem> get _visibleNotifications {
+  /*List<NotificationItem> get _visibleNotifications {
     if (_showAll) return _notifications;
     return _notifications.take(5).toList();
   }
-
-  void _deleteNotification(NotificationItem notification) {
+*/
+  /*void _deleteNotification(NotificationItem notification) {
     setState(() {
       _notifications.remove(notification);
       _notificationOffsets.remove(notification.id);
     });
-  }
+  }*/
 
-  void _clearAllNotifications() async {
+  /* void _clearAllNotifications() async {
     final confirmed = await ConfirmationDialog.showDeleteConfirmation(
       context,
       title: 'Clear All Notifications',
@@ -309,7 +371,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
         _notificationOffsets.clear();
       });
     }
-  }
+  }*/
 
   @override
   Widget build(BuildContext context) {
@@ -336,78 +398,101 @@ class _NotificationsPageState extends State<NotificationsPage> {
         ),
       ),
 
-      body: StreamBuilder<Map<String, bool>>(
-        stream: _notificationsReadMap(), // ← جديد
-        builder: (context, notifSnap) {
-          final readMap = notifSnap.data ?? {};
+      body: StreamBuilder<Map<String, String>>(
+        stream: _notificationDocMap(), // 🔥 NEW
+        builder: (context, docMapSnap) {
+          final notifDocMap = docMapSnap.data ?? {};
 
-          return StreamBuilder<List<NotificationItem>>(
-            stream: _incomingTrackRequestsStream(),
-            builder: (context, incomingSnap) {
-              final incomingTrack = incomingSnap.data ?? [];
+          return StreamBuilder<Map<String, bool>>(
+            stream: _notificationsReadMap(),
+            builder: (context, notifSnap) {
+              final readMap = notifSnap.data ?? {};
 
               return StreamBuilder<List<NotificationItem>>(
-                stream: _senderResponsesStream(),
-                builder: (context, senderSnap) {
-                  final senderResponses = senderSnap.data ?? [];
+                stream: _incomingTrackRequestsStream(),
+                builder: (context, incomingSnap) {
+                  final incomingTrack = incomingSnap.data ?? [];
 
-                  final merged = [
-                    ...incomingTrack,
-                    ...senderResponses,
-                    ..._notifications,
-                  ];
+                  return StreamBuilder<List<NotificationItem>>(
+                    stream: _senderResponsesStream(),
+                    builder: (context, senderSnap) {
+                      final senderResponses = senderSnap.data ?? [];
 
-                  merged.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-                  final visible = _showAll ? merged : merged.take(5).toList();
+                      if (!docMapSnap.hasData ||
+                          !notifSnap.hasData ||
+                          !incomingSnap.hasData ||
+                          !senderSnap.hasData) {
+                        return const SizedBox();
+                      }
 
-                  if (merged.isEmpty) return _buildEmptyState();
+                      final merged = [
+                        ...incomingTrack,
+                        ...senderResponses,
+                      ].where((n) => notifDocMap.containsKey(n.id)).toList();
 
-                  return ListView(
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 1, 10, 1),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            TextButton(
-                              onPressed: _clearAllNotifications,
-                              child: Text(
-                                'Clear all',
-                                style: TextStyle(
-                                  color: Colors.grey[600],
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500,
+                      merged.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+
+                      // 🔥 inject notificationDocId
+                      for (final n in merged) {
+                        n.notificationDocId = notifDocMap[n.id];
+
+                        // 🔥 إذا ما له notification doc = اعتبره مقروء
+                        if (n.notificationDocId == null) {
+                          n.isRead = true;
+                        }
+                      }
+
+                      final visible = _showAll
+                          ? merged
+                          : merged.take(5).toList();
+
+                      if (merged.isEmpty) return _buildEmptyState();
+
+                      return ListView(
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 1, 10, 1),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: const [],
+                            ),
+                          ),
+
+                          ...visible.map((notif) {
+                            final live = readMap[notif.id] ?? notif.isRead;
+                            final frozen = _frozenReadMap[notif.id];
+                            final override = _localReadOverride[notif.id];
+
+                            notif.isRead =
+                                override ??
+                                (_freezeReadUI
+                                    ? (_frozenReadMap[notif.id] ?? notif.isRead)
+                                    : (readMap[notif.id] ?? notif.isRead));
+
+                            return _buildNotificationItem(notif);
+                          }),
+
+                          if (!_showAll && merged.length > 5)
+                            Padding(
+                              padding: const EdgeInsets.all(5),
+                              child: TextButton(
+                                onPressed: () =>
+                                    setState(() => _showAll = true),
+                                child: const Text(
+                                  'View All Notifications',
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.kGreen,
+                                  ),
                                 ),
                               ),
                             ),
-                          ],
-                        ),
-                      ),
 
-                      // 🔥 هنا الربط المهم
-                      ...visible.map((notif) {
-                        notif.isRead = readMap[notif.id] ?? true;
-                        return _buildNotificationItem(notif);
-                      }),
-
-                      if (!_showAll && merged.length > 5)
-                        Padding(
-                          padding: const EdgeInsets.all(5),
-                          child: TextButton(
-                            onPressed: () => setState(() => _showAll = true),
-                            child: const Text(
-                              'View All Notifications',
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.kGreen,
-                              ),
-                            ),
-                          ),
-                        ),
-
-                      const SizedBox(height: 20),
-                    ],
+                          const SizedBox(height: 20),
+                        ],
+                      );
+                    },
                   );
                 },
               );
@@ -497,8 +582,11 @@ class _NotificationsPageState extends State<NotificationsPage> {
                         notification,
                       );
 
-                      if (confirmed) {
-                        _deleteNotification(notification);
+                      if (confirmed && notification.notificationDocId != null) {
+                        await FirebaseFirestore.instance
+                            .collection('notifications')
+                            .doc(notification.notificationDocId!)
+                            .delete();
                       } else {
                         // Only reset if it was swiped and user cancelled
                         if (wasSwiped && mounted) {
@@ -743,21 +831,22 @@ class _NotificationsPageState extends State<NotificationsPage> {
                     ),
                   ),
                 ),
-
-                // Unread indicator - INSIDE the white container
+                // GREEN UNREAD BAR (LEFT)
                 if (!notification.isRead)
                   Positioned(
-                    top: 18,
-                    right: 18,
+                    left: 0,
+                    top: 8,
+                    bottom: 8,
                     child: Container(
-                      width: 10,
-                      height: 10,
-                      decoration: const BoxDecoration(
+                      width: 4,
+                      decoration: BoxDecoration(
                         color: AppColors.kGreen,
-                        shape: BoxShape.circle,
+                        borderRadius: BorderRadius.circular(4),
                       ),
                     ),
                   ),
+
+                // Unread indicator - INSIDE the white container
               ],
             ),
           ),
@@ -1123,7 +1212,15 @@ class _NotificationsPageState extends State<NotificationsPage> {
   }
 
   /// Navigate to source: track request -> Received; accepted/declined -> Sent. Request expanded.
-  void _onNotificationTap(NotificationItem notification) {
+  void _onNotificationTap(NotificationItem notification) async {
+    setState(() {
+      _localReadOverride[notification.id] = true;
+      notification.isRead = true;
+    });
+
+    // 🔥 أول شي: اعتبري الإشعار مقروء
+    await _markNotificationAsReadByRequestId(notification.id);
+
     if (notification.type == NotificationType.trackRequest ||
         notification.type == NotificationType.trackAccepted ||
         notification.type == NotificationType.trackRejected) {
@@ -1131,13 +1228,31 @@ class _NotificationsPageState extends State<NotificationsPage> {
       final filterIndex = notification.type == NotificationType.trackRequest
           ? 0
           : 1;
+
       Navigator.pop(context, {
         'tab': 2,
         'expandRequestId': notification.id,
         'filterIndex': filterIndex,
       });
     }
-    // Other notification types can be handled here later (e.g. meeting point -> Meet Up tab)
+
+    // باقي الأنواع لاحقاً
+  }
+
+  Future<void> _markNotificationAsReadByRequestId(String requestId) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final q = await FirebaseFirestore.instance
+        .collection('notifications')
+        .where('userId', isEqualTo: user.uid)
+        .where('data.requestId', isEqualTo: requestId)
+        .limit(1)
+        .get();
+
+    if (q.docs.isEmpty) return; // ما فيه notification مرتبطة بهذا الطلب
+
+    await q.docs.first.reference.update({'isRead': true});
   }
 
   /// Date only: strip day name if present (e.g. "Tue, Jan 31" -> "Jan 31").
@@ -1285,11 +1400,18 @@ class _NotificationsPageState extends State<NotificationsPage> {
         await FirebaseFirestore.instance
             .collection('trackRequests')
             .doc(notification.id)
-            .update({'status': 'accepted'});
+            .update({
+              'status': 'accepted',
+              'respondedAt': FieldValue.serverTimestamp(),
+            });
+        await _markNotificationAsReadByRequestId(notification.id);
 
         setState(() {
           notification.actionLabel = "Accepted";
           notification.isRead = true;
+
+          _localReadOverride[notification.id] = true; // 🔥 هذا المهم
+
           _respondedNotifications.add(notification.id);
         });
       } catch (e) {
@@ -1313,11 +1435,18 @@ class _NotificationsPageState extends State<NotificationsPage> {
         await FirebaseFirestore.instance
             .collection('trackRequests')
             .doc(notification.id)
-            .update({'status': 'declined'});
+            .update({
+              'status': 'declined',
+              'respondedAt': FieldValue.serverTimestamp(),
+            });
+        await _markNotificationAsReadByRequestId(notification.id);
 
         setState(() {
           notification.actionLabel = "Declined";
           notification.isRead = true;
+
+          _localReadOverride[notification.id] = true; // 🔥
+
           _respondedNotifications.add(notification.id);
         });
       } catch (e) {
@@ -1460,6 +1589,8 @@ enum NotificationType {
 
 class NotificationItem {
   final String id;
+  String? notificationDocId; // 🔥 جديد
+
   final NotificationType type;
   final String title;
   final String message;
@@ -1477,6 +1608,8 @@ class NotificationItem {
 
   NotificationItem({
     required this.id,
+    this.notificationDocId,
+
     required this.type,
     required this.title,
     required this.message,

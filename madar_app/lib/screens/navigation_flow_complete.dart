@@ -4,6 +4,7 @@
 
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
@@ -27,19 +28,23 @@ void showNavigationDialog(
   String shopId, {
   String destinationPoiMaterial = '',
   String floorSrc = '',
-  Map<String, double>? destinationHitGltf,
+  Map<String, double>?
+  destinationHitGltf,
 }) {
   showModalBottomSheet(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    builder: (context) => NavigateToShopDialog(
-      shopName: shopName,
-      shopId: shopId,
-      destinationPoiMaterial: destinationPoiMaterial,
-      floorSrc: floorSrc,
-      destinationHitGltf: destinationHitGltf,
-    ),
+    builder: (context) =>
+        NavigateToShopDialog(
+          shopName: shopName,
+          shopId: shopId,
+          destinationPoiMaterial:
+              destinationPoiMaterial,
+          floorSrc: floorSrc,
+          destinationHitGltf:
+              destinationHitGltf,
+        ),
   );
 }
 
@@ -47,7 +52,8 @@ void showNavigationDialog(
 // 2. NAVIGATE TO SHOP DIALOG
 // ============================================================================
 
-class NavigateToShopDialog extends StatelessWidget {
+class NavigateToShopDialog
+    extends StatelessWidget {
   final String shopName;
   final String shopId;
 
@@ -58,7 +64,8 @@ class NavigateToShopDialog extends StatelessWidget {
   final String floorSrc;
 
   /// Destination hit point in glTF coords from the map hotspot (optional)
-  final Map<String, double>? destinationHitGltf;
+  final Map<String, double>?
+  destinationHitGltf;
 
   const NavigateToShopDialog({
     super.key,
@@ -71,8 +78,11 @@ class NavigateToShopDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(context).size.height;
-    final isSmallScreen = screenHeight < 700;
+    final screenHeight = MediaQuery.of(
+      context,
+    ).size.height;
+    final isSmallScreen =
+        screenHeight < 700;
 
     return Container(
       decoration: const BoxDecoration(
@@ -91,33 +101,58 @@ class NavigateToShopDialog extends StatelessWidget {
             height: 4,
             decoration: BoxDecoration(
               color: Colors.grey[300],
-              borderRadius: BorderRadius.circular(2),
+              borderRadius:
+                  BorderRadius.circular(
+                    2,
+                  ),
             ),
           ),
 
           // Header matched to "Set Your Location" style
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
+            padding:
+                const EdgeInsets.fromLTRB(
+                  20,
+                  10,
+                  20,
+                  10,
+                ),
             child: Row(
               children: [
                 Expanded(
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment:
+                        CrossAxisAlignment
+                            .start,
                     children: [
                       Text(
                         'Navigate to $shopName',
                         style: TextStyle(
-                          fontSize: isSmallScreen ? 20 : 22,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.kGreen,
+                          fontSize:
+                              isSmallScreen
+                              ? 20
+                              : 22,
+                          fontWeight:
+                              FontWeight
+                                  .w600,
+                          color: AppColors
+                              .kGreen,
                         ),
                         maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                        overflow:
+                            TextOverflow
+                                .ellipsis,
                       ),
-                      const SizedBox(height: 2),
+                      const SizedBox(
+                        height: 2,
+                      ),
                       Text(
                         'First, set your starting point.',
-                        style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors
+                              .grey[600],
+                        ),
                       ),
                     ],
                   ),
@@ -129,22 +164,34 @@ class NavigateToShopDialog extends StatelessWidget {
           const SizedBox(height: 30),
 
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
+            padding:
+                const EdgeInsets.symmetric(
+                  horizontal: 20,
+                ),
             child: SecondaryButton(
               text: 'Pin on Map',
-              icon: Icons.location_on_outlined,
+              icon: Icons
+                  .location_on_outlined,
               onPressed: () {
                 Navigator.pop(context);
                 showModalBottomSheet(
                   context: context,
-                  isScrollControlled: true,
-                  backgroundColor: Colors.transparent,
-                  builder: (context) => SetYourLocationDialog(
-                        shopName: shopName,
+                  isScrollControlled:
+                      true,
+                  backgroundColor:
+                      Colors
+                          .transparent,
+                  builder: (context) =>
+                      SetYourLocationDialog(
+                        shopName:
+                            shopName,
                         shopId: shopId,
-                        destinationPoiMaterial: destinationPoiMaterial,
-                        floorSrc: floorSrc,
-                        destinationHitGltf: destinationHitGltf,
+                        destinationPoiMaterial:
+                            destinationPoiMaterial,
+                        floorSrc:
+                            floorSrc,
+                        destinationHitGltf:
+                            destinationHitGltf,
                       ),
                 );
               },
@@ -154,17 +201,42 @@ class NavigateToShopDialog extends StatelessWidget {
           const SizedBox(height: 12),
 
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
+            padding:
+                const EdgeInsets.symmetric(
+                  horizontal: 20,
+                ),
             child: PrimaryButton(
               text: 'Scan With Camera',
-              icon: Icons.camera_alt_outlined,
+              icon: Icons
+                  .camera_alt_outlined,
               onPressed: () async {
+                final rootCtx =
+                    Navigator.of(
+                      context,
+                      rootNavigator:
+                          true,
+                    ).context;
+
                 Navigator.pop(context);
-                await _handleScanWithCamera(context, shopName, shopId, destinationPoiMaterial, floorSrc, destinationHitGltf);
+
+                await _handleScanWithCamera(
+                  rootCtx,
+                  shopName,
+                  shopId,
+                  destinationPoiMaterial,
+                  floorSrc,
+                  destinationHitGltf,
+                );
               },
             ),
           ),
-          SizedBox(height: MediaQuery.of(context).padding.bottom + 35),
+          SizedBox(
+            height:
+                MediaQuery.of(
+                  context,
+                ).padding.bottom +
+                35,
+          ),
         ],
       ),
     );
@@ -176,79 +248,266 @@ class NavigateToShopDialog extends StatelessWidget {
     String shopId,
     String destinationPoiMaterial,
     String floorSrc,
-    Map<String, double>? destinationHitGltf,
+    Map<String, double>?
+    destinationHitGltf,
   ) async {
-    final status = await Permission.camera.request();
-
+    // 1) Camera permission
+    final status = await Permission
+        .camera
+        .request();
     if (!context.mounted) return;
 
-    if (status.isGranted) {
-      final result = await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => const UnityCameraPage(isNavigation: true),
-        ),
-      );
-
-      if (!context.mounted) return;
-
-      if (result == true) {
-        await showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => ARSuccessDialog(
-  onOkPressed: () {
-    Navigator.pop(context); // close dialog
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (_) => PathOverviewScreen(
-          shopName: shopName,
-          shopId: shopId,
-          startingMethod: 'scan',
-          destinationPoiMaterial: destinationPoiMaterial,
-          // keep these if your constructor has them
-          destinationHitGltf: destinationHitGltf,
-          floorSrc: floorSrc,
-        ),
-      ),
-    );
-  },
-),
-
-        );
-
-        if (!context.mounted) return;
-
-        Navigator.pushReplacement(
+    if (!status.isGranted) {
+      if (status.isPermanentlyDenied) {
+        ScaffoldMessenger.of(
           context,
-          MaterialPageRoute(
-            builder: (_) => PathOverviewScreen(
-              shopName: shopName,
-              shopId: shopId,
-              startingMethod: 'scan',
-              destinationPoiMaterial: destinationPoiMaterial,
-              floorSrc: floorSrc,
-              destinationHitGltf: destinationHitGltf,
+        ).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Camera permission required. Please enable in Settings.',
+            ),
+          ),
+        );
+        openAppSettings();
+      } else {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Camera permission is required.',
             ),
           ),
         );
       }
+      return;
+    }
 
-    } else if (status.isPermanentlyDenied) {
-      ScaffoldMessenger.of(context).showSnackBar(
+    // 2) Ensure signed-in
+    final user = FirebaseAuth
+        .instance
+        .currentUser;
+    if (user == null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(
         const SnackBar(
           content: Text(
-            'Camera permission required. Please enable in Settings.',
+            'You must be signed in.',
           ),
         ),
       );
-      openAppSettings();
+      return;
     }
+
+    // 3) Baseline time (like your old scan logic)
+    final scanStartUtc = DateTime.now()
+        .toUtc();
+
+    // 4) Resolve correct users doc (email/uid)
+    final userDocRef =
+        await _resolveUserDocRef(user);
+
+    // 5) Helper: convert Firestore timestamp to DateTime UTC
+    DateTime? _toUtcDate(dynamic v) {
+      if (v == null) return null;
+      if (v is Timestamp)
+        return v.toDate().toUtc();
+      if (v is int)
+        return DateTime.fromMillisecondsSinceEpoch(
+          v,
+          isUtc: true,
+        );
+      if (v is num)
+        return DateTime.fromMillisecondsSinceEpoch(
+          v.toInt(),
+          isUtc: true,
+        );
+      if (v is String)
+        return DateTime.tryParse(
+          v,
+        )?.toUtc();
+      return null;
+    }
+
+    // 6) Try loading navmesh for snapping (do NOT block if fails)
+    NavMesh? nav;
+    try {
+      nav = await NavMesh.loadAsset(
+        'assets/nav_cor/navmesh_F1.json',
+      );
+      debugPrint(
+        '✅ Navmesh loaded for scan snapping',
+      );
+    } catch (e) {
+      nav = null;
+      debugPrint(
+        '⚠️ Navmesh not available for scan snapping: $e',
+      );
+    }
+
+    bool didReturn = false;
+    late final StreamSubscription sub;
+
+    // 7) Listen for DB update (users doc)
+    sub = userDocRef.snapshots().listen((
+      snap,
+    ) async {
+      if (didReturn) return;
+
+      final data = snap.data();
+      if (data == null) return;
+
+      final loc = data['location'];
+      if (loc is! Map) return;
+
+      // Must be updated after scan started
+      final updatedAtUtc = _toUtcDate(
+        loc['updatedAt'],
+      );
+      if (updatedAtUtc == null) return;
+
+      // Ignore old cached/previous updates
+      if (!updatedAtUtc.isAfter(
+        scanStartUtc,
+      ))
+        return;
+
+      final bp = loc['blenderPosition'];
+      if (bp is! Map) return;
+
+      final x = (bp['x'] as num?)
+          ?.toDouble();
+      final y = (bp['y'] as num?)
+          ?.toDouble();
+      final z = (bp['z'] as num?)
+          ?.toDouble();
+      final floor =
+          bp['floor']; // keep whatever Unity sends
+
+      if (x == null ||
+          y == null ||
+          z == null)
+        return;
+
+      // 8) Snap to closest allowed point (navmesh if available)
+      var snapped = <String, double>{
+        'x': x,
+        'y': y,
+        'z': z,
+      };
+      if (nav != null) {
+        try {
+          snapped = nav!
+              .snapBlenderPoint(
+                snapped,
+              );
+        } catch (_) {
+          // keep raw
+        }
+      }
+
+      didReturn = true;
+
+      // 9) Close Unity page (top route)
+      if (Navigator.of(
+        context,
+      ).canPop()) {
+        Navigator.of(context).pop();
+      }
+
+      await sub.cancel();
+      if (!context.mounted) return;
+      final snappedGltf =
+          <String, double>{
+            'x': snapped['x'] ?? x,
+            'y': snapped['y'] ?? y,
+            'z': snapped['z'] ?? z,
+          };
+
+      // 10) Show the Pin-on-Map UI again (so you can see the pin and press Confirm)
+
+      final floorLabelFromScan =
+          floor == null
+          ? ''
+          : floor.toString();
+
+      showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor:
+            Colors.transparent,
+        builder: (_) =>
+            SetYourLocationDialog(
+              shopName: shopName,
+              shopId: shopId,
+              destinationPoiMaterial:
+                  destinationPoiMaterial,
+              floorSrc: floorSrc,
+              destinationHitGltf:
+                  destinationHitGltf,
+              initialUserPinGltf:
+                  snappedGltf,
+              initialFloorLabel:
+                  floorLabelFromScan,
+            ),
+      );
+    });
+
+    // 11) Open Unity (no need to wait for "result == true")
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            const UnityCameraPage(
+              isScanOnly: true,
+            ),
+      ),
+    );
+
+    // 12) If user exits Unity manually without any DB update, cancel the listener
+    if (!didReturn) {
+      try {
+        await sub.cancel();
+      } catch (_) {}
+    }
+  }
+
+  Future<
+    DocumentReference<
+      Map<String, dynamic>
+    >
+  >
+  _resolveUserDocRef(User user) async {
+    final users = FirebaseFirestore
+        .instance
+        .collection('users');
+
+    final email = user.email;
+    if (email != null &&
+        email.isNotEmpty) {
+      final snap = await users
+          .where(
+            'email',
+            isEqualTo: email,
+          )
+          .limit(1)
+          .get();
+      if (snap.docs.isNotEmpty) {
+        return snap
+            .docs
+            .first
+            .reference;
+      }
+    }
+
+    // Fallback: use uid as doc id.
+    return users.doc(user.uid);
   }
 }
 
-class SetYourLocationDialog extends StatefulWidget {
+class SetYourLocationDialog
+    extends StatefulWidget {
   final String shopName;
   final String shopId;
 
@@ -259,7 +518,11 @@ class SetYourLocationDialog extends StatefulWidget {
   final String floorSrc;
 
   /// Destination hit point in glTF coords from the map hotspot (optional)
-  final Map<String, double>? destinationHitGltf;
+  final Map<String, double>?
+  destinationHitGltf;
+  final Map<String, double>?
+  initialUserPinGltf;
+  final String? initialFloorLabel;
 
   const SetYourLocationDialog({
     super.key,
@@ -268,30 +531,44 @@ class SetYourLocationDialog extends StatefulWidget {
     this.destinationPoiMaterial = '',
     this.floorSrc = '',
     this.destinationHitGltf,
+    this.initialUserPinGltf,
+    this.initialFloorLabel,
   });
 
   @override
-  State<SetYourLocationDialog> createState() => _SetYourLocationDialogState();
+  State<SetYourLocationDialog>
+  createState() =>
+      _SetYourLocationDialogState();
 }
 
-class _SetYourLocationDialogState extends State<SetYourLocationDialog> {
+class _SetYourLocationDialogState
+    extends
+        State<SetYourLocationDialog> {
   String _currentFloorURL = '';
-  List<Map<String, String>> _venueMaps = [];
+  List<Map<String, String>> _venueMaps =
+      [];
   bool _mapsLoading = true;
   bool _jsReady = false;
-  Map<String, double>? _pendingUserPinGltf;
+  Map<String, double>?
+  _pendingUserPinGltf;
   NavMesh? _navmeshF1;
 
-  WebViewController? _webCtrl; // for Flutter -> JS calls (move snapped pin)
+  WebViewController?
+  _webCtrl; // for Flutter -> JS calls (move snapped pin)
 
-  bool _jsBridgeReady = false; // becomes true after JS runs (prevents calling setUserPinFromFlutter too early)
-  Map<String, double>? _pendingPinToSend; // cached pin to push once JS bridge is ready
+  bool _jsBridgeReady =
+      false; // becomes true after JS runs (prevents calling setUserPinFromFlutter too early)
+  Map<String, double>?
+  _pendingPinToSend; // cached pin to push once JS bridge is ready
 
-  String? _pendingPoiToHighlight; // destination POI material to highlight once JS is ready
+  String?
+  _pendingPoiToHighlight; // destination POI material to highlight once JS is ready
 
   // User-picked start location (BlenderPosition)
-Map<String, double>? _pickedPosGltf;   // what model-viewer returns (Y-up)
-Map<String, double>? _pickedPosBlender; // converted for navmesh + Firestore (Z-up)
+  Map<String, double>?
+  _pickedPosGltf; // what model-viewer returns (Y-up)
+  Map<String, double>?
+  _pickedPosBlender; // converted for navmesh + Firestore (Z-up)
   String _pickedFloorLabel = '';
 
   @override
@@ -299,51 +576,92 @@ Map<String, double>? _pickedPosBlender; // converted for navmesh + Firestore (Z-
     super.initState();
 
     // Open the correct floor if the caller provided it (Path/Pin flow).
-    if (widget.floorSrc.trim().isNotEmpty) {
-      _currentFloorURL = widget.floorSrc.trim();
+    if (widget.floorSrc
+        .trim()
+        .isNotEmpty) {
+      _currentFloorURL = widget.floorSrc
+          .trim();
     }
 
     // Destination highlight only (NO PATH on this screen).
-    final dest = widget.destinationPoiMaterial.trim();
+    final dest = widget
+        .destinationPoiMaterial
+        .trim();
     if (dest.isNotEmpty) {
       _pendingPoiToHighlight = dest;
-    } else if (widget.shopId.trim().startsWith('POIMAT_')) {
+    } else if (widget.shopId
+        .trim()
+        .startsWith('POIMAT_')) {
       // VenuePage often passes POI material as shopId
-      _pendingPoiToHighlight = widget.shopId.trim();
+      _pendingPoiToHighlight = widget
+          .shopId
+          .trim();
     } else {
       _pendingPoiToHighlight = null;
     }
 
+    if (widget.initialUserPinGltf !=
+        null) {
+      final g =
+          widget.initialUserPinGltf!;
+      _pickedPosGltf = g;
+      _pickedPosBlender =
+          _gltfToBlender(g);
+    }
+    if (widget.initialFloorLabel !=
+            null &&
+        widget.initialFloorLabel!
+            .trim()
+            .isNotEmpty) {
+      _pickedFloorLabel = widget
+          .initialFloorLabel!
+          .trim();
+    }
+
     _loadVenueMaps();
-    _loadUserBlenderPosition();
+    if (widget.initialUserPinGltf ==
+        null) {
+      _loadUserBlenderPosition();
+    }
 
     // Load navmesh only for snapping the user's pin to the walkable floor.
     _loadNavmeshF1();
   }
 
-Future<void> _loadNavmeshF1() async {
+  Future<void> _loadNavmeshF1() async {
     try {
-      final m = await NavMesh.loadAsset('assets/nav_cor/navmesh_F1.json');
+      final m = await NavMesh.loadAsset(
+        'assets/nav_cor/navmesh_F1.json',
+      );
       if (!mounted) return;
       setState(() => _navmeshF1 = m);
-      debugPrint('✅ Navmesh loaded (F1) for snapping');
+      debugPrint(
+        '✅ Navmesh loaded (F1) for snapping',
+      );
     } catch (e) {
-      debugPrint('❌ Failed to load navmesh_F1.json: $e');
+      debugPrint(
+        '❌ Failed to load navmesh_F1.json: $e',
+      );
     }
   }
 
   /// Loads the last saved user location (if any). It reads from:
   /// users/{uid}.location.blenderPosition {x,y,z,floor}
   /// and sets the UI state (and preferred floor) accordingly.
-  Future<void> _loadUserBlenderPosition() async {
-    final user = FirebaseAuth.instance.currentUser;
+  Future<void>
+  _loadUserBlenderPosition() async {
+    final user = FirebaseAuth
+        .instance
+        .currentUser;
     if (user == null) return;
 
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get(const GetOptions(source: Source.serverAndCache));
+      final userDocRef =
+          await _resolveUserDocRef(
+            user,
+          );
+      final doc = await userDocRef
+          .get();
 
       final data = doc.data();
       if (data == null) return;
@@ -351,23 +669,45 @@ Future<void> _loadNavmeshF1() async {
       final location = data['location'];
       if (location is! Map) return;
 
-      final bp = location['blenderPosition'];
+      final bp =
+          location['blenderPosition'];
       if (bp is! Map) return;
 
-      final x = (bp['x'] as num?)?.toDouble();
-      final y = (bp['y'] as num?)?.toDouble();
-      final z = (bp['z'] as num?)?.toDouble();
+      final x = (bp['x'] as num?)
+          ?.toDouble();
+      final y = (bp['y'] as num?)
+          ?.toDouble();
+      final z = (bp['z'] as num?)
+          ?.toDouble();
       final floorRaw = bp['floor'];
-      if (x == null || y == null || z == null) return;
+      if (x == null ||
+          y == null ||
+          z == null)
+        return;
 
-      final floorLabel = floorRaw == null ? '' : floorRaw.toString();
+      final floorLabel =
+          floorRaw == null
+          ? ''
+          : floorRaw.toString();
 
       if (!mounted) return;
-      final blenderRaw = {'x': x, 'y': y, 'z': z};
+      final blenderRaw = {
+        'x': x,
+        'y': y,
+        'z': z,
+      };
 
       // Snap to navmesh if it is already loaded (keeps the pin on walkable floor).
-      final blender = (_navmeshF1 != null) ? _navmeshF1!.snapBlenderPoint(blenderRaw) : blenderRaw;
-      final gltf = _blenderToGltf(blender);
+      final blender =
+          (_navmeshF1 != null)
+          ? _navmeshF1!
+                .snapBlenderPoint(
+                  blenderRaw,
+                )
+          : blenderRaw;
+      final gltf = _blenderToGltf(
+        blender,
+      );
 
       setState(() {
         _pickedPosBlender = blender;
@@ -376,58 +716,85 @@ Future<void> _loadNavmeshF1() async {
       });
 
       // Update the visible pin if JS is ready (safe even if it isn't).
-      if (_jsReady && _pickedPosGltf != null) {
-        _pushUserPinToJs(_pickedPosGltf!);
+      if (_jsReady &&
+          _pickedPosGltf != null) {
+        _pushUserPinToJs(
+          _pickedPosGltf!,
+        );
       }
 
       // If we already have maps loaded, switch to the saved floor.
-      if (floorLabel.isNotEmpty && _venueMaps.isNotEmpty) {
-        final match = _venueMaps.firstWhere(
-          (m) => (m['floorNumber'] ?? '') == floorLabel,
-          orElse: () => const {'mapURL': ''},
-        );
-        final url = match['mapURL'] ?? '';
+      if (floorLabel.isNotEmpty &&
+          _venueMaps.isNotEmpty) {
+        final match = _venueMaps
+            .firstWhere(
+              (m) =>
+                  (m['floorNumber'] ??
+                      '') ==
+                  floorLabel,
+              orElse: () => const {
+                'mapURL': '',
+              },
+            );
+        final url =
+            match['mapURL'] ?? '';
         if (url.isNotEmpty && mounted) {
-          setState(() => _currentFloorURL = url);
+          setState(
+            () =>
+                _currentFloorURL = url,
+          );
         }
       }
     } catch (e) {
-      debugPrint('Error loading user blenderPosition: $e');
+      debugPrint(
+        'Error loading user blenderPosition: $e',
+      );
     }
   }
 
   String _floorLabelForUrl(String url) {
     for (final m in _venueMaps) {
-      if ((m['mapURL'] ?? '') == url) return (m['floorNumber'] ?? '').toString();
+      if ((m['mapURL'] ?? '') == url)
+        return (m['floorNumber'] ?? '')
+            .toString();
     }
     return '';
   }
 
-  
   String _fNumberForUrl(String url) {
     for (final m in _venueMaps) {
-      if ((m['mapURL'] ?? '') == url) return (m['F_number'] ?? '').toString();
+      if ((m['mapURL'] ?? '') == url)
+        return (m['F_number'] ?? '')
+            .toString();
     }
     return '';
   }
-  Map<String, double> _gltfToBlender(Map<String, double> g) {
-  // glTF (Y up) -> Blender (Z up)
-  return {
-    'x': g['x'] ?? 0,
-    'y': -(g['z'] ?? 0),
-    'z': (g['y'] ?? 0),
-  };
-}
 
-Map<String, double> _blenderToGltf(Map<String, double> b) {
-  // Blender (Z up) -> glTF (Y up)
-  return {
-    'x': b['x'] ?? 0,
-    'y': (b['z'] ?? 0),
-    'z': -(b['y'] ?? 0),
-  };
-}
-  Future<void> _pushUserPinToJs(Map<String, double> gltf) async {
+  Map<String, double> _gltfToBlender(
+    Map<String, double> g,
+  ) {
+    // glTF (Y up) -> Blender (Z up)
+    return {
+      'x': g['x'] ?? 0,
+      'y': -(g['z'] ?? 0),
+      'z': (g['y'] ?? 0),
+    };
+  }
+
+  Map<String, double> _blenderToGltf(
+    Map<String, double> b,
+  ) {
+    // Blender (Z up) -> glTF (Y up)
+    return {
+      'x': b['x'] ?? 0,
+      'y': (b['z'] ?? 0),
+      'z': -(b['y'] ?? 0),
+    };
+  }
+
+  Future<void> _pushUserPinToJs(
+    Map<String, double> gltf,
+  ) async {
     final c = _webCtrl;
     if (c == null) return;
 
@@ -439,35 +806,50 @@ Map<String, double> _blenderToGltf(Map<String, double> b) {
     final x = gltf['x'];
     final y = gltf['y'];
     final z = gltf['z'];
-    if (x == null || y == null || z == null) return;
+    if (x == null ||
+        y == null ||
+        z == null)
+      return;
 
-    final js = 'window.setUserPinFromFlutter($x, $y, $z);';
+    final js =
+        'window.setUserPinFromFlutter($x, $y, $z);';
     try {
       await c.runJavaScript(js);
     } catch (e) {
-      debugPrint('❌ runJavaScript failed: $e');
+      debugPrint(
+        '❌ runJavaScript failed: $e',
+      );
     }
   }
 
-
-  Future<void> _pushDestinationHighlightToJs() async {
+  Future<void>
+  _pushDestinationHighlightToJs() async {
     final c = _webCtrl;
     final name = _pendingPoiToHighlight;
-    if (c == null || name == null || name.trim().isEmpty) return;
+    if (c == null ||
+        name == null ||
+        name.trim().isEmpty)
+      return;
 
     if (!_jsBridgeReady) return;
 
-    final safe = jsonEncode(name.trim()); // ensures quotes/escaping
-    final js = 'window.highlightPoiFromFlutter($safe);';
+    final safe = jsonEncode(
+      name.trim(),
+    ); // ensures quotes/escaping
+    final js =
+        'window.highlightPoiFromFlutter($safe);';
     try {
       await c.runJavaScript(js);
-      _pendingPoiToHighlight = null; // only need to apply once
+      _pendingPoiToHighlight =
+          null; // only need to apply once
     } catch (e) {
-      debugPrint('❌ highlight runJavaScript failed: $e');
+      debugPrint(
+        '❌ highlight runJavaScript failed: $e',
+      );
     }
   }
 
-// JS: tap → positionAndNormalFromPoint → show hotspot pin → send JSON to Flutter via POI_CHANNEL
+  // JS: tap → positionAndNormalFromPoint → show hotspot pin → send JSON to Flutter via POI_CHANNEL
   String get _pinPickerJs => r'''
 console.log("✅ PinPicker relatedJs injected");
 
@@ -933,7 +1315,8 @@ const timer = setInterval(function() {
 
       if (decoded is! Map) return;
       final obj = decoded;
-      final type = (obj['type'] ?? '').toString();
+      final type = (obj['type'] ?? '')
+          .toString();
 
       if (type == 'pin_picker_ready') {
         _jsBridgeReady = true;
@@ -950,61 +1333,103 @@ const timer = setInterval(function() {
       }
 
       if (type == 'user_pin') {
-  final ok = obj['ok'] == true;
-  if (!ok) return;
+        final ok = obj['ok'] == true;
+        if (!ok) return;
 
-  final pos = obj['position'];
-  if (pos is Map) {
-    final x = (pos['x'] as num?)?.toDouble();
-    final y = (pos['y'] as num?)?.toDouble();
-    final z = (pos['z'] as num?)?.toDouble();
-    if (x == null || y == null || z == null) return;
+        final pos = obj['position'];
+        if (pos is Map) {
+          final x = (pos['x'] as num?)
+              ?.toDouble();
+          final y = (pos['y'] as num?)
+              ?.toDouble();
+          final z = (pos['z'] as num?)
+              ?.toDouble();
+          if (x == null ||
+              y == null ||
+              z == null)
+            return;
 
-    final gltf = {'x': x, 'y': y, 'z': z};
-final blender = _gltfToBlender(gltf);
+          final gltf = {
+            'x': x,
+            'y': y,
+            'z': z,
+          };
+          final blender =
+              _gltfToBlender(gltf);
 
-// snap in Blender-space (corridor floor)
-final nav = _navmeshF1;
-final snappedBlender = (nav == null)
-    ? blender
-    : nav.snapBlenderPoint(blender); // we'll add this helper in navmesh.dart
+          // snap in Blender-space (corridor floor)
+          final nav = _navmeshF1;
+          final snappedBlender =
+              (nav == null)
+              ? blender
+              : nav.snapBlenderPoint(
+                  blender,
+                ); // we'll add this helper in navmesh.dart
 
-final snappedGltf = _blenderToGltf(snappedBlender);
+          final snappedGltf =
+              _blenderToGltf(
+                snappedBlender,
+              );
 
-final floor = _floorLabelForUrl(_currentFloorURL);
+          final floor =
+              _floorLabelForUrl(
+                _currentFloorURL,
+              );
 
-setState(() {
-  _pickedPosGltf = snappedGltf;
-  _pickedPosBlender = snappedBlender;
-  _pickedFloorLabel = floor;
-});
+          setState(() {
+            _pickedPosGltf =
+                snappedGltf;
+            _pickedPosBlender =
+                snappedBlender;
+            _pickedFloorLabel = floor;
+          });
 
-// ✅ Move the visible pin to the snapped position (Flutter -> JS)
-_pushUserPinToJs(snappedGltf);
+          // ✅ Move the visible pin to the snapped position (Flutter -> JS)
+          _pushUserPinToJs(snappedGltf);
 
-debugPrint('📌 PIN glTF: $gltf');
-debugPrint('📌 PIN Blender: $blender');
-debugPrint('📌 SNAPPED Blender: $snappedBlender');
-
-  }
-}
-
+          debugPrint(
+            '📌 PIN glTF: $gltf',
+          );
+          debugPrint(
+            '📌 PIN Blender: $blender',
+          );
+          debugPrint(
+            '📌 SNAPPED Blender: $snappedBlender',
+          );
+        }
+      }
     } catch (_) {
       // ignore non-JSON or unexpected payloads
     }
   }
 
-
-  Future<DocumentReference<Map<String, dynamic>>> _resolveUserDocRef(User user) async {
-    final users = FirebaseFirestore.instance.collection('users');
+  Future<
+    DocumentReference<
+      Map<String, dynamic>
+    >
+  >
+  _resolveUserDocRef(User user) async {
+    final users = FirebaseFirestore
+        .instance
+        .collection('users');
 
     // If your users collection uses auto-generated document IDs (as in your screenshot),
     // we find the doc by email and update that doc instead of creating a new {uid} doc.
     final email = user.email;
-    if (email != null && email.isNotEmpty) {
-      final snap = await users.where('email', isEqualTo: email).limit(1).get();
+    if (email != null &&
+        email.isNotEmpty) {
+      final snap = await users
+          .where(
+            'email',
+            isEqualTo: email,
+          )
+          .limit(1)
+          .get();
       if (snap.docs.isNotEmpty) {
-        return snap.docs.first.reference;
+        return snap
+            .docs
+            .first
+            .reference;
       }
     }
 
@@ -1012,52 +1437,80 @@ debugPrint('📌 SNAPPED Blender: $snappedBlender');
     return users.doc(user.uid);
   }
 
-  Future<bool> _saveBlenderPosition() async {
+  Future<bool>
+  _saveBlenderPosition() async {
     final pos = _pickedPosBlender;
     if (pos == null) return false;
 
-    final user = FirebaseAuth.instance.currentUser;
+    final user = FirebaseAuth
+        .instance
+        .currentUser;
     if (user == null) {
       if (!mounted) return false;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('You must be signed in to save your location.')),
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'You must be signed in to save your location.',
+          ),
+        ),
       );
       return false;
     }
 
-    final floorLabel = _pickedFloorLabel.isNotEmpty
+    final floorLabel =
+        _pickedFloorLabel.isNotEmpty
         ? _pickedFloorLabel
-        : _floorLabelForUrl(_currentFloorURL);
+        : _floorLabelForUrl(
+            _currentFloorURL,
+          );
 
     // Store canonical floor id (F_number) when available (e.g. "0","1"...).
-    final fNumberStr = _fNumberForUrl(_currentFloorURL);
-    final floorValue = fNumberStr.isNotEmpty
-        ? (int.tryParse(fNumberStr) ?? fNumberStr)
-        : (int.tryParse(floorLabel) ?? floorLabel);
+    final fNumberStr = _fNumberForUrl(
+      _currentFloorURL,
+    );
+    final floorValue =
+        fNumberStr.isNotEmpty
+        ? (int.tryParse(fNumberStr) ??
+              fNumberStr)
+        : (int.tryParse(floorLabel) ??
+              floorLabel);
 
     try {
-      final userDocRef = await _resolveUserDocRef(user);
+      final userDocRef =
+          await _resolveUserDocRef(
+            user,
+          );
 
       // Save under location.{blenderPosition,updatedAt}
       // Using dotted keys avoids overwriting future location.multisetPosition.
       await userDocRef.update({
-  'location.blenderPosition': {
-    'x': pos['x'],
-    'y': pos['y'],
-    'z': pos['z'],
-    'floor': floorValue,
-  },
-  'location.updatedAt': FieldValue.serverTimestamp(),
-});
-
+        'location.blenderPosition': {
+          'x': pos['x'],
+          'y': pos['y'],
+          'z': pos['z'],
+          'floor': floorValue,
+        },
+        'location.updatedAt':
+            FieldValue.serverTimestamp(),
+      });
 
       if (!mounted) return true;
       return true;
     } catch (e) {
-      debugPrint('❌ Failed to save location: $e');
+      debugPrint(
+        '❌ Failed to save location: $e',
+      );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to save location: $e')),
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Failed to save location: $e',
+            ),
+          ),
         );
       }
       // Don't rethrow — keep UI alive.
@@ -1065,79 +1518,160 @@ debugPrint('📌 SNAPPED Blender: $snappedBlender');
     }
   }
 
-
   Future<void> _loadVenueMaps() async {
     if (!mounted) return;
     setState(() => _mapsLoading = true);
 
     try {
       // Solitaire Place ID verified from your venue_page logic
-      const String solitaireId = 'ChIJcYTQDwDjLj4RZEiboV6gZzM';
+      const String solitaireId =
+          'ChIJcYTQDwDjLj4RZEiboV6gZzM';
 
-      final doc = await FirebaseFirestore.instance
-          .collection('venues')
-          .doc(solitaireId)
-          .get(const GetOptions(source: Source.serverAndCache));
+      final doc =
+          await FirebaseFirestore
+              .instance
+              .collection('venues')
+              .doc(solitaireId)
+              .get(
+                const GetOptions(
+                  source: Source
+                      .serverAndCache,
+                ),
+              );
 
       final data = doc.data();
 
-      if (data != null && data['map'] is List) {
-        final maps = (data['map'] as List).cast<Map<String, dynamic>>();
+      if (data != null &&
+          data['map'] is List) {
+        final maps =
+            (data['map'] as List)
+                .cast<
+                  Map<String, dynamic>
+                >();
 
-        final convertedMaps = maps.map((m) {
+        final convertedMaps = maps.map((
+          m,
+        ) {
           return {
-            'F_number': (m['F_number'] ?? '').toString(),
-            'floorNumber': (m['floorNumber'] ?? '').toString(),
-            'mapURL': (m['mapURL'] ?? '').toString(),
+            'F_number':
+                (m['F_number'] ?? '')
+                    .toString(),
+            'floorNumber':
+                (m['floorNumber'] ?? '')
+                    .toString(),
+            'mapURL':
+                (m['mapURL'] ?? '')
+                    .toString(),
           };
         }).toList();
 
         if (mounted) {
           setState(() {
             _venueMaps = convertedMaps;
-            if (convertedMaps.isNotEmpty) {
-              _currentFloorURL = convertedMaps.first['mapURL'] ?? '';
+            if (convertedMaps
+                .isNotEmpty) {
+              _currentFloorURL =
+                  convertedMaps
+                      .first['mapURL'] ??
+                  '';
 
               // If we already loaded a saved floor, prefer that.
-              if (_pickedFloorLabel.isNotEmpty) {
-                final match = convertedMaps.firstWhere(
-                  (m) => (m['floorNumber'] ?? '') == _pickedFloorLabel,
-                  orElse: () => const {'mapURL': ''},
-                );
-                final url = match['mapURL'] ?? '';
-                if (url.isNotEmpty) _currentFloorURL = url;
+              // If we already loaded a saved floor, prefer that.
+              // IMPORTANT: _pickedFloorLabel might be "0"/"1" from Unity (F_number), not "GF"/"F1".
+              if (_pickedFloorLabel
+                  .isNotEmpty) {
+                Map<String, String>
+                match;
+
+                // 1) Try match by F_number ("0","1"...)
+                match = convertedMaps
+                    .firstWhere(
+                      (m) =>
+                          (m['F_number'] ??
+                              '') ==
+                          _pickedFloorLabel,
+                      orElse: () =>
+                          const {
+                            'mapURL':
+                                '',
+                          },
+                    );
+
+                // 2) Fallback: match by floorNumber ("GF","F1"...)
+                if ((match['mapURL'] ??
+                        '')
+                    .isEmpty) {
+                  match = convertedMaps
+                      .firstWhere(
+                        (m) =>
+                            (m['floorNumber'] ??
+                                '') ==
+                            _pickedFloorLabel,
+                        orElse: () =>
+                            const {
+                              'mapURL':
+                                  '',
+                            },
+                      );
+                }
+
+                final url =
+                    match['mapURL'] ??
+                    '';
+                if (url.isNotEmpty) {
+                  _currentFloorURL =
+                      url;
+                }
               }
             }
           });
         }
       }
     } catch (e) {
-      debugPrint("Error loading maps in dialog: $e");
+      debugPrint(
+        "Error loading maps in dialog: $e",
+      );
     } finally {
-      if (mounted) setState(() => _mapsLoading = false);
+      if (mounted)
+        setState(
+          () => _mapsLoading = false,
+        );
     }
   }
 
-
   @override
   Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(context).size.height;
+    final screenHeight = MediaQuery.of(
+      context,
+    ).size.height;
 
-    final pinPlaced = _pickedPosGltf != null;
-    
+    final pinPlaced =
+        _pickedPosGltf != null;
+
     // Match venue_page ordering: higher floors first (F2, F1, ... , GF last)
-    final sortedMaps = List<Map<String, String>>.from(_venueMaps);
+    final sortedMaps =
+        List<Map<String, String>>.from(
+          _venueMaps,
+        );
 
     int floorRank(String s) {
       final f = s.trim().toUpperCase();
       if (f == 'GF') return 0;
-      if (f.startsWith('F')) return int.tryParse(f.substring(1)) ?? 0;
+      if (f.startsWith('F'))
+        return int.tryParse(
+              f.substring(1),
+            ) ??
+            0;
       return 0;
     }
 
     sortedMaps.sort((a, b) {
-      final ra = floorRank(a['floorNumber'] ?? '');
-      final rb = floorRank(b['floorNumber'] ?? '');
+      final ra = floorRank(
+        a['floorNumber'] ?? '',
+      );
+      final rb = floorRank(
+        b['floorNumber'] ?? '',
+      );
       return rb.compareTo(ra);
     });
 
@@ -1161,35 +1695,66 @@ debugPrint('📌 SNAPPED Blender: $snappedBlender');
             height: 4,
             decoration: BoxDecoration(
               color: Colors.grey[300],
-              borderRadius: BorderRadius.circular(2),
+              borderRadius:
+                  BorderRadius.circular(
+                    2,
+                  ),
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(10, 10, 20, 10),
+            padding:
+                const EdgeInsets.fromLTRB(
+                  10,
+                  10,
+                  20,
+                  10,
+                ),
             child: Row(
               children: [
                 IconButton(
-                  icon: const Icon(Icons.arrow_back, color: AppColors.kGreen),
-                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(
+                    Icons.arrow_back,
+                    color: AppColors
+                        .kGreen,
+                  ),
+                  onPressed: () =>
+                      Navigator.pop(
+                        context,
+                      ),
                 ),
                 Expanded(
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment:
+                        CrossAxisAlignment
+                            .start,
                     children: [
                       Text(
                         'Set Your Location',
                         style: TextStyle(
-                          fontSize: screenHeight < 700 ? 20 : 22,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.kGreen,
+                          fontSize:
+                              screenHeight <
+                                  700
+                              ? 20
+                              : 22,
+                          fontWeight:
+                              FontWeight
+                                  .w600,
+                          color: AppColors
+                              .kGreen,
                         ),
                       ),
-                      const SizedBox(height: 2),
+                      const SizedBox(
+                        height: 2,
+                      ),
                       Text(
                         pinPlaced
                             ? 'Location selected. Tap again to move it.'
                             : 'Tap on the 3D map to place your pin.',
-                        style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors
+                              .grey[600],
+                        ),
                       ),
                     ],
                   ),
@@ -1199,37 +1764,61 @@ debugPrint('📌 SNAPPED Blender: $snappedBlender');
           ),
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+              padding:
+                  const EdgeInsets.symmetric(
+                    horizontal: 16,
+                  ),
               child: _buildMapContent(),
             ),
           ),
           Padding(
-            padding: EdgeInsets.fromLTRB(
-              20,
-              16,
-              20,
-              MediaQuery.of(context).padding.bottom + 20,
-            ),
+            padding:
+                EdgeInsets.fromLTRB(
+                  20,
+                  16,
+                  20,
+                  MediaQuery.of(
+                        context,
+                      ).padding.bottom +
+                      20,
+                ),
             child: PrimaryButton(
               text: 'Confirm Location',
               enabled: pinPlaced,
               onPressed: pinPlaced
                   ? () async {
-                      final ok = await _saveBlenderPosition();
+                      final ok =
+                          await _saveBlenderPosition();
                       if (!ok) return;
-                      if (!mounted) return;
+                      if (!mounted)
+                        return;
 
-                      Navigator.pop(context);
+                      Navigator.pop(
+                        context,
+                      );
                       Navigator.pushReplacement(
                         context,
                         MaterialPageRoute(
                           builder: (_) => PathOverviewScreen(
-                            shopName: widget.shopName,
-                            shopId: widget.shopId,
-                            startingMethod: 'pin',
-                            destinationPoiMaterial: widget.destinationPoiMaterial,
-                            floorSrc: widget.floorSrc.isNotEmpty ? widget.floorSrc : _currentFloorURL,
-                            destinationHitGltf: widget.destinationHitGltf,
+                            shopName: widget
+                                .shopName,
+                            shopId: widget
+                                .shopId,
+                            startingMethod:
+                                'pin',
+                            destinationPoiMaterial:
+                                widget
+                                    .destinationPoiMaterial,
+                            floorSrc:
+                                widget
+                                    .floorSrc
+                                    .isNotEmpty
+                                ? widget
+                                      .floorSrc
+                                : _currentFloorURL,
+                            destinationHitGltf:
+                                widget
+                                    .destinationHitGltf,
                           ),
                         ),
                       );
@@ -1248,35 +1837,51 @@ debugPrint('📌 SNAPPED Blender: $snappedBlender');
     }
 
     if (_venueMaps.isEmpty) {
-      return const Center(child: Text("Map missing for Solitaire."));
+      return const Center(
+        child: Text(
+          "Map missing for Solitaire.",
+        ),
+      );
     }
 
-    final floorLabel = _floorLabelForUrl(_currentFloorURL);
+    final floorLabel =
+        _floorLabelForUrl(
+          _currentFloorURL,
+        );
     final pos = _pickedPosGltf;
     final bpos = _pickedPosBlender;
-
 
     return Container(
       decoration: BoxDecoration(
         color: Colors.grey.shade50,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade200),
+        borderRadius:
+            BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.grey.shade200,
+        ),
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius:
+            BorderRadius.circular(16),
         child: Stack(
           children: [
             // 3D Model Viewer (with JS picking)
             ModelViewer(
-              key: ValueKey(_currentFloorURL),
+              key: ValueKey(
+                _currentFloorURL,
+              ),
               src: _currentFloorURL,
               alt: "Solitaire 3D Map",
               cameraControls: true,
               autoRotate: false,
-              backgroundColor: Colors.transparent,
-              cameraOrbit: "0deg 65deg 2.5m",
-              minCameraOrbit: "auto 0deg auto",
-              maxCameraOrbit: "auto 90deg auto",
+              backgroundColor:
+                  Colors.transparent,
+              cameraOrbit:
+                  "0deg 65deg 2.5m",
+              minCameraOrbit:
+                  "auto 0deg auto",
+              maxCameraOrbit:
+                  "auto 90deg auto",
               cameraTarget: "0m 0m 0m",
               relatedJs: _pinPickerJs,
               onWebViewCreated: (controller) {
@@ -1286,37 +1891,67 @@ debugPrint('📌 SNAPPED Blender: $snappedBlender');
                 _jsBridgeReady = false;
 
                 // If we already have a saved pin, cache it and push once JS becomes ready
-                _pendingPinToSend = _pickedPosGltf;
+                _pendingPinToSend =
+                    _pickedPosGltf;
               },
               javascriptChannels: {
                 JavascriptChannel(
                   'JS_TEST_CHANNEL',
-                  onMessageReceived: (JavaScriptMessage message) {
-                    debugPrint("✅ JS_TEST_CHANNEL: ${message.message}");
+                  onMessageReceived:
+                      (
+                        JavaScriptMessage
+                        message,
+                      ) {
+                        debugPrint(
+                          "✅ JS_TEST_CHANNEL: ${message.message}",
+                        );
 
-                    // As soon as JS starts running, our window.setUserPinFromFlutter exists.
-                    if (!_jsBridgeReady &&
-                        message.message.contains('PinPicker JS alive')) {
-                      _jsBridgeReady = true;
-                      // Restrict taps to Allowed_floor during Set Location step
-                      _webCtrl?.runJavaScript("window.setLocationModeFromFlutter(true);");
-                      _webCtrl?.runJavaScript("window.setAllowedFloorMaterialFromFlutter('Allowed_floor');");
+                        // As soon as JS starts running, our window.setUserPinFromFlutter exists.
+                        if (!_jsBridgeReady &&
+                            message
+                                .message
+                                .contains(
+                                  'PinPicker JS alive',
+                                )) {
+                          _jsBridgeReady =
+                              true;
+                          // Restrict taps to Allowed_floor during Set Location step
+                          _webCtrl?.runJavaScript(
+                            "window.setLocationModeFromFlutter(true);",
+                          );
+                          _webCtrl?.runJavaScript(
+                            "window.setAllowedFloorMaterialFromFlutter('Allowed_floor');",
+                          );
 
-                      final p = _pendingPinToSend;
-                      if (p != null) {
-                        _pendingPinToSend = null;
-                        _pushUserPinToJs(p);
-                      }
-                      _pushDestinationHighlightToJs();
-                    }
-                  },
+                          final p =
+                              _pendingPinToSend;
+                          if (p !=
+                              null) {
+                            _pendingPinToSend =
+                                null;
+                            _pushUserPinToJs(
+                              p,
+                            );
+                          }
+                          _pushDestinationHighlightToJs();
+                        }
+                      },
                 ),
                 JavascriptChannel(
                   'POI_CHANNEL',
-                  onMessageReceived: (JavaScriptMessage message) {
-                    debugPrint("🟦 POI_CHANNEL: ${message.message}");
-                    _handleJsMessage(message.message);
-                  },
+                  onMessageReceived:
+                      (
+                        JavaScriptMessage
+                        message,
+                      ) {
+                        debugPrint(
+                          "🟦 POI_CHANNEL: ${message.message}",
+                        );
+                        _handleJsMessage(
+                          message
+                              .message,
+                        );
+                      },
                 ),
               },
             ),
@@ -1326,41 +1961,94 @@ debugPrint('📌 SNAPPED Blender: $snappedBlender');
               top: 12,
               right: 12,
               child: Container(
-                padding: const EdgeInsets.all(8),
+                padding:
+                    const EdgeInsets.all(
+                      8,
+                    ),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.9),
-                  borderRadius: BorderRadius.circular(8),
+                  color: Colors.white
+                      .withOpacity(0.9),
+                  borderRadius:
+                      BorderRadius.circular(
+                        8,
+                      ),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
+                      color: Colors
+                          .black
+                          .withOpacity(
+                            0.1,
+                          ),
                       blurRadius: 4,
                     ),
                   ],
                 ),
                 child: Column(
-                  children: (List<Map<String, String>>.from(_venueMaps)
-      ..sort((a, b) {
-        int rank(String s) {
-          final f = s.trim().toUpperCase();
-          if (f == 'GF') return 0;
-          if (f.startsWith('F')) return int.tryParse(f.substring(1)) ?? 0;
-          return 0;
-        }
+                  children:
+                      (List<Map<String, String>>.from(
+                            _venueMaps,
+                          )..sort((
+                            a,
+                            b,
+                          ) {
+                            int rank(
+                              String s,
+                            ) {
+                              final f = s
+                                  .trim()
+                                  .toUpperCase();
+                              if (f ==
+                                  'GF')
+                                return 0;
+                              if (f
+                                  .startsWith(
+                                    'F',
+                                  ))
+                                return int.tryParse(
+                                      f.substring(
+                                        1,
+                                      ),
+                                    ) ??
+                                    0;
+                              return 0;
+                            }
 
-        final ra = rank(a['floorNumber'] ?? '');
-        final rb = rank(b['floorNumber'] ?? '');
-        return rb.compareTo(ra); // higher floors first
-      }))
-    .map((map) {
-
-                    final label = map['floorNumber'] ?? '';
-                    final url = map['mapURL'] ?? '';
-                    final isSelected = _currentFloorURL == url;
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: _buildFloorButton(label, url, isSelected),
-                    );
-                  }).toList(),
+                            final ra = rank(
+                              a['floorNumber'] ??
+                                  '',
+                            );
+                            final rb = rank(
+                              b['floorNumber'] ??
+                                  '',
+                            );
+                            return rb
+                                .compareTo(
+                                  ra,
+                                ); // higher floors first
+                          }))
+                          .map((map) {
+                            final label =
+                                map['floorNumber'] ??
+                                '';
+                            final url =
+                                map['mapURL'] ??
+                                '';
+                            final isSelected =
+                                _currentFloorURL ==
+                                url;
+                            return Padding(
+                              padding: const EdgeInsets.only(
+                                bottom:
+                                    8,
+                              ),
+                              child: _buildFloorButton(
+                                label,
+                                url,
+                                isSelected,
+                              ),
+                            );
+                          })
+                          .toList(),
                 ),
               ),
             ),
@@ -1371,20 +2059,38 @@ debugPrint('📌 SNAPPED Blender: $snappedBlender');
                 left: 12,
                 bottom: 12,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 8,
+                      ),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.92),
-                    borderRadius: BorderRadius.circular(10),
+                    color: Colors.white
+                        .withOpacity(
+                          0.92,
+                        ),
+                    borderRadius:
+                        BorderRadius.circular(
+                          10,
+                        ),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.08),
+                        color: Colors
+                            .black
+                            .withOpacity(
+                              0.08,
+                            ),
                         blurRadius: 6,
                       ),
                     ],
                   ),
                   child: Text(
                     'Floor: $floorLabel\nx: ${pos['x']!.toStringAsFixed(3)}  y: ${pos['y']!.toStringAsFixed(3)}  z: ${pos['z']!.toStringAsFixed(3)}',
-                    style: const TextStyle(fontSize: 12, height: 1.2),
+                    style:
+                        const TextStyle(
+                          fontSize: 12,
+                          height: 1.2,
+                        ),
                   ),
                 ),
               ),
@@ -1394,33 +2100,51 @@ debugPrint('📌 SNAPPED Blender: $snappedBlender');
     );
   }
 
-  Widget _buildFloorButton(String label, String url, bool isSelected) {
+  Widget _buildFloorButton(
+    String label,
+    String url,
+    bool isSelected,
+  ) {
     return SizedBox(
       width: 44,
       height: 40,
       child: ElevatedButton(
         style: ElevatedButton.styleFrom(
-          backgroundColor: isSelected ? AppColors.kGreen : Colors.white,
-          foregroundColor: isSelected ? Colors.white : AppColors.kGreen,
+          backgroundColor: isSelected
+              ? AppColors.kGreen
+              : Colors.white,
+          foregroundColor: isSelected
+              ? Colors.white
+              : AppColors.kGreen,
           padding: EdgeInsets.zero,
           elevation: isSelected ? 2 : 0,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius:
+                BorderRadius.circular(
+                  8,
+                ),
             side: BorderSide(
-              color: isSelected ? AppColors.kGreen : Colors.grey.shade300,
+              color: isSelected
+                  ? AppColors.kGreen
+                  : Colors
+                        .grey
+                        .shade300,
             ),
           ),
         ),
         onPressed: () => setState(() {
           _currentFloorURL = url;
           _pickedPosGltf = null;
-_pickedPosBlender = null;
+          _pickedPosBlender = null;
 
           _pickedFloorLabel = '';
         }),
         child: Text(
           label,
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+          ),
         ),
       ),
     );
@@ -1431,14 +2155,14 @@ _pickedPosBlender = null;
 // 4. PATH OVERVIEW SCREEN - FIXED MAP VISIBILITY & CONSISTENT FLOOR SELECTORS
 // ============================================================================
 
-
 // ============================================================================
 // 4. PATH OVERVIEW SCREEN - FIXED MAP VISIBILITY & CONSISTENT FLOOR SELECTORS
 // ============================================================================
 
 /// Backwards-compatible name used by VenuePage.
 /// This screen lets the user pick a start location (pin) on the map.
-class PinStartLocationScreen extends SetYourLocationDialog {
+class PinStartLocationScreen
+    extends SetYourLocationDialog {
   const PinStartLocationScreen({
     super.key,
     required String shopName,
@@ -1450,13 +2174,15 @@ class PinStartLocationScreen extends SetYourLocationDialog {
 
     String destinationPoiMaterial = '',
   }) : super(
-          shopName: shopName,
-          shopId: shopId,
-          destinationPoiMaterial: destinationPoiMaterial,
-        );
+         shopName: shopName,
+         shopId: shopId,
+         destinationPoiMaterial:
+             destinationPoiMaterial,
+       );
 }
 
-class PathOverviewScreen extends StatefulWidget {
+class PathOverviewScreen
+    extends StatefulWidget {
   final String shopName;
   final String shopId;
   final String startingMethod;
@@ -1468,7 +2194,8 @@ class PathOverviewScreen extends StatefulWidget {
   final String floorSrc;
 
   /// Destination hit point in glTF coords from map (optional)
-  final Map<String, double>? destinationHitGltf;
+  final Map<String, double>?
+  destinationHitGltf;
 
   const PathOverviewScreen({
     super.key,
@@ -1481,12 +2208,16 @@ class PathOverviewScreen extends StatefulWidget {
   });
 
   @override
-  State<PathOverviewScreen> createState() => _PathOverviewScreenState();
+  State<PathOverviewScreen>
+  createState() =>
+      _PathOverviewScreenState();
 }
 
-class _PathOverviewScreenState extends State<PathOverviewScreen> {
+class _PathOverviewScreenState
+    extends State<PathOverviewScreen> {
   String _currentFloor = '';
-  List<Map<String, String>> _venueMaps = [];
+  List<Map<String, String>> _venueMaps =
+      [];
   bool _mapsLoading = false;
   String _selectedPreference = 'stairs';
   String _originFloorLabel = 'GF';
@@ -1496,61 +2227,89 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
 
   WebViewController? _webCtrl;
   bool _jsReady = false;
-  Map<String, double>? _pendingUserPinGltf;
+  Map<String, double>?
+  _pendingUserPinGltf;
   String? _pendingPoiToHighlight;
 
   // ---- Navmesh & path state ----
   NavMesh? _navmeshF1;
   Map<String, double>? _userPosBlender;
   Map<String, double>? _destPosBlender;
-  Map<String, double>? _userSnappedBlender;
-  Map<String, double>? _destSnappedBlender;
+  Map<String, double>?
+  _userSnappedBlender;
+  Map<String, double>?
+  _destSnappedBlender;
 
-  List<Map<String, double>> _pathPointsGltf = [];
+  List<Map<String, double>>
+  _pathPointsGltf = [];
   bool _pathPushed = false;
 
-
-
   // ---- Flutter -> JS helpers (Path Overview) ----
-  Future<void> _pushUserPinToJsPath(Map<String, double> gltf) async {
+  Future<void> _pushUserPinToJsPath(
+    Map<String, double> gltf,
+  ) async {
     final c = _webCtrl;
     if (c == null || !_jsReady) return;
 
     final x = gltf['x'];
     final y = gltf['y'];
     final z = gltf['z'];
-    if (x == null || y == null || z == null) return;
+    if (x == null ||
+        y == null ||
+        z == null)
+      return;
 
     try {
       // webview_flutter (new): runJavaScript
-      await c.runJavaScript('window.setUserPinFromFlutter($x,$y,$z);');
+      await c.runJavaScript(
+        'window.setUserPinFromFlutter($x,$y,$z);',
+      );
     } catch (e) {
-      debugPrint('pushUserPinToJsPath failed: $e');
+      debugPrint(
+        'pushUserPinToJsPath failed: $e',
+      );
     }
   }
 
-  Future<void> _pushDestinationHighlightToJsPath() async {
+  Future<void>
+  _pushDestinationHighlightToJsPath() async {
     final c = _webCtrl;
     final name = _pendingPoiToHighlight;
-    if (c == null || !_jsReady || name == null || name.trim().isEmpty) return;
+    if (c == null ||
+        !_jsReady ||
+        name == null ||
+        name.trim().isEmpty)
+      return;
 
-    final safe = name.replaceAll('\\', '\\\\').replaceAll("'", "\\'");
+    final safe = name
+        .replaceAll('\\', '\\\\')
+        .replaceAll("'", "\\'");
     try {
-      await c.runJavaScript("window.highlightPoiFromFlutter('$safe');");
+      await c.runJavaScript(
+        "window.highlightPoiFromFlutter('$safe');",
+      );
     } catch (e) {
-      debugPrint('pushDestinationHighlightToJsPath failed: $e');
+      debugPrint(
+        'pushDestinationHighlightToJsPath failed: $e',
+      );
     }
   }
 
   // ---- Coordinate conversions ----
-  static Map<String, double> _gltfToBlender(Map<String, double> g) {
+  static Map<String, double>
+  _gltfToBlender(
+    Map<String, double> g,
+  ) {
     final xg = g['x'] ?? 0.0;
     final yg = g['y'] ?? 0.0;
     final zg = g['z'] ?? 0.0;
     return {'x': xg, 'y': -zg, 'z': yg};
   }
 
-  static Map<String, double> _blenderToGltf(Map<String, double> b) {
+  static Map<String, double>
+  _blenderToGltf(
+    Map<String, double> b,
+  ) {
     final xb = b['x'] ?? 0.0;
     final yb = b['y'] ?? 0.0;
     final zb = b['z'] ?? 0.0;
@@ -1559,17 +2318,27 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
 
   Future<void> _loadNavmeshF1() async {
     try {
-      _navmeshF1 = await NavMesh.loadAsset('assets/nav_cor/navmesh_F1.json');
-      debugPrint('✅ Navmesh loaded: v=${_navmeshF1!.v.length} t=${_navmeshF1!.t.length}');
+      _navmeshF1 = await NavMesh.loadAsset(
+        'assets/nav_cor/navmesh_F1.json',
+      );
+      debugPrint(
+        '✅ Navmesh loaded: v=${_navmeshF1!.v.length} t=${_navmeshF1!.t.length}',
+      );
       _maybeComputeAndPushPath();
     } catch (e) {
-      debugPrint('❌ Failed to load navmesh_F1.json: $e');
+      debugPrint(
+        '❌ Failed to load navmesh_F1.json: $e',
+      );
     }
   }
 
   // --- Path cleanup helpers (makes breadcrumbs look more centered/smooth) ---
 
-  List<List<double>> _smoothAndResamplePath(List<List<double>> path, NavMesh nm) {
+  List<List<double>>
+  _smoothAndResamplePath(
+    List<List<double>> path,
+    NavMesh nm,
+  ) {
     var pts = path;
 
     // 1) Chaikin corner-cutting (smooths jagged A* polylines).
@@ -1579,17 +2348,29 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     //pts = pts.map((p) => nm.snapPointXY(p)).toList();
 
     // 3) Resample: keep one point every ~0.25 units (tune for your scale).
-    pts = _resampleByDistance(pts, step: 0.06);
+    pts = _resampleByDistance(
+      pts,
+      step: 0.06,
+    );
 
     // 4) Cap hotspots to avoid WebView overload.
     const maxPts = 180;
     if (pts.length > maxPts) {
-      final stride = (pts.length / maxPts).ceil();
+      final stride =
+          (pts.length / maxPts).ceil();
       final reduced = <List<double>>[];
-      for (var i = 0; i < pts.length; i += stride) {
+      for (
+        var i = 0;
+        i < pts.length;
+        i += stride
+      ) {
         reduced.add(pts[i]);
       }
-      if (reduced.isEmpty || !_samePoint(reduced.last, pts.last)) {
+      if (reduced.isEmpty ||
+          !_samePoint(
+            reduced.last,
+            pts.last,
+          )) {
         reduced.add(pts.last);
       }
       pts = reduced;
@@ -1598,14 +2379,25 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     return pts;
   }
 
-  List<List<double>> _chaikinSmooth(List<List<double>> pts, {int iterations = 2}) {
+  List<List<double>> _chaikinSmooth(
+    List<List<double>> pts, {
+    int iterations = 2,
+  }) {
     var out = pts;
-    for (var it = 0; it < iterations; it++) {
+    for (
+      var it = 0;
+      it < iterations;
+      it++
+    ) {
       if (out.length < 3) return out;
       final next = <List<double>>[];
       next.add(out.first);
 
-      for (var i = 0; i < out.length - 1; i++) {
+      for (
+        var i = 0;
+        i < out.length - 1;
+        i++
+      ) {
         final p0 = out[i];
         final p1 = out[i + 1];
 
@@ -1633,13 +2425,23 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     return out;
   }
 
-  List<List<double>> _resampleByDistance(List<List<double>> pts, {required double step}) {
+  List<List<double>>
+  _resampleByDistance(
+    List<List<double>> pts, {
+    required double step,
+  }) {
     if (pts.length < 2) return pts;
 
-    final out = <List<double>>[pts.first];
+    final out = <List<double>>[
+      pts.first,
+    ];
     var acc = 0.0;
 
-    for (var i = 1; i < pts.length; i++) {
+    for (
+      var i = 1;
+      i < pts.length;
+      i++
+    ) {
       var prev = out.last;
       var cur = pts[i];
 
@@ -1648,9 +2450,15 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
 
       while (acc + segLen >= step) {
         final t = (step - acc) / segLen;
-        final nx = prev[0] + (cur[0] - prev[0]) * t;
-        final ny = prev[1] + (cur[1] - prev[1]) * t;
-        final nz = prev[2] + (cur[2] - prev[2]) * t;
+        final nx =
+            prev[0] +
+            (cur[0] - prev[0]) * t;
+        final ny =
+            prev[1] +
+            (cur[1] - prev[1]) * t;
+        final nz =
+            prev[2] +
+            (cur[2] - prev[2]) * t;
         final np = <double>[nx, ny, nz];
         out.add(np);
         prev = np;
@@ -1662,104 +2470,147 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       acc += segLen;
     }
 
-    if (!_samePoint(out.last, pts.last)) {
+    if (!_samePoint(
+      out.last,
+      pts.last,
+    )) {
       out.add(pts.last);
     }
     return out;
   }
 
-  List<List<double>> _pullPathTowardCenter(
-  List<List<double>> pts, {
-  double strength = 0.45,
-}) {
-  // NOTE:
-  // This is a SAFE placeholder that keeps types correct.
-  // It returns the same points until we wire it to triangle-centroid logic.
-  // So it compiles and you can continue working.
+  List<List<double>>
+  _pullPathTowardCenter(
+    List<List<double>> pts, {
+    double strength = 0.45,
+  }) {
+    // NOTE:
+    // This is a SAFE placeholder that keeps types correct.
+    // It returns the same points until we wire it to triangle-centroid logic.
+    // So it compiles and you can continue working.
 
-  // You can still do a tiny smoothing here if you want:
-  // return _chaikinSmooth3D(pts, iterations: 1);
+    // You can still do a tiny smoothing here if you want:
+    // return _chaikinSmooth3D(pts, iterations: 1);
 
-  return pts;
-}
+    return pts;
+  }
 
   bool _pointInTri2D(
-  double px,
-  double py,
-  double ax,
-  double ay,
-  double bx,
-  double by,
-  double cx,
-  double cy,
-) {
-  // Barycentric technique
-  final v0x = cx - ax;
-  final v0y = cy - ay;
-  final v1x = bx - ax;
-  final v1y = by - ay;
-  final v2x = px - ax;
-  final v2y = py - ay;
+    double px,
+    double py,
+    double ax,
+    double ay,
+    double bx,
+    double by,
+    double cx,
+    double cy,
+  ) {
+    // Barycentric technique
+    final v0x = cx - ax;
+    final v0y = cy - ay;
+    final v1x = bx - ax;
+    final v1y = by - ay;
+    final v2x = px - ax;
+    final v2y = py - ay;
 
-  final dot00 = v0x * v0x + v0y * v0y;
-  final dot01 = v0x * v1x + v0y * v1y;
-  final dot02 = v0x * v2x + v0y * v2y;
-  final dot11 = v1x * v1x + v1y * v1y;
-  final dot12 = v1x * v2x + v1y * v2y;
+    final dot00 = v0x * v0x + v0y * v0y;
+    final dot01 = v0x * v1x + v0y * v1y;
+    final dot02 = v0x * v2x + v0y * v2y;
+    final dot11 = v1x * v1x + v1y * v1y;
+    final dot12 = v1x * v2x + v1y * v2y;
 
-  final denom = (dot00 * dot11 - dot01 * dot01);
-  if (denom.abs() < 1e-12) return false;
+    final denom =
+        (dot00 * dot11 - dot01 * dot01);
+    if (denom.abs() < 1e-12)
+      return false;
 
-  final inv = 1.0 / denom;
-  final u = (dot11 * dot02 - dot01 * dot12) * inv;
-  final v = (dot00 * dot12 - dot01 * dot02) * inv;
+    final inv = 1.0 / denom;
+    final u =
+        (dot11 * dot02 -
+            dot01 * dot12) *
+        inv;
+    final v =
+        (dot00 * dot12 -
+            dot01 * dot02) *
+        inv;
 
-  return (u >= -1e-9) && (v >= -1e-9) && (u + v <= 1.0 + 1e-9);
-}
-
-int? _findContainingTriXY(NavMesh nm, double x, double y) {
-  // O(numTriangles) but OK for shortcut sampling.
-  for (int ti = 0; ti < nm.t.length; ti++) {
-    final tri = nm.t[ti];
-    final a = nm.v[tri[0]];
-    final b = nm.v[tri[1]];
-    final c = nm.v[tri[2]];
-
-    if (_pointInTri2D(
-      x, y,
-      a[0], a[1],
-      b[0], b[1],
-      c[0], c[1],
-    )) {
-      return ti;
-    }
+    return (u >= -1e-9) &&
+        (v >= -1e-9) &&
+        (u + v <= 1.0 + 1e-9);
   }
-  return null;
-}
 
-  List<List<double>> _shortcutPathBySampling(NavMesh nm, List<List<double>> pts) {
+  int? _findContainingTriXY(
+    NavMesh nm,
+    double x,
+    double y,
+  ) {
+    // O(numTriangles) but OK for shortcut sampling.
+    for (
+      int ti = 0;
+      ti < nm.t.length;
+      ti++
+    ) {
+      final tri = nm.t[ti];
+      final a = nm.v[tri[0]];
+      final b = nm.v[tri[1]];
+      final c = nm.v[tri[2]];
+
+      if (_pointInTri2D(
+        x,
+        y,
+        a[0],
+        a[1],
+        b[0],
+        b[1],
+        c[0],
+        c[1],
+      )) {
+        return ti;
+      }
+    }
+    return null;
+  }
+
+  List<List<double>>
+  _shortcutPathBySampling(
+    NavMesh nm,
+    List<List<double>> pts,
+  ) {
     if (pts.length <= 2) return pts;
 
-    const double sampleStep = 0.06; // smaller = stricter
+    const double sampleStep =
+        0.06; // smaller = stricter
 
-    bool segmentWalkable(List<double> a, List<double> b) {
+    bool segmentWalkable(
+      List<double> a,
+      List<double> b,
+    ) {
       final ax = a[0], ay = a[1];
       final bx = b[0], by = b[1];
       final dx = bx - ax;
       final dy = by - ay;
-      final len = math.sqrt(dx * dx + dy * dy);
+      final len = math.sqrt(
+        dx * dx + dy * dy,
+      );
       if (len < 1e-6) return true;
 
-      final steps = math.max(2, (len / sampleStep).ceil());
+      final steps = math.max(
+        2,
+        (len / sampleStep).ceil(),
+      );
       for (int i = 0; i <= steps; i++) {
         final t = i / steps;
         final x = ax + dx * t;
         final y = ay + dy * t;
 
-              // Strict: the sample point must actually be inside the navmesh surface
-      final triId = _findContainingTriXY(nm, x, y);
-      if (triId == null) return false;
-
+        // Strict: the sample point must actually be inside the navmesh surface
+        final triId =
+            _findContainingTriXY(
+              nm,
+              x,
+              y,
+            );
+        if (triId == null) return false;
       }
       return true;
     }
@@ -1771,8 +2622,15 @@ int? _findContainingTriXY(NavMesh nm, double x, double y) {
     while (i < pts.length - 1) {
       int best = i + 1;
 
-      for (int j = pts.length - 1; j > i + 1; j--) {
-        if (segmentWalkable(pts[i], pts[j])) {
+      for (
+        int j = pts.length - 1;
+        j > i + 1;
+        j--
+      ) {
+        if (segmentWalkable(
+          pts[i],
+          pts[j],
+        )) {
           best = j;
           break;
         }
@@ -1785,14 +2643,22 @@ int? _findContainingTriXY(NavMesh nm, double x, double y) {
     return out;
   }
 
-  double _distXY(List<double> a, List<double> b) {
+  double _distXY(
+    List<double> a,
+    List<double> b,
+  ) {
     final dx = a[0] - b[0];
     final dy = a[1] - b[1];
     return math.sqrt(dx * dx + dy * dy);
   }
 
-  bool _samePoint(List<double> a, List<double> b) {
-    return (a[0] - b[0]).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-6 && (a[2] - b[2]).abs() < 1e-6;
+  bool _samePoint(
+    List<double> a,
+    List<double> b,
+  ) {
+    return (a[0] - b[0]).abs() < 1e-6 &&
+        (a[1] - b[1]).abs() < 1e-6 &&
+        (a[2] - b[2]).abs() < 1e-6;
   }
 
   Future<void> _pushPathToJs() async {
@@ -1801,14 +2667,18 @@ int? _findContainingTriXY(NavMesh nm, double x, double y) {
     if (_pathPointsGltf.isEmpty) return;
 
     // Limit hotspots to avoid perf issues.
-    final pts = _pathPointsGltf ;
+    final pts = _pathPointsGltf;
 
     final jsArg = jsonEncode(pts);
     try {
-      await c.runJavaScript('window.setPathFromFlutter($jsArg);');
+      await c.runJavaScript(
+        'window.setPathFromFlutter($jsArg);',
+      );
       _pathPushed = true;
     } catch (e) {
-      debugPrint('pushPathToJs failed: $e');
+      debugPrint(
+        'pushPathToJs failed: $e',
+      );
     }
   }
 
@@ -1822,47 +2692,98 @@ int? _findContainingTriXY(NavMesh nm, double x, double y) {
     if (u == null || d == null) return;
 
     // Snap both endpoints to navmesh in Blender XY.
-    final uSnap = nm.snapPointXY([u['x']!, u['y']!, u['z']!]);
-    final dSnap = nm.snapPointXY([d['x']!, d['y']!, d['z']!]);
-    
-    _userSnappedBlender = {'x': uSnap[0], 'y': uSnap[1], 'z': uSnap[2]};
-    _destSnappedBlender = {'x': dSnap[0], 'y': dSnap[1], 'z': dSnap[2]};
+    final uSnap = nm.snapPointXY([
+      u['x']!,
+      u['y']!,
+      u['z']!,
+    ]);
+    final dSnap = nm.snapPointXY([
+      d['x']!,
+      d['y']!,
+      d['z']!,
+    ]);
 
-        // ---- DEBUG: raw vs snapped (Blender space) ----
-    final uRaw = [u['x']!, u['y']!, u['z']!];
-    final dRaw = [d['x']!, d['y']!, d['z']!];
+    _userSnappedBlender = {
+      'x': uSnap[0],
+      'y': uSnap[1],
+      'z': uSnap[2],
+    };
+    _destSnappedBlender = {
+      'x': dSnap[0],
+      'y': dSnap[1],
+      'z': dSnap[2],
+    };
+
+    // ---- DEBUG: raw vs snapped (Blender space) ----
+    final uRaw = [
+      u['x']!,
+      u['y']!,
+      u['z']!,
+    ];
+    final dRaw = [
+      d['x']!,
+      d['y']!,
+      d['z']!,
+    ];
 
     final uDx = uRaw[0] - uSnap[0];
     final uDy = uRaw[1] - uSnap[1];
-    final uDist = math.sqrt(uDx * uDx + uDy * uDy);
+    final uDist = math.sqrt(
+      uDx * uDx + uDy * uDy,
+    );
 
     final dDx = dRaw[0] - dSnap[0];
     final dDy = dRaw[1] - dSnap[1];
-    final dDist = math.sqrt(dDx * dDx + dDy * dDy);
-
-    debugPrint("🟩 startRawB=$uRaw  startSnapB=$uSnap  Δxy=$uDist");
-    debugPrint("🟥 destRawB=$dRaw   destSnapB=$dSnap   Δxy=$dDist");
-
-    // Compute path as Blender polyline.
-    var pathB = nm.findPathFunnelBlenderXY(
-      start: uSnap,
-      goal: dSnap,
+    final dDist = math.sqrt(
+      dDx * dDx + dDy * dDy,
     );
 
-    pathB = _pullPathTowardCenter(pathB, strength: 0.45);
-    pathB = _shortcutPathBySampling(nm, pathB);
+    debugPrint(
+      "🟩 startRawB=$uRaw  startSnapB=$uSnap  Δxy=$uDist",
+    );
+    debugPrint(
+      "🟥 destRawB=$dRaw   destSnapB=$dSnap   Δxy=$dDist",
+    );
+
+    // Compute path as Blender polyline.
+    var pathB = nm
+        .findPathFunnelBlenderXY(
+          start: uSnap,
+          goal: dSnap,
+        );
+
+    pathB = _pullPathTowardCenter(
+      pathB,
+      strength: 0.45,
+    );
+    pathB = _shortcutPathBySampling(
+      nm,
+      pathB,
+    );
 
     if (pathB.isEmpty) {
-      debugPrint('⚠️ Navmesh returned empty path');
+      debugPrint(
+        '⚠️ Navmesh returned empty path',
+      );
       return;
     }
 
     // Smooth & resample so the dots look centered and not “hugging” corners.
-    final _prettyB = _smoothAndResamplePath(pathB, nm);
+    final _prettyB =
+        _smoothAndResamplePath(
+          pathB,
+          nm,
+        );
 
     // Convert polyline points to glTF for model-viewer.
     _pathPointsGltf = _prettyB
-        .map((p) => _blenderToGltf({'x': p[0], 'y': p[1], 'z': p[2]}))
+        .map(
+          (p) => _blenderToGltf({
+            'x': p[0],
+            'y': p[1],
+            'z': p[2],
+          }),
+        )
         .toList();
 
     // If JS is ready, push immediately.
@@ -1871,13 +2792,14 @@ int? _findContainingTriXY(NavMesh nm, double x, double y) {
     }
   }
 
-  
   void _handlePoiMessage(String raw) {
     // Path viewer JS posts a small set of messages. We keep this tolerant and
     // non-breaking.
     try {
       final obj = jsonDecode(raw);
-      if (obj is Map && obj['type'] == 'path_viewer_ready') {
+      if (obj is Map &&
+          obj['type'] ==
+              'path_viewer_ready') {
         // JS is fully ready (viewer exists + listeners bound).
         if (!_jsReady) {
           _jsReady = true;
@@ -1887,7 +2809,9 @@ int? _findContainingTriXY(NavMesh nm, double x, double y) {
           _pushUserPinToJsPath(pin);
         }
         _pushDestinationHighlightToJsPath();
-        if (_pathPointsGltf.isNotEmpty && !_pathPushed) {
+        if (_pathPointsGltf
+                .isNotEmpty &&
+            !_pathPushed) {
           _pushPathToJs();
         }
       }
@@ -1896,13 +2820,18 @@ int? _findContainingTriXY(NavMesh nm, double x, double y) {
     }
   }
 
-  void _handlePathChannelMessage(String message) {
+  void _handlePathChannelMessage(
+    String message,
+  ) {
     // Reserved for future polyline/breadcrumb route updates.
     // Keeping it here prevents runtime/compile errors.
-    debugPrint('PATH_CHANNEL: $message');
+    debugPrint(
+      'PATH_CHANNEL: $message',
+    );
   }
 
-  static const String _pathViewerJs = r'''console.log("✅ PathViewer JS injected");
+  static const String _pathViewerJs =
+      r'''console.log("✅ PathViewer JS injected");
 
 function postToPOI(obj) {
   try { POI_CHANNEL.postMessage(JSON.stringify(obj)); return true; } catch (e) { return false; }
@@ -2241,23 +3170,37 @@ const timer = setInterval(function() {
     super.initState();
 
     // Prefer opening the floor that VenuePage passed (if any).
-    if (widget.floorSrc.trim().isNotEmpty) {
-      _currentFloor = widget.floorSrc.trim();
+    if (widget.floorSrc
+        .trim()
+        .isNotEmpty) {
+      _currentFloor = widget.floorSrc
+          .trim();
     }
 
     // If VenuePage provided a destination hit point, store it for navmesh routing.
-    final dh = widget.destinationHitGltf;
-    if (dh != null && dh.containsKey('x') && dh.containsKey('y') && dh.containsKey('z')) {
-      _destPosBlender = _gltfToBlender(dh);
+    final dh =
+        widget.destinationHitGltf;
+    if (dh != null &&
+        dh.containsKey('x') &&
+        dh.containsKey('y') &&
+        dh.containsKey('z')) {
+      _destPosBlender = _gltfToBlender(
+        dh,
+      );
     }
 
-
-    final dest = widget.destinationPoiMaterial.trim();
+    final dest = widget
+        .destinationPoiMaterial
+        .trim();
     if (dest.isNotEmpty) {
       _pendingPoiToHighlight = dest;
-    } else if (widget.shopId.trim().startsWith('POIMAT_')) {
+    } else if (widget.shopId
+        .trim()
+        .startsWith('POIMAT_')) {
       // VenuePage often passes POI material as shopId
-      _pendingPoiToHighlight = widget.shopId.trim();
+      _pendingPoiToHighlight = widget
+          .shopId
+          .trim();
     } else {
       _pendingPoiToHighlight = null;
     }
@@ -2270,15 +3213,25 @@ const timer = setInterval(function() {
   /// users/{uid}.location.blenderPosition {x,y,z,floor}
   /// We currently use it to display the correct origin floor and to
   /// default the 3D map to that floor.
-  Future<void> _loadUserBlenderPosition() async {
-    final user = FirebaseAuth.instance.currentUser;
+  Future<void>
+  _loadUserBlenderPosition() async {
+    final user = FirebaseAuth
+        .instance
+        .currentUser;
     if (user == null) return;
 
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get(const GetOptions(source: Source.serverAndCache));
+      final doc =
+          await FirebaseFirestore
+              .instance
+              .collection('users')
+              .doc(user.uid)
+              .get(
+                const GetOptions(
+                  source: Source
+                      .serverAndCache,
+                ),
+              );
 
       final data = doc.data();
       if (data == null) return;
@@ -2286,55 +3239,73 @@ const timer = setInterval(function() {
       final location = data['location'];
       if (location is! Map) return;
 
-      final bp = location['blenderPosition'];
+      final bp =
+          location['blenderPosition'];
       if (bp is! Map) return;
 
       final floorRaw = bp['floor'];
       if (floorRaw == null) return;
 
-      final floorLabel = floorRaw.toString();
+      final floorLabel = floorRaw
+          .toString();
 
       // Keep user's saved pin coords (Blender) and convert to glTF for model-viewer.
       final xNum = bp['x'];
       final yNum = bp['y'];
       final zNum = bp['z'];
-      if (xNum is num && yNum is num && zNum is num) {
-        _userPosBlender = {'x': xNum.toDouble(), 'y': yNum.toDouble(), 'z': zNum.toDouble()};
+      if (xNum is num &&
+          yNum is num &&
+          zNum is num) {
+        _userPosBlender = {
+          'x': xNum.toDouble(),
+          'y': yNum.toDouble(),
+          'z': zNum.toDouble(),
+        };
         // Blender (x, y, z) -> glTF (x, y, z)  where glTF.y=Blender.z and glTF.z=-Blender.y
         _pendingUserPinGltf = {
           'x': xNum.toDouble(),
           'y': zNum.toDouble(),
           'z': (-yNum.toDouble()),
         };
-        
-        if (_jsReady && _pendingUserPinGltf != null) {
-          _pushUserPinToJsPath(_pendingUserPinGltf!);
+
+        if (_jsReady &&
+            _pendingUserPinGltf !=
+                null) {
+          _pushUserPinToJsPath(
+            _pendingUserPinGltf!,
+          );
         }
-if (_jsReady) {
-        }
+        if (_jsReady) {}
       }
 
       if (!mounted) return;
       setState(() {
         _originFloorLabel = floorLabel;
-        _desiredStartFloorLabel = floorLabel;
+        _desiredStartFloorLabel =
+            floorLabel;
       });
 
       _maybeComputeAndPushPath();
     } catch (e) {
-      debugPrint('Error loading user blenderPosition in PathOverview: $e');
+      debugPrint(
+        'Error loading user blenderPosition in PathOverview: $e',
+      );
     }
   }
 
   // ---------- AR Navigation Functions ----------
 
   /// Check if place has world position for AR navigation
-  Future<bool> _hasWorldPosition(String placeId) async {
+  Future<bool> _hasWorldPosition(
+    String placeId,
+  ) async {
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('places')
-          .doc(placeId)
-          .get();
+      final doc =
+          await FirebaseFirestore
+              .instance
+              .collection('places')
+              .doc(placeId)
+              .get();
 
       if (!doc.exists) return false;
 
@@ -2342,17 +3313,27 @@ if (_jsReady) {
       if (data == null) return false;
 
       // Check for worldPosition field
-      return data.containsKey('worldPosition') && data['worldPosition'] != null;
+      return data.containsKey(
+            'worldPosition',
+          ) &&
+          data['worldPosition'] != null;
     } catch (e) {
-      debugPrint("Error checking world position: $e");
+      debugPrint(
+        "Error checking world position: $e",
+      );
       return false;
     }
   }
 
   /// Show dialog when AR is not supported for this place
-  void _showNoPositionDialog(String placeName) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final dialogPadding = screenWidth < 360 ? 20.0 : 28.0;
+  void _showNoPositionDialog(
+    String placeName,
+  ) {
+    final screenWidth = MediaQuery.of(
+      context,
+    ).size.width;
+    final dialogPadding =
+        screenWidth < 360 ? 20.0 : 28.0;
 
     showDialog(
       context: context,
@@ -2360,80 +3341,129 @@ if (_jsReady) {
       builder: (BuildContext context) {
         return Dialog(
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
+            borderRadius:
+                BorderRadius.circular(
+                  24,
+                ),
           ),
           elevation: 0,
-          backgroundColor: Colors.transparent,
+          backgroundColor:
+              Colors.transparent,
           child: Container(
-            padding: EdgeInsets.all(dialogPadding),
+            padding: EdgeInsets.all(
+              dialogPadding,
+            ),
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.circular(24),
+              borderRadius:
+                  BorderRadius.circular(
+                    24,
+                  ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.15),
+                  color: Colors.black
+                      .withOpacity(
+                        0.15,
+                      ),
                   blurRadius: 20,
-                  offset: const Offset(0, 10),
+                  offset: const Offset(
+                    0,
+                    10,
+                  ),
                 ),
               ],
             ),
             child: Column(
-              mainAxisSize: MainAxisSize.min,
+              mainAxisSize:
+                  MainAxisSize.min,
               children: [
                 // Icon
                 Container(
                   width: 80,
                   height: 80,
-                  decoration: BoxDecoration(
-                    color: AppColors.kGreen.withOpacity(0.15),
-                    shape: BoxShape.circle,
-                  ),
+                  decoration:
+                      BoxDecoration(
+                        color: AppColors
+                            .kGreen
+                            .withOpacity(
+                              0.15,
+                            ),
+                        shape: BoxShape
+                            .circle,
+                      ),
                   child: const Center(
                     child: Icon(
-                      Icons.location_off_rounded,
+                      Icons
+                          .location_off_rounded,
                       size: 42,
-                      color: AppColors.kGreen,
+                      color: AppColors
+                          .kGreen,
                     ),
                   ),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(
+                  height: 20,
+                ),
 
                 // Title
                 const Text(
                   'AR Not Supported',
-                  textAlign: TextAlign.center,
+                  textAlign:
+                      TextAlign.center,
                   style: TextStyle(
                     fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.kGreen,
+                    fontWeight:
+                        FontWeight.bold,
+                    color: AppColors
+                        .kGreen,
                     height: 1.2,
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(
+                  height: 12,
+                ),
 
                 // Description
                 Text(
                   'This place doesn\'t support AR navigation yet. Please check back later!',
-                  textAlign: TextAlign.center,
+                  textAlign:
+                      TextAlign.center,
                   style: TextStyle(
                     fontSize: 15,
                     height: 1.5,
-                    color: Colors.grey[700],
+                    color: Colors
+                        .grey[700],
                   ),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(
+                  height: 24,
+                ),
 
                 // Button
                 SizedBox(
-                  width: double.infinity,
+                  width:
+                      double.infinity,
                   child: ElevatedButton(
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: () =>
+                        Navigator.of(
+                          context,
+                        ).pop(),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.kGreen,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      backgroundColor:
+                          AppColors
+                              .kGreen,
+                      foregroundColor:
+                          Colors.white,
+                      padding:
+                          const EdgeInsets.symmetric(
+                            vertical:
+                                14,
+                          ),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius:
+                            BorderRadius.circular(
+                              12,
+                            ),
                       ),
                       elevation: 0,
                     ),
@@ -2441,8 +3471,11 @@ if (_jsReady) {
                       'Got it',
                       style: TextStyle(
                         fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.3,
+                        fontWeight:
+                            FontWeight
+                                .w600,
+                        letterSpacing:
+                            0.3,
                       ),
                     ),
                   ),
@@ -2456,18 +3489,26 @@ if (_jsReady) {
   }
 
   /// Open AR navigation with validation
-  Future<void> _openNavigationAR() async {
+  Future<void>
+  _openNavigationAR() async {
     // Validate world position before proceeding
-    final hasPosition = await _hasWorldPosition(widget.shopId);
+    final hasPosition =
+        await _hasWorldPosition(
+          widget.shopId,
+        );
 
     if (!hasPosition) {
       if (!mounted) return;
-      _showNoPositionDialog(widget.shopName);
+      _showNoPositionDialog(
+        widget.shopName,
+      );
       return;
     }
 
     // Request camera permission
-    final status = await Permission.camera.request();
+    final status = await Permission
+        .camera
+        .request();
 
     if (status.isGranted) {
       if (!mounted) return;
@@ -2475,12 +3516,18 @@ if (_jsReady) {
         context,
         MaterialPageRoute(
           builder: (_) =>
-              UnityCameraPage(isNavigation: true, placeId: widget.shopId),
+              UnityCameraPage(
+                isNavigation: true,
+                placeId: widget.shopId,
+              ),
         ),
       );
-    } else if (status.isPermanentlyDenied) {
+    } else if (status
+        .isPermanentlyDenied) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(
         const SnackBar(
           content: Text(
             'Camera permission is permanently denied. Please enable it from Settings.',
@@ -2490,9 +3537,13 @@ if (_jsReady) {
       openAppSettings();
     } else {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(
         const SnackBar(
-          content: Text('Camera permission is required to use AR.'),
+          content: Text(
+            'Camera permission is required to use AR.',
+          ),
         ),
       );
     }
@@ -2501,55 +3552,99 @@ if (_jsReady) {
   Future<void> _loadVenueMaps() async {
     setState(() => _mapsLoading = true);
     try {
-      final doc = await FirebaseFirestore.instance
+      final doc = await FirebaseFirestore
+          .instance
           .collection('venues')
-          .doc('ChIJcYTQDwDjLj4RZEiboV6gZzM') // Solitaire ID
-          .get(const GetOptions(source: Source.serverAndCache));
+          .doc(
+            'ChIJcYTQDwDjLj4RZEiboV6gZzM',
+          ) // Solitaire ID
+          .get(
+            const GetOptions(
+              source:
+                  Source.serverAndCache,
+            ),
+          );
 
       final data = doc.data();
-      if (data != null && data['map'] is List) {
-        final maps = (data['map'] as List).cast<Map<String, dynamic>>();
-        final convertedMaps = maps.map((map) {
+      if (data != null &&
+          data['map'] is List) {
+        final maps =
+            (data['map'] as List)
+                .cast<
+                  Map<String, dynamic>
+                >();
+        final convertedMaps = maps.map((
+          map,
+        ) {
           return {
-            'floorNumber': (map['floorNumber'] ?? '').toString(),
-            'mapURL': (map['mapURL'] ?? '').toString(),
+            'floorNumber':
+                (map['floorNumber'] ??
+                        '')
+                    .toString(),
+            'mapURL':
+                (map['mapURL'] ?? '')
+                    .toString(),
           };
         }).toList();
 
         if (mounted) {
           setState(() {
             _venueMaps = convertedMaps;
-            if (convertedMaps.isNotEmpty) {
+            if (convertedMaps
+                .isNotEmpty) {
               // Default floor
-              _currentFloor = convertedMaps.first['mapURL'] ?? '';
+              _currentFloor =
+                  convertedMaps
+                      .first['mapURL'] ??
+                  '';
 
               // If we have a saved starting floor (Pin on Map), prefer showing that floor
-              if (_desiredStartFloorLabel.isNotEmpty) {
-                final match = convertedMaps.firstWhere(
-                  (m) => (m['floorNumber'] ?? '') == _desiredStartFloorLabel,
-                  orElse: () => const {'mapURL': ''},
-                );
-                final url = match['mapURL'] ?? '';
-                if (url.isNotEmpty) _currentFloor = url;
+              if (_desiredStartFloorLabel
+                  .isNotEmpty) {
+                final match = convertedMaps
+                    .firstWhere(
+                      (m) =>
+                          (m['floorNumber'] ??
+                              '') ==
+                          _desiredStartFloorLabel,
+                      orElse: () =>
+                          const {
+                            'mapURL':
+                                '',
+                          },
+                    );
+                final url =
+                    match['mapURL'] ??
+                    '';
+                if (url.isNotEmpty)
+                  _currentFloor = url;
               }
             }
           });
         }
       }
     } catch (e) {
-      debugPrint("Error loading maps: $e");
+      debugPrint(
+        "Error loading maps: $e",
+      );
     } finally {
-      if (mounted) setState(() => _mapsLoading = false);
+      if (mounted)
+        setState(
+          () => _mapsLoading = false,
+        );
     }
   }
 
-  void _changePreference(String preference) {
+  void _changePreference(
+    String preference,
+  ) {
     setState(() {
       _selectedPreference = preference;
       if (preference == 'elevator') {
         _estimatedTime = '3 min';
         _estimatedDistance = '180 m';
-      } else if (preference == 'escalator') {
+      } else if (preference ==
+          'escalator') {
         _estimatedTime = '2.5 min';
         _estimatedDistance = '170 m';
       } else {
@@ -2561,19 +3656,30 @@ if (_jsReady) {
 
   @override
   Widget build(BuildContext context) {
-        // Match venue_page ordering: higher floors first (F2, F1, ... , GF last)
-    final sortedMaps = List<Map<String, String>>.from(_venueMaps);
+    // Match venue_page ordering: higher floors first (F2, F1, ... , GF last)
+    final sortedMaps =
+        List<Map<String, String>>.from(
+          _venueMaps,
+        );
 
     int floorRank(String s) {
       final f = s.trim().toUpperCase();
       if (f == 'GF') return 0;
-      if (f.startsWith('F')) return int.tryParse(f.substring(1)) ?? 0;
+      if (f.startsWith('F'))
+        return int.tryParse(
+              f.substring(1),
+            ) ??
+            0;
       return 0;
     }
 
     sortedMaps.sort((a, b) {
-      final ra = floorRank(a['floorNumber'] ?? '');
-      final rb = floorRank(b['floorNumber'] ?? '');
+      final ra = floorRank(
+        a['floorNumber'] ?? '',
+      );
+      final rb = floorRank(
+        b['floorNumber'] ?? '',
+      );
       return rb.compareTo(ra);
     });
 
@@ -2587,39 +3693,76 @@ if (_jsReady) {
               child: _mapsLoading
                   ? const AppLoadingIndicator()
                   : ModelViewer(
-                      key: ValueKey(_currentFloor),
-                      src: _currentFloor,
+                      key: ValueKey(
+                        _currentFloor,
+                      ),
+                      src:
+                          _currentFloor,
                       alt: "3D Map",
-                      cameraControls: true,
-                      backgroundColor: const Color(0xFFF5F5F0),
-                      cameraOrbit: "0deg 65deg 2.5m",
-                      minCameraOrbit: "auto 0deg auto",
-                      maxCameraOrbit: "auto 90deg auto",
-                      cameraTarget: "0m 0m 0m",
-                      relatedJs: _pathViewerJs,
-                      onWebViewCreated: (c) {
-                        _webCtrl = c;
-                        _jsReady = false;
-                      },
+                      cameraControls:
+                          true,
+                      backgroundColor:
+                          const Color(
+                            0xFFF5F5F0,
+                          ),
+                      cameraOrbit:
+                          "0deg 65deg 2.5m",
+                      minCameraOrbit:
+                          "auto 0deg auto",
+                      maxCameraOrbit:
+                          "auto 90deg auto",
+                      cameraTarget:
+                          "0m 0m 0m",
+                      relatedJs:
+                          _pathViewerJs,
+                      onWebViewCreated:
+                          (c) {
+                            _webCtrl =
+                                c;
+                            _jsReady =
+                                false;
+                          },
                       javascriptChannels: {
-                        JavascriptChannel('POI_CHANNEL',
-                            onMessageReceived: (msg) => _handlePoiMessage(msg.message)),
-                        JavascriptChannel('JS_TEST_CHANNEL',
-                            onMessageReceived: (msg) {
-                          if (!_jsReady &&
-                              msg.message.contains('PathViewer JS alive')) {
-                            _jsReady = true;
+                        JavascriptChannel(
+                          'POI_CHANNEL',
+                          onMessageReceived:
+                              (
+                                msg,
+                              ) => _handlePoiMessage(
+                                msg.message,
+                              ),
+                        ),
+                        JavascriptChannel(
+                          'JS_TEST_CHANNEL',
+                          onMessageReceived: (msg) {
+                            if (!_jsReady &&
+                                msg.message.contains(
+                                  'PathViewer JS alive',
+                                )) {
+                              _jsReady =
+                                  true;
 
-                            final pin = _pendingUserPinGltf;
-                            if (pin != null) {
-                              _pushUserPinToJsPath(pin);
+                              final pin =
+                                  _pendingUserPinGltf;
+                              if (pin !=
+                                  null) {
+                                _pushUserPinToJsPath(
+                                  pin,
+                                );
+                              }
+                              _pushDestinationHighlightToJsPath();
                             }
-                            _pushDestinationHighlightToJsPath();
-                          }
-                        }),
-                        JavascriptChannel('PATH_CHANNEL',
-                            onMessageReceived: (msg) =>
-                                _handlePathChannelMessage(msg.message)),
+                          },
+                        ),
+                        JavascriptChannel(
+                          'PATH_CHANNEL',
+                          onMessageReceived:
+                              (
+                                msg,
+                              ) => _handlePathChannelMessage(
+                                msg.message,
+                              ),
+                        ),
                       },
                     ),
             ),
@@ -2629,25 +3772,52 @@ if (_jsReady) {
               top: 220, // Below header
               right: 20,
               child: Container(
-                padding: const EdgeInsets.all(8),
+                padding:
+                    const EdgeInsets.all(
+                      8,
+                    ),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.9),
-                  borderRadius: BorderRadius.circular(8),
+                  color: Colors.white
+                      .withOpacity(0.9),
+                  borderRadius:
+                      BorderRadius.circular(
+                        8,
+                      ),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
+                      color: Colors
+                          .black
+                          .withOpacity(
+                            0.1,
+                          ),
                       blurRadius: 4,
                     ),
                   ],
                 ),
                 child: Column(
-                  children: sortedMaps.map((map) {
-                    final label = map['floorNumber'] ?? '';
-                    final url = map['mapURL'] ?? '';
-                    final isSelected = _currentFloor == url;
+                  children: sortedMaps.map((
+                    map,
+                  ) {
+                    final label =
+                        map['floorNumber'] ??
+                        '';
+                    final url =
+                        map['mapURL'] ??
+                        '';
+                    final isSelected =
+                        _currentFloor ==
+                        url;
                     return Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: _buildFloorButton(label, url, isSelected),
+                      padding:
+                          const EdgeInsets.only(
+                            bottom: 8,
+                          ),
+                      child:
+                          _buildFloorButton(
+                            label,
+                            url,
+                            isSelected,
+                          ),
                     );
                   }).toList(),
                 ),
@@ -2661,21 +3831,37 @@ if (_jsReady) {
               right: 0,
               child: Container(
                 color: Colors.white,
-                padding: const EdgeInsets.fromLTRB(10, 20, 20, 16),
+                padding:
+                    const EdgeInsets.fromLTRB(
+                      10,
+                      20,
+                      20,
+                      16,
+                    ),
                 child: Column(
                   children: [
                     // Location rows with back button
                     Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment:
+                          CrossAxisAlignment
+                              .start,
                       children: [
                         Padding(
-                          padding: const EdgeInsets.only(top: 8),
+                          padding:
+                              const EdgeInsets.only(
+                                top: 8,
+                              ),
                           child: IconButton(
                             icon: const Icon(
-                              Icons.arrow_back,
-                              color: AppColors.kGreen,
+                              Icons
+                                  .arrow_back,
+                              color: AppColors
+                                  .kGreen,
                             ),
-                            onPressed: () => Navigator.pop(context),
+                            onPressed: () =>
+                                Navigator.pop(
+                                  context,
+                                ),
                           ),
                         ),
                         Expanded(
@@ -2683,27 +3869,41 @@ if (_jsReady) {
                             children: [
                               // Origin Row
                               _locationRow(
-                                Icons.radio_button_checked,
+                                Icons
+                                    .radio_button_checked,
                                 'Your location',
                                 'GF',
-                                const Color(0xFF6C6C6C),
+                                const Color(
+                                  0xFF6C6C6C,
+                                ),
                               ),
 
                               // Dotted Line
                               Padding(
-                                padding: const EdgeInsets.only(left: 10),
+                                padding: const EdgeInsets.only(
+                                  left:
+                                      10,
+                                ),
                                 child: Align(
-                                  alignment: Alignment.centerLeft,
+                                  alignment:
+                                      Alignment.centerLeft,
                                   child: SizedBox(
-                                    height: 15,
-                                    width: 2,
+                                    height:
+                                        15,
+                                    width:
+                                        2,
                                     child: Column(
                                       children: List.generate(
                                         3,
-                                        (index) => Expanded(
+                                        (
+                                          index,
+                                        ) => Expanded(
                                           child: Container(
                                             width: 1.5,
-                                            color: index % 2 == 0
+                                            color:
+                                                index %
+                                                        2 ==
+                                                    0
                                                 ? Colors.grey[400]
                                                 : Colors.transparent,
                                           ),
@@ -2716,10 +3916,14 @@ if (_jsReady) {
 
                               // Destination Row
                               _locationRow(
-                                Icons.location_on,
-                                widget.shopName,
+                                Icons
+                                    .location_on,
+                                widget
+                                    .shopName,
                                 'F1',
-                                const Color(0xFFC88D52),
+                                const Color(
+                                  0xFFC88D52,
+                                ),
                               ),
                             ],
                           ),
@@ -2727,7 +3931,9 @@ if (_jsReady) {
                       ],
                     ),
 
-                    const SizedBox(height: 16),
+                    const SizedBox(
+                      height: 16,
+                    ),
 
                     // Preference buttons row - HORIZONTAL LAYOUT (icon + text)
                     Row(
@@ -2735,23 +3941,30 @@ if (_jsReady) {
                         Expanded(
                           child: _preferenceButtonHorizontal(
                             'Stairs',
-                            Icons.stairs,
+                            Icons
+                                .stairs,
                             'stairs',
                           ),
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(
+                          width: 8,
+                        ),
                         Expanded(
                           child: _preferenceButtonHorizontal(
                             'Elevator',
-                            Icons.elevator,
+                            Icons
+                                .elevator,
                             'elevator',
                           ),
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(
+                          width: 8,
+                        ),
                         Expanded(
                           child: _preferenceButtonHorizontal(
                             'Escalator',
-                            Icons.escalator,
+                            Icons
+                                .escalator,
                             'escalator',
                           ),
                         ),
@@ -2768,45 +3981,75 @@ if (_jsReady) {
               left: 0,
               right: 0,
               child: Container(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+                padding:
+                    const EdgeInsets.fromLTRB(
+                      20,
+                      20,
+                      20,
+                      16,
+                    ),
                 decoration: const BoxDecoration(
                   color: Colors.white,
-                  borderRadius: BorderRadius.only(
-                    topLeft: Radius.circular(30),
-                    topRight: Radius.circular(30),
-                  ),
+                  borderRadius:
+                      BorderRadius.only(
+                        topLeft:
+                            Radius.circular(
+                              30,
+                            ),
+                        topRight:
+                            Radius.circular(
+                              30,
+                            ),
+                      ),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black12,
+                      color: Colors
+                          .black12,
                       blurRadius: 8,
-                      offset: Offset(0, -2),
+                      offset: Offset(
+                        0,
+                        -2,
+                      ),
                     ),
                   ],
                 ),
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
+                  mainAxisSize:
+                      MainAxisSize.min,
                   children: [
                     // Time and Distance Info
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      mainAxisAlignment:
+                          MainAxisAlignment
+                              .spaceBetween,
                       children: [
                         Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                          crossAxisAlignment:
+                              CrossAxisAlignment
+                                  .start,
                           children: [
                             Text(
                               '$_estimatedTime ($_estimatedDistance)',
                               style: const TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.black,
+                                fontSize:
+                                    22,
+                                fontWeight:
+                                    FontWeight.bold,
+                                color: Colors
+                                    .black,
                               ),
                             ),
-                            const SizedBox(height: 4),
+                            const SizedBox(
+                              height: 4,
+                            ),
                             Text(
-                              widget.shopName,
+                              widget
+                                  .shopName,
                               style: TextStyle(
-                                color: Colors.grey[500],
-                                fontSize: 16,
+                                color: Colors
+                                    .grey[500],
+                                fontSize:
+                                    16,
                               ),
                             ),
                           ],
@@ -2814,20 +4057,38 @@ if (_jsReady) {
                       ],
                     ),
 
-                    const SizedBox(height: 20),
+                    const SizedBox(
+                      height: 20,
+                    ),
 
                     // Divider
-                    Divider(color: Colors.grey[300], thickness: 1, height: 1),
+                    Divider(
+                      color: Colors
+                          .grey[300],
+                      thickness: 1,
+                      height: 1,
+                    ),
 
-                    const SizedBox(height: 20),
+                    const SizedBox(
+                      height: 20,
+                    ),
 
                     // Start AR Navigation Button
                     PrimaryButton(
-                      text: 'Start AR Navigation',
-                      onPressed: _openNavigationAR,
+                      text:
+                          'Start AR Navigation',
+                      onPressed:
+                          _openNavigationAR,
                     ),
 
-                    SizedBox(height: MediaQuery.of(context).padding.bottom),
+                    SizedBox(
+                      height:
+                          MediaQuery.of(
+                                context,
+                              )
+                              .padding
+                              .bottom,
+                    ),
                   ],
                 ),
               ),
@@ -2838,24 +4099,44 @@ if (_jsReady) {
     );
   }
 
-  Widget _locationRow(IconData icon, String label, String floor, Color color) {
+  Widget _locationRow(
+    IconData icon,
+    String label,
+    String floor,
+    Color color,
+  ) {
     return Row(
       children: [
-        Icon(icon, color: color, size: 22),
+        Icon(
+          icon,
+          color: color,
+          size: 22,
+        ),
         const SizedBox(width: 12),
         Expanded(
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            padding:
+                const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.grey[100]!),
+              borderRadius:
+                  BorderRadius.circular(
+                    12,
+                  ),
+              border: Border.all(
+                color:
+                    Colors.grey[100]!,
+              ),
             ),
             child: Text(
               label,
               style: const TextStyle(
                 fontSize: 15,
-                fontWeight: FontWeight.w500,
+                fontWeight:
+                    FontWeight.w500,
                 color: Colors.black87,
               ),
             ),
@@ -2868,7 +4149,8 @@ if (_jsReady) {
             floor,
             style: TextStyle(
               fontSize: 14,
-              fontWeight: FontWeight.bold,
+              fontWeight:
+                  FontWeight.bold,
               color: Colors.grey[300],
             ),
           ),
@@ -2876,29 +4158,41 @@ if (_jsReady) {
       ],
     );
   }
-  
+
   // Horizontal preference button (icon next to text)
   Widget _preferenceButtonHorizontal(
     String label,
     IconData icon,
     String value,
   ) {
-    final isSelected = _selectedPreference == value;
+    final isSelected =
+        _selectedPreference == value;
     return GestureDetector(
-      onTap: () => _changePreference(value),
+      onTap: () =>
+          _changePreference(value),
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+        padding:
+            const EdgeInsets.symmetric(
+              vertical: 10,
+              horizontal: 12,
+            ),
         decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFFE8E9E0) : Colors.white,
-          borderRadius: BorderRadius.circular(20),
+          color: isSelected
+              ? const Color(0xFFE8E9E0)
+              : Colors.white,
+          borderRadius:
+              BorderRadius.circular(20),
         ),
         child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisAlignment:
+              MainAxisAlignment.center,
           children: [
             Icon(
               icon,
               size: 20,
-              color: isSelected ? AppColors.kGreen : Colors.grey[500],
+              color: isSelected
+                  ? AppColors.kGreen
+                  : Colors.grey[500],
             ),
             const SizedBox(width: 6),
             Flexible(
@@ -2906,10 +4200,17 @@ if (_jsReady) {
                 label,
                 style: TextStyle(
                   fontSize: 13,
-                  color: isSelected ? AppColors.kGreen : Colors.grey[600],
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                  color: isSelected
+                      ? AppColors.kGreen
+                      : Colors
+                            .grey[600],
+                  fontWeight: isSelected
+                      ? FontWeight.w600
+                      : FontWeight
+                            .normal,
                 ),
-                overflow: TextOverflow.ellipsis,
+                overflow: TextOverflow
+                    .ellipsis,
               ),
             ),
           ],
@@ -2919,20 +4220,35 @@ if (_jsReady) {
   }
 
   // CONSISTENT FLOOR BUTTON - Same as Set Your Location dialog
-  Widget _buildFloorButton(String label, String url, bool isSelected) {
+  Widget _buildFloorButton(
+    String label,
+    String url,
+    bool isSelected,
+  ) {
     return SizedBox(
       width: 44,
       height: 40,
       child: ElevatedButton(
         style: ElevatedButton.styleFrom(
-          backgroundColor: isSelected ? AppColors.kGreen : Colors.white,
-          foregroundColor: isSelected ? Colors.white : AppColors.kGreen,
+          backgroundColor: isSelected
+              ? AppColors.kGreen
+              : Colors.white,
+          foregroundColor: isSelected
+              ? Colors.white
+              : AppColors.kGreen,
           padding: EdgeInsets.zero,
           elevation: isSelected ? 2 : 0,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius:
+                BorderRadius.circular(
+                  8,
+                ),
             side: BorderSide(
-              color: isSelected ? AppColors.kGreen : Colors.grey.shade300,
+              color: isSelected
+                  ? AppColors.kGreen
+                  : Colors
+                        .grey
+                        .shade300,
             ),
           ),
         ),
@@ -2941,7 +4257,10 @@ if (_jsReady) {
         }),
         child: Text(
           label,
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+          ),
         ),
       ),
     );
@@ -2952,25 +4271,36 @@ if (_jsReady) {
 // 5. AR SUCCESS DIALOG
 // ============================================================================
 
-class ARSuccessDialog extends StatelessWidget {
+class ARSuccessDialog
+    extends StatelessWidget {
   final VoidCallback onOkPressed;
 
-  const ARSuccessDialog({super.key, required this.onOkPressed});
+  const ARSuccessDialog({
+    super.key,
+    required this.onOkPressed,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      shape: RoundedRectangleBorder(
+        borderRadius:
+            BorderRadius.circular(20),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(
+          24,
+        ),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisSize:
+              MainAxisSize.min,
           children: [
             Container(
               width: 80,
               height: 80,
               decoration: BoxDecoration(
-                color: AppColors.kGreen.withOpacity(0.1),
+                color: AppColors.kGreen
+                    .withOpacity(0.1),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
@@ -2985,7 +4315,8 @@ class ARSuccessDialog extends StatelessWidget {
               'Success!',
               style: TextStyle(
                 fontSize: 24,
-                fontWeight: FontWeight.w700,
+                fontWeight:
+                    FontWeight.w700,
                 color: Colors.black87,
               ),
             ),
@@ -2993,7 +4324,8 @@ class ARSuccessDialog extends StatelessWidget {
 
             Text(
               'Your location has been detected. You will now be taken to the Path Overview screen.',
-              textAlign: TextAlign.center,
+              textAlign:
+                  TextAlign.center,
               style: TextStyle(
                 fontSize: 15,
                 color: Colors.grey[700],
@@ -3005,17 +4337,29 @@ class ARSuccessDialog extends StatelessWidget {
             ElevatedButton(
               onPressed: onOkPressed,
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.kGreen,
-                foregroundColor: Colors.white,
-                minimumSize: const Size.fromHeight(48),
+                backgroundColor:
+                    AppColors.kGreen,
+                foregroundColor:
+                    Colors.white,
+                minimumSize:
+                    const Size.fromHeight(
+                      48,
+                    ),
                 elevation: 0,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius:
+                      BorderRadius.circular(
+                        12,
+                      ),
                 ),
               ),
               child: const Text(
                 'OK',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight:
+                      FontWeight.w600,
+                ),
               ),
             ),
           ],

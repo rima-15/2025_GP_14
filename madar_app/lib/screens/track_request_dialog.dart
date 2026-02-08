@@ -1489,12 +1489,18 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
     final date = _selectedDate!;
     final endDate = _selectedEndDate!;
     final start = DateTime(
-      date.year, date.month, date.day,
-      _startTime!.hour, _startTime!.minute,
+      date.year,
+      date.month,
+      date.day,
+      _startTime!.hour,
+      _startTime!.minute,
     );
     final end = DateTime(
-      endDate.year, endDate.month, endDate.day,
-      _endTime!.hour, _endTime!.minute,
+      endDate.year,
+      endDate.month,
+      endDate.day,
+      _endTime!.hour,
+      _endTime!.minute,
     );
     if (!end.isAfter(start)) return;
 
@@ -1555,7 +1561,8 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
 
         if (start.isBefore(existingEnd) && existingStart.isBefore(end)) {
           final now = DateTime.now();
-          final isActive = existingStatus == 'accepted' &&
+          final isActive =
+              existingStatus == 'accepted' &&
               !now.isBefore(existingStart) &&
               now.isBefore(existingEnd);
           results.add({
@@ -1672,7 +1679,11 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            for (int i = 0; i < _scheduledOverlapFriends.length; i++) ...[
+                            for (
+                              int i = 0;
+                              i < _scheduledOverlapFriends.length;
+                              i++
+                            ) ...[
                               if (i > 0) const SizedBox(height: 8),
                               Text(
                                 '${_scheduledOverlapFriends[i]['name']} (${_scheduledOverlapFriends[i]['phone']})',
@@ -1706,7 +1717,10 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
               onPressed: () => Navigator.pop(ctx, false),
               style: TextButton.styleFrom(
                 backgroundColor: Colors.grey[200],
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
@@ -1724,7 +1738,10 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
               onPressed: () => Navigator.pop(ctx, true),
               style: TextButton.styleFrom(
                 backgroundColor: AppColors.kError,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
@@ -1994,7 +2011,9 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
 
       // --- Scheduled Overlap Handling ---
       // If scheduled overlaps were detected (from end time selection), show dialog
-      if (_scheduledOverlapFriends.isNotEmpty && _scheduledOverlapDocIds.isNotEmpty && mounted) {
+      if (_scheduledOverlapFriends.isNotEmpty &&
+          _scheduledOverlapDocIds.isNotEmpty &&
+          mounted) {
         final proceed = await _showScheduledOverlapDialog();
         if (proceed != true) {
           setState(() => _isSubmitting = false);
@@ -2185,7 +2204,6 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                     ),
                   ),
 
-
                   const SizedBox(height: 24),
 
                   // Select Friends Section
@@ -2353,7 +2371,10 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                       decoration: BoxDecoration(
                         color: Colors.red[50],
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.red.shade300, width: 1.5),
+                        border: Border.all(
+                          color: Colors.red.shade300,
+                          width: 1.5,
+                        ),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2401,7 +2422,11 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                                 child: Row(
                                   children: [
                                     const SizedBox(width: 28),
-                                    Icon(Icons.person, size: 16, color: Colors.red[300]),
+                                    Icon(
+                                      Icons.person,
+                                      size: 16,
+                                      color: Colors.red[300],
+                                    ),
                                     const SizedBox(width: 6),
                                     Expanded(
                                       child: Text(
@@ -2735,10 +2760,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                         }
                         return Text(
                           'Venue hours: $hoursStr',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: textColor,
-                          ),
+                          style: TextStyle(fontSize: 12, color: textColor),
                         );
                       },
                     ),

@@ -509,10 +509,14 @@ class _HistoryPageState extends State<HistoryPage> {
         label = 'Expired';
         break;
       case 'terminated':
-      case 'cancelled':
         bg = AppColors.kError.withOpacity(0.1);
         text = AppColors.kError;
         label = 'Terminated';
+        break;
+      case 'cancelled':
+        bg = Colors.orange.withOpacity(0.1);
+        text = Colors.orange[800]!;
+        label = 'Cancelled';
         break;
       case 'completed':
         bg = AppColors.kGreen.withOpacity(0.1);

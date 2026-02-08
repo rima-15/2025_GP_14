@@ -61,13 +61,38 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
   String? _cachedMyPhone;
   String? _cachedMyName;
 
+  // Venue opening hours
+  List<String> _venueWeekdayText = [];
+  List<dynamic> _venuePeriods = [];
+  int? _venueUtcOffset;
+  String? _venueBusinessStatus;
+  bool _loadingHours = false;
+
+  // End date (for overnight tracking)
+  DateTime? _selectedEndDate;
+
+  // Overlap detection state
+  // Active overlaps: friends auto-removed (stored so they can be restored)
+  List<Friend> _activeOverlapRemovedFriends = [];
+  // Scheduled overlaps: friends with pending/accepted scheduled overlap
+  List<Map<String, String>> _scheduledOverlapFriends = [];
+  List<String> _scheduledOverlapDocIds = [];
+
+  // UID cache to avoid repeated Firestore lookups
+  final Map<String, String> _phoneToUidCache = {};
+
+  // ScrollController for main content
+  final ScrollController _mainScrollController = ScrollController();
+  // GlobalKey for the overlap message container
+  final GlobalKey _overlapMsgKey = GlobalKey();
+
   @override
   void initState() {
     super.initState();
     _loadVenues();
     _getCurrentLocation();
     _preloadContacts(); // Pre-load contacts and DB status
-    _loadCurrentUserInfo(); // Cache current user's phone/name for fast lookups
+    _loadCurrentUserInfo(); // Cache current user's phone/name
 
     _phoneFocusNode.addListener(() {
       setState(() {
@@ -91,9 +116,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
         _cachedMyName = ('${data['firstName'] ?? ''} ${data['lastName'] ?? ''}')
             .trim();
       }
-    } catch (_) {
-      // Ignore - will fall back to querying if needed
-    }
+    } catch (_) {}
   }
 
   /// Pre-load contacts and check DB status in background
@@ -175,6 +198,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
   void dispose() {
     _phoneController.dispose();
     _phoneFocusNode.dispose();
+    _mainScrollController.dispose();
     super.dispose();
   }
 
@@ -284,8 +308,235 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
         _selectedVenue = nearestVenue!.name;
         _selectedVenueId = nearestVenue.id;
       });
+      _loadVenueHours(nearestVenue.id);
     }
   }
+
+  // ---------- Venue Opening Hours Helpers ----------
+
+  /// Load opening hours for the selected venue from Firestore cache
+  Future<void> _loadVenueHours(String venueId) async {
+    if (!mounted) return;
+    setState(() => _loadingHours = true);
+    try {
+      final cacheDoc = await FirebaseFirestore.instance
+          .collection('venues')
+          .doc(venueId)
+          .collection('cache')
+          .doc('googlePlaces')
+          .get();
+      if (!mounted) return;
+      if (cacheDoc.exists && cacheDoc.data() != null) {
+        final data = cacheDoc.data()!;
+        final opening = (data['openingHours'] as Map<String, dynamic>?) ?? {};
+        List<String> weekdayText =
+            (opening['weekday_text'] as List?)?.cast<String>() ?? [];
+        final periods = (opening['periods'] as List?) ?? [];
+        final utcOffset = data['utcOffset'] as int?;
+        final businessStatus = data['businessStatus'] as String?;
+        final types =
+            (data['types'] as List?)?.cast<String>() ?? const <String>[];
+
+        // Airports with no hours data → assume open 24 hours
+        if (weekdayText.isEmpty && types.contains('airport')) {
+          weekdayText = const [
+            'Sunday: Open 24 hours',
+            'Monday: Open 24 hours',
+            'Tuesday: Open 24 hours',
+            'Wednesday: Open 24 hours',
+            'Thursday: Open 24 hours',
+            'Friday: Open 24 hours',
+            'Saturday: Open 24 hours',
+          ];
+        }
+
+        // Ensure Sunday-first order
+        if (weekdayText.isNotEmpty &&
+            weekdayText.first.toLowerCase().startsWith('monday')) {
+          final idxSun = weekdayText.indexWhere(
+            (l) => l.toLowerCase().startsWith('sunday'),
+          );
+          if (idxSun > 0) {
+            weekdayText = [
+              ...weekdayText.sublist(idxSun),
+              ...weekdayText.sublist(0, idxSun),
+            ];
+          }
+        }
+        setState(() {
+          _venueWeekdayText = weekdayText;
+          _venuePeriods = periods;
+          _venueUtcOffset = utcOffset;
+          _venueBusinessStatus = businessStatus;
+          _loadingHours = false;
+        });
+      } else {
+        setState(() {
+          _venueWeekdayText = [];
+          _venuePeriods = [];
+          _venueUtcOffset = null;
+          _venueBusinessStatus = null;
+          _loadingHours = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingHours = false);
+    }
+  }
+
+  bool _venueIsOpen24Hours() {
+    // Check weekday_text (e.g. "Sunday: Open 24 hours")
+    if (_venueWeekdayText.isNotEmpty) {
+      final all24 = _venueWeekdayText.every(
+        (line) =>
+            line.toLowerCase().contains('24') ||
+            line.toLowerCase().contains('open 24'),
+      );
+      if (all24) return true;
+    }
+    // Check periods: single period with no 'close' → open 24/7
+    if (_venuePeriods.length == 1) {
+      final period = _venuePeriods.first;
+      if (period is Map<String, dynamic> && !period.containsKey('close')) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool _venueIsTemporarilyClosed() {
+    return _venueBusinessStatus?.toLowerCase() == 'closed_temporarily';
+  }
+
+  int? _parseHHMM(String time) {
+    if (time.length != 4) return null;
+    final h = int.tryParse(time.substring(0, 2));
+    final m = int.tryParse(time.substring(2, 4));
+    if (h == null || m == null) return null;
+    return h * 60 + m;
+  }
+
+  /// Get venue hours for a specific date from periods data
+  ({TimeOfDay? open, TimeOfDay? close, bool overnight, bool closed})
+  _getVenueHoursForDate(DateTime date) {
+    if (_venueIsTemporarilyClosed()) {
+      return (open: null, close: null, overnight: false, closed: true);
+    }
+    if (_venueIsOpen24Hours()) {
+      return (
+        open: const TimeOfDay(hour: 0, minute: 0),
+        close: const TimeOfDay(hour: 23, minute: 59),
+        overnight: false,
+        closed: false,
+      );
+    }
+    if (_venuePeriods.isEmpty && _venueWeekdayText.isEmpty) {
+      return (
+        open: const TimeOfDay(hour: 0, minute: 0),
+        close: const TimeOfDay(hour: 23, minute: 59),
+        overnight: false,
+        closed: false,
+      );
+    }
+    final dartWeekday = date.weekday;
+    final googleDay = dartWeekday == 7 ? 0 : dartWeekday;
+    for (final period in _venuePeriods) {
+      if (period is! Map<String, dynamic>) continue;
+      final openData = period['open'] as Map<String, dynamic>?;
+      final closeData = period['close'] as Map<String, dynamic>?;
+      if (openData == null) continue;
+      final openDay = openData['day'] as int?;
+      final openTime = openData['time'] as String?;
+      if (openDay != googleDay || openTime == null) continue;
+      final openMin = _parseHHMM(openTime);
+      if (openMin == null) continue;
+      if (closeData == null) {
+        return (
+          open: TimeOfDay(hour: openMin ~/ 60, minute: openMin % 60),
+          close: const TimeOfDay(hour: 23, minute: 59),
+          overnight: false,
+          closed: false,
+        );
+      }
+      final closeDay = closeData['day'] as int?;
+      final closeTime = closeData['time'] as String?;
+      if (closeDay == null || closeTime == null) continue;
+      final closeMin = _parseHHMM(closeTime);
+      if (closeMin == null) continue;
+      final isOvernight = closeDay != openDay;
+      return (
+        open: TimeOfDay(hour: openMin ~/ 60, minute: openMin % 60),
+        close: TimeOfDay(hour: closeMin ~/ 60, minute: closeMin % 60),
+        overnight: isOvernight,
+        closed: false,
+      );
+    }
+    // Fallback: parse from weekday_text
+    const dayLabels = [
+      'Sunday',
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+    ];
+    final line = _venueWeekdayText.firstWhere(
+      (l) => l.toLowerCase().startsWith(dayLabels[googleDay].toLowerCase()),
+      orElse: () => '',
+    );
+    if (line.isEmpty || line.toLowerCase().contains('closed')) {
+      return (open: null, close: null, overnight: false, closed: true);
+    }
+    if (line.toLowerCase().contains('24')) {
+      return (
+        open: const TimeOfDay(hour: 0, minute: 0),
+        close: const TimeOfDay(hour: 23, minute: 59),
+        overnight: false,
+        closed: false,
+      );
+    }
+    return (
+      open: const TimeOfDay(hour: 0, minute: 0),
+      close: const TimeOfDay(hour: 23, minute: 59),
+      overnight: false,
+      closed: false,
+    );
+  }
+
+  String _getVenueHoursStringForDate(DateTime date) {
+    if (_venueIsTemporarilyClosed()) return 'temporarily closed';
+    if (_venueIsOpen24Hours()) return 'open 24 hours';
+    // No hours data at all
+    if (_venuePeriods.isEmpty && _venueWeekdayText.isEmpty) {
+      return 'not available';
+    }
+    final hours = _getVenueHoursForDate(date);
+    if (hours.closed) return 'closed';
+    if (hours.open == null || hours.close == null) return 'not available';
+    final openStr = _formatTime12h(hours.open!);
+    final closeStr = _formatTime12h(hours.close!);
+    if (hours.overnight) return '$openStr - $closeStr (next day)';
+    return '$openStr - $closeStr';
+  }
+
+  /// Whether venue is closed / temporarily closed on date → disable time
+  bool _venueIsClosedOnDate(DateTime date) {
+    if (_venueIsTemporarilyClosed()) return true;
+    final hours = _getVenueHoursForDate(date);
+    return hours.closed;
+  }
+
+  /// Whether the venue allows selecting "next day" as end date.
+  /// True when: open-24h, not-available, or venue is overnight on the date.
+  bool _venueAllowsNextDay(DateTime date) {
+    if (_venueIsOpen24Hours()) return true;
+    if (_venuePeriods.isEmpty && _venueWeekdayText.isEmpty) return true;
+    final hours = _getVenueHoursForDate(date);
+    return hours.overnight;
+  }
+
+  // ---------- End Venue Hours Helpers ----------
 
   bool get _canAddPhone {
     final phone = _phoneController.text.trim();
@@ -325,6 +576,9 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
       });
       return;
     }
+
+    // Start loading - prevent further clicks
+    setState(() => _isAddingPhone = true);
 
     try {
       final query = await FirebaseFirestore.instance
@@ -368,6 +622,8 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
         _isPhoneInputValid = true;
         _phoneInputError = null;
       });
+      // Re-check overlaps if time is already set
+      _checkOverlapsForFriends();
     } catch (e) {
       setState(() {
         _isAddingPhone = false;
@@ -518,6 +774,8 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
   void _removeFriend(Friend friend) {
     setState(() {
       _selectedFriends.remove(friend);
+      // Remove from scheduled overlaps too
+      _scheduledOverlapFriends.removeWhere((f) => f['phone'] == friend.phone);
     });
   }
 
@@ -555,6 +813,8 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
           }
         }
       });
+      // Re-check overlaps if time is already set
+      _checkOverlapsForFriends();
     }
   }
 
@@ -570,16 +830,38 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
     );
 
     if (result != null) {
+      final venueChanged = _selectedVenueId != result.id;
       setState(() {
         _selectedVenue = result.name;
         _selectedVenueId = result.id;
+        if (venueChanged) {
+          // Reset date and time when venue changes
+          _selectedDate = null;
+          _selectedEndDate = null;
+          _startTime = null;
+          _endTime = null;
+        }
       });
+      // Load opening hours for the new venue
+      if (venueChanged) {
+        _loadVenueHours(result.id);
+        // Clear overlap state and restore removed friends
+        _clearOverlapState();
+      }
     }
   }
 
   Future<void> _selectDate() async {
     // Dismiss keyboard when opening date picker
     FocusScope.of(context).unfocus();
+
+    // Must select venue first
+    if (_selectedVenueId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a venue first')),
+      );
+      return;
+    }
 
     final now = DateTime.now();
     final firstDate = now;
@@ -605,27 +887,267 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
     );
 
     if (picked != null) {
+      final dateChanged =
+          _selectedDate == null ||
+          picked.year != _selectedDate!.year ||
+          picked.month != _selectedDate!.month ||
+          picked.day != _selectedDate!.day;
       setState(() {
         _selectedDate = picked;
+        if (dateChanged) {
+          // Date actually changed → reset everything
+          _selectedEndDate = picked;
+          _startTime = null;
+          _endTime = null;
+        }
+        // If same date re-selected, keep existing end date, start/end times
       });
+
+      // Clear overlap state immediately when date changes
+      if (dateChanged) {
+        _clearOverlapState();
+      }
+
+      // Check if venue is closed on this date
+      final hours = _getVenueHoursForDate(picked);
+      if (hours.closed) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('The venue is closed on this date')),
+          );
+        }
+      }
     }
   }
 
-  Future<void> _selectStartTime() async {
-    // Dismiss keyboard when opening time picker
+  Future<void> _selectEndDate() async {
     FocusScope.of(context).unfocus();
-
     if (_selectedDate == null) return;
 
+    final startDate = _selectedDate!;
+    final nextDay = startDate.add(const Duration(days: 1));
+    final allowsNext = _venueAllowsNextDay(startDate);
+
+    final picked = await showModalBottomSheet<DateTime>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return SafeArea(
+          top: false,
+          child: Container(
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(24),
+                topRight: Radius.circular(24),
+              ),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 18, 20, 10),
+                  child: Text(
+                    'Select End Date',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black87,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // Same day option
+                _buildEndDateOption(
+                  ctx: ctx,
+                  date: startDate,
+                  isNextDay: false,
+                  isSelected:
+                      _selectedEndDate != null &&
+                      startDate.year == _selectedEndDate!.year &&
+                      startDate.month == _selectedEndDate!.month &&
+                      startDate.day == _selectedEndDate!.day,
+                  enabled: true,
+                ),
+                // Next day option
+                _buildEndDateOption(
+                  ctx: ctx,
+                  date: nextDay,
+                  isNextDay: true,
+                  isSelected:
+                      _selectedEndDate != null &&
+                      nextDay.year == _selectedEndDate!.year &&
+                      nextDay.month == _selectedEndDate!.month &&
+                      nextDay.day == _selectedEndDate!.day,
+                  enabled: allowsNext,
+                ),
+                const SizedBox(height: 16),
+                Center(
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(ctx, null),
+                    child: const Text(
+                      'Cancel',
+                      style: TextStyle(fontSize: 16, color: Colors.black54),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (picked != null) {
+      setState(() {
+        _selectedEndDate = picked;
+        _endTime = null;
+      });
+      // Clear overlap state when end date changes
+      _clearOverlapState();
+    }
+  }
+
+  Widget _buildEndDateOption({
+    required BuildContext ctx,
+    required DateTime date,
+    required bool isNextDay,
+    required bool isSelected,
+    required bool enabled,
+  }) {
+    return Opacity(
+      opacity: enabled ? 1.0 : 0.4,
+      child: InkWell(
+        onTap: enabled ? () => Navigator.pop(ctx, date) : null,
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? AppColors.kGreen.withOpacity(0.1)
+                : Colors.grey[50],
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isSelected ? AppColors.kGreen : Colors.grey.shade300,
+              width: isSelected ? 2 : 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                isNextDay ? Icons.nights_stay_outlined : Icons.today,
+                color: isSelected ? AppColors.kGreen : Colors.grey[600],
+                size: 20,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      DateFormat('EEE d MMM yyyy').format(date),
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: isSelected ? AppColors.kGreen : Colors.black87,
+                      ),
+                    ),
+                    Text(
+                      isNextDay
+                          ? (enabled
+                                ? 'Next day (overnight)'
+                                : 'Not available – venue closes before midnight')
+                          : 'Same day as start',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isSelected
+                            ? AppColors.kGreen
+                            : (!enabled ? Colors.red[300] : Colors.grey[500]),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (isSelected)
+                const Icon(
+                  Icons.check_circle,
+                  color: AppColors.kGreen,
+                  size: 22,
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _selectStartTime() async {
+    FocusScope.of(context).unfocus();
+
+    if (_selectedVenueId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a venue first')),
+      );
+      return;
+    }
+    if (_selectedDate == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a date first')),
+      );
+      return;
+    }
+
     final date = _selectedDate!;
-    final dayStart = DateTime(date.year, date.month, date.day, 0, 0);
-    final dayEnd = DateTime(date.year, date.month, date.day, 23, 59);
+
+    // Block if venue is closed or temporarily closed
+    if (_venueIsClosedOnDate(date)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _venueIsTemporarilyClosed()
+                ? 'The venue is temporarily closed'
+                : 'The venue is closed on this date',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final venueHours = _getVenueHoursForDate(date);
+    final venueOpen = venueHours.open ?? const TimeOfDay(hour: 0, minute: 0);
+    final venueClose =
+        venueHours.close ?? const TimeOfDay(hour: 23, minute: 59);
+
+    DateTime dayStart = DateTime(
+      date.year,
+      date.month,
+      date.day,
+      venueOpen.hour,
+      venueOpen.minute,
+    );
+    // For overnight venues or open-24h or not-available, allow up to 23:59
+    final DateTime dayEnd;
+    if (venueHours.overnight ||
+        _venueIsOpen24Hours() ||
+        (_venuePeriods.isEmpty && _venueWeekdayText.isEmpty)) {
+      dayEnd = DateTime(date.year, date.month, date.day, 23, 59);
+    } else {
+      dayEnd = DateTime(
+        date.year,
+        date.month,
+        date.day,
+        venueClose.hour,
+        venueClose.minute,
+      );
+    }
 
     final now = DateTime.now();
     final isToday =
         now.year == date.year && now.month == date.month && now.day == date.day;
+    if (isToday && now.isAfter(dayStart)) dayStart = now;
 
-    final min = isToday ? now : dayStart;
+    if (dayStart.isAfter(dayEnd)) return;
 
     DateTime initial;
     if (_startTime != null) {
@@ -636,44 +1158,213 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
         _startTime!.hour,
         _startTime!.minute,
       );
+      if (initial.isBefore(dayStart)) initial = dayStart;
     } else {
-      initial = min;
+      initial = dayStart;
     }
 
     final picked = await _showCupertinoDateTimePicker(
-      title: 'Select Time',
+      title: 'Start Time',
       initial: initial,
-      minimum: min,
+      minimum: dayStart,
       maximum: dayEnd,
     );
-
     if (picked == null) return;
 
     setState(() {
       _startTime = TimeOfDay(hour: picked.hour, minute: picked.minute);
+      _endTime = null;
+      _selectedEndDate = _selectedDate; // reset end date to start date
+    });
+    // Clear overlap state when start time changes (end time will be null)
+    _clearOverlapState();
+  }
 
+  Future<void> _selectEndTime() async {
+    FocusScope.of(context).unfocus();
+
+    if (_selectedDate == null || _startTime == null) return;
+
+    final date = _selectedDate!;
+    final nextDay = date.add(const Duration(days: 1));
+    final venueHours = _getVenueHoursForDate(date);
+    final venueClose =
+        venueHours.close ?? const TimeOfDay(hour: 23, minute: 59);
+    final isOpen24 = _venueIsOpen24Hours();
+    final noHoursData = _venuePeriods.isEmpty && _venueWeekdayText.isEmpty;
+    final allowsNextDay = _venueAllowsNextDay(date);
+
+    final endDate = _selectedEndDate ?? date;
+    final isNextDay =
+        endDate.day != date.day ||
+        endDate.month != date.month ||
+        endDate.year != date.year;
+
+    final startMin = _startTime!.hour * 60 + _startTime!.minute;
+
+    // ── CASE 1: User explicitly chose next-day end date ──
+    if (isNextDay) {
+      // Determine max time on the next day
+      int maxMinOnNextDay;
+      if (isOpen24 || noHoursData) {
+        // Max = startTime - 1 min → total 23h59m
+        maxMinOnNextDay = (startMin - 1 + 1440) % 1440;
+      } else {
+        // Overnight venue → venue close on next day
+        maxMinOnNextDay = venueClose.hour * 60 + venueClose.minute;
+        // Cap at startTime - 1 min (23h59m max)
+        final cap = (startMin - 1 + 1440) % 1440;
+        if (maxMinOnNextDay > cap) maxMinOnNextDay = cap;
+      }
+
+      final pickerMin = DateTime(
+        nextDay.year,
+        nextDay.month,
+        nextDay.day,
+        0,
+        0,
+      );
+      final pickerMax = DateTime(
+        nextDay.year,
+        nextDay.month,
+        nextDay.day,
+        maxMinOnNextDay ~/ 60,
+        maxMinOnNextDay % 60,
+      );
+
+      if (pickerMin.isAfter(pickerMax)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No valid end time on next day')),
+        );
+        return;
+      }
+
+      DateTime initial;
       if (_endTime != null) {
-        final end = DateTime(
+        initial = DateTime(
+          nextDay.year,
+          nextDay.month,
+          nextDay.day,
+          _endTime!.hour,
+          _endTime!.minute,
+        );
+        if (initial.isBefore(pickerMin)) initial = pickerMin;
+        if (initial.isAfter(pickerMax)) initial = pickerMin;
+      } else {
+        initial = pickerMin;
+      }
+
+      final picked = await _showCupertinoDateTimePicker(
+        title: 'End Time (next day)',
+        initial: initial,
+        minimum: pickerMin,
+        maximum: pickerMax,
+      );
+      if (picked == null) return;
+
+      setState(() {
+        _endTime = TimeOfDay(hour: picked.hour, minute: picked.minute);
+        _selectedEndDate = nextDay;
+      });
+      await _checkOverlapsForFriends();
+      return;
+    }
+
+    // ── CASE 2: Same-day end date, overnight / 24h / no-data venue ──
+    if (allowsNextDay) {
+      // Show full 12-hour wheel (00:00 - 23:59) so user can pick times
+      // past midnight. We validate after selection.
+      final pickerMin = DateTime(date.year, date.month, date.day, 0, 0);
+      final pickerMax = DateTime(date.year, date.month, date.day, 23, 59);
+
+      // Default initial to start + 10 min
+      DateTime initial;
+      if (_endTime != null) {
+        initial = DateTime(
           date.year,
           date.month,
           date.day,
           _endTime!.hour,
           _endTime!.minute,
         );
-        if (!end.isAfter(picked)) _endTime = null;
+      } else {
+        final def = DateTime(
+          date.year,
+          date.month,
+          date.day,
+          _startTime!.hour,
+          _startTime!.minute,
+        ).add(const Duration(minutes: 10));
+        initial = DateTime(
+          date.year,
+          date.month,
+          date.day,
+          def.hour,
+          def.minute,
+        );
       }
-    });
-  }
+      if (initial.isBefore(pickerMin)) initial = pickerMin;
+      if (initial.isAfter(pickerMax)) initial = pickerMax;
 
-  Future<void> _selectEndTime() async {
-    // Dismiss keyboard when opening time picker
-    FocusScope.of(context).unfocus();
+      final picked = await _showCupertinoDateTimePicker(
+        title: 'End Time',
+        initial: initial,
+        minimum: pickerMin,
+        maximum: pickerMax,
+      );
+      if (picked == null) return;
 
-    if (_selectedDate == null || _startTime == null) return;
+      final endMin = picked.hour * 60 + picked.minute;
+      final wrapsToNextDay = endMin <= startMin;
 
-    final date = _selectedDate!;
-    final dayEnd = DateTime(date.year, date.month, date.day, 23, 59);
+      // Calculate duration
+      int durationMin;
+      if (wrapsToNextDay) {
+        durationMin = (1440 - startMin) + endMin;
+      } else {
+        durationMin = endMin - startMin;
+      }
 
+      // Validate duration
+      if (durationMin < 10) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Duration must be at least 10 minutes')),
+        );
+        return;
+      }
+      if (durationMin > 1439) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Maximum duration is 23 hours and 59 minutes'),
+          ),
+        );
+        return;
+      }
+
+      // For overnight venues, validate end time against venue close
+      if (wrapsToNextDay &&
+          venueHours.overnight &&
+          !(isOpen24 || noHoursData)) {
+        final closeMin = venueClose.hour * 60 + venueClose.minute;
+        if (endMin > closeMin) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Venue closes at ${_formatTime12h(venueClose)}'),
+            ),
+          );
+          return;
+        }
+      }
+
+      setState(() {
+        _endTime = TimeOfDay(hour: picked.hour, minute: picked.minute);
+        _selectedEndDate = wrapsToNextDay ? nextDay : date;
+      });
+      await _checkOverlapsForFriends();
+      return;
+    }
+
+    // ── CASE 3: Regular venue (non-overnight, same day only) ──
     final start = DateTime(
       date.year,
       date.month,
@@ -681,12 +1372,38 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
       _startTime!.hour,
       _startTime!.minute,
     );
+    final minEnd = start.add(const Duration(minutes: 10));
+    final maxEnd = DateTime(
+      date.year,
+      date.month,
+      date.day,
+      venueClose.hour,
+      venueClose.minute,
+    );
 
-    final minEnd = start.add(const Duration(minutes: 1));
-
-    if (minEnd.isAfter(dayEnd)) {
+    if (minEnd.isAfter(maxEnd)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Not enough time before venue closes (min 10 min)'),
+        ),
+      );
       return;
     }
+
+    final pickerMin = DateTime(
+      date.year,
+      date.month,
+      date.day,
+      minEnd.hour,
+      minEnd.minute,
+    );
+    final pickerMax = DateTime(
+      date.year,
+      date.month,
+      date.day,
+      maxEnd.hour,
+      maxEnd.minute,
+    );
 
     DateTime initial;
     if (_endTime != null) {
@@ -697,22 +1414,334 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
         _endTime!.hour,
         _endTime!.minute,
       );
+      if (initial.isBefore(pickerMin)) initial = pickerMin;
+      if (initial.isAfter(pickerMax)) initial = pickerMin;
     } else {
-      initial = minEnd;
+      initial = pickerMin;
     }
 
     final picked = await _showCupertinoDateTimePicker(
-      title: 'Select Time',
+      title: 'End Time',
       initial: initial,
-      minimum: minEnd,
-      maximum: dayEnd,
+      minimum: pickerMin,
+      maximum: pickerMax,
     );
-
     if (picked == null) return;
 
     setState(() {
       _endTime = TimeOfDay(hour: picked.hour, minute: picked.minute);
+      _selectedEndDate = date;
     });
+    await _checkOverlapsForFriends();
+  }
+
+  /// Clear all overlap state and restore removed friends back to selected list.
+  void _clearOverlapState() {
+    setState(() {
+      // Restore previously removed friends
+      for (final f in _activeOverlapRemovedFriends) {
+        if (!_selectedFriends.any((s) => s.phone == f.phone)) {
+          _selectedFriends.add(f);
+        }
+      }
+      _activeOverlapRemovedFriends.clear();
+      _scheduledOverlapFriends.clear();
+      _scheduledOverlapDocIds.clear();
+    });
+  }
+
+  /// Check overlaps for all selected friends after time is fully set.
+  /// - Active overlaps → auto-remove friend, show single red message with names
+  /// - Scheduled overlaps → stored for dialog when user submits
+  Future<void> _checkOverlapsForFriends() async {
+    // Build the full list to check: current selected + previously removed
+    // Do NOT add removed friends back to _selectedFriends (avoids flicker)
+    final allFriendsToCheck = <Friend>[
+      ..._selectedFriends,
+      ..._activeOverlapRemovedFriends.where(
+        (f) => !_selectedFriends.any((s) => s.phone == f.phone),
+      ),
+    ];
+
+    if (_selectedDate == null ||
+        _startTime == null ||
+        _endTime == null ||
+        _selectedEndDate == null ||
+        _selectedVenueId == null ||
+        allFriendsToCheck.isEmpty) {
+      setState(() {
+        // Restore removed friends since there's nothing to check
+        for (final f in _activeOverlapRemovedFriends) {
+          if (!_selectedFriends.any((s) => s.phone == f.phone)) {
+            _selectedFriends.add(f);
+          }
+        }
+        _activeOverlapRemovedFriends = [];
+        _scheduledOverlapFriends.clear();
+        _scheduledOverlapDocIds.clear();
+      });
+      return;
+    }
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final date = _selectedDate!;
+    final endDate = _selectedEndDate!;
+    final start = DateTime(
+      date.year, date.month, date.day,
+      _startTime!.hour, _startTime!.minute,
+    );
+    final end = DateTime(
+      endDate.year, endDate.month, endDate.day,
+      _endTime!.hour, _endTime!.minute,
+    );
+    if (!end.isAfter(start)) return;
+
+    final venueId = _selectedVenueId!;
+    final newScheduledFriends = <Map<String, String>>[];
+    final newScheduledDocIds = <String>[];
+    final friendsToRemove = <Friend>[];
+
+    // Normalize phone for lookup
+    String normalizePhone(String phone) {
+      String p = phone.replaceAll(RegExp(r'[^\d+]'), '');
+      if (p.startsWith('0')) p = '+966${p.substring(1)}';
+      if (p.startsWith('5') && p.length == 9) p = '+966$p';
+      if (p.startsWith('966')) p = '+$p';
+      return p;
+    }
+
+    // Resolve UIDs in parallel (using cache) — check ALL friends including previously removed
+    final friendsCopy = List<Friend>.from(allFriendsToCheck);
+    final uidFutures = friendsCopy.map((friend) async {
+      final phone = normalizePhone(friend.phone);
+      if (_phoneToUidCache.containsKey(phone)) {
+        return MapEntry(friend, _phoneToUidCache[phone]!);
+      }
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .where('phone', isEqualTo: phone)
+          .limit(1)
+          .get();
+      if (snap.docs.isEmpty) return MapEntry(friend, '');
+      final uid = snap.docs.first.id;
+      _phoneToUidCache[phone] = uid;
+      return MapEntry(friend, uid);
+    }).toList();
+    final uidResults = await Future.wait(uidFutures);
+
+    // Filter out friends with no UID
+    final validEntries = uidResults.where((e) => e.value.isNotEmpty).toList();
+
+    // Check overlaps in parallel
+    final overlapFutures = validEntries.map((entry) async {
+      final friend = entry.key;
+      final receiverUid = entry.value;
+      final snap = await FirebaseFirestore.instance
+          .collection('trackRequests')
+          .where('senderId', isEqualTo: user.uid)
+          .where('receiverId', isEqualTo: receiverUid)
+          .where('venueId', isEqualTo: venueId)
+          .where('status', whereIn: ['pending', 'accepted'])
+          .get();
+
+      final results = <Map<String, dynamic>>[];
+      for (final doc in snap.docs) {
+        final data = doc.data();
+        final existingStart = (data['startAt'] as Timestamp).toDate();
+        final existingEnd = (data['endAt'] as Timestamp).toDate();
+        final existingStatus = data['status'] as String? ?? '';
+
+        if (start.isBefore(existingEnd) && existingStart.isBefore(end)) {
+          final now = DateTime.now();
+          final isActive = existingStatus == 'accepted' &&
+              !now.isBefore(existingStart) &&
+              now.isBefore(existingEnd);
+          results.add({
+            'friend': friend,
+            'uid': receiverUid,
+            'docId': doc.id,
+            'isActive': isActive,
+          });
+        }
+      }
+      return results;
+    }).toList();
+    final overlapResults = await Future.wait(overlapFutures);
+
+    for (final results in overlapResults) {
+      for (final r in results) {
+        final friend = r['friend'] as Friend;
+        if (r['isActive'] == true) {
+          if (!friendsToRemove.any((f) => f.phone == friend.phone)) {
+            friendsToRemove.add(friend);
+          }
+        } else {
+          newScheduledFriends.add({
+            'name': friend.name,
+            'phone': friend.phone,
+            'uid': r['uid'] as String,
+          });
+          newScheduledDocIds.add(r['docId'] as String);
+        }
+      }
+    }
+
+    if (!mounted) return;
+
+    // Determine which previously removed friends are now clear (no longer overlap)
+    final previouslyRemoved = List<Friend>.from(_activeOverlapRemovedFriends);
+    final stillOverlapping = friendsToRemove.map((f) => f.phone).toSet();
+
+    setState(() {
+      // Restore previously removed friends that no longer have active overlap
+      for (final f in previouslyRemoved) {
+        if (!stillOverlapping.contains(f.phone) &&
+            !_selectedFriends.any((s) => s.phone == f.phone)) {
+          _selectedFriends.add(f);
+        }
+      }
+
+      _activeOverlapRemovedFriends = friendsToRemove;
+      _scheduledOverlapFriends = newScheduledFriends;
+      _scheduledOverlapDocIds = newScheduledDocIds;
+
+      // Remove friends with active overlap from selected list
+      for (final f in friendsToRemove) {
+        _selectedFriends.removeWhere((s) => s.phone == f.phone);
+      }
+    });
+
+    // Scroll to the overlap message only if there are new removals
+    final hadNewRemovals = friendsToRemove.any(
+      (f) => !previouslyRemoved.any((p) => p.phone == f.phone),
+    );
+    if (hadNewRemovals) {
+      await Future.delayed(const Duration(milliseconds: 100));
+      if (mounted && _overlapMsgKey.currentContext != null) {
+        Scrollable.ensureVisible(
+          _overlapMsgKey.currentContext!,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
+      }
+    }
+  }
+
+  /// Show scheduled overlap dialog matching the app's standard dialog design.
+  Future<bool?> _showScheduledOverlapDialog() {
+    return showDialog<bool>(
+      context: context,
+      barrierColor: Colors.black54,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: const Text(
+            'Overlapping Requests',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'You already have scheduled requests that overlap with the selected time.',
+                  style: TextStyle(fontSize: 15, height: 1.4),
+                ),
+                const SizedBox(height: 16),
+                // Friends list with vertical green line (matches app design)
+                IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 3,
+                        decoration: BoxDecoration(
+                          color: Colors.orange,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            for (int i = 0; i < _scheduledOverlapFriends.length; i++) ...[
+                              if (i > 0) const SizedBox(height: 8),
+                              Text(
+                                '${_scheduledOverlapFriends[i]['name']} (${_scheduledOverlapFriends[i]['phone']})',
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  height: 1.3,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'The existing scheduled requests for these friends will be cancelled.',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.red[600],
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              style: TextButton.styleFrom(
+                backgroundColor: Colors.grey[200],
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: const Text(
+                'Go Back',
+                style: TextStyle(
+                  color: Colors.black87,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15,
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: TextButton.styleFrom(
+                backgroundColor: AppColors.kError,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: const Text(
+                'Replace & Continue',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<DateTime?> _showCupertinoDateTimePicker({
@@ -832,6 +1861,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
     return _selectedFriends.isNotEmpty &&
         _selectedVenue != null &&
         _selectedDate != null &&
+        _selectedEndDate != null &&
         _startTime != null &&
         _endTime != null;
   }
@@ -852,6 +1882,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
 
     // Validate time
     final date = _selectedDate!;
+    final endDate = _selectedEndDate ?? date;
     final start = DateTime(
       date.year,
       date.month,
@@ -860,9 +1891,9 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
       _startTime!.minute,
     );
     final end = DateTime(
-      date.year,
-      date.month,
-      date.day,
+      endDate.year,
+      endDate.month,
+      endDate.day,
       _endTime!.hour,
       _endTime!.minute,
     );
@@ -876,18 +1907,36 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
     }
 
     final durationMinutes = end.difference(start).inMinutes;
+    if (durationMinutes < 10) {
+      _isSubmitting = false;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Duration must be at least 10 minutes')),
+      );
+      return;
+    }
+    if (durationMinutes > 1439) {
+      _isSubmitting = false;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Maximum duration is 23 hours and 59 minutes'),
+        ),
+      );
+      return;
+    }
 
     try {
-      // Run sender fetch and all receiver lookups in PARALLEL
       final List<Friend> friends = List.from(_selectedFriends);
 
-      // Start all queries at once
-      final senderFuture = FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
+      // Use cached sender info if available, otherwise fetch
+      String senderName = _cachedMyName ?? '';
+      String senderPhone = _cachedMyPhone ?? '';
 
-      // For each friend, query by phone (returns doc with uid and name)
+      // Fetch sender info only if not cached
+      final Future<DocumentSnapshot>? senderFuture = senderPhone.isEmpty
+          ? FirebaseFirestore.instance.collection('users').doc(user.uid).get()
+          : null;
+
+      // For each friend, query by phone in parallel
       final receiverFutures = friends.map((f) async {
         final q = await FirebaseFirestore.instance
             .collection('users')
@@ -907,14 +1956,17 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
       }).toList();
 
       // Wait for all queries in parallel
-      final results = await Future.wait([senderFuture, ...receiverFutures]);
+      final receiverResults = await Future.wait(receiverFutures);
 
-      final senderDoc = results[0] as DocumentSnapshot;
-      final senderData = senderDoc.data() as Map<String, dynamic>? ?? {};
-      final senderName =
-          ('${senderData['firstName'] ?? ''} ${senderData['lastName'] ?? ''}')
-              .trim();
-      final senderPhone = (senderData['phone'] ?? '').toString();
+      // If sender needed fetching, await it
+      if (senderFuture != null) {
+        final senderDoc = await senderFuture;
+        final senderData = senderDoc.data() as Map<String, dynamic>? ?? {};
+        senderName =
+            ('${senderData['firstName'] ?? ''} ${senderData['lastName'] ?? ''}')
+                .trim();
+        senderPhone = (senderData['phone'] ?? '').toString();
+      }
 
       if (senderPhone.isEmpty) {
         _isSubmitting = false;
@@ -928,29 +1980,49 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
 
       // Check receiver results
       final resolved = <Map<String, String>>[];
-      for (var i = 1; i < results.length; i++) {
-        final r = results[i] as Map<String, String>?;
+      for (var i = 0; i < receiverResults.length; i++) {
+        final r = receiverResults[i];
         if (r == null) {
           _isSubmitting = false;
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('User not found for ${friends[i - 1].phone}'),
-            ),
+            SnackBar(content: Text('User not found for ${friends[i].phone}')),
           );
           return;
         }
         resolved.add(r);
       }
 
+      // --- Scheduled Overlap Handling ---
+      // If scheduled overlaps were detected (from end time selection), show dialog
+      if (_scheduledOverlapFriends.isNotEmpty && _scheduledOverlapDocIds.isNotEmpty && mounted) {
+        final proceed = await _showScheduledOverlapDialog();
+        if (proceed != true) {
+          setState(() => _isSubmitting = false);
+          return;
+        }
+        // Cancel the overlapping scheduled requests with 'cancelled' status
+        final cancelBatch = FirebaseFirestore.instance.batch();
+        for (final docId in _scheduledOverlapDocIds) {
+          cancelBatch.update(
+            FirebaseFirestore.instance.collection('trackRequests').doc(docId),
+            {'status': 'cancelled'},
+          );
+        }
+        await cancelBatch.commit();
+        // Clear overlap state after cancellation
+        _scheduledOverlapFriends.clear();
+        _scheduledOverlapDocIds.clear();
+      }
+
       // Create one request per receiver but same batchId
       final batchId = '${user.uid}_${DateTime.now().millisecondsSinceEpoch}';
       final col = FirebaseFirestore.instance.collection('trackRequests');
-      final batch = FirebaseFirestore.instance.batch();
+      final writeBatch = FirebaseFirestore.instance.batch();
       final now = FieldValue.serverTimestamp();
 
       for (final r in resolved) {
         final docRef = col.doc();
-        batch.set(docRef, {
+        writeBatch.set(docRef, {
           'senderId': user.uid,
           'senderName': senderName.isEmpty ? senderPhone : senderName,
           'senderPhone': senderPhone,
@@ -972,7 +2044,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
         });
       }
 
-      await batch.commit();
+      await writeBatch.commit();
 
       if (!mounted) return;
       Navigator.pop(context);
@@ -983,12 +2055,15 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
       );
     } catch (e) {
       _isSubmitting = false;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Failed to send request: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to send request: $e')));
+      }
     }
   }
 
+  /// Build venue opening hours widget (like venue page)
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -1053,6 +2128,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
           // Content
           Expanded(
             child: SingleChildScrollView(
+              controller: _mainScrollController,
               padding: const EdgeInsets.all(20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1082,7 +2158,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                           const Icon(
                             Icons.place,
                             color: AppColors.kGreen,
-                            size: 21,
+                            size: 20,
                           ),
                           const SizedBox(width: 12),
                           Expanded(
@@ -1108,6 +2184,8 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                       ),
                     ),
                   ),
+
+
                   const SizedBox(height: 24),
 
                   // Select Friends Section
@@ -1266,6 +2344,82 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                   ),
                   const SizedBox(height: 20),
 
+                  // Active overlap removal message (single red card listing all removed friends)
+                  if (_activeOverlapRemovedFriends.isNotEmpty)
+                    Container(
+                      key: _overlapMsgKey,
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.red[50],
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.red.shade300, width: 1.5),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.error_outline,
+                                color: Colors.red[400],
+                                size: 20,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  _activeOverlapRemovedFriends.length == 1
+                                      ? '${_activeOverlapRemovedFriends.first.name} (${_activeOverlapRemovedFriends.first.phone}) was removed from this request due to an active tracking overlap.'
+                                      : 'The following friends were removed from this request due to active tracking overlaps:',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.red[700],
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                              GestureDetector(
+                                onTap: () {
+                                  setState(() {
+                                    // Just dismiss the message, don't restore friends
+                                    _activeOverlapRemovedFriends = [];
+                                  });
+                                },
+                                child: Icon(
+                                  Icons.close,
+                                  size: 18,
+                                  color: Colors.grey[500],
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (_activeOverlapRemovedFriends.length > 1) ...[
+                            const SizedBox(height: 8),
+                            for (final f in _activeOverlapRemovedFriends)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 4),
+                                child: Row(
+                                  children: [
+                                    const SizedBox(width: 28),
+                                    Icon(Icons.person, size: 16, color: Colors.red[300]),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                      child: Text(
+                                        '${f.name} (${f.phone})',
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          color: Colors.red[600],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ],
+                      ),
+                    ),
+
                   // Selected Friends List
                   if (_selectedFriends.isNotEmpty) ...[
                     const Text(
@@ -1322,6 +2476,21 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                                       color: Colors.grey[500],
                                     ),
                                   ),
+                                  // Show scheduled overlap warning inline
+                                  if (_scheduledOverlapFriends.any(
+                                    (f) => f['phone'] == friend.phone,
+                                  ))
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 4),
+                                      child: Text(
+                                        'Has a scheduled overlap',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.orange[700],
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
                                 ],
                               ),
                             ),
@@ -1369,64 +2538,212 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                   ),
                   const SizedBox(height: 16),
 
-                  // Date Selector
-                  GestureDetector(
-                    onTap: _selectDate,
-                    child: Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.grey[50],
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.grey.shade300),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(
-                            Icons.calendar_today,
-                            color: AppColors.kGreen,
-                            size: 20,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Date',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.black54,
+                  // Date Range Selectors
+                  Row(
+                    children: [
+                      // Start Date
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: _selectedVenueId == null
+                              ? () {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Please select a venue first',
+                                      ),
+                                    ),
+                                  );
+                                }
+                              : _selectDate,
+                          child: Opacity(
+                            opacity: _selectedVenueId == null ? 0.5 : 1.0,
+                            child: Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: Colors.grey[50],
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.grey.shade300),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.calendar_today,
+                                        color: AppColors.kGreen,
+                                        size: 20,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      const Text(
+                                        'Start Date',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.black54,
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  _selectedDate != null
-                                      ? DateFormat(
-                                          'EEEE, MMMM d, yyyy',
-                                        ).format(_selectedDate!)
-                                      : 'Select date',
-                                  style: TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: _selectedDate != null
-                                        ? FontWeight.w600
-                                        : FontWeight.w400,
-                                    color: _selectedDate != null
-                                        ? Colors.black87
-                                        : Colors.grey[400],
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    _selectedDate != null
+                                        ? DateFormat(
+                                            'EEE d MMM yyyy',
+                                          ).format(_selectedDate!)
+                                        : '--/--/----',
+                                    style: TextStyle(
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w700,
+                                      color: _selectedDate != null
+                                          ? Colors.black87
+                                          : Colors.grey[400],
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
-                          Icon(
-                            Icons.arrow_forward_ios,
-                            color: Colors.grey[400],
-                            size: 16,
-                          ),
-                        ],
+                        ),
                       ),
-                    ),
+                      const SizedBox(width: 12),
+                      // End Date
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () {
+                            if (_selectedDate == null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Please select a start date first',
+                                  ),
+                                ),
+                              );
+                              return;
+                            }
+                            if (_venueIsClosedOnDate(_selectedDate!)) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    _venueIsTemporarilyClosed()
+                                        ? 'The venue is temporarily closed'
+                                        : 'The venue is closed on this date',
+                                  ),
+                                ),
+                              );
+                              return;
+                            }
+                            _selectEndDate();
+                          },
+                          child: Opacity(
+                            opacity:
+                                (_selectedDate == null ||
+                                    (_selectedDate != null &&
+                                        _venueIsClosedOnDate(_selectedDate!)))
+                                ? 0.4
+                                : 1.0,
+                            child: Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: Colors.grey[50],
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.grey.shade300),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        (_selectedEndDate != null &&
+                                                _selectedDate != null &&
+                                                _selectedEndDate !=
+                                                    _selectedDate)
+                                            ? Icons.nights_stay_outlined
+                                            : Icons.event,
+                                        color: AppColors.kGreen,
+                                        size: 20,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Flexible(
+                                        child: Text(
+                                          (_selectedEndDate != null &&
+                                                  _selectedDate != null &&
+                                                  _selectedEndDate !=
+                                                      _selectedDate)
+                                              ? 'End · Next day'
+                                              : 'End Date',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color:
+                                                (_selectedEndDate != null &&
+                                                    _selectedDate != null &&
+                                                    _selectedEndDate !=
+                                                        _selectedDate)
+                                                ? AppColors.kGreen
+                                                : Colors.black54,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    _selectedEndDate != null
+                                        ? DateFormat(
+                                            'EEE d MMM yyyy',
+                                          ).format(_selectedEndDate!)
+                                        : '--/--/----',
+                                    style: TextStyle(
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w700,
+                                      color: _selectedEndDate != null
+                                          ? Colors.black87
+                                          : Colors.grey[400],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
+                  // Show venue hours for selected date
+                  if (_selectedDate != null && _selectedVenueId != null) ...[
+                    const SizedBox(height: 4),
+                    Builder(
+                      builder: (_) {
+                        final hoursStr = _getVenueHoursStringForDate(
+                          _selectedDate!,
+                        );
+                        final isClosed =
+                            hoursStr == 'closed' ||
+                            hoursStr == 'temporarily closed';
+                        final isNotAvailable = hoursStr == 'not available';
+                        final isOpen24 = hoursStr == 'open 24 hours';
+                        Color textColor;
+                        if (isClosed) {
+                          textColor = Colors.red;
+                        } else if (isOpen24) {
+                          textColor = Colors.green;
+                        } else if (isNotAvailable) {
+                          textColor = Colors.orange[700]!;
+                        } else {
+                          textColor = Colors.grey[500]!;
+                        }
+                        return Text(
+                          'Venue hours: $hoursStr',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: textColor,
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+
                   const SizedBox(height: 12),
 
                   // Time Range Selectors
@@ -1435,55 +2752,58 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                       Expanded(
                         child: GestureDetector(
                           onTap: () {
-                            if (_selectedDate == null) {
-                              return;
-                            }
                             _clearTimeError();
                             _selectStartTime();
                           },
-
-                          child: Container(
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: Colors.grey[50],
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.grey.shade300),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    const Icon(
-                                      Icons.access_time,
-                                      color: AppColors.kGreen,
-                                      size: 20,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    const Text(
-                                      'Start Time',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.black54,
+                          child: Opacity(
+                            opacity:
+                                (_selectedDate == null ||
+                                    (_selectedDate != null &&
+                                        _venueIsClosedOnDate(_selectedDate!)))
+                                ? 0.4
+                                : 1.0,
+                            child: Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: Colors.grey[50],
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.grey.shade300),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.access_time,
+                                        color: AppColors.kGreen,
+                                        size: 20,
                                       ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  _startTime != null
-                                      ? _formatTime12h(_startTime!)
-                                      : '--:--',
-
-                                  style: TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w700,
-                                    color: _startTime != null
-                                        ? Colors.black87
-                                        : Colors.grey[400],
+                                      const SizedBox(width: 8),
+                                      const Text(
+                                        'Start Time',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.black54,
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                ),
-                              ],
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    _startTime != null
+                                        ? _formatTime12h(_startTime!)
+                                        : '--:--',
+                                    style: TextStyle(
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w700,
+                                      color: _startTime != null
+                                          ? Colors.black87
+                                          : Colors.grey[400],
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
@@ -1492,78 +2812,116 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                       Expanded(
                         child: GestureDetector(
                           onTap: () {
-                            if (_selectedDate == null) {
-                              return;
-                            }
-                            if (_startTime == null) {
-                              return;
-                            }
                             _clearTimeError();
                             _selectEndTime();
                           },
-
-                          child: Container(
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: Colors.grey[50],
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.grey.shade300),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    const Icon(
-                                      Icons.access_time,
-                                      color: AppColors.kGreen,
-                                      size: 20,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    const Text(
-                                      'End Time',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.black54,
+                          child: Opacity(
+                            opacity:
+                                (_startTime == null ||
+                                    (_selectedDate != null &&
+                                        _venueIsClosedOnDate(_selectedDate!)))
+                                ? 0.4
+                                : 1.0,
+                            child: Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: Colors.grey[50],
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.grey.shade300),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.access_time,
+                                        color: AppColors.kGreen,
+                                        size: 20,
                                       ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  _endTime != null
-                                      ? _formatTime12h(_endTime!)
-                                      : '--:--',
-                                  style: TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w700,
-                                    color: _endTime != null
-                                        ? Colors.black87
-                                        : Colors.grey[400],
+                                      const SizedBox(width: 8),
+                                      const Text(
+                                        'End Time',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.black54,
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                ),
-                              ],
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    _endTime != null
+                                        ? _formatTime12h(_endTime!)
+                                        : '--:--',
+                                    style: TextStyle(
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w700,
+                                      color: _endTime != null
+                                          ? Colors.black87
+                                          : Colors.grey[400],
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 6),
-                  SizedBox(
-                    height: 18,
-                    child: (!_isTimeValid && _timeError != null)
-                        ? Text(
-                            _timeError!,
-                            style: const TextStyle(
-                              color: AppColors.kError,
-                              fontSize: 13,
-                            ),
-                          )
-                        : null,
-                  ),
-
-                  const SizedBox(height: 32),
+                  // Duration info
+                  if (_startTime != null &&
+                      _endTime != null &&
+                      _selectedDate != null &&
+                      _selectedEndDate != null) ...[
+                    const SizedBox(height: 6),
+                    Builder(
+                      builder: (_) {
+                        final s = DateTime(
+                          _selectedDate!.year,
+                          _selectedDate!.month,
+                          _selectedDate!.day,
+                          _startTime!.hour,
+                          _startTime!.minute,
+                        );
+                        final e = DateTime(
+                          _selectedEndDate!.year,
+                          _selectedEndDate!.month,
+                          _selectedEndDate!.day,
+                          _endTime!.hour,
+                          _endTime!.minute,
+                        );
+                        final mins = e.difference(s).inMinutes;
+                        final h = mins ~/ 60;
+                        final m = mins % 60;
+                        final durStr = h > 0
+                            ? (m > 0 ? '${h}h ${m}min' : '${h}h')
+                            : '${m}min';
+                        return Text(
+                          'Duration: $durStr',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: (mins < 10 || mins > 1439)
+                                ? Colors.red
+                                : Colors.grey[500],
+                            fontWeight: FontWeight.w400,
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                  if (!_isTimeValid && _timeError != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      _timeError!,
+                      style: const TextStyle(
+                        color: AppColors.kError,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
                 ],
               ),
             ),

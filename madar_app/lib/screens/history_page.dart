@@ -34,31 +34,22 @@ class HistoryTrackingRequest {
   });
 }
 
-class HistoryPage
-    extends StatefulWidget {
+class HistoryPage extends StatefulWidget {
   const HistoryPage({super.key});
 
   @override
-  State<HistoryPage> createState() =>
-      _HistoryPageState();
+  State<HistoryPage> createState() => _HistoryPageState();
 }
 
-class _HistoryPageState
-    extends State<HistoryPage> {
+class _HistoryPageState extends State<HistoryPage> {
   int _mainTabIndex = 0;
   int _trackingFilterIndex = 0;
 
-  static const List<String> _mainTabs =
-      ['Tracking', 'Meeting point'];
-  static const List<String>
-  _trackingFilters = [
-    'Sent',
-    'Received',
-  ];
+  static const List<String> _mainTabs = ['Tracking', 'Meeting point'];
+  static const List<String> _trackingFilters = ['Sent', 'Received'];
 
   /// Include 'cancelled' so Cancel/Stop Tracking requests show in history as Terminated.
-  static const List<String>
-  _historyStatuses = [
+  static const List<String> _historyStatuses = [
     'declined',
     'expired',
     'terminated',
@@ -66,273 +57,138 @@ class _HistoryPageState
     'cancelled',
   ];
 
-  late final Stream<
-    List<HistoryTrackingRequest>
-  >
-  _sentStream;
-  late final Stream<
-    List<HistoryTrackingRequest>
-  >
-  _receivedStream;
+  late final Stream<List<HistoryTrackingRequest>> _sentStream;
+  late final Stream<List<HistoryTrackingRequest>> _receivedStream;
 
   @override
   void initState() {
     super.initState();
-    _sentStream =
-        _createSentHistoryStream();
-    _receivedStream =
-        _createReceivedHistoryStream();
+    _sentStream = _createSentHistoryStream();
+    _receivedStream = _createReceivedHistoryStream();
     _markStaleRequestsOnLoad();
   }
 
   /// One-time: mark pending/accepted requests past endAt as expired/completed when opening History.
   void _markStaleRequestsOnLoad() {
-    final uid = FirebaseAuth
-        .instance
-        .currentUser
-        ?.uid;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     final now = DateTime.now();
-    final col = FirebaseFirestore
-        .instance
-        .collection('trackRequests');
+    final col = FirebaseFirestore.instance.collection('trackRequests');
     col
-        .where(
-          'senderId',
-          isEqualTo: uid,
-        )
-        .where(
-          'status',
-          whereIn: [
-            'pending',
-            'accepted',
-          ],
-        )
+        .where('senderId', isEqualTo: uid)
+        .where('status', whereIn: ['pending', 'accepted'])
         .get()
         .then((snap) {
           for (final d in snap.docs) {
-            final endAt =
-                (d.data()['endAt']
-                        as Timestamp?)
-                    ?.toDate();
-            if (endAt == null ||
-                !endAt.isBefore(now))
-              continue;
-            final status =
-                (d.data()['status'] ??
-                        '')
-                    .toString();
+            final endAt = (d.data()['endAt'] as Timestamp?)?.toDate();
+            if (endAt == null || !endAt.isBefore(now)) continue;
+            final status = (d.data()['status'] ?? '').toString();
             col.doc(d.id).update({
-              'status':
-                  status == 'pending'
-                  ? 'expired'
-                  : 'completed',
+              'status': status == 'pending' ? 'expired' : 'completed',
             });
           }
         });
     col
-        .where(
-          'receiverId',
-          isEqualTo: uid,
-        )
-        .where(
-          'status',
-          whereIn: [
-            'pending',
-            'accepted',
-          ],
-        )
+        .where('receiverId', isEqualTo: uid)
+        .where('status', whereIn: ['pending', 'accepted'])
         .get()
         .then((snap) {
           for (final d in snap.docs) {
-            final endAt =
-                (d.data()['endAt']
-                        as Timestamp?)
-                    ?.toDate();
-            if (endAt == null ||
-                !endAt.isBefore(now))
-              continue;
-            final status =
-                (d.data()['status'] ??
-                        '')
-                    .toString();
+            final endAt = (d.data()['endAt'] as Timestamp?)?.toDate();
+            if (endAt == null || !endAt.isBefore(now)) continue;
+            final status = (d.data()['status'] ?? '').toString();
             col.doc(d.id).update({
-              'status':
-                  status == 'pending'
-                  ? 'expired'
-                  : 'completed',
+              'status': status == 'pending' ? 'expired' : 'completed',
             });
           }
         });
   }
 
-  Stream<List<HistoryTrackingRequest>>
-  _createSentHistoryStream() {
-    final uid = FirebaseAuth
-        .instance
-        .currentUser
-        ?.uid;
-    if (uid == null)
-      return Stream.value([]);
+  Stream<List<HistoryTrackingRequest>> _createSentHistoryStream() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return Stream.value([]);
 
     return FirebaseFirestore.instance
         .collection('trackRequests')
-        .where(
-          'senderId',
-          isEqualTo: uid,
-        )
+        .where('senderId', isEqualTo: uid)
         .snapshots()
         .map((snap) {
           final list = snap.docs
               .where(
-                (d) => _historyStatuses
-                    .contains(
-                      (d.data()['status'] ??
-                              '')
-                          .toString(),
-                    ),
+                (d) => _historyStatuses.contains(
+                  (d.data()['status'] ?? '').toString(),
+                ),
               )
-              .map(
-                (d) =>
-                    _docToHistoryRequest(
-                      d,
-                      isSent: true,
-                    ),
-              )
+              .map((d) => _docToHistoryRequest(d, isSent: true))
               .toList();
-          list.sort(
-            (a, b) => b.endAt.compareTo(
-              a.endAt,
-            ),
-          );
+          list.sort((a, b) => b.endAt.compareTo(a.endAt));
           return list;
         })
         .handleError((e, st) {
-          debugPrint(
-            'History sent stream error: $e',
-          );
+          debugPrint('History sent stream error: $e');
         });
   }
 
-  Stream<List<HistoryTrackingRequest>>
-  _createReceivedHistoryStream() {
-    final uid = FirebaseAuth
-        .instance
-        .currentUser
-        ?.uid;
-    if (uid == null)
-      return Stream.value([]);
+  Stream<List<HistoryTrackingRequest>> _createReceivedHistoryStream() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return Stream.value([]);
 
     return FirebaseFirestore.instance
         .collection('trackRequests')
-        .where(
-          'receiverId',
-          isEqualTo: uid,
-        )
+        .where('receiverId', isEqualTo: uid)
         .snapshots()
         .map((snap) {
           final list = snap.docs
               .where(
-                (d) => _historyStatuses
-                    .contains(
-                      (d.data()['status'] ??
-                              '')
-                          .toString(),
-                    ),
+                (d) => _historyStatuses.contains(
+                  (d.data()['status'] ?? '').toString(),
+                ),
               )
-              .map(
-                (d) =>
-                    _docToHistoryRequest(
-                      d,
-                      isSent: false,
-                    ),
-              )
+              .map((d) => _docToHistoryRequest(d, isSent: false))
               .toList();
-          list.sort(
-            (a, b) => b.endAt.compareTo(
-              a.endAt,
-            ),
-          );
+          list.sort((a, b) => b.endAt.compareTo(a.endAt));
           return list;
         })
         .handleError((e, st) {
-          debugPrint(
-            'History received stream error: $e',
-          );
+          debugPrint('History received stream error: $e');
         });
   }
 
-  HistoryTrackingRequest
-  _docToHistoryRequest(
-    QueryDocumentSnapshot<
-      Map<String, dynamic>
-    >
-    d, {
+  HistoryTrackingRequest _docToHistoryRequest(
+    QueryDocumentSnapshot<Map<String, dynamic>> d, {
     required bool isSent,
   }) {
     final data = d.data();
-    final startAt =
-        _parseTimestamp(
-          data['startAt'],
-        ) ??
-        DateTime.now();
-    final endAt =
-        _parseTimestamp(
-          data['endAt'],
-        ) ??
-        startAt;
+    final startAt = _parseTimestamp(data['startAt']) ?? DateTime.now();
+    final endAt = _parseTimestamp(data['endAt']) ?? startAt;
     return HistoryTrackingRequest(
       id: d.id,
-      status: (data['status'] ?? '')
-          .toString(),
+      status: (data['status'] ?? '').toString(),
       startAt: startAt,
       endAt: endAt,
-      startTime: DateFormat(
-        'h:mm a',
-      ).format(startAt),
-      endTime: DateFormat(
-        'h:mm a',
-      ).format(endAt),
-      venueName:
-          (data['venueName'] ?? '')
-              .toString(),
+      startTime: DateFormat('h:mm a').format(startAt),
+      endTime: DateFormat('h:mm a').format(endAt),
+      venueName: (data['venueName'] ?? '').toString(),
       otherUserName: isSent
-          ? (data['receiverName'] ?? '')
-                .toString()
-          : (data['senderName'] ??
-                    'Unknown')
-                .toString(),
+          ? (data['receiverName'] ?? '').toString()
+          : (data['senderName'] ?? 'Unknown').toString(),
       otherUserPhone: isSent
-          ? (data['receiverPhone'] ??
-                    '')
-                .toString()
-          : (data['senderPhone'] ?? '')
-                .toString(),
+          ? (data['receiverPhone'] ?? '').toString()
+          : (data['senderPhone'] ?? '').toString(),
       isSent: isSent,
     );
   }
 
-  DateTime? _parseTimestamp(
-    dynamic value,
-  ) {
+  DateTime? _parseTimestamp(dynamic value) {
     if (value == null) return null;
-    if (value is Timestamp)
-      return value.toDate();
+    if (value is Timestamp) return value.toDate();
     return null;
   }
 
   String _formatDate(DateTime d) {
     final now = DateTime.now();
-    final today = DateTime(
-      now.year,
-      now.month,
-      now.day,
-    );
-    final target = DateTime(
-      d.year,
-      d.month,
-      d.day,
-    );
+    final today = DateTime(now.year, now.month, now.day);
+    final target = DateTime(d.year, d.month, d.day);
     if (target == today) return 'Today';
     const months = [
       'Jan',
@@ -359,12 +215,8 @@ class _HistoryPageState
         backgroundColor: Colors.white,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(
-            Icons.arrow_back,
-            color: AppColors.kGreen,
-          ),
-          onPressed: () =>
-              Navigator.pop(context),
+          icon: const Icon(Icons.arrow_back, color: AppColors.kGreen),
+          onPressed: () => Navigator.pop(context),
         ),
         title: const Text(
           'Requests History',
@@ -376,113 +228,69 @@ class _HistoryPageState
         ),
         centerTitle: true,
         bottom: PreferredSize(
-          preferredSize:
-              const Size.fromHeight(52),
+          preferredSize: const Size.fromHeight(52),
           child: Column(
             children: [
               _buildMainTabs(),
-              Container(
-                height: 1,
-                color: Colors.black12,
-              ),
+              Container(height: 1, color: Colors.black12),
             ],
           ),
         ),
       ),
-      body: _mainTabIndex == 0
-          ? _buildTrackingTab()
-          : _buildMeetingPointTab(),
+      body: _mainTabIndex == 0 ? _buildTrackingTab() : _buildMeetingPointTab(),
     );
   }
 
   Widget _buildMainTabs() {
     return Padding(
-      padding:
-          const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 8,
-          ),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
-        children: List.generate(
-          _mainTabs.length,
-          (i) {
-            final isSelected =
-                _mainTabIndex == i;
-            return Expanded(
-              child: GestureDetector(
-                onTap: () => setState(
-                  () =>
-                      _mainTabIndex = i,
-                ),
-                child: Column(
-                  children: [
-                    Text(
-                      _mainTabs[i],
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight:
-                            FontWeight
-                                .w600,
-                        color:
-                            isSelected
-                            ? AppColors
-                                  .kGreen
-                            : Colors
-                                  .grey,
-                      ),
+        children: List.generate(_mainTabs.length, (i) {
+          final isSelected = _mainTabIndex == i;
+          return Expanded(
+            child: GestureDetector(
+              onTap: () => setState(() => _mainTabIndex = i),
+              child: Column(
+                children: [
+                  Text(
+                    _mainTabs[i],
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: isSelected ? AppColors.kGreen : Colors.grey,
                     ),
-                    const SizedBox(
-                      height: 8,
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    height: 2,
+                    decoration: BoxDecoration(
+                      color: isSelected ? AppColors.kGreen : Colors.transparent,
+                      borderRadius: BorderRadius.circular(1),
                     ),
-                    Container(
-                      height: 2,
-                      decoration: BoxDecoration(
-                        color:
-                            isSelected
-                            ? AppColors
-                                  .kGreen
-                            : Colors
-                                  .transparent,
-                        borderRadius:
-                            BorderRadius.circular(
-                              1,
-                            ),
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            );
-          },
-        ),
+            ),
+          );
+        }),
       ),
     );
   }
 
   Widget _buildTrackingTab() {
     return Column(
-      crossAxisAlignment:
-          CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 16),
         Padding(
-          padding:
-              const EdgeInsets.symmetric(
-                horizontal: 16,
-              ),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
           child: _buildFilterPills(),
         ),
         const SizedBox(height: 16),
         Expanded(
-          child:
-              _trackingFilterIndex == 0
-              ? _buildHistoryList(
-                  stream: _sentStream,
-                )
-              : _buildHistoryList(
-                  stream:
-                      _receivedStream,
-                ),
+          child: _trackingFilterIndex == 0
+              ? _buildHistoryList(stream: _sentStream)
+              : _buildHistoryList(stream: _receivedStream),
         ),
       ],
     );
@@ -493,110 +301,67 @@ class _HistoryPageState
       height: 40,
       decoration: BoxDecoration(
         color: Colors.grey[100],
-        borderRadius:
-            BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(20),
       ),
       padding: const EdgeInsets.all(4),
       child: Row(
-        children: List.generate(
-          _trackingFilters.length,
-          (i) {
-            final isSelected =
-                _trackingFilterIndex ==
-                i;
-            return Expanded(
-              child: GestureDetector(
-                onTap: () => setState(
-                  () =>
-                      _trackingFilterIndex =
-                          i,
+        children: List.generate(_trackingFilters.length, (i) {
+          final isSelected = _trackingFilterIndex == i;
+          return Expanded(
+            child: GestureDetector(
+              onTap: () => setState(() => _trackingFilterIndex = i),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: isSelected ? AppColors.kGreen : Colors.transparent,
+                  borderRadius: BorderRadius.circular(18),
                 ),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? AppColors
-                              .kGreen
-                        : Colors
-                              .transparent,
-                    borderRadius:
-                        BorderRadius.circular(
-                          18,
-                        ),
-                  ),
-                  alignment:
-                      Alignment.center,
-                  child: Text(
-                    _trackingFilters[i],
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight:
-                          FontWeight
-                              .w600,
-                      color: isSelected
-                          ? Colors.white
-                          : Colors
-                                .grey[600],
-                    ),
+                alignment: Alignment.center,
+                child: Text(
+                  _trackingFilters[i],
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: isSelected ? Colors.white : Colors.grey[600],
                   ),
                 ),
               ),
-            );
-          },
-        ),
+            ),
+          );
+        }),
       ),
     );
   }
 
   Widget _buildHistoryList({
-    required Stream<
-      List<HistoryTrackingRequest>
-    >
-    stream,
+    required Stream<List<HistoryTrackingRequest>> stream,
   }) {
-    return StreamBuilder<
-      List<HistoryTrackingRequest>
-    >(
-      key: ValueKey(
-        _trackingFilterIndex,
-      ),
+    return StreamBuilder<List<HistoryTrackingRequest>>(
+      key: ValueKey(_trackingFilterIndex),
       stream: stream,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           return Center(
             child: Padding(
-              padding:
-                  const EdgeInsets.all(
-                    24.0,
-                  ),
+              padding: const EdgeInsets.all(24.0),
               child: Text(
                 'Couldn\'t load history. Check your connection.',
-                textAlign:
-                    TextAlign.center,
+                textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 15,
-                  color:
-                      Colors.grey[600],
-                  fontWeight:
-                      FontWeight.w500,
+                  color: Colors.grey[600],
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ),
           );
         }
-        if (snapshot.connectionState ==
-                ConnectionState
-                    .waiting &&
+        if (snapshot.connectionState == ConnectionState.waiting &&
             !snapshot.hasData) {
           return const Center(
-            child:
-                CircularProgressIndicator(
-                  color:
-                      AppColors.kGreen,
-                ),
+            child: CircularProgressIndicator(color: AppColors.kGreen),
           );
         }
-        final list =
-            snapshot.data ?? [];
+        final list = snapshot.data ?? [];
         if (list.isEmpty) {
           return Center(
             child: Text(
@@ -604,185 +369,116 @@ class _HistoryPageState
               style: TextStyle(
                 fontSize: 15,
                 color: Colors.grey[600],
-                fontWeight:
-                    FontWeight.w500,
+                fontWeight: FontWeight.w500,
               ),
             ),
           );
         }
         return ListView.builder(
-          padding:
-              const EdgeInsets.fromLTRB(
-                16,
-                0,
-                16,
-                24,
-              ),
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
           itemCount: list.length,
-          itemBuilder: (context, i) =>
-              Padding(
-                padding:
-                    const EdgeInsets.only(
-                      bottom: 12,
-                    ),
-                child:
-                    _buildHistoryTile(
-                      list[i],
-                    ),
-              ),
+          itemBuilder: (context, i) => Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: _buildHistoryTile(list[i]),
+          ),
         );
       },
     );
   }
 
-  Widget _buildHistoryTile(
-    HistoryTrackingRequest r,
-  ) {
+  Widget _buildHistoryTile(HistoryTrackingRequest r) {
     final dateStr = _formatDate(
-      DateTime(
-        r.startAt.year,
-        r.startAt.month,
-        r.startAt.day,
-      ),
+      DateTime(r.startAt.year, r.startAt.month, r.startAt.day),
     );
-    final durationStr =
-        '$dateStr, ${r.startTime} - ${r.endTime}';
+    final durationStr = '$dateStr, ${r.startTime} - ${r.endTime}';
 
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius:
-            BorderRadius.circular(16),
-        border: Border.all(
-          color: Colors.grey.shade200,
-        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
         boxShadow: [
           BoxShadow(
-            color: Colors.black
-                .withOpacity(0.04),
+            color: Colors.black.withOpacity(0.04),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
         ],
       ),
       child: Padding(
-        padding: const EdgeInsets.all(
-          16,
-        ),
+        padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
                 Container(
                   width: 44,
                   height: 44,
-                  decoration:
-                      BoxDecoration(
-                        color: Colors
-                            .grey[200],
-                        shape: BoxShape
-                            .circle,
-                      ),
-                  child: Icon(
-                    Icons.person,
-                    color: Colors
-                        .grey[600],
-                    size: 22,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[200],
+                    shape: BoxShape.circle,
                   ),
+                  child: Icon(Icons.person, color: Colors.grey[600], size: 22),
                 ),
-                const SizedBox(
-                  width: 12,
-                ),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
-                    crossAxisAlignment:
-                        CrossAxisAlignment
-                            .start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         r.otherUserName,
                         style: const TextStyle(
                           fontSize: 16,
-                          fontWeight:
-                              FontWeight
-                                  .w700,
-                          color: Colors
-                              .black87,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.black87,
                         ),
                       ),
-                      if (r
-                          .otherUserPhone
-                          .isNotEmpty)
+                      if (r.otherUserPhone.isNotEmpty)
                         Text(
                           r.otherUserPhone,
                           style: TextStyle(
-                            fontSize:
-                                13,
-                            color: Colors
-                                .grey[600],
+                            fontSize: 13,
+                            color: Colors.grey[600],
                           ),
                         ),
                     ],
                   ),
                 ),
-                _historyStatusBadge(
-                  r.status,
-                ),
+                _historyStatusBadge(r.status),
               ],
             ),
             const SizedBox(height: 12),
             IntrinsicHeight(
               child: Row(
-                crossAxisAlignment:
-                    CrossAxisAlignment
-                        .start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
                     width: 3,
                     decoration: BoxDecoration(
-                      color: AppColors
-                          .kGreen,
-                      borderRadius:
-                          BorderRadius.circular(
-                            2,
-                          ),
+                      color: AppColors.kGreen,
+                      borderRadius: BorderRadius.circular(2),
                     ),
                   ),
-                  const SizedBox(
-                    width: 12,
-                  ),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment
-                              .start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           durationStr,
                           style: const TextStyle(
-                            fontSize:
-                                13,
-                            fontWeight:
-                                FontWeight
-                                    .w500,
-                            color: Colors
-                                .black87,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.black87,
                           ),
                         ),
-                        const SizedBox(
-                          height: 6,
-                        ),
+                        const SizedBox(height: 6),
                         Text(
-                          r.venueName.isEmpty
-                              ? '—'
-                              : r.venueName,
+                          r.venueName.isEmpty ? '—' : r.venueName,
                           style: TextStyle(
-                            fontSize:
-                                13,
-                            color: Colors
-                                .grey[700],
+                            fontSize: 13,
+                            color: Colors.grey[700],
                           ),
                         ),
                       ],
@@ -797,58 +493,46 @@ class _HistoryPageState
     );
   }
 
-  Widget _historyStatusBadge(
-    String status,
-  ) {
+  Widget _historyStatusBadge(String status) {
     Color bg;
     Color text;
     String label;
     switch (status) {
       case 'declined':
-        bg = AppColors.kError
-            .withOpacity(0.1);
+        bg = AppColors.kError.withOpacity(0.1);
         text = AppColors.kError;
         label = 'Declined';
         break;
       case 'expired':
-        bg = Colors.grey.withOpacity(
-          0.15,
-        );
+        bg = Colors.grey.withOpacity(0.15);
         text = Colors.grey[700]!;
         label = 'Expired';
         break;
       case 'terminated':
-      case 'cancelled':
-        bg = AppColors.kError
-            .withOpacity(0.1);
+        bg = AppColors.kError.withOpacity(0.1);
         text = AppColors.kError;
         label = 'Terminated';
         break;
+      case 'cancelled':
+        bg = Colors.orange.withOpacity(0.1);
+        text = Colors.orange[800]!;
+        label = 'Cancelled';
+        break;
       case 'completed':
-        bg = AppColors.kGreen
-            .withOpacity(0.1);
+        bg = AppColors.kGreen.withOpacity(0.1);
         text = AppColors.kGreen;
         label = 'Completed';
         break;
       default:
-        bg = Colors.grey.withOpacity(
-          0.15,
-        );
+        bg = Colors.grey.withOpacity(0.15);
         text = Colors.grey[700]!;
-        label = status.isEmpty
-            ? '—'
-            : status;
+        label = status.isEmpty ? '—' : status;
     }
     return Container(
-      padding:
-          const EdgeInsets.symmetric(
-            horizontal: 10,
-            vertical: 4,
-          ),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: bg,
-        borderRadius:
-            BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Text(
         label,

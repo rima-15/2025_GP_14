@@ -179,9 +179,20 @@ class _NotificationsPageState extends State<NotificationsPage> {
     for (final doc in unreadSnap.docs) {
       final data = doc.data();
 
-      final requiresAction =
-          (data['requiresAction'] == true); // إذا مو موجود = false
-      if (requiresAction) continue; // لا نلمس اللي يتطلب أكشن
+      final requiresAction = (data['requiresAction'] == true);
+      final type = data['type'];
+      final senderId = data['data']?['senderId'];
+      final currentUid = user.uid;
+
+      // trackStarted:
+      // اقرأها تلقائياً فقط إذا أنا المرسل
+      if (type == 'trackStarted' && senderId == currentUid) {
+        batch.update(doc.reference, {'isRead': true});
+        continue;
+      }
+
+      // باقي الإشعارات اللي تحتاج أكشن
+      if (requiresAction) continue;
 
       batch.update(doc.reference, {'isRead': true});
     }
@@ -345,6 +356,37 @@ class _NotificationsPageState extends State<NotificationsPage> {
         });
   }
 
+  Stream<List<NotificationItem>> _trackStartedStream() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return const Stream.empty();
+
+    return FirebaseFirestore.instance
+        .collection('notifications')
+        .where('userId', isEqualTo: uid)
+        .where('type', isEqualTo: 'trackStarted')
+        .snapshots()
+        .map((snap) {
+          return snap.docs.map((doc) {
+            final d = doc.data();
+
+            final ts =
+                (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+
+            return NotificationItem(
+              id: d['data']?['requestId'],
+              notificationDocId: doc.id,
+              type: NotificationType.trackStarted,
+              title: d['title'] ?? 'Tracking Started',
+              message: d['body'] ?? '',
+              timestamp: ts,
+              isRead: d['isRead'] ?? false,
+              endAt: (d['data']?['endAt'] as Timestamp?)?.toDate(), // 🔥
+              requiresAction: d['requiresAction'] == true, // 🔥
+            );
+          }).toList();
+        });
+  }
+
   /*List<NotificationItem> get _visibleNotifications {
     if (_showAll) return _notifications;
     return _notifications.take(5).toList();
@@ -418,83 +460,103 @@ class _NotificationsPageState extends State<NotificationsPage> {
                     builder: (context, senderSnap) {
                       final senderResponses = senderSnap.data ?? [];
 
-                      if (!docMapSnap.hasData ||
-                          !notifSnap.hasData ||
-                          !incomingSnap.hasData ||
-                          !senderSnap.hasData) {
-                        return const SizedBox();
-                      }
+                      return StreamBuilder<List<NotificationItem>>(
+                        stream: _trackStartedStream(),
+                        builder: (context, trackStartedSnap) {
+                          final trackStarted = trackStartedSnap.data ?? [];
 
-                      final merged = [
-                        ...incomingTrack,
-                        ...senderResponses,
-                      ].where((n) => notifDocMap.containsKey(n.id)).toList();
+                          if (!docMapSnap.hasData ||
+                              !notifSnap.hasData ||
+                              !incomingSnap.hasData ||
+                              !senderSnap.hasData ||
+                              !trackStartedSnap.hasData) {
+                            return const SizedBox();
+                          }
 
-                      merged.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+                          final merged =
+                              [
+                                    ...incomingTrack,
+                                    ...senderResponses,
+                                    ...trackStarted, // 🔥 الجديد
+                                  ]
+                                  .where((n) => notifDocMap.containsKey(n.id))
+                                  .toList();
 
-                      // 🔥 inject notificationDocId
-                      for (final n in merged) {
-                        n.notificationDocId = notifDocMap[n.id];
+                          merged.sort(
+                            (a, b) => b.timestamp.compareTo(a.timestamp),
+                          );
 
-                        // 🔥 إذا ما له notification doc = اعتبره مقروء
-                        if (n.notificationDocId == null) {
-                          n.isRead = true;
-                        }
-                      }
+                          // 🔥 inject notificationDocId
+                          for (final n in merged) {
+                            n.notificationDocId = notifDocMap[n.id];
 
-                      final visible = _showAll
-                          ? merged
-                          : merged.take(5).toList();
+                            // 🔥 إذا ما له notification doc = اعتبره مقروء
+                            if (n.notificationDocId == null) {
+                              n.isRead = true;
+                            }
+                          }
 
-                      if (merged.isEmpty) return _buildEmptyState();
+                          final visible = _showAll
+                              ? merged
+                              : merged.take(5).toList();
 
-                      return ListView(
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 1, 10, 1),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.end,
-                              children: const [],
-                            ),
-                          ),
+                          if (merged.isEmpty) return _buildEmptyState();
 
-                          ...visible.map((notif) {
-                            final live = readMap[notif.id] ?? notif.isRead;
-                            final frozen = _frozenReadMap[notif.id];
-                            final override = _localReadOverride[notif.id];
-
-                            notif.isRead =
-                                override ??
-                                (_freezeReadUI
-                                    ? (_frozenReadMap[notif.id] ?? notif.isRead)
-                                    : (readMap[notif.id] ?? notif.isRead));
-
-                            return _buildNotificationItem(notif);
-                          }),
-
-                          if (!_showAll && merged.length > 5)
-                            Padding(
-                              padding: const EdgeInsets.all(5),
-                              child: TextButton(
-                                onPressed: () =>
-                                    setState(() => _showAll = true),
-                                child: const Text(
-                                  'View All Notifications',
-                                  style: TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppColors.kGreen,
-                                  ),
+                          return ListView(
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  16,
+                                  1,
+                                  10,
+                                  1,
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.end,
+                                  children: const [],
                                 ),
                               ),
-                            ),
 
-                          const SizedBox(height: 20),
-                        ],
+                              ...visible.map((notif) {
+                                final live = readMap[notif.id] ?? notif.isRead;
+                                final frozen = _frozenReadMap[notif.id];
+                                final override = _localReadOverride[notif.id];
+
+                                notif.isRead =
+                                    override ??
+                                    (_freezeReadUI
+                                        ? (_frozenReadMap[notif.id] ??
+                                              notif.isRead)
+                                        : (readMap[notif.id] ?? notif.isRead));
+
+                                return _buildNotificationItem(notif);
+                              }),
+
+                              if (!_showAll && merged.length > 5)
+                                Padding(
+                                  padding: const EdgeInsets.all(5),
+                                  child: TextButton(
+                                    onPressed: () =>
+                                        setState(() => _showAll = true),
+                                    child: const Text(
+                                      'View All Notifications',
+                                      style: TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w600,
+                                        color: AppColors.kGreen,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+
+                              const SizedBox(height: 20),
+                            ],
+                          );
+                        },
                       );
                     },
                   );
-                },
+                }, // 🔥 هذا السطر ناقص عندك
               );
             },
           );
@@ -777,6 +839,58 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                 color: Colors.grey[700],
                                 height: 1.4,
                               ),
+                            ),
+                          ],
+                          if (notification.type ==
+                                  NotificationType.trackStarted &&
+                              notification.requiresAction) ...[
+                            const SizedBox(height: 12),
+
+                            Builder(
+                              builder: (_) {
+                                final expired =
+                                    notification.endAt != null &&
+                                    DateTime.now().isAfter(notification.endAt!);
+
+                                return ElevatedButton(
+                                  onPressed: expired
+                                      ? null
+                                      : () async {
+                                          // mark read
+                                          if (notification.notificationDocId !=
+                                              null) {
+                                            await FirebaseFirestore.instance
+                                                .collection('notifications')
+                                                .doc(
+                                                  notification
+                                                      .notificationDocId!,
+                                                )
+                                                .update({'isRead': true});
+                                          }
+
+                                          setState(() {
+                                            notification.isRead = true;
+                                          });
+
+                                          // لاحقًا تربطين set location
+                                        },
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: AppColors.kGreen,
+                                    disabledBackgroundColor: Colors.grey[300],
+                                    minimumSize: const Size(
+                                      double.infinity,
+                                      40,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                  ),
+                                  child: const Text(
+                                    'Set Your Location',
+                                    style: TextStyle(color: Colors.white),
+                                  ),
+                                );
+                              },
                             ),
                           ],
 
@@ -1129,6 +1243,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
         return Icons.check_circle_outline;
       case NotificationType.trackRejected:
         return Icons.cancel_outlined;
+      case NotificationType.trackStarted: //started
+        return Icons.play_circle_outline;
+
       case NotificationType.locationRefresh:
         return Icons.refresh;
       case NotificationType.navigateRequest:
@@ -1153,6 +1270,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
     switch (type) {
       case NotificationType.trackAccepted:
       case NotificationType.participantAccepted:
+      case NotificationType.trackStarted:
       case NotificationType.allArrived:
         return AppColors.kGreen;
       case NotificationType.trackRejected:
@@ -1403,7 +1521,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
             .update({
               'status': 'accepted',
               'respondedAt': FieldValue.serverTimestamp(),
+              'startNotified': false,
+              'startNotifiedUsers': [], // ✅ أضيفي هذا السطر
             });
+
         await _markNotificationAsReadByRequestId(notification.id);
 
         setState(() {
@@ -1576,6 +1697,7 @@ enum NotificationType {
   trackRequest,
   trackAccepted,
   trackRejected,
+  trackStarted, // 🔥 أضيفي هذا هنا
   locationRefresh,
   navigateRequest,
   meetingPointRequest,
@@ -1590,6 +1712,8 @@ enum NotificationType {
 class NotificationItem {
   final String id;
   String? notificationDocId; // 🔥 جديد
+  final DateTime? endAt;
+  final bool requiresAction;
 
   final NotificationType type;
   final String title;
@@ -1609,6 +1733,9 @@ class NotificationItem {
   NotificationItem({
     required this.id,
     this.notificationDocId,
+    this.endAt,
+
+    this.requiresAction = false,
 
     required this.type,
     required this.title,

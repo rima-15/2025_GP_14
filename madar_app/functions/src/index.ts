@@ -2,6 +2,8 @@ import * as admin from "firebase-admin";
 import { setGlobalOptions } from "firebase-functions";
 import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { onRequest } from "firebase-functions/v2/https";
+import { onSchedule } from "firebase-functions/v2/scheduler";
+//import { Timestamp } from "firebase-admin/firestore";
 
 setGlobalOptions({ maxInstances: 10 });
 
@@ -153,6 +155,114 @@ export const onTrackRequestStatusChanged = onDocumentUpdated(
     }
   }
 );
+/* ------------------------------------------------------------------
+   🔔 Track Started Notification (Scheduled)
+-------------------------------------------------------------------*/
+export const onTrackStarted = onSchedule("every 1 minutes", async () => {
+  const now = admin.firestore.Timestamp.now();
+
+  const snap = await db
+    .collection("trackRequests")
+    .where("status", "==", "accepted")
+    .where("startAt", "<=", now)
+    .get();
+
+  if (snap.empty) return;
+
+  const batch = db.batch();
+
+  for (const doc of snap.docs) {
+    const data = doc.data();
+    const requestId = doc.id;
+
+    const senderId = data.senderId;
+    const receiverId = data.receiverId;
+
+    if (!senderId || !receiverId) continue;
+
+    const notifiedUsers: string[] = data.startNotifiedUsers || [];
+
+    if (notifiedUsers.includes(receiverId)) continue;
+
+    // ================= RECEIVER PUSH =================
+    const receiverDoc = await db.collection("users").doc(receiverId).get();
+    const receiverTokens: string[] = receiverDoc.data()?.fcmTokens ?? [];
+
+    if (receiverTokens.length > 0) {
+      await admin.messaging().sendEachForMulticast({
+        notification: {
+          title: "Tracking Started",
+          body: `${data.senderName} can now track your location`,
+        },
+        data: {
+          type: "trackStarted",
+          requestId,
+        },
+        tokens: receiverTokens,
+      });
+    }
+
+    // ================= SENDER PUSH (مرة وحدة) =================
+    if (notifiedUsers.length === 0) {
+      const senderDoc = await db.collection("users").doc(senderId).get();
+      const senderTokens: string[] = senderDoc.data()?.fcmTokens ?? [];
+
+      if (senderTokens.length > 0) {
+        await admin.messaging().sendEachForMulticast({
+          notification: {
+            title: "Tracking Started",
+            body: "You can now track your friends",
+          },
+          data: {
+            type: "trackStarted",
+            requestId,
+          },
+          tokens: senderTokens,
+        });
+      }
+    }
+
+    // ================= FIRESTORE NOTIFICATIONS =================
+
+    batch.set(db.collection("notifications").doc(), {
+      userId: receiverId,
+      type: "trackStarted",
+      requiresAction: true,
+      isRead: false,
+      title: "Tracking Started",
+      body: `${data.senderName} can now track your location`,
+      data: {
+        requestId,
+        endAt: data.endAt,
+      },
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    if (notifiedUsers.length === 0) {
+      batch.set(db.collection("notifications").doc(), {
+        userId: senderId,
+        type: "trackStarted",
+        requiresAction: false,
+        isRead: false,
+        title: "Tracking Started",
+        body: "You can now track your friends",
+        data: {
+          requestId,
+          endAt: data.endAt,
+        },
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+
+    batch.update(doc.ref, {
+      startNotifiedUsers: admin.firestore.FieldValue.arrayUnion(receiverId),
+    });
+  }
+
+  await batch.commit();
+});
+
+
 
 /* ------------------------------------------------------------------
    Unity Location Writer (HTTPS)

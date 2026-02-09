@@ -101,7 +101,8 @@ flutter:
      - assets/venues/solitaire.json
      - assets/maps/F1_map.glb
      - assets/maps/F2_map.glb
-     - assets/nav_cor/navmesh_F1.json
+     - assets/nav_cor/navmesh_GF.json
+     - assets/poi/Solitaire_poi_GF.json
 
      
 flutter_native_splash:

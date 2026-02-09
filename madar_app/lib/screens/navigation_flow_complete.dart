@@ -7,6 +7,7 @@ import 'dart:math' as math;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:madar_app/widgets/app_widgets.dart';
 import 'package:madar_app/widgets/custom_scaffold.dart';
 import 'package:madar_app/theme/theme.dart';
@@ -631,20 +632,25 @@ class _SetYourLocationDialogState
   }
 
   Future<void> _loadNavmeshF1() async {
-    try {
-      final m = await NavMesh.loadAsset(
-        'assets/nav_cor/navmesh_F1.json',
-      );
-      if (!mounted) return;
-      setState(() => _navmeshF1 = m);
-      debugPrint(
-        '✅ Navmesh loaded (F1) for snapping',
-      );
-    } catch (e) {
-      debugPrint(
-        '❌ Failed to load navmesh_F1.json: $e',
-      );
+    // Robust asset lookup: supports both older F1 naming and GF naming.
+    final candidates = <String>[
+      'assets/nav_cor/navmesh_F1.json',
+      'assets/nav_cor/navmesh_GF.json',
+    ];
+
+    for (final path in candidates) {
+      try {
+        final m = await NavMesh.loadAsset(path);
+        if (!mounted) return;
+        setState(() => _navmeshF1 = m);
+        debugPrint('✅ Navmesh loaded: $path  v=${m.v.length} t=${m.t.length}');
+        return;
+      } catch (_) {
+        // try next
+      }
     }
+
+    debugPrint('❌ Failed to load navmesh. Check pubspec.yaml assets + file path.');
   }
 
   /// Loads the last saved user location (if any). It reads from:
@@ -1022,6 +1028,17 @@ window.__poiOriginals = window.__poiOriginals || {};
 function _matName(m) {
   try { return m.name || (m.material && m.material.name) || ""; } catch(e){ return ""; }
 }
+function _normMatName(s){
+  try{
+    let t = String(s||"").trim();
+    if(t && !t.toUpperCase().startsWith("POIMAT_")) t = "POIMAT_" + t;
+    t = t.toLowerCase();
+    t = t.replace(/\s+/g, "");
+    t = t.replace(/\.\d+$/g, "");
+    return t;
+  }catch(e){ return ""; }
+}
+
 
 
 
@@ -1080,9 +1097,9 @@ function cacheOriginalPoiMaterials(viewer) {
 
 function _restorePoi(viewer, name) {
   const m = (viewer && viewer.model && viewer.model.materials)
-    ? viewer.model.materials.find(x => _matName(x) === name)
+    ? (viewer.model.materials.find(x => _matName(x) === name) || viewer.model.materials.find(x => _normMatName(_matName(x)) === _normMatName(name)))
     : null;
-  const orig = window.__poiOriginals[name];
+  const orig = window.__poiOriginals[name] || window.__poiOriginals[name.replace(/\.\d+$/g,"")];
   if (!m || !orig) return;
 
   const pbr = m.pbrMetallicRoughness;
@@ -1094,7 +1111,8 @@ function _restorePoi(viewer, name) {
 function _applyPoiHighlight(viewer, name) {
   if (!viewer || !viewer.model || !viewer.model.materials) return false;
 
-  const mat = viewer.model.materials.find(m => _matName(m) === name);
+  const target = _normMatName(name);
+  const mat = (viewer.model.materials.find(m => _matName(m) === name) || viewer.model.materials.find(m => _normMatName(_matName(m)) === target));
   if (!mat) return false;
 
   // Restore previous highlight if exists
@@ -2319,20 +2337,114 @@ class _PathOverviewScreenState
   }
 
   Future<void> _loadNavmeshF1() async {
-    try {
-      _navmeshF1 = await NavMesh.loadAsset(
-        'assets/nav_cor/navmesh_F1.json',
-      );
-      debugPrint(
-        '✅ Navmesh loaded: v=${_navmeshF1!.v.length} t=${_navmeshF1!.t.length}',
-      );
+    // Robust asset lookup: supports both older F1 naming and GF naming.
+    final candidates = <String>[
+      'assets/nav_cor/navmesh_F1.json',
+      'assets/nav_cor/navmesh_GF.json'
+    ];
+
+    for (final path in candidates) {
+      try {
+        final m = await NavMesh.loadAsset(path);
+        if (!mounted) return;
+        setState(() => _navmeshF1 = m);
+        debugPrint('✅ Navmesh loaded: $path  v=${m.v.length} t=${m.t.length}');
+        _maybeComputeAndPushPath();
+        return;
+      } catch (_) {
+        // try next
+      }
+    }
+
+    debugPrint('❌ Failed to load navmesh. Check pubspec.yaml assets + file path.');
+  }
+
+  String _normalizePoiKey(String s) {
+    var t = s.trim();
+    if (t.isEmpty) return t;
+    if (!t.toUpperCase().startsWith('POIMAT_')) {
+      t = 'POIMAT_' + t;
+    }
+    // Strip Blender suffix like .001
+    t = t.replaceAll(RegExp(r'\.\d+$'), '');
+    // Normalize whitespace
+    t = t.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return t;
+  }
+
+  String _normalizeForCompare(String s) {
+    return _normalizePoiKey(s)
+        .toLowerCase()
+        .replaceAll(RegExp(r'\s+'), '');
+  }
+
+  Future<void> _loadDestinationFromPoiJsonIfNeeded() async {
+    if (_destPosBlender != null) return;
+
+    final rawName = (widget.destinationPoiMaterial.trim().isNotEmpty)
+        ? widget.destinationPoiMaterial
+        : widget.shopId;
+
+    final wanted = _normalizeForCompare(rawName);
+    if (wanted.isEmpty) return;
+
+    final candidates = <String>[
+      'assets/Solitaire_poi_GF.json',
+      'assets/poi/Solitaire_poi_GF.json',
+      'assets/data/Solitaire_poi_GF.json',
+      'assets/Solitaire_poi_F0.json',
+    ];
+
+    Map<String, dynamic>? pois;
+    for (final path in candidates) {
+      try {
+        final raw = await rootBundle.loadString(path);
+        final obj = jsonDecode(raw);
+        if (obj is Map && obj['pois'] is Map) {
+          pois = Map<String, dynamic>.from(obj['pois'] as Map);
+          debugPrint('✅ POI json loaded: $path  (pois=${pois.length})');
+          break;
+        }
+      } catch (_) {
+        // try next
+      }
+    }
+    if (pois == null) {
+      debugPrint('❌ Could not load POI json (Solitaire_poi_GF.json). Check pubspec.yaml assets.');
+      return;
+    }
+
+    String? matchedKey;
+    Map? matched;
+    for (final entry in pois.entries) {
+      final k = entry.key.toString();
+      if (_normalizeForCompare(k) == wanted) {
+        matchedKey = k;
+        matched = entry.value as Map?;
+        break;
+      }
+    }
+
+    if (matchedKey == null || matched == null) {
+      debugPrint('⚠️ POI not found in json for: $rawName');
+      return;
+    }
+
+    final x = matched['x'];
+    final y = matched['y'];
+    final z = matched['z'];
+    if (x is num && y is num && z is num) {
+      _destPosBlender = {'x': x.toDouble(), 'y': y.toDouble(), 'z': z.toDouble()};
+      // Keep highlight using the matched key (no .001 suffix)
+      _pendingPoiToHighlight = _normalizePoiKey(matchedKey);
+      if (_jsReady) {
+        _pushDestinationHighlightToJsPath();
+      }
+      debugPrint('✅ Destination resolved from POI json: $matchedKey -> ($_destPosBlender)');
       _maybeComputeAndPushPath();
-    } catch (e) {
-      debugPrint(
-        '❌ Failed to load navmesh_F1.json: $e',
-      );
     }
   }
+
 
   // --- Path cleanup helpers (makes breadcrumbs look more centered/smooth) ---
 
@@ -3019,6 +3131,17 @@ window.__pendingPoiHighlight = null;
 function _matName(m) {
   try { return m.name || (m.material && m.material.name) || ""; } catch(e){ return ""; }
 }
+function _normMatName(s){
+  try{
+    let t = String(s||"").trim();
+    if(t && !t.toUpperCase().startsWith("POIMAT_")) t = "POIMAT_" + t;
+    t = t.toLowerCase();
+    t = t.replace(/\s+/g, "");
+    t = t.replace(/\.\d+$/g, "");
+    return t;
+  }catch(e){ return ""; }
+}
+
 
 
 
@@ -3071,9 +3194,9 @@ function cacheOriginalPoiMaterials(viewer) {
 
 function _restorePoi(viewer, name) {
   const m = (viewer && viewer.model && viewer.model.materials)
-    ? viewer.model.materials.find(x => _matName(x) === name)
+    ? (viewer.model.materials.find(x => _matName(x) === name) || viewer.model.materials.find(x => _normMatName(_matName(x)) === _normMatName(name)))
     : null;
-  const orig = window.__poiOriginals[name];
+  const orig = window.__poiOriginals[name] || window.__poiOriginals[name.replace(/\.\d+$/g,"")];
   if (!m || !orig) return;
 
   const pbr = m.pbrMetallicRoughness;
@@ -3084,13 +3207,15 @@ function _restorePoi(viewer, name) {
 
 function _applyPoiHighlight(viewer, name) {
   if (!viewer || !viewer.model || !viewer.model.materials) return false;
-  const mat = viewer.model.materials.find(m => _matName(m) === name);
+  const target = _normMatName(name);
+  const mat = (viewer.model.materials.find(m => _matName(m) === name) || viewer.model.materials.find(m => _normMatName(_matName(m)) === target));
   if (!mat) return false;
+  const actualName = _matName(mat);
 
-  if (window.__highlightedPoi && window.__highlightedPoi !== name) {
+  if (window.__highlightedPoi && window.__highlightedPoi !== actualName) {
     _restorePoi(viewer, window.__highlightedPoi);
   }
-  if (!window.__poiOriginals[name]) cacheOriginalPoiMaterials(viewer);
+  if (!window.__poiOriginals[actualName]) cacheOriginalPoiMaterials(viewer);
 
   const pbr = mat.pbrMetallicRoughness;
   if (pbr) {
@@ -3100,7 +3225,7 @@ function _applyPoiHighlight(viewer, name) {
   _setEmis(mat, [0.2612, 0.1765, 0.0965]);
 
 
-  window.__highlightedPoi = name;
+  window.__highlightedPoi = actualName;
   viewer.requestUpdate();
   return true;
 }
@@ -3209,6 +3334,7 @@ const timer = setInterval(function() {
     _loadVenueMaps();
     _loadUserBlenderPosition();
     _loadNavmeshF1();
+    _loadDestinationFromPoiJsonIfNeeded();
   }
 
   /// Loads the user's saved start location from:

@@ -238,10 +238,11 @@ class _CategoryPageState extends State<CategoryPage>
   }
 
   Future<void> _openNavigationFlow(
-    String placeId,
-    String placeName,
-    String? poiMaterial,
-  ) async {
+  String placeId,
+  String placeName,
+  String? poiMaterial,
+  String floorSrc,
+) async {
     final hasPosition = await _hasWorldPosition(placeId);
     if (!hasPosition) {
       if (!mounted) return;
@@ -250,9 +251,16 @@ class _CategoryPageState extends State<CategoryPage>
     }
     if (!mounted) return;
 
-    final material = (poiMaterial?.trim().isNotEmpty ?? false)
-        ? poiMaterial!.trim()
-        : 'POIMAT_${placeName.trim()}';
+    var material = (poiMaterial ?? '').trim();
+if (material.isEmpty) {
+  material = 'POIMAT_${placeName.trim()}';
+}
+
+// If your DB stores mesh names like "POI_StoreName", convert to POIMAT_
+if (material.toUpperCase().startsWith('POI_')) {
+  material = 'POIMAT_${material.substring(4)}';
+}
+
 
     debugPrint(
       '🧾 Category selected: name="$placeName" -> material="$material"',
@@ -264,13 +272,15 @@ class _CategoryPageState extends State<CategoryPage>
     }
 
     showNavigationDialog(
-      context,
-      placeName,
-      placeId,
-      destinationPoiMaterial: material,
-    );
+  context,
+  placeName,
+  placeId,
+  destinationPoiMaterial: material,
+  floorSrc: floorSrc,
+);
 
-  }
+
+}
 
   // ---------- Build ----------
 
@@ -448,9 +458,13 @@ class _CategoryPageState extends State<CategoryPage>
         (data['poiMaterial'] ?? data['material'] ?? data['poiMat'])
             ?.toString()
             .trim();
+    final floorSrc =
+    (data['floorSrc'] ?? data['floor'] ?? data['level'] ?? 'GF')
+        .toString()
+        .trim();
 
     return InkWell(
-      onTap: () => _openNavigationFlow(placeId, placeName, poiMaterial),
+      onTap: () => _openNavigationFlow(placeId, placeName, poiMaterial, floorSrc),
 
       borderRadius: BorderRadius.circular(12),
       child: Container(

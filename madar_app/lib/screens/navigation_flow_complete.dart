@@ -376,8 +376,10 @@ class NavigateToShopDialog
       final bp = loc['blenderPosition'];
       if (bp is! Map) return;
 
-      final x = (bp['x'] as num?)
-          ?.toDouble();
+      final x =
+          ((bp['x'] as num?)
+              ?.toDouble() ??
+          0.0);
       final y = (bp['y'] as num?)
           ?.toDouble();
       final z = (bp['z'] as num?)

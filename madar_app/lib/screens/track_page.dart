@@ -403,7 +403,12 @@ window.upsertTrackedPin = function(userId,x,y,z,label){
   const viewer = getViewer();
   if(!viewer || !userId) return false;
   const hs = ensurePin(viewer, userId, label);
-  hs.setAttribute('data-position', `${x} ${y} ${z}`);
+  if (hs.parentElement) {
+  hs.parentElement.removeChild(hs);
+  viewer.appendChild(hs);
+}
+hs.setAttribute('data-position', `${x} ${y} ${z}`);
+
   hs.setAttribute('data-normal', '0 1 0');
   hs.style.display = 'block';
   viewer.requestUpdate();
@@ -427,6 +432,20 @@ window.removeTrackedPin = function(userId){
   viewer.requestUpdate();
   return true;
 };
+
+
+window.__viewerReady = false;
+
+(function(){
+  const v = getViewer();
+  if(!v) return;
+  v.addEventListener('load', () => { window.__viewerReady = true; }, { once:true });
+  v.addEventListener('model-visibility', () => { window.__viewerReady = true; });
+})();
+window.isViewerReady = function(){
+  return !!window.__viewerReady;
+};
+
 ''';
 
   // Meeting point data
@@ -600,12 +619,25 @@ window.removeTrackedPin = function(userId){
                       .toString();
 
               // name (optional)
+              final first =
+                  (u['firstName'] ?? '')
+                      .toString()
+                      .trim();
+              final last =
+                  (u['lastName'] ?? '')
+                      .toString()
+                      .trim();
+
               final displayName =
-                  (u['name'] ??
-                          u['fullName'] ??
-                          u['email'] ??
-                          'User')
-                      .toString();
+                  (first.isNotEmpty ||
+                      last.isNotEmpty)
+                  ? ('$first $last')
+                        .trim()
+                  : (u['name'] ??
+                            u['fullName'] ??
+                            u['email'] ??
+                            'User')
+                        .toString();
 
               if (x == null ||
                   y == null ||
@@ -899,7 +931,8 @@ window.removeTrackedPin = function(userId){
     return false;
   }
 
-  void _applyAllTrackedPinsToViewer() {
+  Future<void>
+  _applyAllTrackedPinsToViewer() async {
     if (_trackMapController == null) {
       _pendingPinApply = true;
       return;
@@ -928,9 +961,10 @@ window.removeTrackedPin = function(userId){
       );
 
       if (!ok) {
-        _trackMapController!.runJavaScript(
-          "hideTrackedPin('$userId');",
-        );
+        await _trackMapController!
+            .runJavaScript(
+              "hideTrackedPin('$userId');",
+            );
         continue;
       }
       final double xRaw =
@@ -1337,17 +1371,7 @@ window.removeTrackedPin = function(userId){
                       _pendingPinApply =
                           true; // ✅ مهم
 
-                      Future.delayed(
-                        const Duration(
-                          milliseconds:
-                              150,
-                        ),
-                        () {
-                          if (!mounted)
-                            return;
-                          _applyAllTrackedPinsToViewer();
-                        },
-                      );
+                      _applyPinsWhenViewerReady();
                     },
               ),
             Positioned(
@@ -1474,6 +1498,35 @@ window.removeTrackedPin = function(userId){
         ),
       ),
     );
+  }
+
+  Future<void>
+  _applyPinsWhenViewerReady() async {
+    if (_trackMapController == null)
+      return;
+
+    int tries = 0;
+    while (tries < 20) {
+      tries++;
+      try {
+        final ok =
+            await _trackMapController!
+                .runJavaScriptReturningResult(
+                  "isViewerReady();",
+                );
+        final ready = ok
+            .toString()
+            .contains('true');
+        if (ready) break;
+      } catch (_) {}
+      await Future.delayed(
+        const Duration(
+          milliseconds: 150,
+        ),
+      );
+    }
+    if (!mounted) return;
+    _applyAllTrackedPinsToViewer();
   }
 
   Widget _floorButton(
@@ -2687,6 +2740,8 @@ window.removeTrackedPin = function(userId){
             'status': newStatus,
             'respondedAt':
                 FieldValue.serverTimestamp(), // 🔥 وقت الرد الحقيقي
+            if (newStatus == 'accepted')
+              'startNotifiedUsers': [],
           });
 
       // 2️⃣ 🔥 تعليم الإشعار كمقروء

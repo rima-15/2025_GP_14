@@ -2071,6 +2071,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
           'status': 'pending',
           'createdAt': now,
           'batchId': batchId,
+          'startNotifiedUsers': [],
         });
       }
 

@@ -1712,10 +1712,8 @@ window.removeTrackedPin = function(userId){
           .doc(requestId)
           .update({
             'status': newStatus,
-            'respondedAt': FieldValue.serverTimestamp(),
-
-            if (newStatus == 'accepted')
-              'startNotifiedUsers': [], // 🔥🔥 مهم جدًا
+            'respondedAt': FieldValue.serverTimestamp(), // 🔥 وقت الرد الحقيقي
+            if (newStatus == 'accepted') 'startNotifiedUsers': [],
           });
 
       // 2️⃣ 🔥 تعليم الإشعار كمقروء

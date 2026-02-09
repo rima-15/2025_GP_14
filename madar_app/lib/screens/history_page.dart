@@ -514,12 +514,12 @@ class _HistoryPageState extends State<HistoryPage> {
         label = 'Terminated';
         break;
       case 'cancelled':
-        bg = Colors.orange.withOpacity(0.1);
-        text = Colors.orange[800]!;
+        bg = Colors.grey.withOpacity(0.15);
+        text = Colors.grey[700]!;
         label = 'Cancelled';
         break;
       case 'completed':
-        bg = AppColors.kGreen.withOpacity(0.1);
+        bg = const Color.fromARGB(255, 12, 13, 10).withOpacity(0.1);
         text = AppColors.kGreen;
         label = 'Completed';
         break;

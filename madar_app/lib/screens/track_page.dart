@@ -371,30 +371,129 @@ function getViewer(){ return document.querySelector('model-viewer'); }
 function pinId(userId){ return `trackedPin_${userId}`; }
 function labelId(userId){ return `trackedLabel_${userId}`; }
 
+function ensureTrackStyle() {
+  if (document.getElementById("track_pin_hotspot_style")) return;
+  const style = document.createElement("style");
+  style.id = "track_pin_hotspot_style";
+  style.textContent = `
+    .trackedPinHotspot{
+      pointer-events:none;
+      position:absolute;
+      left:0; top:0;
+      width:1px; height:1px;
+      transform: translate3d(var(--hotspot-x), var(--hotspot-y), 0px);
+      will-change: transform;
+      z-index: 900;
+      opacity: var(--hotspot-visibility);
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function buildTeardropPin(container, opts){
+  const size = (opts && opts.size) ? Number(opts.size) : 22;
+  const color = (opts && opts.color) ? String(opts.color) : "#ff3b30";
+  const label = (opts && typeof opts.label === "string") ? opts.label : "";
+
+  const wrap = document.createElement("div");
+  wrap.style.position = "absolute";
+  wrap.style.left = "0";
+  wrap.style.top = "0";
+  wrap.style.transform = "translate(-50%, -92%)";
+  wrap.style.pointerEvents = "none";
+
+  const column = document.createElement("div");
+  column.style.display = "flex";
+  column.style.flexDirection = "column";
+  column.style.alignItems = "center";
+  column.style.gap = "4px";
+
+  // Optional label bubble (above pin)
+  if (label) {
+    const bubble = document.createElement("div");
+    bubble.style.padding = "3px 8px";
+    bubble.style.borderRadius = "12px";
+    bubble.style.background = "rgba(0,0,0,0.55)";
+    bubble.style.color = "#fff";
+    bubble.style.fontSize = "11px";
+    bubble.style.maxWidth = "140px";
+    bubble.style.whiteSpace = "nowrap";
+    bubble.style.overflow = "hidden";
+    bubble.style.textOverflow = "ellipsis";
+    bubble.textContent = label;
+    column.appendChild(bubble);
+  }
+
+  const holder = document.createElement("div");
+  holder.style.position = "relative";
+  holder.style.width = `${size}px`;
+  holder.style.height = `${size}px`;
+  holder.style.overflow = "visible";
+
+  const pin = document.createElement("div");
+  pin.style.width = `${size}px`;
+  pin.style.height = `${size}px`;
+  pin.style.background = color;
+  pin.style.borderRadius = `${size}px ${size}px ${size}px 0`;
+  pin.style.position = "absolute";
+  pin.style.left = "50%";
+  pin.style.top = "50%";
+  pin.style.transform = "translate(-50%, -50%) rotate(-45deg)";
+  pin.style.transformOrigin = "center";
+  pin.style.boxShadow = "0 6px 14px rgba(0,0,0,0.35)";
+  pin.style.border = "2px solid rgba(255,255,255,0.85)";
+
+  const inner = document.createElement("div");
+  inner.style.width = `${Math.round(size*0.33)}px`;
+  inner.style.height = `${Math.round(size*0.33)}px`;
+  inner.style.background = "white";
+  inner.style.borderRadius = "999px";
+  inner.style.position = "absolute";
+  inner.style.left = "50%";
+  inner.style.top = "50%";
+  inner.style.transform = "translate(-50%, -50%)";
+  pin.appendChild(inner);
+
+  holder.appendChild(pin);
+
+  const shadow = document.createElement("div");
+  shadow.style.width = `${Math.round(size*0.75)}px`;
+  shadow.style.height = `${Math.max(5, Math.round(size*0.25))}px`;
+  shadow.style.background = "rgba(0,0,0,0.25)";
+  shadow.style.borderRadius = "999px";
+  shadow.style.filter = "blur(1px)";
+
+  column.appendChild(holder);
+  column.appendChild(shadow);
+
+  wrap.appendChild(column);
+  container.appendChild(wrap);
+}
+
 function ensurePin(viewer, userId, label){
+  ensureTrackStyle();
+
   const id = pinId(userId);
   let hs = viewer.querySelector(`#${id}`);
   if(!hs){
     hs = document.createElement('div');
     hs.id = id;
     hs.slot = `hotspot-${id}`;
+    hs.className = "trackedPinHotspot";
     hs.style.display = 'block';
-    hs.innerHTML = `
-      <div style="display:flex;flex-direction:column;align-items:center;gap:2px;">
-        <div style="font-size:34px;line-height:34px;">📍</div>
-        <div id="${labelId(userId)}"
-             style="padding:2px 6px;border-radius:10px;background:rgba(0,0,0,0.55);
-                    color:#fff;font-size:11px;max-width:120px;white-space:nowrap;
-                    overflow:hidden;text-overflow:ellipsis;">
-          ${label || ''}
-        </div>
-      </div>
-    `;
     viewer.appendChild(hs);
+
+    // build UI once
+    buildTeardropPin(hs, { size: 22, color: "#ff3b30", label: label || "" });
+    hs.__labelText = label || "";
   }else{
-    // update label if provided
-    const el = hs.querySelector(`#${labelId(userId)}`);
-    if(el && typeof label === 'string') el.textContent = label;
+    // update label bubble if changed (rebuild simplest)
+    const newLabel = label || "";
+    if (hs.__labelText !== newLabel) {
+      hs.innerHTML = "";
+      buildTeardropPin(hs, { size: 22, color: "#ff3b30", label: newLabel });
+      hs.__labelText = newLabel;
+    }
   }
   return hs;
 }
@@ -402,13 +501,16 @@ function ensurePin(viewer, userId, label){
 window.upsertTrackedPin = function(userId,x,y,z,label){
   const viewer = getViewer();
   if(!viewer || !userId) return false;
-  const hs = ensurePin(viewer, userId, label);
-  if (hs.parentElement) {
-  hs.parentElement.removeChild(hs);
-  viewer.appendChild(hs);
-}
-hs.setAttribute('data-position', `${x} ${y} ${z}`);
 
+  const hs = ensurePin(viewer, userId, label);
+
+  // Force refresh
+  if (hs.parentElement) {
+    hs.parentElement.removeChild(hs);
+    viewer.appendChild(hs);
+  }
+
+  hs.setAttribute('data-position', `${Number(x)} ${Number(y)} ${Number(z)}`);
   hs.setAttribute('data-normal', '0 1 0');
   hs.style.display = 'block';
   viewer.requestUpdate();
@@ -433,18 +535,15 @@ window.removeTrackedPin = function(userId){
   return true;
 };
 
-
 window.__viewerReady = false;
-
 (function(){
   const v = getViewer();
   if(!v) return;
   v.addEventListener('load', () => { window.__viewerReady = true; }, { once:true });
   v.addEventListener('model-visibility', () => { window.__viewerReady = true; });
 })();
-window.isViewerReady = function(){
-  return !!window.__viewerReady;
-};
+window.isViewerReady = function(){ return !!window.__viewerReady; };
+
 
 ''';
 
@@ -504,6 +603,17 @@ window.isViewerReady = function(){
     _listenToActiveTrackedUsers();
   }
 
+  // ضعّيها داخل _TrackPageState (فوق أو تحت)
+  Map<String, double> _blenderToGltf({
+    required double x,
+    required double y,
+    required double z,
+  }) {
+    // Blender (Z-up) -> glTF (Y-up)
+    // ✅ بدون عكس X
+    return {'x': x, 'y': z, 'z': -y};
+  }
+
   void
   _listenToActiveTrackedUsers() async {
     final user = FirebaseAuth
@@ -511,8 +621,6 @@ window.isViewerReady = function(){
         .currentUser;
     if (user == null) return;
 
-    // This assumes trackRequests stores senderId = auth uid
-    // and receiverId = Firestore users docId
     final q = FirebaseFirestore.instance
         .collection('trackRequests')
         .where(
@@ -532,23 +640,26 @@ window.isViewerReady = function(){
           <String>{};
 
       for (final d in snap.docs) {
+        final data = d.data();
+
         final startAt =
-            (d.data()['startAt']
+            (data['startAt']
                     as Timestamp?)
                 ?.toDate();
         final endAt =
-            (d.data()['endAt']
+            (data['endAt']
                     as Timestamp?)
                 ?.toDate();
+
         final now = DateTime.now();
         final isActiveNow =
             startAt != null &&
             endAt != null &&
             now.isAfter(startAt) &&
             now.isBefore(endAt);
+
         if (!isActiveNow) continue;
 
-        final data = d.data();
         final rid =
             (data['receiverId'] ?? '')
                 .toString()
@@ -565,6 +676,7 @@ window.isViewerReady = function(){
           .difference(
             activeReceiverIds,
           );
+
       for (final id in toRemove) {
         _userLocSubs[id]?.cancel();
         _userLocSubs.remove(id);
@@ -573,7 +685,6 @@ window.isViewerReady = function(){
         _trackedFloorByUser.remove(id);
         _trackedNameByUser.remove(id);
 
-        // remove pin in viewer
         _trackMapController
             ?.runJavaScript(
               "removeTrackedPin('$id');",
@@ -583,6 +694,7 @@ window.isViewerReady = function(){
       // Add new subscriptions
       final toAdd = activeReceiverIds
           .difference(currentIds);
+
       for (final id in toAdd) {
         _userLocSubs[id] = FirebaseFirestore
             .instance
@@ -602,23 +714,21 @@ window.isViewerReady = function(){
                       as Map?) ??
                   {};
 
-              final x =
+              final bx =
                   (blender['x'] as num?)
                       ?.toDouble();
-              final y =
+              final by =
                   (blender['y'] as num?)
                       ?.toDouble();
-              final z =
+              final bz =
                   (blender['z'] as num?)
                       ?.toDouble();
 
-              // floor might be "1"/"2" or "GF"/"F1"
               final floorRaw =
                   (blender['floor'] ??
                           '')
                       .toString();
 
-              // name (optional)
               final first =
                   (u['firstName'] ?? '')
                       .toString()
@@ -639,16 +749,16 @@ window.isViewerReady = function(){
                             'User')
                         .toString();
 
-              if (x == null ||
-                  y == null ||
-                  z == null) {
-                // if location missing -> hide pin
+              if (bx == null ||
+                  by == null ||
+                  bz == null) {
                 _trackedPosByUser
                     .remove(id);
                 _trackedFloorByUser
                     .remove(id);
                 _trackedNameByUser
                     .remove(id);
+
                 _trackMapController
                     ?.runJavaScript(
                       "hideTrackedPin('$id');",
@@ -656,17 +766,21 @@ window.isViewerReady = function(){
                 return;
               }
 
-              _trackedPosByUser[id] = {
-                'x': x,
-                'y': y,
-                'z': z,
-              };
+              // ✅ التحويل إلى glTF مثل مبدأ الـ Navigation (وبدون عكس X)
+              final gltf =
+                  _blenderToGltf(
+                    x: bx,
+                    y: by,
+                    z: bz,
+                  );
+
+              _trackedPosByUser[id] =
+                  gltf;
               _trackedFloorByUser[id] =
                   floorRaw;
               _trackedNameByUser[id] =
                   displayName;
 
-              // Apply pins to current floor
               _applyAllTrackedPinsToViewer();
             });
       }
@@ -967,11 +1081,13 @@ window.isViewerReady = function(){
             );
         continue;
       }
-      final double xRaw =
-          (pos['x'] ?? 0).toDouble();
-      final double x = -xRaw;
-      final y = pos['y']!;
-      final z = pos['z']!;
+      final x = (pos['x'] ?? 0)
+          .toDouble();
+      final y = (pos['y'] ?? 0)
+          .toDouble();
+      final z = (pos['z'] ?? 0)
+          .toDouble();
+
       final label =
           (_trackedNameByUser[userId] ??
                   'User')
@@ -1358,8 +1474,18 @@ window.isViewerReady = function(){
                 src: _currentFloor,
                 alt: "3D Map",
                 ar: false,
-                autoRotate: false,
                 cameraControls: true,
+                autoRotate: false,
+                backgroundColor:
+                    Colors.transparent,
+                cameraOrbit:
+                    "0deg 65deg 2.5m",
+                minCameraOrbit:
+                    "auto 0deg auto",
+                maxCameraOrbit:
+                    "auto 90deg auto",
+                cameraTarget:
+                    "0m 0m 0m",
 
                 // ===== NEW: JS pin + controller =====
                 relatedJs: _trackPinJs,

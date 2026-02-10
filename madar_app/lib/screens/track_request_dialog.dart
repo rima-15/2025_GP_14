@@ -16,43 +16,31 @@ import 'package:share_plus/share_plus.dart';
 class _ContactItem {
   final String name;
   final String phone;
-  _ContactItem({
-    required this.name,
-    required this.phone,
-  });
+  _ContactItem({required this.name, required this.phone});
 }
 
 // ----------------------------------------------------------------------------
 // Track Request Dialog
 // ----------------------------------------------------------------------------
 
-class TrackRequestDialog
-    extends StatefulWidget {
+class TrackRequestDialog extends StatefulWidget {
   const TrackRequestDialog({super.key});
 
   @override
-  State<TrackRequestDialog>
-  createState() =>
-      _TrackRequestDialogState();
+  State<TrackRequestDialog> createState() => _TrackRequestDialogState();
 }
 
-class _TrackRequestDialogState
-    extends State<TrackRequestDialog> {
-  final FocusNode _phoneFocusNode =
-      FocusNode();
+class _TrackRequestDialogState extends State<TrackRequestDialog> {
+  final FocusNode _phoneFocusNode = FocusNode();
   bool _isPhoneFocused = false;
-  final _phoneController =
-      TextEditingController();
-  final List<Friend> _selectedFriends =
-      [];
+  final _phoneController = TextEditingController();
+  final List<Friend> _selectedFriends = [];
   bool _isPhoneInputValid = true;
   String? _phoneInputError;
   bool _isTimeValid = true;
   String? _timeError;
-  bool _isAddingPhone =
-      false; // Prevent multiple clicks on Add button
-  bool _isSubmitting =
-      false; // Prevent multiple clicks on Send Request
+  bool _isAddingPhone = false; // Prevent multiple clicks on Add button
+  bool _isSubmitting = false; // Prevent multiple clicks on Send Request
 
   DateTime? _selectedDate;
   TimeOfDay? _startTime;
@@ -66,10 +54,8 @@ class _TrackRequestDialogState
   Position? _currentPosition;
 
   // Pre-loaded contacts data (loaded when dialog opens for fast access)
-  List<_ContactItem>
-  _preloadedContacts = [];
-  Map<String, bool>
-  _preloadedInDbStatus = {};
+  List<_ContactItem> _preloadedContacts = [];
+  Map<String, bool> _preloadedInDbStatus = {};
 
   // Cached current user info (loaded once in initState to avoid repeated queries)
   String? _cachedMyPhone;
@@ -87,25 +73,18 @@ class _TrackRequestDialogState
 
   // Overlap detection state
   // Active overlaps: friends auto-removed (stored so they can be restored)
-  List<Friend>
-  _activeOverlapRemovedFriends = [];
+  List<Friend> _activeOverlapRemovedFriends = [];
   // Scheduled overlaps: friends with pending/accepted scheduled overlap
-  List<Map<String, String>>
-  _scheduledOverlapFriends = [];
-  List<String> _scheduledOverlapDocIds =
-      [];
+  List<Map<String, String>> _scheduledOverlapFriends = [];
+  List<String> _scheduledOverlapDocIds = [];
 
   // UID cache to avoid repeated Firestore lookups
-  final Map<String, String>
-  _phoneToUidCache = {};
+  final Map<String, String> _phoneToUidCache = {};
 
   // ScrollController for main content
-  final ScrollController
-  _mainScrollController =
-      ScrollController();
+  final ScrollController _mainScrollController = ScrollController();
   // GlobalKey for the overlap message container
-  final GlobalKey _overlapMsgKey =
-      GlobalKey();
+  final GlobalKey _overlapMsgKey = GlobalKey();
 
   @override
   void initState() {
@@ -117,82 +96,53 @@ class _TrackRequestDialogState
 
     _phoneFocusNode.addListener(() {
       setState(() {
-        _isPhoneFocused =
-            _phoneFocusNode.hasFocus;
+        _isPhoneFocused = _phoneFocusNode.hasFocus;
       });
     });
   }
 
   /// Cache current user's phone and name to avoid repeated Firestore queries
-  Future<void>
-  _loadCurrentUserInfo() async {
-    final user = FirebaseAuth
-        .instance
-        .currentUser;
+  Future<void> _loadCurrentUserInfo() async {
+    final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
     try {
-      final doc =
-          await FirebaseFirestore
-              .instance
-              .collection('users')
-              .doc(user.uid)
-              .get();
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
       final data = doc.data();
       if (data != null && mounted) {
-        _cachedMyPhone =
-            (data['phone'] ?? '')
-                .toString();
-        _cachedMyName =
-            ('${data['firstName'] ?? ''} ${data['lastName'] ?? ''}')
-                .trim();
+        _cachedMyPhone = (data['phone'] ?? '').toString();
+        _cachedMyName = ('${data['firstName'] ?? ''} ${data['lastName'] ?? ''}')
+            .trim();
       }
     } catch (_) {}
   }
 
   /// Pre-load contacts and check DB status in background
-  Future<void>
-  _preloadContacts() async {
+  Future<void> _preloadContacts() async {
     try {
       if (!await FlutterContacts.requestPermission()) {
         return;
       }
-      final contacts =
-          await FlutterContacts.getContacts(
-            withProperties: true,
-          );
-      final List<_ContactItem> items =
-          [];
+      final contacts = await FlutterContacts.getContacts(withProperties: true);
+      final List<_ContactItem> items = [];
       for (final c in contacts) {
         if (c.phones.isEmpty) continue;
-        final name =
-            c.displayName.trim().isEmpty
-            ? 'Unknown'
-            : c.displayName;
+        final name = c.displayName.trim().isEmpty ? 'Unknown' : c.displayName;
         for (final p in c.phones) {
-          final phone = _normalizePhone(
-            p.number,
-          );
+          final phone = _normalizePhone(p.number);
           if (phone.isNotEmpty)
-            items.add(
-              _ContactItem(
-                name: name,
-                phone: phone,
-              ),
-            );
+            items.add(_ContactItem(name: name, phone: phone));
         }
       }
       final seen = <String>{};
       final deduped = <_ContactItem>[];
       for (final i in items) {
-        if (seen.add(i.phone))
-          deduped.add(i);
+        if (seen.add(i.phone)) deduped.add(i);
       }
       deduped.sort(
-        (a, b) => a.name
-            .toLowerCase()
-            .compareTo(
-              b.name.toLowerCase(),
-            ),
+        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
       );
 
       if (!mounted) return;
@@ -202,36 +152,22 @@ class _TrackRequestDialogState
 
       // Check DB status in batches
       const batchSize = 20;
-      for (
-        var i = 0;
-        i < deduped.length;
-        i += batchSize
-      ) {
+      for (var i = 0; i < deduped.length; i += batchSize) {
         if (!mounted) return;
-        final batch = deduped
-            .skip(i)
-            .take(batchSize)
-            .toList();
+        final batch = deduped.skip(i).take(batchSize).toList();
         for (final item in batch) {
           if (!mounted) return;
           try {
-            final uid =
-                await _getUserIdByPhone(
-                  item.phone,
-                );
+            final uid = await _getUserIdByPhone(item.phone);
             if (mounted) {
               setState(() {
-                _preloadedInDbStatus[item
-                        .phone] =
-                    uid != null;
+                _preloadedInDbStatus[item.phone] = uid != null;
               });
             }
           } catch (_) {
             if (mounted) {
               setState(() {
-                _preloadedInDbStatus[item
-                        .phone] =
-                    false;
+                _preloadedInDbStatus[item.phone] = false;
               });
             }
           }
@@ -242,50 +178,20 @@ class _TrackRequestDialogState
     }
   }
 
-  static String _normalizePhone(
-    String raw,
-  ) {
-    String phone = raw
-        .replaceAll(RegExp(r'\s+'), '')
-        .replaceAll('-', '');
-    if (phone.startsWith('+966'))
-      phone = phone.replaceFirst(
-        '+966',
-        '',
-      );
-    if (phone.startsWith('966'))
-      phone = phone.replaceFirst(
-        '966',
-        '',
-      );
-    if (phone.startsWith('05') &&
-        phone.length >= 9)
-      phone = phone.substring(2);
-    phone = phone.replaceAll(
-      RegExp(r'[^\d]'),
-      '',
-    );
-    if (phone.length >= 9)
-      phone = phone.substring(
-        phone.length - 9,
-      );
-    return phone.length == 9
-        ? '+966$phone'
-        : '';
+  static String _normalizePhone(String raw) {
+    String phone = raw.replaceAll(RegExp(r'\s+'), '').replaceAll('-', '');
+    if (phone.startsWith('+966')) phone = phone.replaceFirst('+966', '');
+    if (phone.startsWith('966')) phone = phone.replaceFirst('966', '');
+    if (phone.startsWith('05') && phone.length >= 9) phone = phone.substring(2);
+    phone = phone.replaceAll(RegExp(r'[^\d]'), '');
+    if (phone.length >= 9) phone = phone.substring(phone.length - 9);
+    return phone.length == 9 ? '+966$phone' : '';
   }
 
   String _formatTime12h(TimeOfDay t) {
     final now = DateTime.now();
-    final dt = DateTime(
-      now.year,
-      now.month,
-      now.day,
-      t.hour,
-      t.minute,
-    );
-    return DateFormat(
-      'h:mm a',
-    ).format(dt); // 1:35 AM
+    final dt = DateTime(now.year, now.month, now.day, t.hour, t.minute);
+    return DateFormat('h:mm a').format(dt); // 1:35 AM
   }
 
   @override
@@ -304,8 +210,7 @@ class _TrackRequestDialogState
   }
 
   void _clearTimeError() {
-    if (!_isTimeValid ||
-        _timeError != null) {
+    if (!_isTimeValid || _timeError != null) {
       setState(() {
         _isTimeValid = true;
         _timeError = null;
@@ -313,62 +218,39 @@ class _TrackRequestDialogState
     }
   }
 
-  Future<String?> _getUserIdByPhone(
-    String phone,
-  ) async {
-    final q = await FirebaseFirestore
-        .instance
+  Future<String?> _getUserIdByPhone(String phone) async {
+    final q = await FirebaseFirestore.instance
         .collection('users')
-        .where(
-          'phone',
-          isEqualTo: phone,
-        )
+        .where('phone', isEqualTo: phone)
         .limit(1)
         .get();
 
     if (q.docs.isEmpty) return null;
-    return q
-        .docs
-        .first
-        .id; // docId = uid
+    return q.docs.first.id; // docId = uid
   }
 
   Future<void> _loadVenues() async {
-    setState(
-      () => _loadingVenues = true,
-    );
+    setState(() => _loadingVenues = true);
 
     try {
-      final snapshot =
-          await FirebaseFirestore
-              .instance
-              .collection('venues')
-              .orderBy('venueName')
-              .get();
+      final snapshot = await FirebaseFirestore.instance
+          .collection('venues')
+          .orderBy('venueName')
+          .get();
 
-      final venues = snapshot.docs.map((
-        doc,
-      ) {
+      final venues = snapshot.docs.map((doc) {
         final data = doc.data();
         return VenueOption(
           id: doc.id,
           name: data['venueName'] ?? '',
-          latitude:
-              data['latitude']
-                  as double?,
-          longitude:
-              data['longitude']
-                  as double?,
+          latitude: data['latitude'] as double?,
+          longitude: data['longitude'] as double?,
         );
       }).toList();
 
       // Sort alphabetically (case-insensitive)
       venues.sort(
-        (a, b) => a.name
-            .toLowerCase()
-            .compareTo(
-              b.name.toLowerCase(),
-            ),
+        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
       );
 
       setState(() {
@@ -376,66 +258,45 @@ class _TrackRequestDialogState
         _loadingVenues = false;
       });
     } catch (e) {
-      setState(
-        () => _loadingVenues = false,
-      );
-      debugPrint(
-        'Error loading venues: $e',
-      );
+      setState(() => _loadingVenues = false);
+      debugPrint('Error loading venues: $e');
     }
   }
 
-  Future<void>
-  _getCurrentLocation() async {
+  Future<void> _getCurrentLocation() async {
     try {
-      final permission =
-          await Geolocator.checkPermission();
-      if (permission ==
-          LocationPermission.denied) {
+      final permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
         await Geolocator.requestPermission();
       }
 
-      final position =
-          await Geolocator.getCurrentPosition();
-      setState(
-        () =>
-            _currentPosition = position,
-      );
+      final position = await Geolocator.getCurrentPosition();
+      setState(() => _currentPosition = position);
 
       // Auto-select nearest venue
       if (_allVenues.isNotEmpty) {
-        _autoSelectNearestVenue(
-          position,
-        );
+        _autoSelectNearestVenue(position);
       }
     } catch (e) {
-      debugPrint(
-        'Error getting location: $e',
-      );
+      debugPrint('Error getting location: $e');
     }
   }
 
-  void _autoSelectNearestVenue(
-    Position position,
-  ) {
+  void _autoSelectNearestVenue(Position position) {
     VenueOption? nearestVenue;
-    double minDistance =
-        double.infinity;
+    double minDistance = double.infinity;
 
     for (final venue in _allVenues) {
-      if (venue.latitude != null &&
-          venue.longitude != null) {
-        final distance =
-            Geolocator.distanceBetween(
-              position.latitude,
-              position.longitude,
-              venue.latitude!,
-              venue.longitude!,
-            );
+      if (venue.latitude != null && venue.longitude != null) {
+        final distance = Geolocator.distanceBetween(
+          position.latitude,
+          position.longitude,
+          venue.latitude!,
+          venue.longitude!,
+        );
 
         // Within 500 meters
-        if (distance < 500 &&
-            distance < minDistance) {
+        if (distance < 500 && distance < minDistance) {
           minDistance = distance;
           nearestVenue = venue;
         }
@@ -444,10 +305,8 @@ class _TrackRequestDialogState
 
     if (nearestVenue != null) {
       setState(() {
-        _selectedVenue =
-            nearestVenue!.name;
-        _selectedVenueId =
-            nearestVenue.id;
+        _selectedVenue = nearestVenue!.name;
+        _selectedVenueId = nearestVenue.id;
       });
       _loadVenueHours(nearestVenue.id);
     }
@@ -456,55 +315,30 @@ class _TrackRequestDialogState
   // ---------- Venue Opening Hours Helpers ----------
 
   /// Load opening hours for the selected venue from Firestore cache
-  Future<void> _loadVenueHours(
-    String venueId,
-  ) async {
+  Future<void> _loadVenueHours(String venueId) async {
     if (!mounted) return;
-    setState(
-      () => _loadingHours = true,
-    );
+    setState(() => _loadingHours = true);
     try {
-      final cacheDoc =
-          await FirebaseFirestore
-              .instance
-              .collection('venues')
-              .doc(venueId)
-              .collection('cache')
-              .doc('googlePlaces')
-              .get();
+      final cacheDoc = await FirebaseFirestore.instance
+          .collection('venues')
+          .doc(venueId)
+          .collection('cache')
+          .doc('googlePlaces')
+          .get();
       if (!mounted) return;
-      if (cacheDoc.exists &&
-          cacheDoc.data() != null) {
+      if (cacheDoc.exists && cacheDoc.data() != null) {
         final data = cacheDoc.data()!;
-        final opening =
-            (data['openingHours']
-                as Map<
-                  String,
-                  dynamic
-                >?) ??
-            {};
+        final opening = (data['openingHours'] as Map<String, dynamic>?) ?? {};
         List<String> weekdayText =
-            (opening['weekday_text']
-                    as List?)
-                ?.cast<String>() ??
-            [];
-        final periods =
-            (opening['periods']
-                as List?) ??
-            [];
-        final utcOffset =
-            data['utcOffset'] as int?;
-        final businessStatus =
-            data['businessStatus']
-                as String?;
+            (opening['weekday_text'] as List?)?.cast<String>() ?? [];
+        final periods = (opening['periods'] as List?) ?? [];
+        final utcOffset = data['utcOffset'] as int?;
+        final businessStatus = data['businessStatus'] as String?;
         final types =
-            (data['types'] as List?)
-                ?.cast<String>() ??
-            const <String>[];
+            (data['types'] as List?)?.cast<String>() ?? const <String>[];
 
         // Airports with no hours data → assume open 24 hours
-        if (weekdayText.isEmpty &&
-            types.contains('airport')) {
+        if (weekdayText.isEmpty && types.contains('airport')) {
           weekdayText = const [
             'Sunday: Open 24 hours',
             'Monday: Open 24 hours',
@@ -518,36 +352,22 @@ class _TrackRequestDialogState
 
         // Ensure Sunday-first order
         if (weekdayText.isNotEmpty &&
-            weekdayText.first
-                .toLowerCase()
-                .startsWith('monday')) {
-          final idxSun = weekdayText
-              .indexWhere(
-                (l) => l
-                    .toLowerCase()
-                    .startsWith(
-                      'sunday',
-                    ),
-              );
+            weekdayText.first.toLowerCase().startsWith('monday')) {
+          final idxSun = weekdayText.indexWhere(
+            (l) => l.toLowerCase().startsWith('sunday'),
+          );
           if (idxSun > 0) {
             weekdayText = [
-              ...weekdayText.sublist(
-                idxSun,
-              ),
-              ...weekdayText.sublist(
-                0,
-                idxSun,
-              ),
+              ...weekdayText.sublist(idxSun),
+              ...weekdayText.sublist(0, idxSun),
             ];
           }
         }
         setState(() {
-          _venueWeekdayText =
-              weekdayText;
+          _venueWeekdayText = weekdayText;
           _venuePeriods = periods;
           _venueUtcOffset = utcOffset;
-          _venueBusinessStatus =
-              businessStatus;
+          _venueBusinessStatus = businessStatus;
           _loadingHours = false;
         });
       } else {
@@ -560,39 +380,24 @@ class _TrackRequestDialogState
         });
       }
     } catch (_) {
-      if (mounted)
-        setState(
-          () => _loadingHours = false,
-        );
+      if (mounted) setState(() => _loadingHours = false);
     }
   }
 
   bool _venueIsOpen24Hours() {
     // Check weekday_text (e.g. "Sunday: Open 24 hours")
     if (_venueWeekdayText.isNotEmpty) {
-      final all24 = _venueWeekdayText
-          .every(
-            (line) =>
-                line
-                    .toLowerCase()
-                    .contains('24') ||
-                line
-                    .toLowerCase()
-                    .contains(
-                      'open 24',
-                    ),
-          );
+      final all24 = _venueWeekdayText.every(
+        (line) =>
+            line.toLowerCase().contains('24') ||
+            line.toLowerCase().contains('open 24'),
+      );
       if (all24) return true;
     }
     // Check periods: single period with no 'close' → open 24/7
     if (_venuePeriods.length == 1) {
-      final period =
-          _venuePeriods.first;
-      if (period
-              is Map<String, dynamic> &&
-          !period.containsKey(
-            'close',
-          )) {
+      final period = _venuePeriods.first;
+      if (period is Map<String, dynamic> && !period.containsKey('close')) {
         return true;
       }
     }
@@ -600,132 +405,68 @@ class _TrackRequestDialogState
   }
 
   bool _venueIsTemporarilyClosed() {
-    return _venueBusinessStatus
-            ?.toLowerCase() ==
-        'closed_temporarily';
+    return _venueBusinessStatus?.toLowerCase() == 'closed_temporarily';
   }
 
   int? _parseHHMM(String time) {
     if (time.length != 4) return null;
-    final h = int.tryParse(
-      time.substring(0, 2),
-    );
-    final m = int.tryParse(
-      time.substring(2, 4),
-    );
-    if (h == null || m == null)
-      return null;
+    final h = int.tryParse(time.substring(0, 2));
+    final m = int.tryParse(time.substring(2, 4));
+    if (h == null || m == null) return null;
     return h * 60 + m;
   }
 
   /// Get venue hours for a specific date from periods data
-  ({
-    TimeOfDay? open,
-    TimeOfDay? close,
-    bool overnight,
-    bool closed,
-  })
+  ({TimeOfDay? open, TimeOfDay? close, bool overnight, bool closed})
   _getVenueHoursForDate(DateTime date) {
     if (_venueIsTemporarilyClosed()) {
-      return (
-        open: null,
-        close: null,
-        overnight: false,
-        closed: true,
-      );
+      return (open: null, close: null, overnight: false, closed: true);
     }
     if (_venueIsOpen24Hours()) {
       return (
-        open: const TimeOfDay(
-          hour: 0,
-          minute: 0,
-        ),
-        close: const TimeOfDay(
-          hour: 23,
-          minute: 59,
-        ),
+        open: const TimeOfDay(hour: 0, minute: 0),
+        close: const TimeOfDay(hour: 23, minute: 59),
         overnight: false,
         closed: false,
       );
     }
-    if (_venuePeriods.isEmpty &&
-        _venueWeekdayText.isEmpty) {
+    if (_venuePeriods.isEmpty && _venueWeekdayText.isEmpty) {
       return (
-        open: const TimeOfDay(
-          hour: 0,
-          minute: 0,
-        ),
-        close: const TimeOfDay(
-          hour: 23,
-          minute: 59,
-        ),
+        open: const TimeOfDay(hour: 0, minute: 0),
+        close: const TimeOfDay(hour: 23, minute: 59),
         overnight: false,
         closed: false,
       );
     }
     final dartWeekday = date.weekday;
-    final googleDay = dartWeekday == 7
-        ? 0
-        : dartWeekday;
-    for (final period
-        in _venuePeriods) {
-      if (period
-          is! Map<String, dynamic>)
-        continue;
-      final openData =
-          period['open']
-              as Map<String, dynamic>?;
-      final closeData =
-          period['close']
-              as Map<String, dynamic>?;
+    final googleDay = dartWeekday == 7 ? 0 : dartWeekday;
+    for (final period in _venuePeriods) {
+      if (period is! Map<String, dynamic>) continue;
+      final openData = period['open'] as Map<String, dynamic>?;
+      final closeData = period['close'] as Map<String, dynamic>?;
       if (openData == null) continue;
-      final openDay =
-          openData['day'] as int?;
-      final openTime =
-          openData['time'] as String?;
-      if (openDay != googleDay ||
-          openTime == null)
-        continue;
-      final openMin = _parseHHMM(
-        openTime,
-      );
+      final openDay = openData['day'] as int?;
+      final openTime = openData['time'] as String?;
+      if (openDay != googleDay || openTime == null) continue;
+      final openMin = _parseHHMM(openTime);
       if (openMin == null) continue;
       if (closeData == null) {
         return (
-          open: TimeOfDay(
-            hour: openMin ~/ 60,
-            minute: openMin % 60,
-          ),
-          close: const TimeOfDay(
-            hour: 23,
-            minute: 59,
-          ),
+          open: TimeOfDay(hour: openMin ~/ 60, minute: openMin % 60),
+          close: const TimeOfDay(hour: 23, minute: 59),
           overnight: false,
           closed: false,
         );
       }
-      final closeDay =
-          closeData['day'] as int?;
-      final closeTime =
-          closeData['time'] as String?;
-      if (closeDay == null ||
-          closeTime == null)
-        continue;
-      final closeMin = _parseHHMM(
-        closeTime,
-      );
+      final closeDay = closeData['day'] as int?;
+      final closeTime = closeData['time'] as String?;
+      if (closeDay == null || closeTime == null) continue;
+      final closeMin = _parseHHMM(closeTime);
       if (closeMin == null) continue;
-      final isOvernight =
-          closeDay != openDay;
+      final isOvernight = closeDay != openDay;
       return (
-        open: TimeOfDay(
-          hour: openMin ~/ 60,
-          minute: openMin % 60,
-        ),
-        close: TimeOfDay(
-          hour: closeMin ~/ 60,
-          minute: closeMin % 60,
-        ),
+        open: TimeOfDay(hour: openMin ~/ 60, minute: openMin % 60),
+        close: TimeOfDay(hour: closeMin ~/ 60, minute: closeMin % 60),
         overnight: isOvernight,
         closed: false,
       );
@@ -740,124 +481,66 @@ class _TrackRequestDialogState
       'Friday',
       'Saturday',
     ];
-    final line = _venueWeekdayText
-        .firstWhere(
-          (l) => l
-              .toLowerCase()
-              .startsWith(
-                dayLabels[googleDay]
-                    .toLowerCase(),
-              ),
-          orElse: () => '',
-        );
-    if (line.isEmpty ||
-        line.toLowerCase().contains(
-          'closed',
-        )) {
-      return (
-        open: null,
-        close: null,
-        overnight: false,
-        closed: true,
-      );
+    final line = _venueWeekdayText.firstWhere(
+      (l) => l.toLowerCase().startsWith(dayLabels[googleDay].toLowerCase()),
+      orElse: () => '',
+    );
+    if (line.isEmpty || line.toLowerCase().contains('closed')) {
+      return (open: null, close: null, overnight: false, closed: true);
     }
-    if (line.toLowerCase().contains(
-      '24',
-    )) {
+    if (line.toLowerCase().contains('24')) {
       return (
-        open: const TimeOfDay(
-          hour: 0,
-          minute: 0,
-        ),
-        close: const TimeOfDay(
-          hour: 23,
-          minute: 59,
-        ),
+        open: const TimeOfDay(hour: 0, minute: 0),
+        close: const TimeOfDay(hour: 23, minute: 59),
         overnight: false,
         closed: false,
       );
     }
     return (
-      open: const TimeOfDay(
-        hour: 0,
-        minute: 0,
-      ),
-      close: const TimeOfDay(
-        hour: 23,
-        minute: 59,
-      ),
+      open: const TimeOfDay(hour: 0, minute: 0),
+      close: const TimeOfDay(hour: 23, minute: 59),
       overnight: false,
       closed: false,
     );
   }
 
-  String _getVenueHoursStringForDate(
-    DateTime date,
-  ) {
-    if (_venueIsTemporarilyClosed())
-      return 'temporarily closed';
-    if (_venueIsOpen24Hours())
-      return 'open 24 hours';
+  String _getVenueHoursStringForDate(DateTime date) {
+    if (_venueIsTemporarilyClosed()) return 'temporarily closed';
+    if (_venueIsOpen24Hours()) return 'open 24 hours';
     // No hours data at all
-    if (_venuePeriods.isEmpty &&
-        _venueWeekdayText.isEmpty) {
+    if (_venuePeriods.isEmpty && _venueWeekdayText.isEmpty) {
       return 'not available';
     }
-    final hours = _getVenueHoursForDate(
-      date,
-    );
+    final hours = _getVenueHoursForDate(date);
     if (hours.closed) return 'closed';
-    if (hours.open == null ||
-        hours.close == null)
-      return 'not available';
-    final openStr = _formatTime12h(
-      hours.open!,
-    );
-    final closeStr = _formatTime12h(
-      hours.close!,
-    );
-    if (hours.overnight)
-      return '$openStr - $closeStr (next day)';
+    if (hours.open == null || hours.close == null) return 'not available';
+    final openStr = _formatTime12h(hours.open!);
+    final closeStr = _formatTime12h(hours.close!);
+    if (hours.overnight) return '$openStr - $closeStr (next day)';
     return '$openStr - $closeStr';
   }
 
   /// Whether venue is closed / temporarily closed on date → disable time
-  bool _venueIsClosedOnDate(
-    DateTime date,
-  ) {
-    if (_venueIsTemporarilyClosed())
-      return true;
-    final hours = _getVenueHoursForDate(
-      date,
-    );
+  bool _venueIsClosedOnDate(DateTime date) {
+    if (_venueIsTemporarilyClosed()) return true;
+    final hours = _getVenueHoursForDate(date);
     return hours.closed;
   }
 
   /// Whether the venue allows selecting "next day" as end date.
   /// True when: open-24h, not-available, or venue is overnight on the date.
-  bool _venueAllowsNextDay(
-    DateTime date,
-  ) {
-    if (_venueIsOpen24Hours())
-      return true;
-    if (_venuePeriods.isEmpty &&
-        _venueWeekdayText.isEmpty)
-      return true;
-    final hours = _getVenueHoursForDate(
-      date,
-    );
+  bool _venueAllowsNextDay(DateTime date) {
+    if (_venueIsOpen24Hours()) return true;
+    if (_venuePeriods.isEmpty && _venueWeekdayText.isEmpty) return true;
+    final hours = _getVenueHoursForDate(date);
     return hours.overnight;
   }
 
   // ---------- End Venue Hours Helpers ----------
 
   bool get _canAddPhone {
-    final phone = _phoneController.text
-        .trim();
-    return phone.length == 9 &&
-        RegExp(
-          r'^\d{9}$',
-        ).hasMatch(phone);
+    final phone = _phoneController.text.trim();
+    return phone.length == 9 && RegExp(r'^\d{9}$').hasMatch(phone);
   }
 
   Future<void> _addPhoneNumber() async {
@@ -867,23 +550,18 @@ class _TrackRequestDialogState
     if (!_canAddPhone) {
       setState(() {
         _isPhoneInputValid = false;
-        _phoneInputError =
-            'Enter 9 digits';
+        _phoneInputError = 'Enter 9 digits';
       });
       return;
     }
 
-    final phone =
-        '+966${_phoneController.text.trim()}';
+    final phone = '+966${_phoneController.text.trim()}';
 
     // Check if already added (instant check, no network)
-    if (_selectedFriends.any(
-      (f) => f.phone == phone,
-    )) {
+    if (_selectedFriends.any((f) => f.phone == phone)) {
       setState(() {
         _isPhoneInputValid = false;
-        _phoneInputError =
-            'Friend already added';
+        _phoneInputError = 'Friend already added';
       });
       return;
     }
@@ -894,28 +572,20 @@ class _TrackRequestDialogState
         _cachedMyPhone == phone) {
       setState(() {
         _isPhoneInputValid = false;
-        _phoneInputError =
-            'You can\'t send a request to yourself';
+        _phoneInputError = 'You can\'t send a request to yourself';
       });
       return;
     }
 
     // Start loading - prevent further clicks
-    setState(
-      () => _isAddingPhone = true,
-    );
+    setState(() => _isAddingPhone = true);
 
     try {
-      final query =
-          await FirebaseFirestore
-              .instance
-              .collection('users')
-              .where(
-                'phone',
-                isEqualTo: phone,
-              )
-              .limit(1)
-              .get();
+      final query = await FirebaseFirestore.instance
+          .collection('users')
+          .where('phone', isEqualTo: phone)
+          .limit(1)
+          .get();
 
       if (query.docs.isEmpty) {
         // Unfocus phone field to hide keyboard
@@ -931,18 +601,11 @@ class _TrackRequestDialogState
         return;
       }
 
-      final userData = query.docs.first
-          .data();
-      final firstName =
-          (userData['firstName'] ?? '')
-              .toString();
-      final lastName =
-          (userData['lastName'] ?? '')
-              .toString();
-      var displayName =
-          '$firstName $lastName'.trim();
-      if (displayName.isEmpty)
-        displayName = phone;
+      final userData = query.docs.first.data();
+      final firstName = (userData['firstName'] ?? '').toString();
+      final lastName = (userData['lastName'] ?? '').toString();
+      var displayName = '$firstName $lastName'.trim();
+      if (displayName.isEmpty) displayName = phone;
 
       // Keep keyboard open for adding more numbers
       setState(() {
@@ -965,8 +628,7 @@ class _TrackRequestDialogState
       setState(() {
         _isAddingPhone = false;
         _isPhoneInputValid = false;
-        _phoneInputError =
-            'Could not verify this number. Try again.';
+        _phoneInputError = 'Could not verify this number. Try again.';
       });
     }
   }
@@ -977,14 +639,9 @@ class _TrackRequestDialogState
       "https://madar.app/invite";
 
   /// Shows "Invite to Madar?" popup when phone number not in DB
-  void _showInviteToMadarDialog(
-    String phone,
-  ) {
-    final screenWidth = MediaQuery.of(
-      context,
-    ).size.width;
-    final dialogPadding =
-        screenWidth < 360 ? 20.0 : 28.0;
+  void _showInviteToMadarDialog(String phone) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final dialogPadding = screenWidth < 360 ? 20.0 : 28.0;
 
     showDialog(
       context: context,
@@ -992,150 +649,89 @@ class _TrackRequestDialogState
       builder: (BuildContext dialogContext) {
         return Dialog(
           shape: RoundedRectangleBorder(
-            borderRadius:
-                BorderRadius.circular(
-                  24,
-                ),
+            borderRadius: BorderRadius.circular(24),
           ),
           elevation: 0,
-          backgroundColor:
-              Colors.transparent,
+          backgroundColor: Colors.transparent,
           child: Stack(
             clipBehavior: Clip.none,
             children: [
               Container(
-                padding: EdgeInsets.all(
-                  dialogPadding,
-                ),
+                padding: EdgeInsets.all(dialogPadding),
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  borderRadius:
-                      BorderRadius.circular(
-                        24,
-                      ),
+                  borderRadius: BorderRadius.circular(24),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors
-                          .black
-                          .withOpacity(
-                            0.15,
-                          ),
+                      color: Colors.black.withOpacity(0.15),
                       blurRadius: 20,
-                      offset:
-                          const Offset(
-                            0,
-                            10,
-                          ),
+                      offset: const Offset(0, 10),
                     ),
                   ],
                 ),
                 child: Column(
-                  mainAxisSize:
-                      MainAxisSize.min,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    const SizedBox(
-                      height: 8,
-                    ),
+                    const SizedBox(height: 8),
                     Container(
                       width: 80,
                       height: 80,
                       decoration: BoxDecoration(
-                        color: AppColors
-                            .kGreen
-                            .withOpacity(
-                              0.15,
-                            ),
-                        shape: BoxShape
-                            .circle,
+                        color: AppColors.kGreen.withOpacity(0.15),
+                        shape: BoxShape.circle,
                       ),
                       child: const Center(
                         child: Icon(
-                          Icons
-                              .person_add_rounded,
+                          Icons.person_add_rounded,
                           size: 42,
-                          color: AppColors
-                              .kGreen,
+                          color: AppColors.kGreen,
                         ),
                       ),
                     ),
-                    const SizedBox(
-                      height: 20,
-                    ),
+                    const SizedBox(height: 20),
                     const Text(
                       'Invite to Madar?',
-                      textAlign:
-                          TextAlign
-                              .center,
+                      textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 22,
-                        fontWeight:
-                            FontWeight
-                                .bold,
-                        color: AppColors
-                            .kGreen,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.kGreen,
                         height: 1.2,
                       ),
                     ),
-                    const SizedBox(
-                      height: 12,
-                    ),
+                    const SizedBox(height: 12),
                     Text(
                       "This person isn't on Madar yet.\nInvite them to start sharing location.",
-                      textAlign:
-                          TextAlign
-                              .center,
+                      textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 15,
                         height: 1.5,
-                        color: Colors
-                            .grey[700],
+                        color: Colors.grey[700],
                       ),
                     ),
-                    const SizedBox(
-                      height: 24,
-                    ),
+                    const SizedBox(height: 24),
                     SizedBox(
-                      width: double
-                          .infinity,
+                      width: double.infinity,
                       child: ElevatedButton(
                         onPressed: () {
-                          Navigator.of(
-                            dialogContext,
-                          ).pop();
-                          _shareInvite(
-                            phone,
-                          );
+                          Navigator.of(dialogContext).pop();
+                          _shareInvite(phone);
                         },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor:
-                              AppColors
-                                  .kGreen,
-                          foregroundColor:
-                              Colors
-                                  .white,
-                          padding:
-                              const EdgeInsets.symmetric(
-                                vertical:
-                                    14,
-                              ),
+                          backgroundColor: AppColors.kGreen,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(
-                            borderRadius:
-                                BorderRadius.circular(
-                                  12,
-                                ),
+                            borderRadius: BorderRadius.circular(12),
                           ),
                           elevation: 0,
                         ),
                         child: const Text(
                           'Send Invite',
                           style: TextStyle(
-                            fontSize:
-                                16,
-                            fontWeight:
-                                FontWeight
-                                    .w600,
-                            letterSpacing:
-                                0.3,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.3,
                           ),
                         ),
                       ),
@@ -1147,16 +743,8 @@ class _TrackRequestDialogState
                 top: 12,
                 right: 12,
                 child: GestureDetector(
-                  onTap: () =>
-                      Navigator.of(
-                        dialogContext,
-                      ).pop(),
-                  child: Icon(
-                    Icons.close,
-                    size: 22,
-                    color: Colors
-                        .grey[500],
-                  ),
+                  onTap: () => Navigator.of(dialogContext).pop(),
+                  child: Icon(Icons.close, size: 22, color: Colors.grey[500]),
                 ),
               ),
             ],
@@ -1167,32 +755,18 @@ class _TrackRequestDialogState
   }
 
   /// Opens the system share sheet directly with the invite message
-  Future<void> _shareInvite(
-    String phone,
-  ) async {
+  Future<void> _shareInvite(String phone) async {
     try {
-      await Share.share(
-        _inviteMessage,
-        subject: 'Invite to Madar',
-      );
+      await Share.share(_inviteMessage, subject: 'Invite to Madar');
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text(
-              'Could not open share. Link copied instead.',
-            ),
-            backgroundColor:
-                AppColors.kGreen,
+            content: Text('Could not open share. Link copied instead.'),
+            backgroundColor: AppColors.kGreen,
           ),
         );
-        Clipboard.setData(
-          ClipboardData(
-            text: _inviteMessage,
-          ),
-        );
+        Clipboard.setData(ClipboardData(text: _inviteMessage));
       }
     }
   }
@@ -1201,61 +775,41 @@ class _TrackRequestDialogState
     setState(() {
       _selectedFriends.remove(friend);
       // Remove from scheduled overlaps too
-      _scheduledOverlapFriends
-          .removeWhere(
-            (f) =>
-                f['phone'] ==
-                friend.phone,
-          );
+      _scheduledOverlapFriends.removeWhere((f) => f['phone'] == friend.phone);
     });
   }
 
   void _toggleFavorite(Friend friend) {
     setState(() {
-      final index = _selectedFriends
-          .indexOf(friend);
+      final index = _selectedFriends.indexOf(friend);
       if (index != -1) {
-        _selectedFriends[index] =
-            Friend(
-              name: friend.name,
-              phone: friend.phone,
-              isFavorite:
-                  !friend.isFavorite,
-              isFromPhoneInput: friend
-                  .isFromPhoneInput,
-            );
+        _selectedFriends[index] = Friend(
+          name: friend.name,
+          phone: friend.phone,
+          isFavorite: !friend.isFavorite,
+          isFromPhoneInput: friend.isFromPhoneInput,
+        );
       }
     });
   }
 
-  Future<void>
-  _showFavoritesList() async {
+  Future<void> _showFavoritesList() async {
     // Dismiss keyboard when opening favorites list
     FocusScope.of(context).unfocus();
 
-    final result =
-        await showModalBottomSheet<
-          List<Friend>
-        >(
-          context: context,
-          isScrollControlled: true,
-          backgroundColor:
-              Colors.transparent,
-          builder: (context) =>
-              const FavoritesListSheet(),
-        );
+    final result = await showModalBottomSheet<List<Friend>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => const FavoritesListSheet(),
+    );
 
     if (result != null) {
       setState(() {
         for (final friend in result) {
           // Only add if not already in list
-          if (!_selectedFriends.any(
-            (f) =>
-                f.phone == friend.phone,
-          )) {
-            _selectedFriends.add(
-              friend,
-            );
+          if (!_selectedFriends.any((f) => f.phone == friend.phone)) {
+            _selectedFriends.add(friend);
           }
         }
       });
@@ -1264,28 +818,19 @@ class _TrackRequestDialogState
     }
   }
 
-  Future<void>
-  _showVenueSelection() async {
+  Future<void> _showVenueSelection() async {
     // Dismiss keyboard when opening venue selector
     FocusScope.of(context).unfocus();
 
-    final result =
-        await showModalBottomSheet<
-          VenueOption
-        >(
-          context: context,
-          isScrollControlled: true,
-          backgroundColor:
-              Colors.transparent,
-          builder: (context) =>
-              VenueSelectionSheet(
-                venues: _allVenues,
-              ),
-        );
+    final result = await showModalBottomSheet<VenueOption>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => VenueSelectionSheet(venues: _allVenues),
+    );
 
     if (result != null) {
-      final venueChanged =
-          _selectedVenueId != result.id;
+      final venueChanged = _selectedVenueId != result.id;
       setState(() {
         _selectedVenue = result.name;
         _selectedVenueId = result.id;
@@ -1312,23 +857,15 @@ class _TrackRequestDialogState
 
     // Must select venue first
     if (_selectedVenueId == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Please select a venue first',
-          ),
-        ),
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a venue first')),
       );
       return;
     }
 
     final now = DateTime.now();
     final firstDate = now;
-    final lastDate = now.add(
-      const Duration(days: 30),
-    );
+    final lastDate = now.add(const Duration(days: 30));
 
     final picked = await showDatePicker(
       context: context,
@@ -1338,15 +875,11 @@ class _TrackRequestDialogState
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
-            colorScheme:
-                const ColorScheme.light(
-                  primary:
-                      AppColors.kGreen,
-                  onPrimary:
-                      Colors.white,
-                  onSurface:
-                      Colors.black87,
-                ),
+            colorScheme: const ColorScheme.light(
+              primary: AppColors.kGreen,
+              onPrimary: Colors.white,
+              onSurface: Colors.black87,
+            ),
           ),
           child: child!,
         );
@@ -1356,12 +889,9 @@ class _TrackRequestDialogState
     if (picked != null) {
       final dateChanged =
           _selectedDate == null ||
-          picked.year !=
-              _selectedDate!.year ||
-          picked.month !=
-              _selectedDate!.month ||
-          picked.day !=
-              _selectedDate!.day;
+          picked.year != _selectedDate!.year ||
+          picked.month != _selectedDate!.month ||
+          picked.day != _selectedDate!.day;
       setState(() {
         _selectedDate = picked;
         if (dateChanged) {
@@ -1379,18 +909,11 @@ class _TrackRequestDialogState
       }
 
       // Check if venue is closed on this date
-      final hours =
-          _getVenueHoursForDate(picked);
+      final hours = _getVenueHoursForDate(picked);
       if (hours.closed) {
         if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'The venue is closed on this date',
-              ),
-            ),
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('The venue is closed on this date')),
           );
         }
       }
@@ -1402,78 +925,48 @@ class _TrackRequestDialogState
     if (_selectedDate == null) return;
 
     final startDate = _selectedDate!;
-    final nextDay = startDate.add(
-      const Duration(days: 1),
-    );
-    final allowsNext =
-        _venueAllowsNextDay(startDate);
+    final nextDay = startDate.add(const Duration(days: 1));
+    final allowsNext = _venueAllowsNextDay(startDate);
 
     final picked = await showModalBottomSheet<DateTime>(
       context: context,
-      backgroundColor:
-          Colors.transparent,
+      backgroundColor: Colors.transparent,
       builder: (ctx) {
         return SafeArea(
           top: false,
           child: Container(
             decoration: const BoxDecoration(
               color: Colors.white,
-              borderRadius:
-                  BorderRadius.only(
-                    topLeft:
-                        Radius.circular(
-                          24,
-                        ),
-                    topRight:
-                        Radius.circular(
-                          24,
-                        ),
-                  ),
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(24),
+                topRight: Radius.circular(24),
+              ),
             ),
             child: Column(
-              mainAxisSize:
-                  MainAxisSize.min,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 const Padding(
-                  padding:
-                      EdgeInsets.fromLTRB(
-                        20,
-                        18,
-                        20,
-                        10,
-                      ),
+                  padding: EdgeInsets.fromLTRB(20, 18, 20, 10),
                   child: Text(
                     'Select End Date',
                     style: TextStyle(
                       fontSize: 22,
-                      fontWeight:
-                          FontWeight
-                              .w600,
-                      color: Colors
-                          .black87,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black87,
                     ),
                   ),
                 ),
-                const SizedBox(
-                  height: 8,
-                ),
+                const SizedBox(height: 8),
                 // Same day option
                 _buildEndDateOption(
                   ctx: ctx,
                   date: startDate,
                   isNextDay: false,
                   isSelected:
-                      _selectedEndDate !=
-                          null &&
-                      startDate.year ==
-                          _selectedEndDate!
-                              .year &&
-                      startDate.month ==
-                          _selectedEndDate!
-                              .month &&
-                      startDate.day ==
-                          _selectedEndDate!
-                              .day,
+                      _selectedEndDate != null &&
+                      startDate.year == _selectedEndDate!.year &&
+                      startDate.month == _selectedEndDate!.month &&
+                      startDate.day == _selectedEndDate!.day,
                   enabled: true,
                 ),
                 // Next day option
@@ -1482,42 +975,23 @@ class _TrackRequestDialogState
                   date: nextDay,
                   isNextDay: true,
                   isSelected:
-                      _selectedEndDate !=
-                          null &&
-                      nextDay.year ==
-                          _selectedEndDate!
-                              .year &&
-                      nextDay.month ==
-                          _selectedEndDate!
-                              .month &&
-                      nextDay.day ==
-                          _selectedEndDate!
-                              .day,
+                      _selectedEndDate != null &&
+                      nextDay.year == _selectedEndDate!.year &&
+                      nextDay.month == _selectedEndDate!.month &&
+                      nextDay.day == _selectedEndDate!.day,
                   enabled: allowsNext,
                 ),
-                const SizedBox(
-                  height: 16,
-                ),
+                const SizedBox(height: 16),
                 Center(
                   child: TextButton(
-                    onPressed: () =>
-                        Navigator.pop(
-                          ctx,
-                          null,
-                        ),
+                    onPressed: () => Navigator.pop(ctx, null),
                     child: const Text(
                       'Cancel',
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: Colors
-                            .black54,
-                      ),
+                      style: TextStyle(fontSize: 16, color: Colors.black54),
                     ),
                   ),
                 ),
-                const SizedBox(
-                  height: 8,
-                ),
+                const SizedBox(height: 8),
               ],
             ),
           ),
@@ -1545,75 +1019,38 @@ class _TrackRequestDialogState
     return Opacity(
       opacity: enabled ? 1.0 : 0.4,
       child: InkWell(
-        onTap: enabled
-            ? () => Navigator.pop(
-                ctx,
-                date,
-              )
-            : null,
+        onTap: enabled ? () => Navigator.pop(ctx, date) : null,
         child: Container(
-          margin:
-              const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 4,
-              ),
-          padding:
-              const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 14,
-              ),
+          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           decoration: BoxDecoration(
             color: isSelected
-                ? AppColors.kGreen
-                      .withOpacity(0.1)
+                ? AppColors.kGreen.withOpacity(0.1)
                 : Colors.grey[50],
-            borderRadius:
-                BorderRadius.circular(
-                  12,
-                ),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: isSelected
-                  ? AppColors.kGreen
-                  : Colors
-                        .grey
-                        .shade300,
+              color: isSelected ? AppColors.kGreen : Colors.grey.shade300,
               width: isSelected ? 2 : 1,
             ),
           ),
           child: Row(
             children: [
               Icon(
-                isNextDay
-                    ? Icons
-                          .nights_stay_outlined
-                    : Icons.today,
-                color: isSelected
-                    ? AppColors.kGreen
-                    : Colors.grey[600],
+                isNextDay ? Icons.nights_stay_outlined : Icons.today,
+                color: isSelected ? AppColors.kGreen : Colors.grey[600],
                 size: 20,
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment
-                          .start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      DateFormat(
-                        'EEE d MMM yyyy',
-                      ).format(date),
+                      DateFormat('EEE d MMM yyyy').format(date),
                       style: TextStyle(
                         fontSize: 15,
-                        fontWeight:
-                            FontWeight
-                                .w600,
-                        color:
-                            isSelected
-                            ? AppColors
-                                  .kGreen
-                            : Colors
-                                  .black87,
+                        fontWeight: FontWeight.w600,
+                        color: isSelected ? AppColors.kGreen : Colors.black87,
                       ),
                     ),
                     Text(
@@ -1624,13 +1061,9 @@ class _TrackRequestDialogState
                           : 'Same day as start',
                       style: TextStyle(
                         fontSize: 12,
-                        color:
-                            isSelected
-                            ? AppColors
-                                  .kGreen
-                            : (!enabled
-                                  ? Colors.red[300]
-                                  : Colors.grey[500]),
+                        color: isSelected
+                            ? AppColors.kGreen
+                            : (!enabled ? Colors.red[300] : Colors.grey[500]),
                       ),
                     ),
                   ],
@@ -1639,8 +1072,7 @@ class _TrackRequestDialogState
               if (isSelected)
                 const Icon(
                   Icons.check_circle,
-                  color:
-                      AppColors.kGreen,
+                  color: AppColors.kGreen,
                   size: 22,
                 ),
             ],
@@ -1650,31 +1082,18 @@ class _TrackRequestDialogState
     );
   }
 
-  Future<void>
-  _selectStartTime() async {
+  Future<void> _selectStartTime() async {
     FocusScope.of(context).unfocus();
 
     if (_selectedVenueId == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Please select a venue first',
-          ),
-        ),
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a venue first')),
       );
       return;
     }
     if (_selectedDate == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Please select a date first',
-          ),
-        ),
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a date first')),
       );
       return;
     }
@@ -1683,9 +1102,7 @@ class _TrackRequestDialogState
 
     // Block if venue is closed or temporarily closed
     if (_venueIsClosedOnDate(date)) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             _venueIsTemporarilyClosed()
@@ -1697,20 +1114,10 @@ class _TrackRequestDialogState
       return;
     }
 
-    final venueHours =
-        _getVenueHoursForDate(date);
-    final venueOpen =
-        venueHours.open ??
-        const TimeOfDay(
-          hour: 0,
-          minute: 0,
-        );
+    final venueHours = _getVenueHoursForDate(date);
+    final venueOpen = venueHours.open ?? const TimeOfDay(hour: 0, minute: 0);
     final venueClose =
-        venueHours.close ??
-        const TimeOfDay(
-          hour: 23,
-          minute: 59,
-        );
+        venueHours.close ?? const TimeOfDay(hour: 23, minute: 59);
 
     DateTime dayStart = DateTime(
       date.year,
@@ -1723,16 +1130,8 @@ class _TrackRequestDialogState
     final DateTime dayEnd;
     if (venueHours.overnight ||
         _venueIsOpen24Hours() ||
-        (_venuePeriods.isEmpty &&
-            _venueWeekdayText
-                .isEmpty)) {
-      dayEnd = DateTime(
-        date.year,
-        date.month,
-        date.day,
-        23,
-        59,
-      );
+        (_venuePeriods.isEmpty && _venueWeekdayText.isEmpty)) {
+      dayEnd = DateTime(date.year, date.month, date.day, 23, 59);
     } else {
       dayEnd = DateTime(
         date.year,
@@ -1745,15 +1144,10 @@ class _TrackRequestDialogState
 
     final now = DateTime.now();
     final isToday =
-        now.year == date.year &&
-        now.month == date.month &&
-        now.day == date.day;
-    if (isToday &&
-        now.isAfter(dayStart))
-      dayStart = now;
+        now.year == date.year && now.month == date.month && now.day == date.day;
+    if (isToday && now.isAfter(dayStart)) dayStart = now;
 
-    if (dayStart.isAfter(dayEnd))
-      return;
+    if (dayStart.isAfter(dayEnd)) return;
 
     DateTime initial;
     if (_startTime != null) {
@@ -1764,29 +1158,23 @@ class _TrackRequestDialogState
         _startTime!.hour,
         _startTime!.minute,
       );
-      if (initial.isBefore(dayStart))
-        initial = dayStart;
+      if (initial.isBefore(dayStart)) initial = dayStart;
     } else {
       initial = dayStart;
     }
 
-    final picked =
-        await _showCupertinoDateTimePicker(
-          title: 'Start Time',
-          initial: initial,
-          minimum: dayStart,
-          maximum: dayEnd,
-        );
+    final picked = await _showCupertinoDateTimePicker(
+      title: 'Start Time',
+      initial: initial,
+      minimum: dayStart,
+      maximum: dayEnd,
+    );
     if (picked == null) return;
 
     setState(() {
-      _startTime = TimeOfDay(
-        hour: picked.hour,
-        minute: picked.minute,
-      );
+      _startTime = TimeOfDay(hour: picked.hour, minute: picked.minute);
       _endTime = null;
-      _selectedEndDate =
-          _selectedDate; // reset end date to start date
+      _selectedEndDate = _selectedDate; // reset end date to start date
     });
     // Clear overlap state when start time changes (end time will be null)
     _clearOverlapState();
@@ -1795,40 +1183,24 @@ class _TrackRequestDialogState
   Future<void> _selectEndTime() async {
     FocusScope.of(context).unfocus();
 
-    if (_selectedDate == null ||
-        _startTime == null)
-      return;
+    if (_selectedDate == null || _startTime == null) return;
 
     final date = _selectedDate!;
-    final nextDay = date.add(
-      const Duration(days: 1),
-    );
-    final venueHours =
-        _getVenueHoursForDate(date);
+    final nextDay = date.add(const Duration(days: 1));
+    final venueHours = _getVenueHoursForDate(date);
     final venueClose =
-        venueHours.close ??
-        const TimeOfDay(
-          hour: 23,
-          minute: 59,
-        );
-    final isOpen24 =
-        _venueIsOpen24Hours();
-    final noHoursData =
-        _venuePeriods.isEmpty &&
-        _venueWeekdayText.isEmpty;
-    final allowsNextDay =
-        _venueAllowsNextDay(date);
+        venueHours.close ?? const TimeOfDay(hour: 23, minute: 59);
+    final isOpen24 = _venueIsOpen24Hours();
+    final noHoursData = _venuePeriods.isEmpty && _venueWeekdayText.isEmpty;
+    final allowsNextDay = _venueAllowsNextDay(date);
 
-    final endDate =
-        _selectedEndDate ?? date;
+    final endDate = _selectedEndDate ?? date;
     final isNextDay =
         endDate.day != date.day ||
         endDate.month != date.month ||
         endDate.year != date.year;
 
-    final startMin =
-        _startTime!.hour * 60 +
-        _startTime!.minute;
+    final startMin = _startTime!.hour * 60 + _startTime!.minute;
 
     // ── CASE 1: User explicitly chose next-day end date ──
     if (isNextDay) {
@@ -1836,20 +1208,13 @@ class _TrackRequestDialogState
       int maxMinOnNextDay;
       if (isOpen24 || noHoursData) {
         // Max = startTime - 1 min → total 23h59m
-        maxMinOnNextDay =
-            (startMin - 1 + 1440) %
-            1440;
+        maxMinOnNextDay = (startMin - 1 + 1440) % 1440;
       } else {
         // Overnight venue → venue close on next day
-        maxMinOnNextDay =
-            venueClose.hour * 60 +
-            venueClose.minute;
+        maxMinOnNextDay = venueClose.hour * 60 + venueClose.minute;
         // Cap at startTime - 1 min (23h59m max)
-        final cap =
-            (startMin - 1 + 1440) %
-            1440;
-        if (maxMinOnNextDay > cap)
-          maxMinOnNextDay = cap;
+        final cap = (startMin - 1 + 1440) % 1440;
+        if (maxMinOnNextDay > cap) maxMinOnNextDay = cap;
       }
 
       final pickerMin = DateTime(
@@ -1867,17 +1232,9 @@ class _TrackRequestDialogState
         maxMinOnNextDay % 60,
       );
 
-      if (pickerMin.isAfter(
-        pickerMax,
-      )) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'No valid end time on next day',
-            ),
-          ),
+      if (pickerMin.isAfter(pickerMax)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No valid end time on next day')),
         );
         return;
       }
@@ -1891,29 +1248,22 @@ class _TrackRequestDialogState
           _endTime!.hour,
           _endTime!.minute,
         );
-        if (initial.isBefore(pickerMin))
-          initial = pickerMin;
-        if (initial.isAfter(pickerMax))
-          initial = pickerMin;
+        if (initial.isBefore(pickerMin)) initial = pickerMin;
+        if (initial.isAfter(pickerMax)) initial = pickerMin;
       } else {
         initial = pickerMin;
       }
 
-      final picked =
-          await _showCupertinoDateTimePicker(
-            title:
-                'End Time (next day)',
-            initial: initial,
-            minimum: pickerMin,
-            maximum: pickerMax,
-          );
+      final picked = await _showCupertinoDateTimePicker(
+        title: 'End Time (next day)',
+        initial: initial,
+        minimum: pickerMin,
+        maximum: pickerMax,
+      );
       if (picked == null) return;
 
       setState(() {
-        _endTime = TimeOfDay(
-          hour: picked.hour,
-          minute: picked.minute,
-        );
+        _endTime = TimeOfDay(hour: picked.hour, minute: picked.minute);
         _selectedEndDate = nextDay;
       });
       await _checkOverlapsForFriends();
@@ -1924,20 +1274,8 @@ class _TrackRequestDialogState
     if (allowsNextDay) {
       // Show full 12-hour wheel (00:00 - 23:59) so user can pick times
       // past midnight. We validate after selection.
-      final pickerMin = DateTime(
-        date.year,
-        date.month,
-        date.day,
-        0,
-        0,
-      );
-      final pickerMax = DateTime(
-        date.year,
-        date.month,
-        date.day,
-        23,
-        59,
-      );
+      final pickerMin = DateTime(date.year, date.month, date.day, 0, 0);
+      final pickerMax = DateTime(date.year, date.month, date.day, 23, 59);
 
       // Default initial to start + 10 min
       DateTime initial;
@@ -1950,18 +1288,13 @@ class _TrackRequestDialogState
           _endTime!.minute,
         );
       } else {
-        final def =
-            DateTime(
-              date.year,
-              date.month,
-              date.day,
-              _startTime!.hour,
-              _startTime!.minute,
-            ).add(
-              const Duration(
-                minutes: 10,
-              ),
-            );
+        final def = DateTime(
+          date.year,
+          date.month,
+          date.day,
+          _startTime!.hour,
+          _startTime!.minute,
+        ).add(const Duration(minutes: 10));
         initial = DateTime(
           date.year,
           date.month,
@@ -1970,56 +1303,39 @@ class _TrackRequestDialogState
           def.minute,
         );
       }
-      if (initial.isBefore(pickerMin))
-        initial = pickerMin;
-      if (initial.isAfter(pickerMax))
-        initial = pickerMax;
+      if (initial.isBefore(pickerMin)) initial = pickerMin;
+      if (initial.isAfter(pickerMax)) initial = pickerMax;
 
-      final picked =
-          await _showCupertinoDateTimePicker(
-            title: 'End Time',
-            initial: initial,
-            minimum: pickerMin,
-            maximum: pickerMax,
-          );
+      final picked = await _showCupertinoDateTimePicker(
+        title: 'End Time',
+        initial: initial,
+        minimum: pickerMin,
+        maximum: pickerMax,
+      );
       if (picked == null) return;
 
-      final endMin =
-          picked.hour * 60 +
-          picked.minute;
-      final wrapsToNextDay =
-          endMin <= startMin;
+      final endMin = picked.hour * 60 + picked.minute;
+      final wrapsToNextDay = endMin <= startMin;
 
       // Calculate duration
       int durationMin;
       if (wrapsToNextDay) {
-        durationMin =
-            (1440 - startMin) + endMin;
+        durationMin = (1440 - startMin) + endMin;
       } else {
         durationMin = endMin - startMin;
       }
 
       // Validate duration
       if (durationMin < 10) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Duration must be at least 10 minutes',
-            ),
-          ),
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Duration must be at least 10 minutes')),
         );
         return;
       }
       if (durationMin > 1439) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text(
-              'Maximum duration is 23 hours and 59 minutes',
-            ),
+            content: Text('Maximum duration is 23 hours and 59 minutes'),
           ),
         );
         return;
@@ -2029,17 +1345,11 @@ class _TrackRequestDialogState
       if (wrapsToNextDay &&
           venueHours.overnight &&
           !(isOpen24 || noHoursData)) {
-        final closeMin =
-            venueClose.hour * 60 +
-            venueClose.minute;
+        final closeMin = venueClose.hour * 60 + venueClose.minute;
         if (endMin > closeMin) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(
+          ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(
-                'Venue closes at ${_formatTime12h(venueClose)}',
-              ),
+              content: Text('Venue closes at ${_formatTime12h(venueClose)}'),
             ),
           );
           return;
@@ -2047,14 +1357,8 @@ class _TrackRequestDialogState
       }
 
       setState(() {
-        _endTime = TimeOfDay(
-          hour: picked.hour,
-          minute: picked.minute,
-        );
-        _selectedEndDate =
-            wrapsToNextDay
-            ? nextDay
-            : date;
+        _endTime = TimeOfDay(hour: picked.hour, minute: picked.minute);
+        _selectedEndDate = wrapsToNextDay ? nextDay : date;
       });
       await _checkOverlapsForFriends();
       return;
@@ -2068,9 +1372,7 @@ class _TrackRequestDialogState
       _startTime!.hour,
       _startTime!.minute,
     );
-    final minEnd = start.add(
-      const Duration(minutes: 10),
-    );
+    final minEnd = start.add(const Duration(minutes: 10));
     final maxEnd = DateTime(
       date.year,
       date.month,
@@ -2080,13 +1382,9 @@ class _TrackRequestDialogState
     );
 
     if (minEnd.isAfter(maxEnd)) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'Not enough time before venue closes (min 10 min)',
-          ),
+          content: Text('Not enough time before venue closes (min 10 min)'),
         ),
       );
       return;
@@ -2116,28 +1414,22 @@ class _TrackRequestDialogState
         _endTime!.hour,
         _endTime!.minute,
       );
-      if (initial.isBefore(pickerMin))
-        initial = pickerMin;
-      if (initial.isAfter(pickerMax))
-        initial = pickerMin;
+      if (initial.isBefore(pickerMin)) initial = pickerMin;
+      if (initial.isAfter(pickerMax)) initial = pickerMin;
     } else {
       initial = pickerMin;
     }
 
-    final picked =
-        await _showCupertinoDateTimePicker(
-          title: 'End Time',
-          initial: initial,
-          minimum: pickerMin,
-          maximum: pickerMax,
-        );
+    final picked = await _showCupertinoDateTimePicker(
+      title: 'End Time',
+      initial: initial,
+      minimum: pickerMin,
+      maximum: pickerMax,
+    );
     if (picked == null) return;
 
     setState(() {
-      _endTime = TimeOfDay(
-        hour: picked.hour,
-        minute: picked.minute,
-      );
+      _endTime = TimeOfDay(hour: picked.hour, minute: picked.minute);
       _selectedEndDate = date;
     });
     await _checkOverlapsForFriends();
@@ -2147,16 +1439,12 @@ class _TrackRequestDialogState
   void _clearOverlapState() {
     setState(() {
       // Restore previously removed friends
-      for (final f
-          in _activeOverlapRemovedFriends) {
-        if (!_selectedFriends.any(
-          (s) => s.phone == f.phone,
-        )) {
+      for (final f in _activeOverlapRemovedFriends) {
+        if (!_selectedFriends.any((s) => s.phone == f.phone)) {
           _selectedFriends.add(f);
         }
       }
-      _activeOverlapRemovedFriends
-          .clear();
+      _activeOverlapRemovedFriends.clear();
       _scheduledOverlapFriends.clear();
       _scheduledOverlapDocIds.clear();
     });
@@ -2165,21 +1453,14 @@ class _TrackRequestDialogState
   /// Check overlaps for all selected friends after time is fully set.
   /// - Active overlaps → auto-remove friend, show single red message with names
   /// - Scheduled overlaps → stored for dialog when user submits
-  Future<void>
-  _checkOverlapsForFriends() async {
+  Future<void> _checkOverlapsForFriends() async {
     // Build the full list to check: current selected + previously removed
     // Do NOT add removed friends back to _selectedFriends (avoids flicker)
     final allFriendsToCheck = <Friend>[
       ..._selectedFriends,
-      ..._activeOverlapRemovedFriends
-          .where(
-            (f) =>
-                !_selectedFriends.any(
-                  (s) =>
-                      s.phone ==
-                      f.phone,
-                ),
-          ),
+      ..._activeOverlapRemovedFriends.where(
+        (f) => !_selectedFriends.any((s) => s.phone == f.phone),
+      ),
     ];
 
     if (_selectedDate == null ||
@@ -2190,26 +1471,19 @@ class _TrackRequestDialogState
         allFriendsToCheck.isEmpty) {
       setState(() {
         // Restore removed friends since there's nothing to check
-        for (final f
-            in _activeOverlapRemovedFriends) {
-          if (!_selectedFriends.any(
-            (s) => s.phone == f.phone,
-          )) {
+        for (final f in _activeOverlapRemovedFriends) {
+          if (!_selectedFriends.any((s) => s.phone == f.phone)) {
             _selectedFriends.add(f);
           }
         }
-        _activeOverlapRemovedFriends =
-            [];
-        _scheduledOverlapFriends
-            .clear();
+        _activeOverlapRemovedFriends = [];
+        _scheduledOverlapFriends.clear();
         _scheduledOverlapDocIds.clear();
       });
       return;
     }
 
-    final user = FirebaseAuth
-        .instance
-        .currentUser;
+    final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
     final date = _selectedDate!;
@@ -2231,169 +1505,83 @@ class _TrackRequestDialogState
     if (!end.isAfter(start)) return;
 
     final venueId = _selectedVenueId!;
-    final newScheduledFriends =
-        <Map<String, String>>[];
-    final newScheduledDocIds =
-        <String>[];
+    final newScheduledFriends = <Map<String, String>>[];
+    final newScheduledDocIds = <String>[];
     final friendsToRemove = <Friend>[];
 
     // Normalize phone for lookup
-    String normalizePhone(
-      String phone,
-    ) {
-      String p = phone.replaceAll(
-        RegExp(r'[^\d+]'),
-        '',
-      );
-      if (p.startsWith('0'))
-        p = '+966${p.substring(1)}';
-      if (p.startsWith('5') &&
-          p.length == 9)
-        p = '+966$p';
-      if (p.startsWith('966'))
-        p = '+$p';
+    String normalizePhone(String phone) {
+      String p = phone.replaceAll(RegExp(r'[^\d+]'), '');
+      if (p.startsWith('0')) p = '+966${p.substring(1)}';
+      if (p.startsWith('5') && p.length == 9) p = '+966$p';
+      if (p.startsWith('966')) p = '+$p';
       return p;
     }
 
     // Resolve UIDs in parallel (using cache) — check ALL friends including previously removed
-    final friendsCopy =
-        List<Friend>.from(
-          allFriendsToCheck,
-        );
-    final uidFutures = friendsCopy.map((
-      friend,
-    ) async {
-      final phone = normalizePhone(
-        friend.phone,
-      );
-      if (_phoneToUidCache.containsKey(
-        phone,
-      )) {
-        return MapEntry(
-          friend,
-          _phoneToUidCache[phone]!,
-        );
+    final friendsCopy = List<Friend>.from(allFriendsToCheck);
+    final uidFutures = friendsCopy.map((friend) async {
+      final phone = normalizePhone(friend.phone);
+      if (_phoneToUidCache.containsKey(phone)) {
+        return MapEntry(friend, _phoneToUidCache[phone]!);
       }
-      final snap =
-          await FirebaseFirestore
-              .instance
-              .collection('users')
-              .where(
-                'phone',
-                isEqualTo: phone,
-              )
-              .limit(1)
-              .get();
-      if (snap.docs.isEmpty)
-        return MapEntry(friend, '');
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .where('phone', isEqualTo: phone)
+          .limit(1)
+          .get();
+      if (snap.docs.isEmpty) return MapEntry(friend, '');
       final uid = snap.docs.first.id;
       _phoneToUidCache[phone] = uid;
       return MapEntry(friend, uid);
     }).toList();
-    final uidResults =
-        await Future.wait(uidFutures);
+    final uidResults = await Future.wait(uidFutures);
 
     // Filter out friends with no UID
-    final validEntries = uidResults
-        .where(
-          (e) => e.value.isNotEmpty,
-        )
-        .toList();
+    final validEntries = uidResults.where((e) => e.value.isNotEmpty).toList();
 
     // Check overlaps in parallel
-    final overlapFutures = validEntries
-        .map((entry) async {
-          final friend = entry.key;
-          final receiverUid =
-              entry.value;
-          final snap =
-              await FirebaseFirestore
-                  .instance
-                  .collection(
-                    'trackRequests',
-                  )
-                  .where(
-                    'senderId',
-                    isEqualTo: user.uid,
-                  )
-                  .where(
-                    'receiverId',
-                    isEqualTo:
-                        receiverUid,
-                  )
-                  .where(
-                    'venueId',
-                    isEqualTo: venueId,
-                  )
-                  .where(
-                    'status',
-                    whereIn: [
-                      'pending',
-                      'accepted',
-                    ],
-                  )
-                  .get();
+    final overlapFutures = validEntries.map((entry) async {
+      final friend = entry.key;
+      final receiverUid = entry.value;
+      final snap = await FirebaseFirestore.instance
+          .collection('trackRequests')
+          .where('senderId', isEqualTo: user.uid)
+          .where('receiverId', isEqualTo: receiverUid)
+          .where('venueId', isEqualTo: venueId)
+          .where('status', whereIn: ['pending', 'accepted'])
+          .get();
 
-          final results =
-              <Map<String, dynamic>>[];
-          for (final doc in snap.docs) {
-            final data = doc.data();
-            final existingStart =
-                (data['startAt']
-                        as Timestamp)
-                    .toDate();
-            final existingEnd =
-                (data['endAt']
-                        as Timestamp)
-                    .toDate();
-            final existingStatus =
-                data['status']
-                    as String? ??
-                '';
+      final results = <Map<String, dynamic>>[];
+      for (final doc in snap.docs) {
+        final data = doc.data();
+        final existingStart = (data['startAt'] as Timestamp).toDate();
+        final existingEnd = (data['endAt'] as Timestamp).toDate();
+        final existingStatus = data['status'] as String? ?? '';
 
-            if (start.isBefore(
-                  existingEnd,
-                ) &&
-                existingStart.isBefore(
-                  end,
-                )) {
-              final now =
-                  DateTime.now();
-              final isActive =
-                  existingStatus ==
-                      'accepted' &&
-                  !now.isBefore(
-                    existingStart,
-                  ) &&
-                  now.isBefore(
-                    existingEnd,
-                  );
-              results.add({
-                'friend': friend,
-                'uid': receiverUid,
-                'docId': doc.id,
-                'isActive': isActive,
-              });
-            }
-          }
-          return results;
-        })
-        .toList();
-    final overlapResults =
-        await Future.wait(
-          overlapFutures,
-        );
+        if (start.isBefore(existingEnd) && existingStart.isBefore(end)) {
+          final now = DateTime.now();
+          final isActive =
+              existingStatus == 'accepted' &&
+              !now.isBefore(existingStart) &&
+              now.isBefore(existingEnd);
+          results.add({
+            'friend': friend,
+            'uid': receiverUid,
+            'docId': doc.id,
+            'isActive': isActive,
+          });
+        }
+      }
+      return results;
+    }).toList();
+    final overlapResults = await Future.wait(overlapFutures);
 
-    for (final results
-        in overlapResults) {
+    for (final results in overlapResults) {
       for (final r in results) {
-        final friend =
-            r['friend'] as Friend;
+        final friend = r['friend'] as Friend;
         if (r['isActive'] == true) {
-          if (!friendsToRemove.any(
-            (f) =>
-                f.phone == friend.phone,
-          )) {
+          if (!friendsToRemove.any((f) => f.phone == friend.phone)) {
             friendsToRemove.add(friend);
           }
         } else {
@@ -2402,9 +1590,7 @@ class _TrackRequestDialogState
             'phone': friend.phone,
             'uid': r['uid'] as String,
           });
-          newScheduledDocIds.add(
-            r['docId'] as String,
-          );
+          newScheduledDocIds.add(r['docId'] as String);
         }
       }
     }
@@ -2412,67 +1598,38 @@ class _TrackRequestDialogState
     if (!mounted) return;
 
     // Determine which previously removed friends are now clear (no longer overlap)
-    final previouslyRemoved =
-        List<Friend>.from(
-          _activeOverlapRemovedFriends,
-        );
-    final stillOverlapping =
-        friendsToRemove
-            .map((f) => f.phone)
-            .toSet();
+    final previouslyRemoved = List<Friend>.from(_activeOverlapRemovedFriends);
+    final stillOverlapping = friendsToRemove.map((f) => f.phone).toSet();
 
     setState(() {
       // Restore previously removed friends that no longer have active overlap
-      for (final f
-          in previouslyRemoved) {
-        if (!stillOverlapping.contains(
-              f.phone,
-            ) &&
-            !_selectedFriends.any(
-              (s) => s.phone == f.phone,
-            )) {
+      for (final f in previouslyRemoved) {
+        if (!stillOverlapping.contains(f.phone) &&
+            !_selectedFriends.any((s) => s.phone == f.phone)) {
           _selectedFriends.add(f);
         }
       }
 
-      _activeOverlapRemovedFriends =
-          friendsToRemove;
-      _scheduledOverlapFriends =
-          newScheduledFriends;
-      _scheduledOverlapDocIds =
-          newScheduledDocIds;
+      _activeOverlapRemovedFriends = friendsToRemove;
+      _scheduledOverlapFriends = newScheduledFriends;
+      _scheduledOverlapDocIds = newScheduledDocIds;
 
       // Remove friends with active overlap from selected list
       for (final f in friendsToRemove) {
-        _selectedFriends.removeWhere(
-          (s) => s.phone == f.phone,
-        );
+        _selectedFriends.removeWhere((s) => s.phone == f.phone);
       }
     });
 
     // Scroll to the overlap message only if there are new removals
-    final hadNewRemovals =
-        friendsToRemove.any(
-          (f) => !previouslyRemoved.any(
-            (p) => p.phone == f.phone,
-          ),
-        );
+    final hadNewRemovals = friendsToRemove.any(
+      (f) => !previouslyRemoved.any((p) => p.phone == f.phone),
+    );
     if (hadNewRemovals) {
-      await Future.delayed(
-        const Duration(
-          milliseconds: 100,
-        ),
-      );
-      if (mounted &&
-          _overlapMsgKey
-                  .currentContext !=
-              null) {
+      await Future.delayed(const Duration(milliseconds: 100));
+      if (mounted && _overlapMsgKey.currentContext != null) {
         Scrollable.ensureVisible(
-          _overlapMsgKey
-              .currentContext!,
-          duration: const Duration(
-            milliseconds: 300,
-          ),
+          _overlapMsgKey.currentContext!,
+          duration: const Duration(milliseconds: 300),
           curve: Curves.easeInOut,
         );
       }
@@ -2480,8 +1637,7 @@ class _TrackRequestDialogState
   }
 
   /// Show scheduled overlap dialog matching the app's standard dialog design.
-  Future<bool?>
-  _showScheduledOverlapDialog() {
+  Future<bool?> _showScheduledOverlapDialog() {
     return showDialog<bool>(
       context: context,
       barrierColor: Colors.black54,
@@ -2490,83 +1646,50 @@ class _TrackRequestDialogState
         return AlertDialog(
           backgroundColor: Colors.white,
           shape: RoundedRectangleBorder(
-            borderRadius:
-                BorderRadius.circular(
-                  16,
-                ),
+            borderRadius: BorderRadius.circular(16),
           ),
           title: const Text(
             'Overlapping Requests',
-            style: TextStyle(
-              fontWeight:
-                  FontWeight.bold,
-              fontSize: 20,
-            ),
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
           ),
           content: SingleChildScrollView(
             child: Column(
-              mainAxisSize:
-                  MainAxisSize.min,
-              crossAxisAlignment:
-                  CrossAxisAlignment
-                      .start,
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
                   'You already have scheduled requests that overlap with the selected time.',
-                  style: TextStyle(
-                    fontSize: 15,
-                    height: 1.4,
-                  ),
+                  style: TextStyle(fontSize: 15, height: 1.4),
                 ),
-                const SizedBox(
-                  height: 16,
-                ),
+                const SizedBox(height: 16),
                 // Friends list with vertical green line (matches app design)
                 IntrinsicHeight(
                   child: Row(
-                    crossAxisAlignment:
-                        CrossAxisAlignment
-                            .start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Container(
                         width: 3,
                         decoration: BoxDecoration(
-                          color: AppColors
-                              .kGreen,
-                          borderRadius:
-                              BorderRadius.circular(
-                                2,
-                              ),
+                          color: AppColors.kGreen,
+                          borderRadius: BorderRadius.circular(2),
                         ),
                       ),
-                      const SizedBox(
-                        width: 12,
-                      ),
+                      const SizedBox(width: 12),
                       Expanded(
                         child: Column(
-                          crossAxisAlignment:
-                              CrossAxisAlignment
-                                  .start,
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             for (
                               int i = 0;
-                              i <
-                                  _scheduledOverlapFriends
-                                      .length;
+                              i < _scheduledOverlapFriends.length;
                               i++
                             ) ...[
-                              if (i > 0)
-                                const SizedBox(
-                                  height:
-                                      8,
-                                ),
+                              if (i > 0) const SizedBox(height: 8),
                               Text(
                                 '${_scheduledOverlapFriends[i]['name']} (${_scheduledOverlapFriends[i]['phone']})',
                                 style: const TextStyle(
-                                  fontSize:
-                                      14,
-                                  height:
-                                      1.3,
+                                  fontSize: 14,
+                                  height: 1.3,
                                 ),
                               ),
                             ],
@@ -2576,110 +1699,65 @@ class _TrackRequestDialogState
                     ],
                   ),
                 ),
-                const SizedBox(
-                  height: 16,
-                ),
+                const SizedBox(height: 16),
                 Text(
                   'The existing scheduled requests for these friends will be cancelled.',
                   style: TextStyle(
                     fontSize: 13,
-                    color:
-                        Colors.red[600],
+                    color: Colors.red[600],
                     height: 1.4,
                   ),
                 ),
               ],
             ),
           ),
-          actionsPadding:
-              const EdgeInsets.fromLTRB(
-                16,
-                0,
-                16,
-                16,
-              ),
+          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           actions: [
             Row(
               children: [
                 Flexible(
                   flex: 2,
                   child: SizedBox(
-                    width:
-                        double.infinity,
+                    width: double.infinity,
                     child: TextButton(
-                      onPressed: () =>
-                          Navigator.pop(
-                            ctx,
-                            false,
-                          ),
+                      onPressed: () => Navigator.pop(ctx, false),
                       style: TextButton.styleFrom(
-                        backgroundColor:
-                            Colors
-                                .grey[200],
-                        padding:
-                            const EdgeInsets.symmetric(
-                              vertical:
-                                  12,
-                            ),
+                        backgroundColor: Colors.grey[200],
+                        padding: const EdgeInsets.symmetric(vertical: 12),
                         shape: RoundedRectangleBorder(
-                          borderRadius:
-                              BorderRadius.circular(
-                                8,
-                              ),
+                          borderRadius: BorderRadius.circular(8),
                         ),
                       ),
                       child: const Text(
                         'Go Back',
                         style: TextStyle(
-                          color: Colors
-                              .black87,
-                          fontWeight:
-                              FontWeight
-                                  .w600,
+                          color: Colors.black87,
+                          fontWeight: FontWeight.w600,
                           fontSize: 15,
                         ),
                       ),
                     ),
                   ),
                 ),
-                const SizedBox(
-                  width: 10,
-                ),
+                const SizedBox(width: 10),
                 Flexible(
                   flex: 3,
                   child: SizedBox(
-                    width:
-                        double.infinity,
+                    width: double.infinity,
                     child: TextButton(
-                      onPressed: () =>
-                          Navigator.pop(
-                            ctx,
-                            true,
-                          ),
+                      onPressed: () => Navigator.pop(ctx, true),
                       style: TextButton.styleFrom(
-                        backgroundColor:
-                            AppColors
-                                .kGreen,
-                        padding:
-                            const EdgeInsets.symmetric(
-                              vertical:
-                                  12,
-                            ),
+                        backgroundColor: AppColors.kGreen,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
                         shape: RoundedRectangleBorder(
-                          borderRadius:
-                              BorderRadius.circular(
-                                8,
-                              ),
+                          borderRadius: BorderRadius.circular(8),
                         ),
                       ),
                       child: const Text(
                         'Replace & Continue',
                         style: TextStyle(
-                          color: Colors
-                              .white,
-                          fontWeight:
-                              FontWeight
-                                  .bold,
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
                           fontSize: 14,
                         ),
                       ),
@@ -2694,33 +1772,22 @@ class _TrackRequestDialogState
     );
   }
 
-  Future<DateTime?>
-  _showCupertinoDateTimePicker({
+  Future<DateTime?> _showCupertinoDateTimePicker({
     required DateTime initial,
     required DateTime minimum,
     required DateTime maximum,
     required String title,
   }) async {
-    DateTime temp =
-        initial.isBefore(minimum)
-        ? minimum
-        : initial;
+    DateTime temp = initial.isBefore(minimum) ? minimum : initial;
 
-    return showModalBottomSheet<
-      DateTime?
-    >(
+    return showModalBottomSheet<DateTime?>(
       context: context,
       isScrollControlled: true,
-      backgroundColor:
-          Colors.transparent,
+      backgroundColor: Colors.transparent,
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setModalState) {
-            final okEnabled =
-                !temp.isBefore(
-                  minimum,
-                ) &&
-                !temp.isAfter(maximum);
+            final okEnabled = !temp.isBefore(minimum) && !temp.isAfter(maximum);
 
             return SafeArea(
               top: false,
@@ -2728,40 +1795,22 @@ class _TrackRequestDialogState
                 height: 420,
                 decoration: const BoxDecoration(
                   color: Colors.white,
-                  borderRadius:
-                      BorderRadius.only(
-                        topLeft:
-                            Radius.circular(
-                              24,
-                            ),
-                        topRight:
-                            Radius.circular(
-                              24,
-                            ),
-                      ),
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(24),
+                    topRight: Radius.circular(24),
+                  ),
                 ),
                 child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment
-                          .start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Padding(
-                      padding:
-                          const EdgeInsets.fromLTRB(
-                            20,
-                            18,
-                            20,
-                            10,
-                          ),
+                      padding: const EdgeInsets.fromLTRB(20, 18, 20, 10),
                       child: Text(
                         title,
                         style: const TextStyle(
                           fontSize: 22,
-                          fontWeight:
-                              FontWeight
-                                  .w600,
-                          color: Colors
-                              .black87,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.black87,
                         ),
                       ),
                     ),
@@ -2769,86 +1818,46 @@ class _TrackRequestDialogState
                     // Picker
                     Expanded(
                       child: CupertinoDatePicker(
-                        mode:
-                            CupertinoDatePickerMode
-                                .time,
-                        use24hFormat:
-                            false,
-                        minimumDate:
-                            minimum,
-                        maximumDate:
-                            maximum,
-                        initialDateTime:
-                            temp,
+                        mode: CupertinoDatePickerMode.time,
+                        use24hFormat: false,
+                        minimumDate: minimum,
+                        maximumDate: maximum,
+                        initialDateTime: temp,
                         onDateTimeChanged: (d) {
-                          if (d
-                              .isBefore(
-                                minimum,
-                              ))
-                            d = minimum;
-                          if (d.isAfter(
-                            maximum,
-                          ))
-                            d = maximum;
+                          if (d.isBefore(minimum)) d = minimum;
+                          if (d.isAfter(maximum)) d = maximum;
 
-                          setModalState(
-                            () => temp =
-                                d,
-                          );
+                          setModalState(() => temp = d);
                         },
                       ),
                     ),
 
                     Padding(
-                      padding:
-                          const EdgeInsets.fromLTRB(
-                            20,
-                            0,
-                            20,
-                            10,
-                          ),
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
                       child: SizedBox(
-                        width: double
-                            .infinity,
+                        width: double.infinity,
                         height: 54,
                         child: ElevatedButton(
-                          onPressed:
-                              okEnabled
-                              ? () => Navigator.pop(
-                                  context,
-                                  temp,
-                                )
+                          onPressed: okEnabled
+                              ? () => Navigator.pop(context, temp)
                               : null,
                           style: ElevatedButton.styleFrom(
-                            backgroundColor:
-                                AppColors
-                                    .kGreen,
+                            backgroundColor: AppColors.kGreen,
                             // قريب من لون الصورة
-                            disabledBackgroundColor:
-                                Colors
-                                    .grey
-                                    .shade300,
-                            elevation:
-                                0,
+                            disabledBackgroundColor: Colors.grey.shade300,
+                            elevation: 0,
                             shape: RoundedRectangleBorder(
-                              borderRadius:
-                                  BorderRadius.circular(
-                                    16,
-                                  ),
+                              borderRadius: BorderRadius.circular(16),
                             ),
                           ),
                           child: Text(
                             'Ok',
                             style: TextStyle(
-                              color:
-                                  okEnabled
+                              color: okEnabled
                                   ? Colors.white
                                   : Colors.grey.shade600,
-                              fontSize:
-                                  18,
-                              fontWeight:
-                                  FontWeight
-                                      .w500,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w500,
                             ),
                           ),
                         ),
@@ -2858,25 +1867,14 @@ class _TrackRequestDialogState
                     // Cancel
                     Center(
                       child: TextButton(
-                        onPressed: () =>
-                            Navigator.pop(
-                              context,
-                              null,
-                            ),
+                        onPressed: () => Navigator.pop(context, null),
                         child: const Text(
                           'Cancel',
-                          style: TextStyle(
-                            fontSize:
-                                18,
-                            color: Colors
-                                .black87,
-                          ),
+                          style: TextStyle(fontSize: 18, color: Colors.black87),
                         ),
                       ),
                     ),
-                    const SizedBox(
-                      height: 8,
-                    ),
+                    const SizedBox(height: 8),
                   ],
                 ),
               ),
@@ -2888,8 +1886,7 @@ class _TrackRequestDialogState
   }
 
   bool get _canSubmit {
-    return _selectedFriends
-            .isNotEmpty &&
+    return _selectedFriends.isNotEmpty &&
         _selectedVenue != null &&
         _selectedDate != null &&
         _selectedEndDate != null &&
@@ -2899,31 +1896,21 @@ class _TrackRequestDialogState
 
   Future<void> _submitRequest() async {
     // Prevent multiple clicks
-    if (_isSubmitting || !_canSubmit)
-      return;
+    if (_isSubmitting || !_canSubmit) return;
     _isSubmitting = true;
 
-    final user = FirebaseAuth
-        .instance
-        .currentUser;
+    final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       _isSubmitting = false;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'You must be signed in',
-          ),
-        ),
-      );
+      ).showSnackBar(const SnackBar(content: Text('You must be signed in')));
       return;
     }
 
     // Validate time
     final date = _selectedDate!;
-    final endDate =
-        _selectedEndDate ?? date;
+    final endDate = _selectedEndDate ?? date;
     final start = DateTime(
       date.year,
       date.month,
@@ -2941,154 +1928,92 @@ class _TrackRequestDialogState
 
     if (!end.isAfter(start)) {
       _isSubmitting = false;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'End time must be after start time',
-          ),
-        ),
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('End time must be after start time')),
       );
       return;
     }
 
-    final durationMinutes = end
-        .difference(start)
-        .inMinutes;
+    final durationMinutes = end.difference(start).inMinutes;
     if (durationMinutes < 10) {
       _isSubmitting = false;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Duration must be at least 10 minutes',
-          ),
-        ),
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Duration must be at least 10 minutes')),
       );
       return;
     }
     if (durationMinutes > 1439) {
       _isSubmitting = false;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'Maximum duration is 23 hours and 59 minutes',
-          ),
+          content: Text('Maximum duration is 23 hours and 59 minutes'),
         ),
       );
       return;
     }
 
     try {
-      final List<Friend> friends =
-          List.from(_selectedFriends);
+      final List<Friend> friends = List.from(_selectedFriends);
 
       // Use cached sender info if available, otherwise fetch
-      String senderName =
-          _cachedMyName ?? '';
-      String senderPhone =
-          _cachedMyPhone ?? '';
+      String senderName = _cachedMyName ?? '';
+      String senderPhone = _cachedMyPhone ?? '';
 
       // Fetch sender info only if not cached
-      final Future<DocumentSnapshot>?
-      senderFuture = senderPhone.isEmpty
-          ? FirebaseFirestore.instance
-                .collection('users')
-                .doc(user.uid)
-                .get()
+      final Future<DocumentSnapshot>? senderFuture = senderPhone.isEmpty
+          ? FirebaseFirestore.instance.collection('users').doc(user.uid).get()
           : null;
 
       // For each friend, query by phone in parallel
-      final receiverFutures = friends.map((
-        f,
-      ) async {
-        final q =
-            await FirebaseFirestore
-                .instance
-                .collection('users')
-                .where(
-                  'phone',
-                  isEqualTo: f.phone,
-                )
-                .limit(1)
-                .get();
+      final receiverFutures = friends.map((f) async {
+        final q = await FirebaseFirestore.instance
+            .collection('users')
+            .where('phone', isEqualTo: f.phone)
+            .limit(1)
+            .get();
         if (q.docs.isEmpty) return null;
         final doc = q.docs.first;
         final data = doc.data();
-        final name =
-            ('${data['firstName'] ?? ''} ${data['lastName'] ?? ''}')
-                .trim();
+        final name = ('${data['firstName'] ?? ''} ${data['lastName'] ?? ''}')
+            .trim();
         return {
           'uid': doc.id,
           'phone': f.phone,
-          'name': name.isEmpty
-              ? f.phone
-              : name,
+          'name': name.isEmpty ? f.phone : name,
         };
       }).toList();
 
       // Wait for all queries in parallel
-      final receiverResults =
-          await Future.wait(
-            receiverFutures,
-          );
+      final receiverResults = await Future.wait(receiverFutures);
 
       // If sender needed fetching, await it
       if (senderFuture != null) {
-        final senderDoc =
-            await senderFuture;
-        final senderData =
-            senderDoc.data()
-                as Map<
-                  String,
-                  dynamic
-                >? ??
-            {};
+        final senderDoc = await senderFuture;
+        final senderData = senderDoc.data() as Map<String, dynamic>? ?? {};
         senderName =
             ('${senderData['firstName'] ?? ''} ${senderData['lastName'] ?? ''}')
                 .trim();
-        senderPhone =
-            (senderData['phone'] ?? '')
-                .toString();
+        senderPhone = (senderData['phone'] ?? '').toString();
       }
 
       if (senderPhone.isEmpty) {
         _isSubmitting = false;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text(
-              'Your phone number is missing in your profile',
-            ),
+            content: Text('Your phone number is missing in your profile'),
           ),
         );
         return;
       }
 
       // Check receiver results
-      final resolved =
-          <Map<String, String>>[];
-      for (
-        var i = 0;
-        i < receiverResults.length;
-        i++
-      ) {
+      final resolved = <Map<String, String>>[];
+      for (var i = 0; i < receiverResults.length; i++) {
         final r = receiverResults[i];
         if (r == null) {
           _isSubmitting = false;
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(
-            SnackBar(
-              content: Text(
-                'User not found for ${friends[i].phone}',
-              ),
-            ),
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('User not found for ${friends[i].phone}')),
           );
           return;
         }
@@ -3097,61 +2022,39 @@ class _TrackRequestDialogState
 
       // --- Scheduled Overlap Handling ---
       // If scheduled overlaps were detected (from end time selection), show dialog
-      if (_scheduledOverlapFriends
-              .isNotEmpty &&
-          _scheduledOverlapDocIds
-              .isNotEmpty &&
+      if (_scheduledOverlapFriends.isNotEmpty &&
+          _scheduledOverlapDocIds.isNotEmpty &&
           mounted) {
-        final proceed =
-            await _showScheduledOverlapDialog();
+        final proceed = await _showScheduledOverlapDialog();
         if (proceed != true) {
-          setState(
-            () => _isSubmitting = false,
-          );
+          setState(() => _isSubmitting = false);
           return;
         }
         // Cancel the overlapping scheduled requests with 'cancelled' status
-        final cancelBatch =
-            FirebaseFirestore.instance
-                .batch();
-        for (final docId
-            in _scheduledOverlapDocIds) {
+        final cancelBatch = FirebaseFirestore.instance.batch();
+        for (final docId in _scheduledOverlapDocIds) {
           cancelBatch.update(
-            FirebaseFirestore.instance
-                .collection(
-                  'trackRequests',
-                )
-                .doc(docId),
+            FirebaseFirestore.instance.collection('trackRequests').doc(docId),
             {'status': 'cancelled'},
           );
         }
         await cancelBatch.commit();
         // Clear overlap state after cancellation
-        _scheduledOverlapFriends
-            .clear();
+        _scheduledOverlapFriends.clear();
         _scheduledOverlapDocIds.clear();
       }
 
       // Create one request per receiver but same batchId
-      final batchId =
-          '${user.uid}_${DateTime.now().millisecondsSinceEpoch}';
-      final col = FirebaseFirestore
-          .instance
-          .collection('trackRequests');
-      final writeBatch =
-          FirebaseFirestore.instance
-              .batch();
-      final now =
-          FieldValue.serverTimestamp();
+      final batchId = '${user.uid}_${DateTime.now().millisecondsSinceEpoch}';
+      final col = FirebaseFirestore.instance.collection('trackRequests');
+      final writeBatch = FirebaseFirestore.instance.batch();
+      final now = FieldValue.serverTimestamp();
 
       for (final r in resolved) {
         final docRef = col.doc();
         writeBatch.set(docRef, {
           'senderId': user.uid,
-          'senderName':
-              senderName.isEmpty
-              ? senderPhone
-              : senderName,
+          'senderName': senderName.isEmpty ? senderPhone : senderName,
           'senderPhone': senderPhone,
 
           'receiverId': r['uid'],
@@ -3161,14 +2064,9 @@ class _TrackRequestDialogState
           'venueId': _selectedVenueId,
           'venueName': _selectedVenue,
 
-          'startAt': Timestamp.fromDate(
-            start,
-          ),
-          'endAt': Timestamp.fromDate(
-            end,
-          ),
-          'durationMinutes':
-              durationMinutes,
+          'startAt': Timestamp.fromDate(start),
+          'endAt': Timestamp.fromDate(end),
+          'durationMinutes': durationMinutes,
 
           'status': 'pending',
           'createdAt': now,
@@ -3191,13 +2089,7 @@ class _TrackRequestDialogState
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Failed to send request: $e',
-            ),
-          ),
-        );
+        ).showSnackBar(SnackBar(content: Text('Failed to send request: $e')));
       }
     }
   }
@@ -3206,11 +2098,7 @@ class _TrackRequestDialogState
   @override
   Widget build(BuildContext context) {
     return Container(
-      height:
-          MediaQuery.of(
-            context,
-          ).size.height *
-          0.85,
+      height: MediaQuery.of(context).size.height * 0.85,
       decoration: const BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.only(
@@ -3222,83 +2110,47 @@ class _TrackRequestDialogState
         children: [
           // Header
           Container(
-            padding:
-                const EdgeInsets.all(
-                  20,
-                ),
+            padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              border: Border(
-                bottom: BorderSide(
-                  color: Colors
-                      .grey
-                      .shade200,
-                ),
-              ),
+              border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
             ),
             child: Row(
               children: [
                 Container(
-                  padding:
-                      const EdgeInsets.all(
-                        8,
-                      ),
+                  padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: Colors
-                        .grey[100],
-                    borderRadius:
-                        BorderRadius.circular(
-                          8,
-                        ),
+                    color: Colors.grey[100],
+                    borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Icon(
-                    Icons
-                        .person_search_outlined,
-                    color: AppColors
-                        .kGreen,
+                    Icons.person_search_outlined,
+                    color: AppColors.kGreen,
                     size: 24,
                   ),
                 ),
-                const SizedBox(
-                  width: 12,
-                ),
+                const SizedBox(width: 12),
                 const Expanded(
                   child: Column(
-                    crossAxisAlignment:
-                        CrossAxisAlignment
-                            .start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         'Create Track Request',
                         style: TextStyle(
                           fontSize: 18,
-                          fontWeight:
-                              FontWeight
-                                  .w700,
-                          color: Colors
-                              .black87,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.black87,
                         ),
                       ),
                       Text(
                         'Select friends and set tracking duration',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors
-                              .black54,
-                        ),
+                        style: TextStyle(fontSize: 13, color: Colors.black54),
                       ),
                     ],
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(
-                    Icons.close,
-                    color:
-                        Colors.black54,
-                  ),
-                  onPressed: () =>
-                      Navigator.pop(
-                        context,
-                      ),
+                  icon: const Icon(Icons.close, color: Colors.black54),
+                  onPressed: () => Navigator.pop(context),
                 ),
               ],
             ),
@@ -3307,90 +2159,56 @@ class _TrackRequestDialogState
           // Content
           Expanded(
             child: SingleChildScrollView(
-              controller:
-                  _mainScrollController,
-              padding:
-                  const EdgeInsets.all(
-                    20,
-                  ),
+              controller: _mainScrollController,
+              padding: const EdgeInsets.all(20),
               child: Column(
-                crossAxisAlignment:
-                    CrossAxisAlignment
-                        .start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // Venue Selection
                   const Text(
                     'Select Venue',
                     style: TextStyle(
                       fontSize: 16,
-                      fontWeight:
-                          FontWeight
-                              .w700,
-                      color: Colors
-                          .black87,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.black87,
                     ),
                   ),
-                  const SizedBox(
-                    height: 12,
-                  ),
+                  const SizedBox(height: 12),
 
                   GestureDetector(
-                    onTap:
-                        _showVenueSelection,
+                    onTap: _showVenueSelection,
                     child: Container(
-                      padding:
-                          const EdgeInsets.all(
-                            16,
-                          ),
+                      padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: Colors
-                            .grey[50],
-                        borderRadius:
-                            BorderRadius.circular(
-                              12,
-                            ),
-                        border: Border.all(
-                          color: Colors
-                              .grey
-                              .shade300,
-                        ),
+                        color: Colors.grey[50],
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.grey.shade300),
                       ),
                       child: Row(
                         children: [
                           const Icon(
                             Icons.place,
-                            color: AppColors
-                                .kGreen,
+                            color: AppColors.kGreen,
                             size: 20,
                           ),
-                          const SizedBox(
-                            width: 12,
-                          ),
+                          const SizedBox(width: 12),
                           Expanded(
                             child: Text(
-                              _selectedVenue ??
-                                  'Select venue',
+                              _selectedVenue ?? 'Select venue',
                               style: TextStyle(
-                                fontSize:
-                                    15,
-                                fontWeight:
-                                    _selectedVenue !=
-                                        null
+                                fontSize: 15,
+                                fontWeight: _selectedVenue != null
                                     ? FontWeight.w600
                                     : FontWeight.w400,
-                                color:
-                                    _selectedVenue !=
-                                        null
+                                color: _selectedVenue != null
                                     ? Colors.black87
                                     : Colors.grey[400],
                               ),
                             ),
                           ),
                           Icon(
-                            Icons
-                                .arrow_forward_ios,
-                            color: Colors
-                                .grey[400],
+                            Icons.arrow_forward_ios,
+                            color: Colors.grey[400],
                             size: 16,
                           ),
                         ],
@@ -3398,82 +2216,56 @@ class _TrackRequestDialogState
                     ),
                   ),
 
-                  const SizedBox(
-                    height: 24,
-                  ),
+                  const SizedBox(height: 24),
 
                   // Select Friends Section
                   const Text(
                     'Select Friends to Track',
                     style: TextStyle(
                       fontSize: 16,
-                      fontWeight:
-                          FontWeight
-                              .w700,
-                      color: Colors
-                          .black87,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.black87,
                     ),
                   ),
-                  const SizedBox(
-                    height: 16,
-                  ),
+                  const SizedBox(height: 16),
 
                   // Phone Number Input with Add Button
                   // Phone Number Input with Add Button + Fixed Error Space
                   Column(
-                    crossAxisAlignment:
-                        CrossAxisAlignment
-                            .start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
                         children: [
                           Expanded(
                             child: TextField(
-                              controller:
-                                  _phoneController,
-                              focusNode:
-                                  _phoneFocusNode,
-                              keyboardType:
-                                  TextInputType
-                                      .number,
+                              controller: _phoneController,
+                              focusNode: _phoneFocusNode,
+                              keyboardType: TextInputType.number,
                               inputFormatters: [
-                                FilteringTextInputFormatter
-                                    .digitsOnly,
-                                LengthLimitingTextInputFormatter(
-                                  9,
-                                ),
+                                FilteringTextInputFormatter.digitsOnly,
+                                LengthLimitingTextInputFormatter(9),
                               ],
                               onChanged: (value) {
                                 setState(() {
-                                  _isPhoneInputValid =
-                                      true;
-                                  _phoneInputError =
-                                      null;
+                                  _isPhoneInputValid = true;
+                                  _phoneInputError = null;
                                 });
                               },
                               decoration: InputDecoration(
-                                hintText:
-                                    'Phone number',
+                                hintText: 'Phone number',
                                 hintStyle: TextStyle(
-                                  color:
-                                      Colors.grey[400],
-                                  fontWeight:
-                                      FontWeight.w400,
+                                  color: Colors.grey[400],
+                                  fontWeight: FontWeight.w400,
                                 ),
-                                prefixText:
-                                    _phoneController.text.isEmpty
+                                prefixText: _phoneController.text.isEmpty
                                     ? null
                                     : '+966 ',
                                 prefixStyle: TextStyle(
-                                  color:
-                                      Colors.grey[600],
-                                  fontSize:
-                                      16,
-                                  fontWeight:
-                                      FontWeight.w500,
+                                  color: Colors.grey[600],
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w500,
                                 ),
-                                suffixIcon:
-                                    _isPhoneFocused
+                                suffixIcon: _isPhoneFocused
                                     ? IconButton(
                                         icon: const Icon(
                                           Icons.contacts,
@@ -3482,217 +2274,140 @@ class _TrackRequestDialogState
                                         onPressed: _pickContact,
                                       )
                                     : null,
-                                filled:
-                                    true,
-                                fillColor:
-                                    Colors.grey[50],
+                                filled: true,
+                                fillColor: Colors.grey[50],
 
                                 border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(
-                                    12,
-                                  ),
+                                  borderRadius: BorderRadius.circular(12),
                                   borderSide: BorderSide(
-                                    color:
-                                        Colors.grey.shade300,
+                                    color: Colors.grey.shade300,
                                   ),
                                 ),
                                 enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(
-                                    12,
-                                  ),
+                                  borderRadius: BorderRadius.circular(12),
                                   borderSide: BorderSide(
-                                    color:
-                                        _isPhoneInputValid
+                                    color: _isPhoneInputValid
                                         ? Colors.grey.shade300
                                         : AppColors.kError,
-                                    width:
-                                        1,
+                                    width: 1,
                                   ),
                                 ),
                                 focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(
-                                    12,
-                                  ),
+                                  borderRadius: BorderRadius.circular(12),
                                   borderSide: BorderSide(
-                                    color:
-                                        _isPhoneInputValid
+                                    color: _isPhoneInputValid
                                         ? AppColors.kGreen
                                         : AppColors.kError,
-                                    width:
-                                        2,
+                                    width: 2,
                                   ),
                                 ),
 
                                 contentPadding: const EdgeInsets.symmetric(
-                                  horizontal:
-                                      16,
-                                  vertical:
-                                      14,
+                                  horizontal: 16,
+                                  vertical: 14,
                                 ),
                               ),
                             ),
                           ),
-                          const SizedBox(
-                            width: 12,
-                          ),
+                          const SizedBox(width: 12),
 
                           GestureDetector(
-                            onTap:
-                                _canAddPhone
-                                ? _addPhoneNumber
-                                : null,
+                            onTap: _canAddPhone ? _addPhoneNumber : null,
                             child: Container(
                               padding: const EdgeInsets.symmetric(
-                                horizontal:
-                                    20,
-                                vertical:
-                                    14,
+                                horizontal: 20,
+                                vertical: 14,
                               ),
                               decoration: BoxDecoration(
-                                color:
-                                    _canAddPhone
+                                color: _canAddPhone
                                     ? AppColors.kGreen
                                     : Colors.grey[300],
-                                borderRadius:
-                                    BorderRadius.circular(
-                                      12,
-                                    ),
+                                borderRadius: BorderRadius.circular(12),
                               ),
                               child: Text(
                                 'Add',
                                 style: TextStyle(
-                                  color:
-                                      _canAddPhone
+                                  color: _canAddPhone
                                       ? Colors.white
                                       : Colors.grey[500],
-                                  fontWeight:
-                                      FontWeight.w600,
-                                  fontSize:
-                                      15,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 15,
                                 ),
                               ),
                             ),
                           ),
 
-                          const SizedBox(
-                            width: 8,
-                          ),
+                          const SizedBox(width: 8),
 
                           IconButton(
-                            onPressed:
-                                _showFavoritesList,
+                            onPressed: _showFavoritesList,
                             icon: const Icon(
-                              Icons
-                                  .favorite_border,
-                              color: AppColors
-                                  .kGreen,
+                              Icons.favorite_border,
+                              color: AppColors.kGreen,
                               size: 28,
                             ),
-                            padding:
-                                const EdgeInsets.all(
-                                  12,
-                                ),
+                            padding: const EdgeInsets.all(12),
                             style: IconButton.styleFrom(
-                              backgroundColor:
-                                  Colors
-                                      .grey[100],
+                              backgroundColor: Colors.grey[100],
                               shape: RoundedRectangleBorder(
-                                borderRadius:
-                                    BorderRadius.circular(
-                                      12,
-                                    ),
+                                borderRadius: BorderRadius.circular(12),
                               ),
                             ),
                           ),
                         ],
                       ),
 
-                      const SizedBox(
-                        height: 6,
-                      ),
+                      const SizedBox(height: 6),
                       SizedBox(
                         height: 18,
-                        child:
-                            (!_isPhoneInputValid &&
-                                _phoneInputError !=
-                                    null)
+                        child: (!_isPhoneInputValid && _phoneInputError != null)
                             ? Text(
                                 _phoneInputError!,
                                 style: const TextStyle(
-                                  color:
-                                      AppColors.kError,
-                                  fontSize:
-                                      13,
+                                  color: AppColors.kError,
+                                  fontSize: 13,
                                 ),
                               )
                             : null,
                       ),
                     ],
                   ),
-                  const SizedBox(
-                    height: 20,
-                  ),
+                  const SizedBox(height: 20),
 
                   // Active overlap removal message (single red card listing all removed friends)
-                  if (_activeOverlapRemovedFriends
-                      .isNotEmpty)
+                  if (_activeOverlapRemovedFriends.isNotEmpty)
                     Container(
-                      key:
-                          _overlapMsgKey,
-                      margin:
-                          const EdgeInsets.only(
-                            bottom: 12,
-                          ),
-                      padding:
-                          const EdgeInsets.all(
-                            12,
-                          ),
+                      key: _overlapMsgKey,
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors
-                            .red[50],
-                        borderRadius:
-                            BorderRadius.circular(
-                              12,
-                            ),
+                        color: Colors.red[50],
+                        borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: Colors
-                              .red
-                              .shade300,
+                          color: Colors.red.shade300,
                           width: 1.5,
                         ),
                       ),
                       child: Column(
-                        crossAxisAlignment:
-                            CrossAxisAlignment
-                                .start,
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(
                             children: [
                               Icon(
-                                Icons
-                                    .error_outline,
-                                color: Colors
-                                    .red[400],
-                                size:
-                                    20,
+                                Icons.error_outline,
+                                color: Colors.red[400],
+                                size: 20,
                               ),
-                              const SizedBox(
-                                width:
-                                    8,
-                              ),
+                              const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
-                                  _activeOverlapRemovedFriends.length ==
-                                          1
+                                  _activeOverlapRemovedFriends.length == 1
                                       ? '${_activeOverlapRemovedFriends.first.name} (${_activeOverlapRemovedFriends.first.phone}) was removed from this request due to an active tracking overlap.'
                                       : 'The following friends were removed from this request due to active tracking overlaps:',
                                   style: TextStyle(
-                                    fontSize:
-                                        13,
-                                    color:
-                                        Colors.red[700],
-                                    fontWeight:
-                                        FontWeight.w500,
+                                    fontSize: 13,
+                                    color: Colors.red[700],
+                                    fontWeight: FontWeight.w500,
                                   ),
                                 ),
                               ),
@@ -3700,47 +2415,31 @@ class _TrackRequestDialogState
                                 onTap: () {
                                   setState(() {
                                     // Just dismiss the message, don't restore friends
-                                    _activeOverlapRemovedFriends =
-                                        [];
+                                    _activeOverlapRemovedFriends = [];
                                   });
                                 },
                                 child: Icon(
-                                  Icons
-                                      .close,
-                                  size:
-                                      18,
-                                  color:
-                                      Colors.grey[500],
+                                  Icons.close,
+                                  size: 18,
+                                  color: Colors.grey[500],
                                 ),
                               ),
                             ],
                           ),
-                          if (_activeOverlapRemovedFriends
-                                  .length >
-                              1) ...[
-                            const SizedBox(
-                              height: 8,
-                            ),
-                            for (final f
-                                in _activeOverlapRemovedFriends)
+                          if (_activeOverlapRemovedFriends.length > 1) ...[
+                            const SizedBox(height: 8),
+                            for (final f in _activeOverlapRemovedFriends)
                               Padding(
-                                padding: const EdgeInsets.only(
-                                  bottom:
-                                      4,
-                                ),
+                                padding: const EdgeInsets.only(bottom: 4),
                                 child: Row(
                                   children: [
-                                    const SizedBox(
-                                      width: 28,
-                                    ),
+                                    const SizedBox(width: 28),
                                     Icon(
                                       Icons.person,
                                       size: 16,
                                       color: Colors.red[300],
                                     ),
-                                    const SizedBox(
-                                      width: 6,
-                                    ),
+                                    const SizedBox(width: 6),
                                     Expanded(
                                       child: Text(
                                         '${f.name} (${f.phone})',
@@ -3759,75 +2458,45 @@ class _TrackRequestDialogState
                     ),
 
                   // Selected Friends List
-                  if (_selectedFriends
-                      .isNotEmpty) ...[
+                  if (_selectedFriends.isNotEmpty) ...[
                     const Text(
                       'Selected friends',
                       style: TextStyle(
                         fontSize: 14,
-                        fontWeight:
-                            FontWeight
-                                .w600,
-                        color: Colors
-                            .black87,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.black87,
                       ),
                     ),
-                    const SizedBox(
-                      height: 12,
-                    ),
+                    const SizedBox(height: 12),
 
-                    for (final friend
-                        in _selectedFriends)
+                    for (final friend in _selectedFriends)
                       Container(
-                        margin:
-                            const EdgeInsets.only(
-                              bottom: 8,
-                            ),
-                        padding:
-                            const EdgeInsets.all(
-                              12,
-                            ),
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: Colors
-                              .grey[50],
-                          borderRadius:
-                              BorderRadius.circular(
-                                12,
-                              ),
-                          border: Border.all(
-                            color: Colors
-                                .grey
-                                .shade200,
-                          ),
+                          color: Colors.grey[50],
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.grey.shade200),
                         ),
                         child: Row(
                           children: [
                             Container(
                               width: 44,
-                              height:
-                                  44,
+                              height: 44,
                               decoration: BoxDecoration(
-                                color: Colors
-                                    .grey[300],
-                                shape: BoxShape
-                                    .circle,
+                                color: Colors.grey[300],
+                                shape: BoxShape.circle,
                               ),
                               child: Icon(
-                                Icons
-                                    .person,
-                                color: Colors
-                                    .grey[600],
-                                size:
-                                    22,
+                                Icons.person,
+                                color: Colors.grey[600],
+                                size: 22,
                               ),
                             ),
-                            const SizedBox(
-                              width: 12,
-                            ),
+                            const SizedBox(width: 12),
                             Expanded(
                               child: Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
                                     friend.name,
@@ -3846,16 +2515,10 @@ class _TrackRequestDialogState
                                   ),
                                   // Show scheduled overlap warning inline
                                   if (_scheduledOverlapFriends.any(
-                                    (
-                                      f,
-                                    ) =>
-                                        f['phone'] ==
-                                        friend.phone,
+                                    (f) => f['phone'] == friend.phone,
                                   ))
                                     Padding(
-                                      padding: const EdgeInsets.only(
-                                        top: 4,
-                                      ),
+                                      padding: const EdgeInsets.only(top: 4),
                                       child: Text(
                                         'Has a scheduled overlap',
                                         style: TextStyle(
@@ -3869,37 +2532,25 @@ class _TrackRequestDialogState
                               ),
                             ),
                             // Favorite button for phone-added friends
-                            if (friend
-                                .isFromPhoneInput)
+                            if (friend.isFromPhoneInput)
                               IconButton(
-                                onPressed: () =>
-                                    _toggleFavorite(
-                                      friend,
-                                    ),
+                                onPressed: () => _toggleFavorite(friend),
                                 icon: Icon(
                                   friend.isFavorite
                                       ? Icons.favorite
                                       : Icons.favorite_border,
-                                  color:
-                                      friend.isFavorite
+                                  color: friend.isFavorite
                                       ? Colors.red
                                       : Colors.grey[400],
-                                  size:
-                                      22,
+                                  size: 22,
                                 ),
                               ),
                             IconButton(
-                              onPressed: () =>
-                                  _removeFriend(
-                                    friend,
-                                  ),
+                              onPressed: () => _removeFriend(friend),
                               icon: const Icon(
-                                Icons
-                                    .check_circle,
-                                color: AppColors
-                                    .kGreen,
-                                size:
-                                    24,
+                                Icons.check_circle,
+                                color: AppColors.kGreen,
+                                size: 24,
                               ),
                             ),
                           ],
@@ -3908,15 +2559,9 @@ class _TrackRequestDialogState
 
                     Text(
                       '${_selectedFriends.length} friend${_selectedFriends.length == 1 ? '' : 's'} selected',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors
-                            .grey[600],
-                      ),
+                      style: TextStyle(fontSize: 13, color: Colors.grey[600]),
                     ),
-                    const SizedBox(
-                      height: 24,
-                    ),
+                    const SizedBox(height: 24),
                   ],
 
                   // Tracking Duration Section
@@ -3924,16 +2569,11 @@ class _TrackRequestDialogState
                     'Tracking Duration',
                     style: TextStyle(
                       fontSize: 16,
-                      fontWeight:
-                          FontWeight
-                              .w700,
-                      color: Colors
-                          .black87,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.black87,
                     ),
                   ),
-                  const SizedBox(
-                    height: 16,
-                  ),
+                  const SizedBox(height: 16),
 
                   // Date Range Selectors
                   Row(
@@ -3941,13 +2581,9 @@ class _TrackRequestDialogState
                       // Start Date
                       Expanded(
                         child: GestureDetector(
-                          onTap:
-                              _selectedVenueId ==
-                                  null
+                          onTap: _selectedVenueId == null
                               ? () {
-                                  ScaffoldMessenger.of(
-                                    context,
-                                  ).showSnackBar(
+                                  ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(
                                       content: Text(
                                         'Please select a venue first',
@@ -3957,32 +2593,16 @@ class _TrackRequestDialogState
                                 }
                               : _selectDate,
                           child: Opacity(
-                            opacity:
-                                _selectedVenueId ==
-                                    null
-                                ? 0.5
-                                : 1.0,
+                            opacity: _selectedVenueId == null ? 0.5 : 1.0,
                             child: Container(
-                              padding:
-                                  const EdgeInsets.all(
-                                    16,
-                                  ),
+                              padding: const EdgeInsets.all(16),
                               decoration: BoxDecoration(
-                                color: Colors
-                                    .grey[50],
-                                borderRadius:
-                                    BorderRadius.circular(
-                                      12,
-                                    ),
-                                border: Border.all(
-                                  color: Colors
-                                      .grey
-                                      .shade300,
-                                ),
+                                color: Colors.grey[50],
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.grey.shade300),
                               ),
                               child: Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Row(
                                     children: [
@@ -3991,9 +2611,7 @@ class _TrackRequestDialogState
                                         color: AppColors.kGreen,
                                         size: 20,
                                       ),
-                                      const SizedBox(
-                                        width: 8,
-                                      ),
+                                      const SizedBox(width: 8),
                                       const Text(
                                         'Start Date',
                                         style: TextStyle(
@@ -4003,25 +2621,17 @@ class _TrackRequestDialogState
                                       ),
                                     ],
                                   ),
-                                  const SizedBox(
-                                    height:
-                                        8,
-                                  ),
+                                  const SizedBox(height: 8),
                                   Text(
-                                    _selectedDate !=
-                                            null
+                                    _selectedDate != null
                                         ? DateFormat(
                                             'EEE d MMM yyyy',
-                                          ).format(
-                                            _selectedDate!,
-                                          )
+                                          ).format(_selectedDate!)
                                         : '--/--/----',
                                     style: TextStyle(
                                       fontSize: 17,
                                       fontWeight: FontWeight.w700,
-                                      color:
-                                          _selectedDate !=
-                                              null
+                                      color: _selectedDate != null
                                           ? Colors.black87
                                           : Colors.grey[400],
                                     ),
@@ -4032,18 +2642,13 @@ class _TrackRequestDialogState
                           ),
                         ),
                       ),
-                      const SizedBox(
-                        width: 12,
-                      ),
+                      const SizedBox(width: 12),
                       // End Date
                       Expanded(
                         child: GestureDetector(
                           onTap: () {
-                            if (_selectedDate ==
-                                null) {
-                              ScaffoldMessenger.of(
-                                context,
-                              ).showSnackBar(
+                            if (_selectedDate == null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
                                   content: Text(
                                     'Please select a start date first',
@@ -4052,12 +2657,8 @@ class _TrackRequestDialogState
                               );
                               return;
                             }
-                            if (_venueIsClosedOnDate(
-                              _selectedDate!,
-                            )) {
-                              ScaffoldMessenger.of(
-                                context,
-                              ).showSnackBar(
+                            if (_venueIsClosedOnDate(_selectedDate!)) {
+                              ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text(
                                     _venueIsTemporarilyClosed()
@@ -4072,44 +2673,26 @@ class _TrackRequestDialogState
                           },
                           child: Opacity(
                             opacity:
-                                (_selectedDate ==
-                                        null ||
-                                    (_selectedDate !=
-                                            null &&
-                                        _venueIsClosedOnDate(
-                                          _selectedDate!,
-                                        )))
+                                (_selectedDate == null ||
+                                    (_selectedDate != null &&
+                                        _venueIsClosedOnDate(_selectedDate!)))
                                 ? 0.4
                                 : 1.0,
                             child: Container(
-                              padding:
-                                  const EdgeInsets.all(
-                                    16,
-                                  ),
+                              padding: const EdgeInsets.all(16),
                               decoration: BoxDecoration(
-                                color: Colors
-                                    .grey[50],
-                                borderRadius:
-                                    BorderRadius.circular(
-                                      12,
-                                    ),
-                                border: Border.all(
-                                  color: Colors
-                                      .grey
-                                      .shade300,
-                                ),
+                                color: Colors.grey[50],
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.grey.shade300),
                               ),
                               child: Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Row(
                                     children: [
                                       Icon(
-                                        (_selectedEndDate !=
-                                                    null &&
-                                                _selectedDate !=
-                                                    null &&
+                                        (_selectedEndDate != null &&
+                                                _selectedDate != null &&
                                                 _selectedEndDate !=
                                                     _selectedDate)
                                             ? Icons.nights_stay_outlined
@@ -4117,15 +2700,11 @@ class _TrackRequestDialogState
                                         color: AppColors.kGreen,
                                         size: 20,
                                       ),
-                                      const SizedBox(
-                                        width: 8,
-                                      ),
+                                      const SizedBox(width: 8),
                                       Flexible(
                                         child: Text(
-                                          (_selectedEndDate !=
-                                                      null &&
-                                                  _selectedDate !=
-                                                      null &&
+                                          (_selectedEndDate != null &&
+                                                  _selectedDate != null &&
                                                   _selectedEndDate !=
                                                       _selectedDate)
                                               ? 'End · Next day'
@@ -4133,10 +2712,8 @@ class _TrackRequestDialogState
                                           style: TextStyle(
                                             fontSize: 12,
                                             color:
-                                                (_selectedEndDate !=
-                                                        null &&
-                                                    _selectedDate !=
-                                                        null &&
+                                                (_selectedEndDate != null &&
+                                                    _selectedDate != null &&
                                                     _selectedEndDate !=
                                                         _selectedDate)
                                                 ? AppColors.kGreen
@@ -4147,25 +2724,17 @@ class _TrackRequestDialogState
                                       ),
                                     ],
                                   ),
-                                  const SizedBox(
-                                    height:
-                                        8,
-                                  ),
+                                  const SizedBox(height: 8),
                                   Text(
-                                    _selectedEndDate !=
-                                            null
+                                    _selectedEndDate != null
                                         ? DateFormat(
                                             'EEE d MMM yyyy',
-                                          ).format(
-                                            _selectedEndDate!,
-                                          )
+                                          ).format(_selectedEndDate!)
                                         : '--/--/----',
                                     style: TextStyle(
                                       fontSize: 17,
                                       fontWeight: FontWeight.w700,
-                                      color:
-                                          _selectedEndDate !=
-                                              null
+                                      color: _selectedEndDate != null
                                           ? Colors.black87
                                           : Colors.grey[400],
                                     ),
@@ -4179,62 +2748,37 @@ class _TrackRequestDialogState
                     ],
                   ),
                   // Show venue hours for selected date
-                  if (_selectedDate !=
-                          null &&
-                      _selectedVenueId !=
-                          null) ...[
-                    const SizedBox(
-                      height: 4,
-                    ),
+                  if (_selectedDate != null && _selectedVenueId != null) ...[
+                    const SizedBox(height: 4),
                     Builder(
                       builder: (_) {
-                        final hoursStr =
-                            _getVenueHoursStringForDate(
-                              _selectedDate!,
-                            );
+                        final hoursStr = _getVenueHoursStringForDate(
+                          _selectedDate!,
+                        );
                         final isClosed =
-                            hoursStr ==
-                                'closed' ||
-                            hoursStr ==
-                                'temporarily closed';
-                        final isNotAvailable =
-                            hoursStr ==
-                            'not available';
-                        final isOpen24 =
-                            hoursStr ==
-                            'open 24 hours';
+                            hoursStr == 'closed' ||
+                            hoursStr == 'temporarily closed';
+                        final isNotAvailable = hoursStr == 'not available';
+                        final isOpen24 = hoursStr == 'open 24 hours';
                         Color textColor;
                         if (isClosed) {
-                          textColor =
-                              Colors
-                                  .red;
+                          textColor = Colors.red;
                         } else if (isOpen24) {
-                          textColor =
-                              Colors
-                                  .green;
+                          textColor = Colors.green;
                         } else if (isNotAvailable) {
-                          textColor = Colors
-                              .orange[700]!;
+                          textColor = Colors.orange[700]!;
                         } else {
-                          textColor = Colors
-                              .grey[500]!;
+                          textColor = Colors.grey[500]!;
                         }
                         return Text(
                           'Venue hours: $hoursStr',
-                          style: TextStyle(
-                            fontSize:
-                                12,
-                            color:
-                                textColor,
-                          ),
+                          style: TextStyle(fontSize: 12, color: textColor),
                         );
                       },
                     ),
                   ],
 
-                  const SizedBox(
-                    height: 12,
-                  ),
+                  const SizedBox(height: 12),
 
                   // Time Range Selectors
                   Row(
@@ -4247,36 +2791,20 @@ class _TrackRequestDialogState
                           },
                           child: Opacity(
                             opacity:
-                                (_selectedDate ==
-                                        null ||
-                                    (_selectedDate !=
-                                            null &&
-                                        _venueIsClosedOnDate(
-                                          _selectedDate!,
-                                        )))
+                                (_selectedDate == null ||
+                                    (_selectedDate != null &&
+                                        _venueIsClosedOnDate(_selectedDate!)))
                                 ? 0.4
                                 : 1.0,
                             child: Container(
-                              padding:
-                                  const EdgeInsets.all(
-                                    16,
-                                  ),
+                              padding: const EdgeInsets.all(16),
                               decoration: BoxDecoration(
-                                color: Colors
-                                    .grey[50],
-                                borderRadius:
-                                    BorderRadius.circular(
-                                      12,
-                                    ),
-                                border: Border.all(
-                                  color: Colors
-                                      .grey
-                                      .shade300,
-                                ),
+                                color: Colors.grey[50],
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.grey.shade300),
                               ),
                               child: Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Row(
                                     children: [
@@ -4285,9 +2813,7 @@ class _TrackRequestDialogState
                                         color: AppColors.kGreen,
                                         size: 20,
                                       ),
-                                      const SizedBox(
-                                        width: 8,
-                                      ),
+                                      const SizedBox(width: 8),
                                       const Text(
                                         'Start Time',
                                         style: TextStyle(
@@ -4297,23 +2823,15 @@ class _TrackRequestDialogState
                                       ),
                                     ],
                                   ),
-                                  const SizedBox(
-                                    height:
-                                        8,
-                                  ),
+                                  const SizedBox(height: 8),
                                   Text(
-                                    _startTime !=
-                                            null
-                                        ? _formatTime12h(
-                                            _startTime!,
-                                          )
+                                    _startTime != null
+                                        ? _formatTime12h(_startTime!)
                                         : '--:--',
                                     style: TextStyle(
                                       fontSize: 17,
                                       fontWeight: FontWeight.w700,
-                                      color:
-                                          _startTime !=
-                                              null
+                                      color: _startTime != null
                                           ? Colors.black87
                                           : Colors.grey[400],
                                     ),
@@ -4324,9 +2842,7 @@ class _TrackRequestDialogState
                           ),
                         ),
                       ),
-                      const SizedBox(
-                        width: 12,
-                      ),
+                      const SizedBox(width: 12),
                       Expanded(
                         child: GestureDetector(
                           onTap: () {
@@ -4335,36 +2851,20 @@ class _TrackRequestDialogState
                           },
                           child: Opacity(
                             opacity:
-                                (_startTime ==
-                                        null ||
-                                    (_selectedDate !=
-                                            null &&
-                                        _venueIsClosedOnDate(
-                                          _selectedDate!,
-                                        )))
+                                (_startTime == null ||
+                                    (_selectedDate != null &&
+                                        _venueIsClosedOnDate(_selectedDate!)))
                                 ? 0.4
                                 : 1.0,
                             child: Container(
-                              padding:
-                                  const EdgeInsets.all(
-                                    16,
-                                  ),
+                              padding: const EdgeInsets.all(16),
                               decoration: BoxDecoration(
-                                color: Colors
-                                    .grey[50],
-                                borderRadius:
-                                    BorderRadius.circular(
-                                      12,
-                                    ),
-                                border: Border.all(
-                                  color: Colors
-                                      .grey
-                                      .shade300,
-                                ),
+                                color: Colors.grey[50],
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.grey.shade300),
                               ),
                               child: Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Row(
                                     children: [
@@ -4373,9 +2873,7 @@ class _TrackRequestDialogState
                                         color: AppColors.kGreen,
                                         size: 20,
                                       ),
-                                      const SizedBox(
-                                        width: 8,
-                                      ),
+                                      const SizedBox(width: 8),
                                       const Text(
                                         'End Time',
                                         style: TextStyle(
@@ -4385,23 +2883,15 @@ class _TrackRequestDialogState
                                       ),
                                     ],
                                   ),
-                                  const SizedBox(
-                                    height:
-                                        8,
-                                  ),
+                                  const SizedBox(height: 8),
                                   Text(
-                                    _endTime !=
-                                            null
-                                        ? _formatTime12h(
-                                            _endTime!,
-                                          )
+                                    _endTime != null
+                                        ? _formatTime12h(_endTime!)
                                         : '--:--',
                                     style: TextStyle(
                                       fontSize: 17,
                                       fontWeight: FontWeight.w700,
-                                      color:
-                                          _endTime !=
-                                              null
+                                      color: _endTime != null
                                           ? Colors.black87
                                           : Colors.grey[400],
                                     ),
@@ -4415,98 +2905,57 @@ class _TrackRequestDialogState
                     ],
                   ),
                   // Duration info
-                  if (_startTime !=
-                          null &&
-                      _endTime !=
-                          null &&
-                      _selectedDate !=
-                          null &&
-                      _selectedEndDate !=
-                          null) ...[
-                    const SizedBox(
-                      height: 6,
-                    ),
+                  if (_startTime != null &&
+                      _endTime != null &&
+                      _selectedDate != null &&
+                      _selectedEndDate != null) ...[
+                    const SizedBox(height: 6),
                     Builder(
                       builder: (_) {
                         final s = DateTime(
-                          _selectedDate!
-                              .year,
-                          _selectedDate!
-                              .month,
-                          _selectedDate!
-                              .day,
-                          _startTime!
-                              .hour,
-                          _startTime!
-                              .minute,
+                          _selectedDate!.year,
+                          _selectedDate!.month,
+                          _selectedDate!.day,
+                          _startTime!.hour,
+                          _startTime!.minute,
                         );
                         final e = DateTime(
-                          _selectedEndDate!
-                              .year,
-                          _selectedEndDate!
-                              .month,
-                          _selectedEndDate!
-                              .day,
-                          _endTime!
-                              .hour,
-                          _endTime!
-                              .minute,
+                          _selectedEndDate!.year,
+                          _selectedEndDate!.month,
+                          _selectedEndDate!.day,
+                          _endTime!.hour,
+                          _endTime!.minute,
                         );
-                        final mins = e
-                            .difference(
-                              s,
-                            )
-                            .inMinutes;
-                        final h =
-                            mins ~/ 60;
-                        final m =
-                            mins % 60;
-                        final durStr =
-                            h > 0
-                            ? (m > 0
-                                  ? '${h}h ${m}min'
-                                  : '${h}h')
+                        final mins = e.difference(s).inMinutes;
+                        final h = mins ~/ 60;
+                        final m = mins % 60;
+                        final durStr = h > 0
+                            ? (m > 0 ? '${h}h ${m}min' : '${h}h')
                             : '${m}min';
                         return Text(
                           'Duration: $durStr',
                           style: TextStyle(
-                            fontSize:
-                                12,
-                            color:
-                                (mins <
-                                        10 ||
-                                    mins >
-                                        1439)
-                                ? Colors
-                                      .red
-                                : Colors
-                                      .grey[500],
-                            fontWeight:
-                                FontWeight
-                                    .w400,
+                            fontSize: 12,
+                            color: (mins < 10 || mins > 1439)
+                                ? Colors.red
+                                : Colors.grey[500],
+                            fontWeight: FontWeight.w400,
                           ),
                         );
                       },
                     ),
                   ],
-                  if (!_isTimeValid &&
-                      _timeError !=
-                          null) ...[
-                    const SizedBox(
-                      height: 4,
-                    ),
+                  if (!_isTimeValid && _timeError != null) ...[
+                    const SizedBox(height: 4),
                     Text(
                       _timeError!,
                       style: const TextStyle(
-                        color: AppColors
-                            .kError,
+                        color: AppColors.kError,
                         fontSize: 13,
                       ),
                     ),
                   ],
-                  const SizedBox(
-                    height: 12,
-                  ),
+                  const SizedBox(height: 12),
                 ],
               ),
             ),
@@ -4514,58 +2963,32 @@ class _TrackRequestDialogState
 
           // Submit Button
           Container(
-            padding:
-                EdgeInsets.fromLTRB(
-                  20,
-                  12,
-                  20,
-                  MediaQuery.of(
-                        context,
-                      ).padding.bottom +
-                      12,
-                ),
+            padding: EdgeInsets.fromLTRB(
+              20,
+              12,
+              20,
+              MediaQuery.of(context).padding.bottom + 12,
+            ),
             decoration: BoxDecoration(
               color: Colors.white,
-              border: Border(
-                top: BorderSide(
-                  color: Colors
-                      .grey
-                      .shade200,
-                ),
-              ),
+              border: Border(top: BorderSide(color: Colors.grey.shade200)),
             ),
             child: ElevatedButton(
-              onPressed: _canSubmit
-                  ? _submitRequest
-                  : null,
+              onPressed: _canSubmit ? _submitRequest : null,
               style: ElevatedButton.styleFrom(
-                backgroundColor:
-                    AppColors.kGreen,
-                foregroundColor:
-                    Colors.white,
-                disabledBackgroundColor:
-                    Colors.grey[300],
-                disabledForegroundColor:
-                    Colors.grey[500],
-                minimumSize:
-                    const Size.fromHeight(
-                      52,
-                    ),
+                backgroundColor: AppColors.kGreen,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: Colors.grey[300],
+                disabledForegroundColor: Colors.grey[500],
+                minimumSize: const Size.fromHeight(52),
                 elevation: 0,
                 shape: RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.circular(
-                        12,
-                      ),
+                  borderRadius: BorderRadius.circular(12),
                 ),
               ),
               child: const Text(
                 'Send Request',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight:
-                      FontWeight.w700,
-                ),
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
               ),
             ),
           ),
@@ -4578,36 +3001,26 @@ class _TrackRequestDialogState
     // Unfocus phone field before opening contact picker
     _phoneFocusNode.unfocus();
 
-    final result =
-        await Navigator.push<String>(
-          context,
-          MaterialPageRoute(
-            builder: (context) =>
-                SelectContactPage(
-                  contacts:
-                      _preloadedContacts,
-                  inDbStatus:
-                      _preloadedInDbStatus,
-                  onInvite:
-                      _shareInvite,
-                ),
-          ),
-        );
+    final result = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => SelectContactPage(
+          contacts: _preloadedContacts,
+          inDbStatus: _preloadedInDbStatus,
+          onInvite: _shareInvite,
+        ),
+      ),
+    );
 
     // If a phone number was returned, fill the phone field
-    if (result != null &&
-        result.isNotEmpty) {
+    if (result != null && result.isNotEmpty) {
       // Remove +966 prefix for the text field (it shows +966 as prefix)
       String phoneDigits = result;
-      if (phoneDigits.startsWith(
-        '+966',
-      )) {
-        phoneDigits = phoneDigits
-            .substring(4);
+      if (phoneDigits.startsWith('+966')) {
+        phoneDigits = phoneDigits.substring(4);
       }
       setState(() {
-        _phoneController.text =
-            phoneDigits;
+        _phoneController.text = phoneDigits;
       });
     }
   }
@@ -4617,12 +3030,10 @@ class _TrackRequestDialogState
 // Select Contact Page – Full page with pre-loaded data, "Invite" for non-DB contacts
 // ----------------------------------------------------------------------------
 
-class SelectContactPage
-    extends StatefulWidget {
+class SelectContactPage extends StatefulWidget {
   final List<_ContactItem> contacts;
   final Map<String, bool> inDbStatus;
-  final void Function(String phone)
-  onInvite;
+  final void Function(String phone) onInvite;
 
   const SelectContactPage({
     super.key,
@@ -4632,30 +3043,21 @@ class SelectContactPage
   });
 
   @override
-  State<SelectContactPage>
-  createState() =>
-      _SelectContactPageState();
+  State<SelectContactPage> createState() => _SelectContactPageState();
 }
 
-class _SelectContactPageState
-    extends State<SelectContactPage> {
-  final _searchController =
-      TextEditingController();
+class _SelectContactPageState extends State<SelectContactPage> {
+  final _searchController = TextEditingController();
   // Local copy of inDbStatus that we can update
-  late Map<String, bool>
-  _localInDbStatus;
+  late Map<String, bool> _localInDbStatus;
   bool _isCheckingDb = false;
 
   @override
   void initState() {
     super.initState();
     // Copy the pre-loaded status
-    _localInDbStatus = Map.from(
-      widget.inDbStatus,
-    );
-    _searchController.addListener(
-      () => setState(() {}),
-    );
+    _localInDbStatus = Map.from(widget.inDbStatus);
+    _searchController.addListener(() => setState(() {}));
     // Check remaining contacts that don't have status yet
     _checkRemainingContacts();
   }
@@ -4667,17 +3069,13 @@ class _SelectContactPageState
   }
 
   /// Check DB status for contacts that weren't checked during pre-loading
-  Future<void>
-  _checkRemainingContacts() async {
+  Future<void> _checkRemainingContacts() async {
     if (_isCheckingDb) return;
     _isCheckingDb = true;
 
     // Find contacts without status
     final toCheck = widget.contacts
-        .where(
-          (c) => !_localInDbStatus
-              .containsKey(c.phone),
-        )
+        .where((c) => !_localInDbStatus.containsKey(c.phone))
         .toList();
 
     if (toCheck.isEmpty) {
@@ -4687,46 +3085,28 @@ class _SelectContactPageState
 
     // Check in batches
     const batchSize = 10;
-    for (
-      var i = 0;
-      i < toCheck.length;
-      i += batchSize
-    ) {
+    for (var i = 0; i < toCheck.length; i += batchSize) {
       if (!mounted) return;
-      final batch = toCheck
-          .skip(i)
-          .take(batchSize)
-          .toList();
+      final batch = toCheck.skip(i).take(batchSize).toList();
 
       // Check all in batch concurrently
       await Future.wait(
         batch.map((item) async {
           try {
-            final query =
-                await FirebaseFirestore
-                    .instance
-                    .collection('users')
-                    .where(
-                      'phone',
-                      isEqualTo:
-                          item.phone,
-                    )
-                    .limit(1)
-                    .get();
+            final query = await FirebaseFirestore.instance
+                .collection('users')
+                .where('phone', isEqualTo: item.phone)
+                .limit(1)
+                .get();
             if (mounted) {
               setState(() {
-                _localInDbStatus[item
-                    .phone] = query
-                    .docs
-                    .isNotEmpty;
+                _localInDbStatus[item.phone] = query.docs.isNotEmpty;
               });
             }
           } catch (_) {
             if (mounted) {
               setState(() {
-                _localInDbStatus[item
-                        .phone] =
-                    false;
+                _localInDbStatus[item.phone] = false;
               });
             }
           }
@@ -4737,35 +3117,19 @@ class _SelectContactPageState
     _isCheckingDb = false;
   }
 
-  List<_ContactItem>
-  get _filteredItems {
-    final q = _searchController.text
-        .trim()
-        .toLowerCase();
-    if (q.isEmpty)
-      return widget.contacts;
+  List<_ContactItem> get _filteredItems {
+    final q = _searchController.text.trim().toLowerCase();
+    if (q.isEmpty) return widget.contacts;
     return widget.contacts
-        .where(
-          (i) =>
-              i.name
-                  .toLowerCase()
-                  .contains(q) ||
-              i.phone.contains(q),
-        )
+        .where((i) => i.name.toLowerCase().contains(q) || i.phone.contains(q))
         .toList();
   }
 
-  Map<String, List<_ContactItem>>
-  get _grouped {
-    final map =
-        <String, List<_ContactItem>>{};
+  Map<String, List<_ContactItem>> get _grouped {
+    final map = <String, List<_ContactItem>>{};
     for (final i in _filteredItems) {
-      final letter = i.name.isNotEmpty
-          ? i.name[0].toUpperCase()
-          : '#';
-      map
-          .putIfAbsent(letter, () => [])
-          .add(i);
+      final letter = i.name.isNotEmpty ? i.name[0].toUpperCase() : '#';
+      map.putIfAbsent(letter, () => []).add(i);
     }
     return map;
   }
@@ -4779,33 +3143,23 @@ class _SelectContactPageState
       Color(0xFFE91E63),
       Color(0xFFFF5722),
     ];
-    return colors[name.hashCode.abs() %
-        colors.length];
+    return colors[name.hashCode.abs() % colors.length];
   }
 
   String _initial(String name) {
-    final parts = name.trim().split(
-      RegExp(r'\s+'),
-    );
+    final parts = name.trim().split(RegExp(r'\s+'));
     if (parts.length >= 2) {
-      final a = parts[0].isNotEmpty
-          ? parts[0][0]
-          : '';
-      final b = parts[1].isNotEmpty
-          ? parts[1][0]
-          : '';
+      final a = parts[0].isNotEmpty ? parts[0][0] : '';
+      final b = parts[1].isNotEmpty ? parts[1][0] : '';
       return (a + b).toUpperCase();
     }
-    return name.isNotEmpty
-        ? name[0].toUpperCase()
-        : '?';
+    return name.isNotEmpty ? name[0].toUpperCase() : '?';
   }
 
   @override
   Widget build(BuildContext context) {
     final grouped = _grouped;
-    final keys = grouped.keys.toList()
-      ..sort();
+    final keys = grouped.keys.toList()..sort();
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -4813,12 +3167,8 @@ class _SelectContactPageState
         backgroundColor: Colors.white,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(
-            Icons.arrow_back,
-            color: AppColors.kGreen,
-          ),
-          onPressed: () =>
-              Navigator.pop(context),
+          icon: const Icon(Icons.arrow_back, color: AppColors.kGreen),
+          onPressed: () => Navigator.pop(context),
         ),
         centerTitle: true,
         title: const Text(
@@ -4834,195 +3184,102 @@ class _SelectContactPageState
         children: [
           // Search Bar - matching Favorites list style
           Padding(
-            padding:
-                const EdgeInsets.symmetric(
-                  horizontal: 12,
-                ),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
             child: TextField(
-              controller:
-                  _searchController,
+              controller: _searchController,
               decoration: InputDecoration(
                 hintText: 'Search',
-                hintStyle: TextStyle(
-                  color:
-                      Colors.grey[400],
-                ),
-                prefixIcon: Icon(
-                  Icons.search,
-                  color: Colors
-                      .grey
-                      .shade600,
-                ),
+                hintStyle: TextStyle(color: Colors.grey[400]),
+                prefixIcon: Icon(Icons.search, color: Colors.grey.shade600),
                 filled: true,
                 fillColor: Colors.white,
                 border: OutlineInputBorder(
-                  borderRadius:
-                      BorderRadius.circular(
-                        12,
-                      ),
-                  borderSide:
-                      BorderSide(
-                        color: Colors
-                            .grey
-                            .shade300,
-                      ),
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
                 ),
-                enabledBorder:
-                    OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.circular(
-                            12,
-                          ),
-                      borderSide:
-                          BorderSide(
-                            color: Colors
-                                .grey
-                                .shade300,
-                          ),
-                    ),
-                focusedBorder:
-                    OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.circular(
-                            12,
-                          ),
-                      borderSide:
-                          BorderSide(
-                            color: Colors
-                                .grey
-                                .shade300,
-                          ),
-                    ),
-                contentPadding:
-                    const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
               ),
-              cursorColor:
-                  AppColors.kGreen,
+              cursorColor: AppColors.kGreen,
             ),
           ),
           const SizedBox(height: 16),
           Expanded(
-            child:
-                widget.contacts.isEmpty
+            child: widget.contacts.isEmpty
                 ? const Center(
-                    child:
-                        CircularProgressIndicator(
-                          color: AppColors
-                              .kGreen,
-                        ),
+                    child: CircularProgressIndicator(color: AppColors.kGreen),
                   )
                 : keys.isEmpty
                 ? Center(
                     child: Text(
                       'No contacts',
-                      style: TextStyle(
-                        color: Colors
-                            .grey[600],
-                      ),
+                      style: TextStyle(color: Colors.grey[600]),
                     ),
                   )
                 : Stack(
                     children: [
                       ListView.builder(
-                        padding:
-                            const EdgeInsets.symmetric(
-                              horizontal:
-                                  16,
-                            ),
-                        itemCount: keys
-                            .fold<int>(
-                              0,
-                              (
-                                sum,
-                                k,
-                              ) =>
-                                  sum +
-                                  1 +
-                                  grouped[k]!
-                                      .length,
-                            ),
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        itemCount: keys.fold<int>(
+                          0,
+                          (sum, k) => sum + 1 + grouped[k]!.length,
+                        ),
                         itemBuilder: (context, index) {
                           int total = 0;
-                          for (final k
-                              in keys) {
-                            final list =
-                                grouped[k]!;
-                            if (index ==
-                                total) {
+                          for (final k in keys) {
+                            final list = grouped[k]!;
+                            if (index == total) {
                               return Padding(
                                 padding: const EdgeInsets.only(
-                                  top:
-                                      8,
-                                  bottom:
-                                      4,
+                                  top: 8,
+                                  bottom: 4,
                                 ),
                                 child: Text(
                                   k,
                                   style: TextStyle(
-                                    fontSize:
-                                        16,
-                                    fontWeight:
-                                        FontWeight.w700,
-                                    color:
-                                        Colors.grey[600],
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.grey[600],
                                   ),
                                 ),
                               );
                             }
                             total += 1;
-                            final rowIndex =
-                                index -
-                                total;
-                            if (rowIndex <
-                                list.length) {
-                              final item =
-                                  list[rowIndex];
-                              final inDb =
-                                  _localInDbStatus[item
-                                      .phone];
+                            final rowIndex = index - total;
+                            if (rowIndex < list.length) {
+                              final item = list[rowIndex];
+                              final inDb = _localInDbStatus[item.phone];
                               // Show loading only if status not yet determined
-                              final loading =
-                                  !_localInDbStatus.containsKey(
-                                    item.phone,
-                                  );
+                              final loading = !_localInDbStatus.containsKey(
+                                item.phone,
+                              );
                               return _ContactRow(
-                                name: item
-                                    .name,
-                                phone: item
-                                    .phone,
-                                avatarColor:
-                                    _avatarColor(
-                                      item.name,
-                                    ),
-                                initial:
-                                    _initial(
-                                      item.name,
-                                    ),
-                                inDb:
-                                    inDb,
-                                loading:
-                                    loading,
-                                onInvite: () =>
-                                    widget.onInvite(
-                                      item.phone,
-                                    ),
+                                name: item.name,
+                                phone: item.phone,
+                                avatarColor: _avatarColor(item.name),
+                                initial: _initial(item.name),
+                                inDb: inDb,
+                                loading: loading,
+                                onInvite: () => widget.onInvite(item.phone),
                                 onTap: () {
                                   // If contact is in DB, return phone to fill field
-                                  if (inDb ==
-                                      true) {
-                                    Navigator.pop(
-                                      context,
-                                      item.phone,
-                                    );
+                                  if (inDb == true) {
+                                    Navigator.pop(context, item.phone);
                                   }
                                 },
                               );
                             }
-                            total += list
-                                .length;
+                            total += list.length;
                           }
                           return const SizedBox.shrink();
                         },
@@ -5035,17 +3292,11 @@ class _SelectContactPageState
                         child: Center(
                           child: SingleChildScrollView(
                             child: Column(
-                              mainAxisSize:
-                                  MainAxisSize
-                                      .min,
+                              mainAxisSize: MainAxisSize.min,
                               children: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ#'
-                                  .split(
-                                    '',
-                                  )
+                                  .split('')
                                   .map(
-                                    (
-                                      c,
-                                    ) => Padding(
+                                    (c) => Padding(
                                       padding: const EdgeInsets.symmetric(
                                         vertical: 1,
                                       ),
@@ -5073,8 +3324,7 @@ class _SelectContactPageState
   }
 }
 
-class _ContactRow
-    extends StatelessWidget {
+class _ContactRow extends StatelessWidget {
   final String name;
   final String phone;
   final Color avatarColor;
@@ -5097,8 +3347,7 @@ class _ContactRow
 
   /// Format phone for display (e.g., +966 5XX XXX XXX)
   String get _displayPhone {
-    if (phone.startsWith('+966') &&
-        phone.length == 13) {
+    if (phone.startsWith('+966') && phone.length == 13) {
       final digits = phone.substring(4);
       return '+966 ${digits.substring(0, 2)} ${digits.substring(2, 5)} ${digits.substring(5)}';
     }
@@ -5107,28 +3356,20 @@ class _ContactRow
 
   @override
   Widget build(BuildContext context) {
-    final showInvite =
-        inDb == false && !loading;
+    final showInvite = inDb == false && !loading;
 
     return ListTile(
-      contentPadding:
-          const EdgeInsets.symmetric(
-            vertical: 4,
-          ),
+      contentPadding: const EdgeInsets.symmetric(vertical: 4),
       leading: Container(
         width: 44,
         height: 44,
-        decoration: BoxDecoration(
-          color: avatarColor,
-          shape: BoxShape.circle,
-        ),
+        decoration: BoxDecoration(color: avatarColor, shape: BoxShape.circle),
         child: Center(
           child: Text(
             initial,
             style: const TextStyle(
               color: Colors.white,
-              fontWeight:
-                  FontWeight.w600,
+              fontWeight: FontWeight.w600,
               fontSize: 16,
             ),
           ),
@@ -5144,48 +3385,33 @@ class _ContactRow
       ),
       subtitle: Text(
         _displayPhone,
-        style: TextStyle(
-          fontSize: 14,
-          color: Colors.grey[600],
-        ),
+        style: TextStyle(fontSize: 14, color: Colors.grey[600]),
       ),
       trailing: loading
           ? SizedBox(
               width: 24,
               height: 24,
-              child:
-                  CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: AppColors
-                        .kGreen,
-                  ),
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: AppColors.kGreen,
+              ),
             )
           : showInvite
           ? OutlinedButton(
               onPressed: onInvite,
               style: OutlinedButton.styleFrom(
-                foregroundColor:
-                    AppColors.kGreen,
-                side: const BorderSide(
-                  color:
-                      AppColors.kGreen,
+                foregroundColor: AppColors.kGreen,
+                side: const BorderSide(color: AppColors.kGreen),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 6,
                 ),
-                padding:
-                    const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 6,
-                    ),
                 minimumSize: Size.zero,
                 shape: RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.circular(
-                        20,
-                      ),
+                  borderRadius: BorderRadius.circular(20),
                 ),
               ),
-              child: const Text(
-                'Invite',
-              ),
+              child: const Text('Invite'),
             )
           : null, // No trailing widget for contacts in DB
       onTap: inDb == true
@@ -5199,35 +3425,24 @@ class _ContactRow
 // Venue Selection Sheet
 // ----------------------------------------------------------------------------
 
-class VenueSelectionSheet
-    extends StatefulWidget {
+class VenueSelectionSheet extends StatefulWidget {
   final List<VenueOption> venues;
 
-  const VenueSelectionSheet({
-    super.key,
-    required this.venues,
-  });
+  const VenueSelectionSheet({super.key, required this.venues});
 
   @override
-  State<VenueSelectionSheet>
-  createState() =>
-      _VenueSelectionSheetState();
+  State<VenueSelectionSheet> createState() => _VenueSelectionSheetState();
 }
 
-class _VenueSelectionSheetState
-    extends State<VenueSelectionSheet> {
-  final _searchController =
-      TextEditingController();
-  List<VenueOption> _filteredVenues =
-      [];
+class _VenueSelectionSheetState extends State<VenueSelectionSheet> {
+  final _searchController = TextEditingController();
+  List<VenueOption> _filteredVenues = [];
 
   @override
   void initState() {
     super.initState();
     _filteredVenues = widget.venues;
-    _searchController.addListener(
-      _filterVenues,
-    );
+    _searchController.addListener(_filterVenues);
   }
 
   @override
@@ -5237,18 +3452,13 @@ class _VenueSelectionSheetState
   }
 
   void _filterVenues() {
-    final query = _searchController.text
-        .toLowerCase();
+    final query = _searchController.text.toLowerCase();
     setState(() {
       if (query.isEmpty) {
         _filteredVenues = widget.venues;
       } else {
         _filteredVenues = widget.venues
-            .where(
-              (venue) => venue.name
-                  .toLowerCase()
-                  .contains(query),
-            )
+            .where((venue) => venue.name.toLowerCase().contains(query))
             .toList();
       }
     });
@@ -5257,11 +3467,7 @@ class _VenueSelectionSheetState
   @override
   Widget build(BuildContext context) {
     return Container(
-      height:
-          MediaQuery.of(
-            context,
-          ).size.height *
-          0.7,
+      height: MediaQuery.of(context).size.height * 0.7,
       decoration: const BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.only(
@@ -5273,16 +3479,12 @@ class _VenueSelectionSheetState
         children: [
           // Header
           Container(
-            padding:
-                const EdgeInsets.all(
-                  20,
-                ),
+            padding: const EdgeInsets.all(20),
             child: const Text(
               'Select Venue',
               style: TextStyle(
                 fontSize: 18,
-                fontWeight:
-                    FontWeight.w600,
+                fontWeight: FontWeight.w600,
                 color: Colors.black87,
               ),
             ),
@@ -5290,74 +3492,33 @@ class _VenueSelectionSheetState
 
           // Search Bar - FIXED HEIGHT
           Padding(
-            padding:
-                const EdgeInsets.symmetric(
-                  horizontal: 20,
-                ),
+            padding: const EdgeInsets.symmetric(horizontal: 20),
             child: TextField(
-              controller:
-                  _searchController,
+              controller: _searchController,
               decoration: InputDecoration(
-                hintText:
-                    'Search for a venue',
-                hintStyle: TextStyle(
-                  color:
-                      Colors.grey[400],
-                ),
-                prefixIcon: Icon(
-                  Icons.search,
-                  color: Colors
-                      .grey
-                      .shade600,
-                ),
+                hintText: 'Search for a venue',
+                hintStyle: TextStyle(color: Colors.grey[400]),
+                prefixIcon: Icon(Icons.search, color: Colors.grey.shade600),
                 filled: true,
                 fillColor: Colors.white,
                 border: OutlineInputBorder(
-                  borderRadius:
-                      BorderRadius.circular(
-                        12,
-                      ),
-                  borderSide:
-                      BorderSide(
-                        color: Colors
-                            .grey
-                            .shade300,
-                      ),
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
                 ),
-                enabledBorder:
-                    OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.circular(
-                            12,
-                          ),
-                      borderSide:
-                          BorderSide(
-                            color: Colors
-                                .grey
-                                .shade300,
-                          ),
-                    ),
-                focusedBorder:
-                    OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.circular(
-                            12,
-                          ),
-                      borderSide:
-                          BorderSide(
-                            color: Colors
-                                .grey
-                                .shade300,
-                          ),
-                    ),
-                contentPadding:
-                    const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
               ),
-              cursorColor:
-                  AppColors.kGreen,
+              cursorColor: AppColors.kGreen,
             ),
           ),
           const SizedBox(height: 16),
@@ -5365,52 +3526,31 @@ class _VenueSelectionSheetState
           // Venues List
           Expanded(
             child: ListView.builder(
-              padding:
-                  const EdgeInsets.symmetric(
-                    horizontal: 20,
-                  ),
-              itemCount: _filteredVenues
-                  .length,
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              itemCount: _filteredVenues.length,
               itemBuilder: (context, index) {
-                final venue =
-                    _filteredVenues[index];
+                final venue = _filteredVenues[index];
                 return ListTile(
-                  contentPadding:
-                      const EdgeInsets.symmetric(
-                        vertical: 8,
-                      ),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 8),
                   leading: Container(
                     width: 44,
                     height: 44,
-                    decoration:
-                        BoxDecoration(
-                          shape: BoxShape
-                              .circle,
-                        ),
+                    decoration: BoxDecoration(shape: BoxShape.circle),
                     child: const Icon(
                       Icons.place,
-                      color: AppColors
-                          .kGreen,
+                      color: AppColors.kGreen,
                       size: 22,
                     ),
                   ),
                   title: Text(
                     venue.name,
-                    style:
-                        const TextStyle(
-                          fontSize: 16,
-                          fontWeight:
-                              FontWeight
-                                  .w500,
-                          color: Colors
-                              .black87,
-                        ),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.black87,
+                    ),
                   ),
-                  onTap: () =>
-                      Navigator.pop(
-                        context,
-                        venue,
-                      ),
+                  onTap: () => Navigator.pop(context, venue),
                 );
               },
             ),
@@ -5425,70 +3565,32 @@ class _VenueSelectionSheetState
 // Favorites List Sheet
 // ----------------------------------------------------------------------------
 
-class FavoritesListSheet
-    extends StatefulWidget {
+class FavoritesListSheet extends StatefulWidget {
   const FavoritesListSheet({super.key});
 
   @override
-  State<FavoritesListSheet>
-  createState() =>
-      _FavoritesListSheetState();
+  State<FavoritesListSheet> createState() => _FavoritesListSheetState();
 }
 
-class _FavoritesListSheetState
-    extends State<FavoritesListSheet> {
-  final _searchController =
-      TextEditingController();
-  final List<Friend> _selectedFriends =
-      [];
+class _FavoritesListSheetState extends State<FavoritesListSheet> {
+  final _searchController = TextEditingController();
+  final List<Friend> _selectedFriends = [];
 
   // Mock favorite friends data
   final List<Friend> _allFavorites = [
-    Friend(
-      name: 'Abeer فاد',
-      phone: '+966503347979',
-      isFavorite: true,
-    ),
-    Friend(
-      name: 'Afnan Salamah',
-      phone: '+966503347978',
-      isFavorite: true,
-    ),
-    Friend(
-      name: 'Razan Aldosari',
-      phone: '+966503347977',
-      isFavorite: true,
-    ),
+    Friend(name: 'Abeer فاد', phone: '+966503347979', isFavorite: true),
+    Friend(name: 'Afnan Salamah', phone: '+966503347978', isFavorite: true),
+    Friend(name: 'Razan Aldosari', phone: '+966503347977', isFavorite: true),
     Friend(
       name: 'Dr. Rafah Almousli',
       phone: '+966503347976',
       isFavorite: true,
     ),
-    Friend(
-      name: 'AMAL',
-      phone: '+966503347975',
-      isFavorite: true,
-    ),
-    Friend(
-      name: 'Ameera',
-      phone: '+966503347974',
-      isFavorite: true,
-    ),
-    Friend(
-      name: 'Amjad',
-      phone: '+966503347973',
-      isFavorite: true,
-    ),
-    Friend(
-      name: 'Areen',
-      phone: '+966503347972',
-      isFavorite: true,
-    ),
-    Friend(
-      name: 'Aryam',
-      phone: '+966503347971',
-      isFavorite: true,
-    ),
+    Friend(name: 'AMAL', phone: '+966503347975', isFavorite: true),
+    Friend(name: 'Ameera', phone: '+966503347974', isFavorite: true),
+    Friend(name: 'Amjad', phone: '+966503347973', isFavorite: true),
+    Friend(name: 'Areen', phone: '+966503347972', isFavorite: true),
+    Friend(name: 'Aryam', phone: '+966503347971', isFavorite: true),
   ];
 
   List<Friend> _filteredFavorites = [];
@@ -5496,12 +3598,8 @@ class _FavoritesListSheetState
   @override
   void initState() {
     super.initState();
-    _filteredFavorites = List.from(
-      _allFavorites,
-    );
-    _searchController.addListener(
-      _filterFavorites,
-    );
+    _filteredFavorites = List.from(_allFavorites);
+    _searchController.addListener(_filterFavorites);
   }
 
   @override
@@ -5511,38 +3609,25 @@ class _FavoritesListSheetState
   }
 
   void _filterFavorites() {
-    final query = _searchController.text
-        .toLowerCase();
+    final query = _searchController.text.toLowerCase();
     setState(() {
       if (query.isEmpty) {
-        _filteredFavorites = List.from(
-          _allFavorites,
-        );
+        _filteredFavorites = List.from(_allFavorites);
       } else {
-        _filteredFavorites =
-            _allFavorites
-                .where(
-                  (friend) =>
-                      friend.name
-                          .toLowerCase()
-                          .contains(
-                            query,
-                          ) ||
-                      friend.phone
-                          .contains(
-                            query,
-                          ),
-                )
-                .toList();
+        _filteredFavorites = _allFavorites
+            .where(
+              (friend) =>
+                  friend.name.toLowerCase().contains(query) ||
+                  friend.phone.contains(query),
+            )
+            .toList();
       }
     });
   }
 
   void _toggleFriend(Friend friend) {
     setState(() {
-      if (_selectedFriends.contains(
-        friend,
-      )) {
+      if (_selectedFriends.contains(friend)) {
         _selectedFriends.remove(friend);
       } else {
         _selectedFriends.add(friend);
@@ -5553,11 +3638,7 @@ class _FavoritesListSheetState
   @override
   Widget build(BuildContext context) {
     return Container(
-      height:
-          MediaQuery.of(
-            context,
-          ).size.height *
-          0.85,
+      height: MediaQuery.of(context).size.height * 0.85,
       decoration: const BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.only(
@@ -5569,65 +3650,38 @@ class _FavoritesListSheetState
         children: [
           // Header
           Container(
-            padding:
-                const EdgeInsets.all(
-                  20,
-                ),
+            padding: const EdgeInsets.all(20),
             child: Row(
               children: [
                 IconButton(
-                  icon: const Icon(
-                    Icons.arrow_back,
-                    color: AppColors
-                        .kGreen,
-                  ),
-                  onPressed: () =>
-                      Navigator.pop(
-                        context,
-                      ),
-                  padding:
-                      EdgeInsets.zero,
-                  constraints:
-                      const BoxConstraints(),
+                  icon: const Icon(Icons.arrow_back, color: AppColors.kGreen),
+                  onPressed: () => Navigator.pop(context),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
                 ),
                 const Expanded(
                   child: Text(
                     'Favorite list',
-                    textAlign: TextAlign
-                        .center,
+                    textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 18,
-                      fontWeight:
-                          FontWeight
-                              .w600,
-                      color: Colors
-                          .black87,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black87,
                     ),
                   ),
                 ),
                 TextButton(
-                  onPressed:
-                      _selectedFriends
-                          .isEmpty
+                  onPressed: _selectedFriends.isEmpty
                       ? null
-                      : () => Navigator.pop(
-                          context,
-                          _selectedFriends,
-                        ),
+                      : () => Navigator.pop(context, _selectedFriends),
                   child: Text(
                     'Add',
                     style: TextStyle(
                       fontSize: 16,
-                      fontWeight:
-                          FontWeight
-                              .w600,
-                      color:
-                          _selectedFriends
-                              .isEmpty
-                          ? Colors
-                                .grey[400]
-                          : AppColors
-                                .kGreen,
+                      fontWeight: FontWeight.w600,
+                      color: _selectedFriends.isEmpty
+                          ? Colors.grey[400]
+                          : AppColors.kGreen,
                     ),
                   ),
                 ),
@@ -5637,73 +3691,33 @@ class _FavoritesListSheetState
 
           // Search Bar
           Padding(
-            padding:
-                const EdgeInsets.symmetric(
-                  horizontal: 12,
-                ),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
             child: TextField(
-              controller:
-                  _searchController,
+              controller: _searchController,
               decoration: InputDecoration(
                 hintText: 'Search',
-                hintStyle: TextStyle(
-                  color:
-                      Colors.grey[400],
-                ),
-                prefixIcon: Icon(
-                  Icons.search,
-                  color: Colors
-                      .grey
-                      .shade600,
-                ),
+                hintStyle: TextStyle(color: Colors.grey[400]),
+                prefixIcon: Icon(Icons.search, color: Colors.grey.shade600),
                 filled: true,
                 fillColor: Colors.white,
                 border: OutlineInputBorder(
-                  borderRadius:
-                      BorderRadius.circular(
-                        12,
-                      ),
-                  borderSide:
-                      BorderSide(
-                        color: Colors
-                            .grey
-                            .shade300,
-                      ),
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
                 ),
-                enabledBorder:
-                    OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.circular(
-                            12,
-                          ),
-                      borderSide:
-                          BorderSide(
-                            color: Colors
-                                .grey
-                                .shade300,
-                          ),
-                    ),
-                focusedBorder:
-                    OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.circular(
-                            12,
-                          ),
-                      borderSide:
-                          BorderSide(
-                            color: Colors
-                                .grey
-                                .shade300,
-                          ),
-                    ),
-                contentPadding:
-                    const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
               ),
-              cursorColor:
-                  AppColors.kGreen,
+              cursorColor: AppColors.kGreen,
             ),
           ),
           const SizedBox(height: 16),
@@ -5711,117 +3725,68 @@ class _FavoritesListSheetState
           // Friends List
           Expanded(
             child: ListView.separated(
-              padding:
-                  const EdgeInsets.symmetric(
-                    horizontal: 20,
-                  ),
-              itemCount:
-                  _filteredFavorites
-                      .length,
-              separatorBuilder:
-                  (context, index) =>
-                      const Divider(
-                        height: 1,
-                      ),
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              itemCount: _filteredFavorites.length,
+              separatorBuilder: (context, index) => const Divider(height: 1),
               itemBuilder: (context, index) {
-                final friend =
-                    _filteredFavorites[index];
-                final isSelected =
-                    _selectedFriends
-                        .contains(
-                          friend,
-                        );
+                final friend = _filteredFavorites[index];
+                final isSelected = _selectedFriends.contains(friend);
 
                 return ListTile(
-                  contentPadding:
-                      const EdgeInsets.symmetric(
-                        vertical: 8,
-                      ),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 8),
                   leading: Container(
                     width: 44,
                     height: 44,
-                    decoration:
-                        BoxDecoration(
-                          color: Colors
-                              .grey[300],
-                          shape: BoxShape
-                              .circle,
-                        ),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[300],
+                      shape: BoxShape.circle,
+                    ),
                     child: Icon(
                       Icons.person,
-                      color: Colors
-                          .grey[600],
+                      color: Colors.grey[600],
                       size: 22,
                     ),
                   ),
                   title: Text(
                     friend.name,
-                    style:
-                        const TextStyle(
-                          fontSize: 16,
-                          fontWeight:
-                              FontWeight
-                                  .w600,
-                          color: Colors
-                              .black87,
-                        ),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black87,
+                    ),
                   ),
                   subtitle: Text(
                     friend.phone,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: Colors
-                          .grey[600],
-                    ),
+                    style: TextStyle(fontSize: 13, color: Colors.grey[600]),
                   ),
                   trailing: GestureDetector(
-                    onTap: () =>
-                        _toggleFriend(
-                          friend,
-                        ),
+                    onTap: () => _toggleFriend(friend),
                     child: Container(
-                      key: ValueKey(
-                        '${friend.phone}_$isSelected',
-                      ),
+                      key: ValueKey('${friend.phone}_$isSelected'),
                       width: 28,
                       height: 28,
                       decoration: BoxDecoration(
-                        color:
-                            isSelected
-                            ? AppColors
-                                  .kGreen
-                            : Colors
-                                  .transparent,
+                        color: isSelected
+                            ? AppColors.kGreen
+                            : Colors.transparent,
                         border: Border.all(
-                          color:
-                              isSelected
-                              ? AppColors
-                                    .kGreen
-                              : Colors
-                                    .grey
-                                    .shade300,
+                          color: isSelected
+                              ? AppColors.kGreen
+                              : Colors.grey.shade300,
                           width: 2,
                         ),
-                        borderRadius:
-                            BorderRadius.circular(
-                              6,
-                            ),
+                        borderRadius: BorderRadius.circular(6),
                       ),
                       child: isSelected
                           ? const Icon(
-                              Icons
-                                  .check,
-                              color: Colors
-                                  .white,
+                              Icons.check,
+                              color: Colors.white,
                               size: 18,
                             )
                           : null,
                     ),
                   ),
-                  onTap: () =>
-                      _toggleFriend(
-                        friend,
-                      ),
+                  onTap: () => _toggleFriend(friend),
                 );
               },
             ),
@@ -5853,8 +3818,7 @@ class Friend {
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is Friend &&
-          runtimeType ==
-              other.runtimeType &&
+          runtimeType == other.runtimeType &&
           phone == other.phone;
 
   @override

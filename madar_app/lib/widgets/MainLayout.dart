@@ -235,6 +235,7 @@ class _MainLayoutState extends State<MainLayout> {
                     MaterialPageRoute(builder: (_) => const HistoryPage()),
                   );
                 },
+                tooltip: 'Requests History',
                 icon: Icon(Icons.history, size: 22, color: Colors.grey[600]),
                 padding: const EdgeInsets.only(right: 16),
               ),

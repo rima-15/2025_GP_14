@@ -390,7 +390,13 @@ class _HistoryPageState extends State<HistoryPage> {
     final dateStr = _formatDate(
       DateTime(r.startAt.year, r.startAt.month, r.startAt.day),
     );
-    final durationStr = '$dateStr, ${r.startTime} - ${r.endTime}';
+    final isOvernight =
+        r.endAt.day != r.startAt.day ||
+        r.endAt.month != r.startAt.month ||
+        r.endAt.year != r.startAt.year;
+    final suffix = isOvernight ? ' (next day)' : '';
+    final durationStr = '$dateStr • ${r.startTime} - ${r.endTime}$suffix';
+    final userLabel = r.isSent ? 'Tracked User' : 'Sender';
 
     return Container(
       decoration: BoxDecoration(
@@ -465,21 +471,21 @@ class _HistoryPageState extends State<HistoryPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          durationStr,
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.black87,
-                          ),
+                        _labeledDetail(
+                          '$userLabel: ',
+                          r.otherUserPhone.isEmpty
+                              ? r.otherUserName
+                              : '${r.otherUserName} (${r.otherUserPhone})',
                         ),
                         const SizedBox(height: 6),
-                        Text(
+                        _labeledDetail(
+                          'Duration: ',
+                          durationStr,
+                        ),
+                        const SizedBox(height: 6),
+                        _labeledDetail(
+                          'Venue: ',
                           r.venueName.isEmpty ? '—' : r.venueName,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Colors.grey[700],
-                          ),
                         ),
                       ],
                     ),
@@ -489,6 +495,31 @@ class _HistoryPageState extends State<HistoryPage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _labeledDetail(String label, String value) {
+    return RichText(
+      text: TextSpan(
+        children: [
+          TextSpan(
+            text: label,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w400,
+              color: Colors.grey[500],
+            ),
+          ),
+          TextSpan(
+            text: value,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: Colors.black87,
+            ),
+          ),
+        ],
       ),
     );
   }

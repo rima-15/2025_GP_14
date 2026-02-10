@@ -842,8 +842,6 @@ class _SetYourLocationDialogState
         'window.highlightPoiFromFlutter($safe);';
     try {
       await c.runJavaScript(js);
-      _pendingPoiToHighlight =
-          null; // only need to apply once
     } catch (e) {
       debugPrint(
         '❌ highlight runJavaScript failed: $e',

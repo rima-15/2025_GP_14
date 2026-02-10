@@ -46,6 +46,16 @@ class PathOverviewScreen extends StatefulWidget {
 
 class _PathOverviewScreenState extends State<PathOverviewScreen> {
   String _currentFloor = '';
+  // Caller-provided floor selector. Can be a mapURL (assets/...glb) or a label like "GF"/"F1"/"0"/"1".
+  String _requestedFloorToken = '';
+  bool _requestedFloorIsUrl = false;
+
+  bool _looksLikeMapUrl(String s) {
+    final t = s.trim();
+    if (t.isEmpty) return false;
+    return t.contains('/') || t.endsWith('.glb') || t.startsWith('http');
+  }
+
   List<Map<String, String>> _venueMaps = [];
   bool _mapsLoading = false;
   String _selectedPreference = 'stairs';
@@ -685,6 +695,7 @@ function setUserPin(viewer, pos) {
 
 // --- Path breadcrumbs (safe hotspots) ---
 window.__pathHotspots = window.__pathHotspots || [];
+window.__pendingPathPoints = window.__pendingPathPoints || null;
 
 function clearPathHotspots(viewer) {
   try {
@@ -727,7 +738,11 @@ function ensurePathStyle() {
 window.setPathFromFlutter = function(points) {
   try {
     const viewer = getViewer();
-    if (!viewer) return false;
+    if (!viewer || !viewer.model) {
+      window.__pendingPathPoints = points || [];
+      postToTest("⏳ setPathFromFlutter pending (viewer/model not ready)");
+      return true;
+    }
     ensurePathStyle();
     clearPathHotspots(viewer);
 
@@ -924,7 +939,20 @@ window.highlightPoiFromFlutter = function(name) {
   }
 
   const ok = _applyPoiHighlight(viewer, n);
-  postToTest(ok ? ("✅ highlightPoiFromFlutter applied: " + n) : ("⚠️ highlightPoiFromFlutter: material not found: " + n));
+  postToTest(ok ? ("✅ highlightPoiFromFlutter applied: " + n) : ("⚠️ highlightPoiFromFlutter: material not found yet: " + n));
+  if (!ok) {
+    // Materials may not be ready yet; retry a few times.
+    window.__highlightRetry = (window.__highlightRetry || 0) + 1;
+    if (window.__highlightRetry <= 8) {
+      window.__pendingPoiHighlight = n;
+      setTimeout(() => { try { window.highlightPoiFromFlutter(n); } catch(e) {} }, 250);
+      return;
+    } else {
+      window.__highlightRetry = 0;
+    }
+  } else {
+    window.__highlightRetry = 0;
+  }
 };
 
 function setupViewer() {
@@ -948,7 +976,38 @@ function setupViewer() {
       postToTest(ok ? ("✅ applied pending highlight on load: " + n) : ("⚠️ pending highlight not found: " + n));
       window.__pendingPoiHighlight = null;
     }
+
+    if (window.__pendingPathPoints && window.__pendingPathPoints.length) {
+      const pts = window.__pendingPathPoints;
+      window.__pendingPathPoints = null;
+      window.setPathFromFlutter(pts);
+      postToTest('✅ applied pending path on load');
+    }
   });
+
+  // If the model is already loaded by the time setupViewer() runs,
+  // apply any pending state immediately (don't rely solely on the load event).
+  try {
+    if (viewer && viewer.model) {
+      if (window.__pendingUserPin) {
+        setUserPin(viewer, window.__pendingUserPin);
+        postToTest("✅ applied pending pin (immediate)");
+        window.__pendingUserPin = null;
+      }
+      if (window.__pendingPoiHighlight) {
+        const n = window.__pendingPoiHighlight;
+        const ok = _applyPoiHighlight(viewer, n);
+        postToTest(ok ? ("✅ applied pending highlight (immediate): " + n) : ("⚠️ pending highlight not found (immediate): " + n));
+        if (ok) window.__pendingPoiHighlight = null;
+      }
+      if (window.__pendingPathPoints && window.__pendingPathPoints.length) {
+        const pts = window.__pendingPathPoints;
+        window.__pendingPathPoints = null;
+        window.setPathFromFlutter(pts);
+        postToTest("✅ applied pending path (immediate)");
+      }
+    }
+  } catch(e) {}
 
   postToPOI({ type: "path_viewer_ready" });
   return true;
@@ -1255,10 +1314,44 @@ const timer = setInterval(function() {
           setState(() {
             _venueMaps = convertedMaps;
             if (convertedMaps.isNotEmpty) {
-              // Default floor
+              // 1) Safe default.
               _currentFloor = convertedMaps.first['mapURL'] ?? '';
 
-              // If we have a saved starting floor (Pin on Map), prefer showing that floor
+              // 2) If caller provided a mapURL, prefer it if it exists in venue maps.
+              if (_requestedFloorIsUrl && _requestedFloorToken.isNotEmpty) {
+                final exists = convertedMaps.any((m) => (m['mapURL'] ?? '') == _requestedFloorToken);
+                if (exists) _currentFloor = _requestedFloorToken;
+              }
+
+              // 3) If caller provided a label (GF/F1/0/1), resolve it to a mapURL.
+              if (!_requestedFloorIsUrl && _requestedFloorToken.isNotEmpty) {
+                // Try match by floorNumber first ("GF","F1"...)
+                final match = convertedMaps.firstWhere(
+                  (m) => (m['floorNumber'] ?? '') == _requestedFloorToken,
+                  orElse: () => const {'mapURL': ''},
+                );
+                var url = match['mapURL'] ?? '';
+
+                // Fallback: accept "0"/"1" as GF/F1 style
+                if (url.isEmpty) {
+                  final f = _requestedFloorToken.trim();
+                  String asLabel = '';
+                  if (f == '0') asLabel = 'GF';
+                  if (f == '1') asLabel = 'F1';
+                  if (f == '2') asLabel = 'F2';
+                  if (asLabel.isNotEmpty) {
+                    final match2 = convertedMaps.firstWhere(
+                      (m) => (m['floorNumber'] ?? '') == asLabel,
+                      orElse: () => const {'mapURL': ''},
+                    );
+                    url = match2['mapURL'] ?? '';
+                  }
+                }
+
+                if (url.isNotEmpty) _currentFloor = url;
+              }
+
+              // 4) If we have a saved starting floor (Pin on Map), prefer showing that floor.
               if (_desiredStartFloorLabel.isNotEmpty) {
                 final match = convertedMaps.firstWhere(
                   (m) => (m['floorNumber'] ?? '') == _desiredStartFloorLabel,

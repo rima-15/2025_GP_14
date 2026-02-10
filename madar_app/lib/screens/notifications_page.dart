@@ -852,7 +852,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                     notification.endAt != null &&
                                     DateTime.now().isAfter(notification.endAt!);
 
-                                return ElevatedButton(
+                                return OutlinedButton(
                                   onPressed: expired
                                       ? null
                                       : () async {
@@ -870,24 +870,70 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
                                           setState(() {
                                             notification.isRead = true;
+                                            _localReadOverride[notification
+                                                    .id] =
+                                                true;
                                           });
 
                                           // لاحقًا تربطين set location
                                         },
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: AppColors.kGreen,
-                                    disabledBackgroundColor: Colors.grey[300],
-                                    minimumSize: const Size(
-                                      double.infinity,
-                                      40,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(8),
+                                  style: ButtonStyle(
+                                    minimumSize:
+                                        MaterialStateProperty.all<Size>(
+                                          const Size(double.infinity, 40),
+                                        ),
+                                    backgroundColor:
+                                        MaterialStateProperty.resolveWith<
+                                          Color
+                                        >((states) {
+                                          if (states.contains(
+                                            MaterialState.disabled,
+                                          )) {
+                                            return Colors.grey[300]!;
+                                          }
+                                          return AppColors.kGreen;
+                                        }),
+                                    foregroundColor:
+                                        MaterialStateProperty.resolveWith<
+                                          Color
+                                        >((states) {
+                                          if (states.contains(
+                                            MaterialState.disabled,
+                                          )) {
+                                            return Colors.grey[600]!;
+                                          }
+                                          return Colors.white;
+                                        }),
+                                    side:
+                                        MaterialStateProperty.resolveWith<
+                                          BorderSide
+                                        >((states) {
+                                          if (states.contains(
+                                            MaterialState.disabled,
+                                          )) {
+                                            return BorderSide.none;
+                                          }
+                                          return BorderSide(
+                                            color: AppColors.kGreen,
+                                            width: 0,
+                                          );
+                                        }),
+                                    shape: MaterialStateProperty.all(
+                                      RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
                                     ),
                                   ),
-                                  child: const Text(
-                                    'Set Your Location',
-                                    style: TextStyle(color: Colors.white),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: const [
+                                      Icon(
+                                        Icons.location_on_outlined,
+                                        size: 22,
+                                      ),
+                                      SizedBox(width: 8),
+                                      Text('Set My Location'),
+                                    ],
                                   ),
                                 );
                               },

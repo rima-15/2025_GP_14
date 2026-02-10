@@ -91,6 +91,18 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     return '';
   }
 
+  String _navmeshForCurrentFloor() {
+    final url = _currentFloor.trim();
+    if (url.isEmpty) return '';
+
+    for (final m in _venueMaps) {
+      if ((m['mapURL'] ?? '') == url) {
+        return (m['navmesh'] ?? '').toString();
+      }
+    }
+    return '';
+  }
+
   bool _isSavedFloorActive() {
     // saved floor from Firestore (you store floor as 0/1/2...)
     final savedRaw = _desiredStartFloorLabel.isNotEmpty
@@ -290,14 +302,31 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
   }
 
   Future<void> _loadNavmeshF1() async {
+    // Find the current floor’s navmesh from _venueMaps using _currentFloor (mapURL)
+    String path = '';
+    for (final m in _venueMaps) {
+      if ((m['mapURL'] ?? '') == _currentFloor) {
+        path = (m['navmesh'] ?? '').toString();
+        break;
+      }
+    }
+
+    if (path.isEmpty) {
+      debugPrint('⚠️ No navmesh found for current floor mapURL=$_currentFloor');
+      _navmeshF1 = null;
+      return;
+    }
+
     try {
-      _navmeshF1 = await NavMesh.loadAsset('assets/nav_cor/navmesh_GF.json');
+      _navmeshF1 = await NavMesh.loadAsset(path);
       debugPrint(
-        '✅ Navmesh loaded: v=${_navmeshF1!.v.length} t=${_navmeshF1!.t.length}',
+        '✅ Navmesh loaded ($path): v=${_navmeshF1!.v.length} t=${_navmeshF1!.t.length}',
       );
+      _pathPushed = false;
       _maybeComputeAndPushPath();
     } catch (e) {
-      debugPrint('❌ Failed to load navmesh_GF.json: $e');
+      debugPrint('❌ Failed to load navmesh ($path): $e');
+      _navmeshF1 = null;
     }
   }
 
@@ -1135,7 +1164,6 @@ const timer = setInterval(function() {
 
     _loadVenueMaps();
     _loadUserBlenderPosition();
-    _loadNavmeshF1();
   }
 
   /// Loads the user's saved start location from:
@@ -1346,12 +1374,9 @@ const timer = setInterval(function() {
 
     if (status.isGranted) {
       if (!mounted) return;
-      onPressed:
-      () {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Camera page not connected yet')),
-        );
-      };
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Camera page not connected yet')),
+      );
     } else if (status.isPermanentlyDenied) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1388,6 +1413,7 @@ const timer = setInterval(function() {
             'floorNumber': (map['floorNumber'] ?? '').toString(), // "GF", "F1"
             'F_number': (map['F_number'] ?? '').toString(), // "0", "1"
             'mapURL': (map['mapURL'] ?? '').toString(),
+            'navmesh': (map['navmesh'] ?? '').toString(), // ✅ add
           };
         }).toList();
 
@@ -1436,16 +1462,20 @@ const timer = setInterval(function() {
 
               // 4) If we have a saved starting floor (Pin on Map), prefer showing that floor.
               if (_desiredStartFloorLabel.isNotEmpty) {
-  final savedF = _toFNumber(_desiredStartFloorLabel); // "0"/"1"/...
-  final match = convertedMaps.firstWhere(
-    (m) => (m['F_number'] ?? '') == savedF,
-    orElse: () => const {'mapURL': ''},
-  );
-  final url = match['mapURL'] ?? '';
-  if (url.isNotEmpty) _currentFloor = url;
-}
-
-        }});
+                final savedF = _toFNumber(
+                  _desiredStartFloorLabel,
+                ); // "0"/"1"/...
+                final match = convertedMaps.firstWhere(
+                  (m) => (m['F_number'] ?? '') == savedF,
+                  orElse: () => const {'mapURL': ''},
+                );
+                final url = match['mapURL'] ?? '';
+                if (url.isNotEmpty) _currentFloor = url;
+              }
+            }
+          });
+          // ✅ ADD THIS LINE HERE (AFTER setState)
+          _loadNavmeshF1();
         }
       }
     } catch (e) {
@@ -1865,9 +1895,17 @@ const timer = setInterval(function() {
             ),
           ),
         ),
-        onPressed: () => setState(() {
-          _currentFloor = url;
-        }),
+        onPressed: () {
+          setState(() {
+            _currentFloor = url;
+            _pathPushed = false;
+            _pathPointsGltf = [];
+          });
+
+          _loadNavmeshF1();
+          _maybeComputeAndPushPath();
+        },
+
         child: Text(
           label,
           style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),

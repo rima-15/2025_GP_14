@@ -102,6 +102,7 @@ flutter:
      - assets/maps/GF_map.glb
      - assets/maps/F1_map.glb
      - assets/nav_cor/navmesh_GF.json
+     - assets/nav_cor/navmesh_F1.json
      - assets/poi/Solitaire_poi_GF.json
 
      

@@ -46,6 +46,16 @@ class PathOverviewScreen extends StatefulWidget {
 
 class _PathOverviewScreenState extends State<PathOverviewScreen> {
   String _currentFloor = '';
+  // Caller-provided floor selector. Can be a mapURL (assets/...glb) or a label like "GF"/"F1"/"0"/"1".
+  String _requestedFloorToken = '';
+  bool _requestedFloorIsUrl = false;
+
+  bool _looksLikeMapUrl(String s) {
+    final t = s.trim();
+    if (t.isEmpty) return false;
+    return t.contains('/') || t.endsWith('.glb') || t.startsWith('http');
+  }
+
   List<Map<String, String>> _venueMaps = [];
   bool _mapsLoading = false;
   String _selectedPreference = 'stairs';
@@ -53,6 +63,48 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
   String _desiredStartFloorLabel = '';
   String _estimatedTime = '2 min';
   String _estimatedDistance = '166 m';
+
+  String _toFNumber(String raw) {
+    final s = raw.trim();
+    if (s.isEmpty) return '';
+    // already numeric "0","1","2"...
+    if (RegExp(r'^\d+$').hasMatch(s)) return s;
+
+    final up = s.toUpperCase();
+    if (up == 'GF') return '0';
+
+    // "F1", "F2" ...
+    final m = RegExp(r'^F(\d+)$').firstMatch(up);
+    if (m != null) return m.group(1) ?? '';
+
+    return '';
+  }
+
+  String _currentFNumber() {
+    final url = _currentFloor.trim();
+    if (url.isEmpty) return '';
+    for (final m in _venueMaps) {
+      if ((m['mapURL'] ?? '') == url) {
+        return (m['F_number'] ?? '').toString();
+      }
+    }
+    return '';
+  }
+
+  bool _isSavedFloorActive() {
+    // saved floor from Firestore (you store floor as 0/1/2...)
+    final savedRaw = _desiredStartFloorLabel.isNotEmpty
+        ? _desiredStartFloorLabel
+        : _originFloorLabel;
+
+    final saved = _toFNumber(savedRaw);
+    final current = _currentFNumber();
+
+    // If we can't determine one side yet, don't block.
+    if (saved.isEmpty || current.isEmpty) return true;
+
+    return saved == current;
+  }
 
   WebViewController? _webCtrl;
   bool _jsReady = false;
@@ -62,7 +114,6 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
   // ---- POI index (for resolving destination coords) ----
   Map<String, Map<String, dynamic>>? _poiByNorm;
   bool _poiLoading = false;
-
 
   // ---- Navmesh & path state ----
   NavMesh? _navmeshF1;
@@ -83,6 +134,15 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     final y = gltf['y'];
     final z = gltf['z'];
     if (x == null || y == null || z == null) return;
+
+    if (!_isSavedFloorActive()) {
+      try {
+        await _webCtrl!.runJavaScript(
+          'window.clearUserPinFromFlutter && window.clearUserPinFromFlutter();',
+        );
+      } catch (_) {}
+      return;
+    }
 
     try {
       // webview_flutter (new): runJavaScript
@@ -105,7 +165,6 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     }
   }
 
-  
   // ---- POI JSON loading / destination resolving ----
   String _normPoiKey(String s) {
     var n = (s).trim().toLowerCase();
@@ -174,7 +233,8 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
   Future<void> _resolveDestinationFromPoiJsonIfNeeded() async {
     if (_destPosBlender != null) return;
 
-    final name = (_pendingPoiToHighlight ?? widget.destinationPoiMaterial).trim();
+    final name = (_pendingPoiToHighlight ?? widget.destinationPoiMaterial)
+        .trim();
     if (name.isEmpty) return;
 
     await _loadPoiIndexIfNeeded();
@@ -185,7 +245,9 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     final poi = idx[norm];
 
     if (poi == null) {
-      debugPrint('⚠️ Destination not found in POI json for "$name" (norm="$norm")');
+      debugPrint(
+        '⚠️ Destination not found in POI json for "$name" (norm="$norm")',
+      );
       return;
     }
 
@@ -206,12 +268,13 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       }
     });
 
-    debugPrint('✅ Destination resolved from POI json: $name -> B=($_destPosBlender)');
+    debugPrint(
+      '✅ Destination resolved from POI json: $name -> B=($_destPosBlender)',
+    );
     _maybeComputeAndPushPath();
   }
 
-
-// ---- Coordinate conversions ----
+  // ---- Coordinate conversions ----
   static Map<String, double> _gltfToBlender(Map<String, double> g) {
     final xg = g['x'] ?? 0.0;
     final yg = g['y'] ?? 0.0;
@@ -479,6 +542,14 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     if (c == null || !_jsReady) return;
     if (_pathPointsGltf.isEmpty) return;
 
+    if (!_isSavedFloorActive()) {
+      try {
+        await c.runJavaScript('window.setPathFromFlutter([]);'); // clears dots
+      } catch (_) {}
+      _pathPushed = false;
+      return;
+    }
+
     // Limit hotspots to avoid perf issues.
     final pts = _pathPointsGltf;
 
@@ -685,6 +756,7 @@ function setUserPin(viewer, pos) {
 
 // --- Path breadcrumbs (safe hotspots) ---
 window.__pathHotspots = window.__pathHotspots || [];
+window.__pendingPathPoints = window.__pendingPathPoints || null;
 
 function clearPathHotspots(viewer) {
   try {
@@ -727,7 +799,11 @@ function ensurePathStyle() {
 window.setPathFromFlutter = function(points) {
   try {
     const viewer = getViewer();
-    if (!viewer) return false;
+    if (!viewer || !viewer.model) {
+      window.__pendingPathPoints = points || [];
+      postToTest("⏳ setPathFromFlutter pending (viewer/model not ready)");
+      return true;
+    }
     ensurePathStyle();
     clearPathHotspots(viewer);
 
@@ -899,18 +975,37 @@ function _applyPoiHighlight(viewer, name) {
 }
 
 
+// Clear pin (can be called when switching to a different floor)
+window.clearUserPinFromFlutter = function() {
+  const viewer = getViewer();
+  if (!viewer) return;
+
+  try {
+    const pin = viewer.querySelector('[slot="hotspot-userpin"]');
+    if (pin) pin.remove();
+    window.__pendingUserPin = null;
+    viewer.requestUpdate();
+    postToTest("🧹 clearUserPinFromFlutter");
+  } catch (e) {}
+};
+
+// Set pin from Flutter (supports pending until model is ready)
 window.setUserPinFromFlutter = function(x, y, z) {
   const viewer = getViewer();
-  const pos = { x: Number(x), y: Number(y), z: Number(z) };
+  const p = { x: Number(x), y: Number(y), z: Number(z) };
 
   if (!viewer || !viewer.model) {
-    window.__pendingUserPin = pos;
+    window.__pendingUserPin = p;
     postToTest("⏳ setUserPinFromFlutter pending (viewer/model not ready)");
-    return;
+    return false;
   }
-  setUserPin(viewer, pos);
-  postToTest(`✅ setUserPinFromFlutter applied: ${pos.x},${pos.y},${pos.z}`);
+
+  setUserPin(viewer, p);
+  window.__pendingUserPin = null;
+  postToTest("✅ setUserPinFromFlutter applied");
+  return true;
 };
+
 
 window.highlightPoiFromFlutter = function(name) {
   const viewer = getViewer();
@@ -924,7 +1019,20 @@ window.highlightPoiFromFlutter = function(name) {
   }
 
   const ok = _applyPoiHighlight(viewer, n);
-  postToTest(ok ? ("✅ highlightPoiFromFlutter applied: " + n) : ("⚠️ highlightPoiFromFlutter: material not found: " + n));
+  postToTest(ok ? ("✅ highlightPoiFromFlutter applied: " + n) : ("⚠️ highlightPoiFromFlutter: material not found yet: " + n));
+  if (!ok) {
+    // Materials may not be ready yet; retry a few times.
+    window.__highlightRetry = (window.__highlightRetry || 0) + 1;
+    if (window.__highlightRetry <= 8) {
+      window.__pendingPoiHighlight = n;
+      setTimeout(() => { try { window.highlightPoiFromFlutter(n); } catch(e) {} }, 250);
+      return;
+    } else {
+      window.__highlightRetry = 0;
+    }
+  } else {
+    window.__highlightRetry = 0;
+  }
 };
 
 function setupViewer() {
@@ -948,7 +1056,38 @@ function setupViewer() {
       postToTest(ok ? ("✅ applied pending highlight on load: " + n) : ("⚠️ pending highlight not found: " + n));
       window.__pendingPoiHighlight = null;
     }
+
+    if (window.__pendingPathPoints && window.__pendingPathPoints.length) {
+      const pts = window.__pendingPathPoints;
+      window.__pendingPathPoints = null;
+      window.setPathFromFlutter(pts);
+      postToTest('✅ applied pending path on load');
+    }
   });
+
+  // If the model is already loaded by the time setupViewer() runs,
+  // apply any pending state immediately (don't rely solely on the load event).
+  try {
+    if (viewer && viewer.model) {
+      if (window.__pendingUserPin) {
+        setUserPin(viewer, window.__pendingUserPin);
+        postToTest("✅ applied pending pin (immediate)");
+        window.__pendingUserPin = null;
+      }
+      if (window.__pendingPoiHighlight) {
+        const n = window.__pendingPoiHighlight;
+        const ok = _applyPoiHighlight(viewer, n);
+        postToTest(ok ? ("✅ applied pending highlight (immediate): " + n) : ("⚠️ pending highlight not found (immediate): " + n));
+        if (ok) window.__pendingPoiHighlight = null;
+      }
+      if (window.__pendingPathPoints && window.__pendingPathPoints.length) {
+        const pts = window.__pendingPathPoints;
+        window.__pendingPathPoints = null;
+        window.setPathFromFlutter(pts);
+        postToTest("✅ applied pending path (immediate)");
+      }
+    }
+  } catch(e) {}
 
   postToPOI({ type: "path_viewer_ready" });
   return true;
@@ -1207,12 +1346,12 @@ const timer = setInterval(function() {
 
     if (status.isGranted) {
       if (!mounted) return;
-      onPressed: () {
-  ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(content: Text('Camera page not connected yet')),
-  );
-};
-
+      onPressed:
+      () {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Camera page not connected yet')),
+        );
+      };
     } else if (status.isPermanentlyDenied) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1246,7 +1385,8 @@ const timer = setInterval(function() {
         final maps = (data['map'] as List).cast<Map<String, dynamic>>();
         final convertedMaps = maps.map((map) {
           return {
-            'floorNumber': (map['floorNumber'] ?? '').toString(),
+            'floorNumber': (map['floorNumber'] ?? '').toString(), // "GF", "F1"
+            'F_number': (map['F_number'] ?? '').toString(), // "0", "1"
             'mapURL': (map['mapURL'] ?? '').toString(),
           };
         }).toList();
@@ -1255,20 +1395,57 @@ const timer = setInterval(function() {
           setState(() {
             _venueMaps = convertedMaps;
             if (convertedMaps.isNotEmpty) {
-              // Default floor
+              // 1) Safe default.
               _currentFloor = convertedMaps.first['mapURL'] ?? '';
 
-              // If we have a saved starting floor (Pin on Map), prefer showing that floor
-              if (_desiredStartFloorLabel.isNotEmpty) {
+              // 2) If caller provided a mapURL, prefer it if it exists in venue maps.
+              if (_requestedFloorIsUrl && _requestedFloorToken.isNotEmpty) {
+                final exists = convertedMaps.any(
+                  (m) => (m['mapURL'] ?? '') == _requestedFloorToken,
+                );
+                if (exists) _currentFloor = _requestedFloorToken;
+              }
+
+              // 3) If caller provided a label (GF/F1/0/1), resolve it to a mapURL.
+              if (!_requestedFloorIsUrl && _requestedFloorToken.isNotEmpty) {
+                // Try match by floorNumber first ("GF","F1"...)
                 final match = convertedMaps.firstWhere(
-                  (m) => (m['floorNumber'] ?? '') == _desiredStartFloorLabel,
+                  (m) => (m['floorNumber'] ?? '') == _requestedFloorToken,
                   orElse: () => const {'mapURL': ''},
                 );
-                final url = match['mapURL'] ?? '';
+                var url = match['mapURL'] ?? '';
+
+                // Fallback: accept "0"/"1" as GF/F1 style
+                if (url.isEmpty) {
+                  final f = _requestedFloorToken.trim();
+                  String asLabel = '';
+                  if (f == '0') asLabel = 'GF';
+                  if (f == '1') asLabel = 'F1';
+                  if (f == '2') asLabel = 'F2';
+                  if (asLabel.isNotEmpty) {
+                    final match2 = convertedMaps.firstWhere(
+                      (m) => (m['floorNumber'] ?? '') == asLabel,
+                      orElse: () => const {'mapURL': ''},
+                    );
+                    url = match2['mapURL'] ?? '';
+                  }
+                }
+
                 if (url.isNotEmpty) _currentFloor = url;
               }
-            }
-          });
+
+              // 4) If we have a saved starting floor (Pin on Map), prefer showing that floor.
+              if (_desiredStartFloorLabel.isNotEmpty) {
+  final savedF = _toFNumber(_desiredStartFloorLabel); // "0"/"1"/...
+  final match = convertedMaps.firstWhere(
+    (m) => (m['F_number'] ?? '') == savedF,
+    orElse: () => const {'mapURL': ''},
+  );
+  final url = match['mapURL'] ?? '';
+  if (url.isNotEmpty) _currentFloor = url;
+}
+
+        }});
         }
       }
     } catch (e) {

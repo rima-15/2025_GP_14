@@ -12,7 +12,7 @@ import 'package:madar_app/theme/theme.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
-import 'package:webview_flutter/webview_flutter.dart' show JavaScriptMessage;
+import 'package:webview_flutter/webview_flutter.dart' show JavaScriptMessage, WebViewController;
 import 'category_page.dart';
 import 'navigation_flow_complete.dart';
 
@@ -1737,7 +1737,7 @@ return;
                 minCameraOrbit: "auto 0deg auto",
                 maxCameraOrbit: "auto 90deg auto",
                 cameraTarget: "0m 0m 0m",
-                relatedJs: '''console.log("✅ relatedJs injected");
+                relatedJs: r'''console.log("✅ relatedJs injected");
 
 // ---------------------------
 // Channels
@@ -1769,7 +1769,8 @@ function getPointFromTouchEnd(viewer, e) {
 // Normalize names: "POIMAT_DIOR fashion.001" -> "POIMAT_DIOR fashion"
 function stripDotNumber(name) {
   if (!name) return name;
-  return name.replace(/\.\d+\$/, '');
+  return name.replace(/\.\d+$/, '');
+
 }
 
 // ---------------------------
@@ -2306,6 +2307,9 @@ class _PinStartLocationScreenState extends State<PinStartLocationScreen> {
   bool _saving = false;
   String? _saveError;
 
+
+  WebViewController? _webCtrl; // Flutter -> JS
+  bool _jsBridgeReady = false;
   String _inferFloorLabel(String src) {
     // Try to infer a human-readable floor label from the GLB src (URL or asset).
     final uri = Uri.tryParse(src);
@@ -2455,7 +2459,7 @@ class _PinStartLocationScreenState extends State<PinStartLocationScreen> {
             minCameraOrbit: "auto 0deg auto",
             maxCameraOrbit: "auto 90deg auto",
             cameraTarget: "0m 0m 0m",
-            relatedJs: '''
+            relatedJs: r'''
 console.log("✅ PinStartLocation relatedJs injected");
 
 function postToPOI(msg) {
@@ -2466,6 +2470,83 @@ function postToTest(msg) {
 }
 
 function getViewer() { return document.querySelector('model-viewer'); }
+// ---- POI highlight (destination) ----
+window.__pendingPoiHighlight = "";
+window.__poiOriginals = window.__poiOriginals || {};
+
+function _normMatName(s) {
+  return String(s || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/\.\d+$/g, "");
+}
+
+function _setBase(pbr, rgba) { try { if (pbr && pbr.baseColorFactor) pbr.baseColorFactor = rgba; } catch(e) {} }
+function _setRough(pbr, r) { try { if (pbr && pbr.roughnessFactor != null) pbr.roughnessFactor = r; } catch(e) {} }
+function _setEmis(mat, rgb) { try { if (mat && mat.emissiveFactor) mat.emissiveFactor = rgb; } catch(e) {} }
+
+function _applyPoiHighlight(viewer, targetName) {
+  const want = _normMatName(targetName);
+  if (!want || !viewer || !viewer.model || !viewer.model.materials) return false;
+
+  const mats = viewer.model.materials;
+  let mat = null;
+  for (const mm of mats) {
+    if (!mm || !mm.name) continue;
+    if (_normMatName(mm.name) === want) { mat = mm; break; }
+  }
+  if (!mat) return false;
+
+  if (!window.__poiOriginals[mat.name]) {
+    const pbr = mat.pbrMetallicRoughness;
+    window.__poiOriginals[mat.name] = {
+      base: (pbr && pbr.baseColorFactor) ? Array.from(pbr.baseColorFactor) : null,
+      rough: (pbr && pbr.roughnessFactor != null) ? pbr.roughnessFactor : null,
+      emis: (mat.emissiveFactor) ? Array.from(mat.emissiveFactor) : null,
+    };
+  }
+
+  const pbr = mat.pbrMetallicRoughness;
+  // highlight style (brown palette)
+  if (pbr) {
+    _setBase(pbr, [0.4353, 0.2941, 0.1608, 1.0]);
+    _setRough(pbr, 0.10);
+  }
+  _setEmis(mat, [0.2612, 0.1765, 0.0965]);
+
+  viewer.requestUpdate();
+  return true;
+}
+
+window.highlightPoiFromFlutter = function(name) {
+  const viewer = getViewer();
+  const n = String(name || "");
+  if (!n) return;
+
+  if (!viewer || !viewer.model) {
+    window.__pendingPoiHighlight = n;
+    postToTest("⏳ highlightPoiFromFlutter pending (viewer/model not ready)");
+    return;
+  }
+
+  const ok = _applyPoiHighlight(viewer, n);
+  postToTest(ok ? ("✅ highlightPoiFromFlutter applied: " + n) : ("⚠️ highlightPoiFromFlutter not found yet: " + n));
+
+  if (!ok) {
+    window.__highlightRetry = (window.__highlightRetry || 0) + 1;
+    if (window.__highlightRetry <= 8) {
+      window.__pendingPoiHighlight = n;
+      setTimeout(() => { try { window.highlightPoiFromFlutter(n); } catch(e) {} }, 250);
+    } else {
+      window.__highlightRetry = 0;
+    }
+  } else {
+    window.__highlightRetry = 0;
+    window.__pendingPoiHighlight = "";
+  }
+};
+
 
 function cssPointFromEvent(viewer, event) {
   const rect = viewer.getBoundingClientRect();
@@ -2515,12 +2596,50 @@ var timer = setInterval(function() {
   var ok2 = setupPinMode();
   if ((ok1 && ok2) || tries > 30) clearInterval(timer);
 }, 300);
+
+
+function setupViewer() {
+  const viewer = getViewer();
+  if (!viewer) return;
+
+  function applyPending() {
+    const v = getViewer();
+    if (!v || !v.model) return;
+    if (window.__pendingPoiHighlight) {
+      try { window.highlightPoiFromFlutter(window.__pendingPoiHighlight); } catch(e) {}
+    }
+  }
+
+  viewer.addEventListener("load", () => {
+    postToTest("✅ PinStartLocation model load");
+    applyPending();
+  });
+
+  try { if (viewer.model) applyPending(); } catch(e) {}
+}
+
+setupViewer();
+postToTest("PinStartLocation JS alive");
+
 ''',
+            onWebViewCreated: (controller) {
+              _webCtrl = controller;
+              _jsBridgeReady = false;
+            },
             javascriptChannels: {
               JavascriptChannel(
                 'JS_TEST_CHANNEL',
                 onMessageReceived: (JavaScriptMessage message) {
                   debugPrint("✅ JS_TEST_CHANNEL (pin): ${message.message}");
+
+                  if (!_jsBridgeReady && message.message.contains('PinStartLocation JS alive')) {
+                    _jsBridgeReady = true;
+                    final dest = widget.destinationPoi.trim();
+                    if (dest.isNotEmpty) {
+                      final safe = jsonEncode(dest);
+                      _webCtrl?.runJavaScript('window.highlightPoiFromFlutter($safe);');
+                    }
+                  }
                 },
               ),
               JavascriptChannel(

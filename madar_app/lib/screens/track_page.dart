@@ -1552,13 +1552,13 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             _updateRequestStatus(
               r.id,
               'terminated',
-              successMessage: 'Location sharing has been stopped.',
+              successMessage: 'Active tracking has been terminated',
             );
           }
         },
         icon: const Icon(Icons.stop_circle_outlined, size: 18),
         label: const Text(
-          'Stop Tracking',
+          'Stop Sharing',
           style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
         ),
         style: OutlinedButton.styleFrom(
@@ -1844,7 +1844,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             _updateRequestStatus(
               r.id,
               'declined',
-              successMessage: 'Scheduled tracking has been removed',
+              successMessage: 'Tracking request declined after acceptance',
             );
           }
         },
@@ -1944,7 +1944,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   String _statusUpdateMessage(String status) {
     switch (status) {
       case 'accepted':
-        return 'Tracking request accepted successfully';
+        return 'Tracking request accepted';
       case 'declined':
         return 'Tracking request has been declined';
       case 'terminated':
@@ -1957,7 +1957,44 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   Widget _buildIncomingActionButtons(BuildContext context, TrackingRequest r) {
     return Row(
       children: [
-        // Decline = same design as "Navigate to friend" (outlined)
+        // Accept (left) = filled green
+        Expanded(
+          child: ElevatedButton.icon(
+            onPressed: () async {
+              final confirmed =
+                  await ConfirmationDialog.showPositiveConfirmation(
+                    context,
+                    title: 'Accept Track Request',
+                    message:
+                        'Are you sure you want to accept this tracking request?',
+                    confirmText: 'Accept',
+                  );
+              if (confirmed && mounted) {
+                _updateRequestStatus(
+                  r.id,
+                  'accepted',
+                  successMessage: 'Tracking request accepted successfully.',
+                );
+              }
+            },
+            icon: const Icon(Icons.check_circle_outline, size: 18),
+            label: const Text(
+              'Accept',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.kGreen,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        // Decline (right) = outlined
         Expanded(
           child: OutlinedButton.icon(
             onPressed: () async {
@@ -1988,43 +2025,6 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               foregroundColor: AppColors.kGreen,
               side: BorderSide(color: AppColors.kGreen, width: 2),
               padding: const EdgeInsets.symmetric(vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(width: 12),
-        // Accept = same design as "Refresh Location" (filled green)
-        Expanded(
-          child: ElevatedButton.icon(
-            onPressed: () async {
-              final confirmed =
-                  await ConfirmationDialog.showPositiveConfirmation(
-                    context,
-                    title: 'Accept Track Request',
-                    message:
-                        'Are you sure you want to accept this tracking request?',
-                    confirmText: 'Accept',
-                  );
-              if (confirmed && mounted) {
-                _updateRequestStatus(
-                  r.id,
-                  'accepted',
-                  successMessage: 'Tracking request accepted successfully.',
-                );
-              }
-            },
-            icon: const Icon(Icons.check_circle_outline, size: 18),
-            label: const Text(
-              'Accept',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.kGreen,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              elevation: 0,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -2068,15 +2068,45 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
   /// Build duration string with overnight "(next day)" support and • separator
   String _buildDurationStr(TrackingRequest r) {
-    final dateStr = _formatDateForDuration(
-      DateTime(r.startAt.year, r.startAt.month, r.startAt.day),
-    );
     final isOvernight =
         r.endAt.day != r.startAt.day ||
         r.endAt.month != r.startAt.month ||
         r.endAt.year != r.startAt.year;
-    final suffix = isOvernight ? ' (next day)' : '';
-    return '$dateStr • ${r.startTime} - ${r.endTime}$suffix';
+
+    if (isOvernight) {
+      // Show date range: "1 - 2 Feb" or "31 Jan - 1 Feb"
+      final startDay = r.startAt.day;
+      final endDay = r.endAt.day;
+      final startMonth = _shortMonth(r.startAt.month);
+      final endMonth = _shortMonth(r.endAt.month);
+      final dateRange = r.startAt.month == r.endAt.month
+          ? '$startDay - $endDay $endMonth'
+          : '$startDay $startMonth - $endDay $endMonth';
+      return '$dateRange • ${r.startTime} - ${r.endTime}';
+    }
+
+    final dateStr = _formatDateForDuration(
+      DateTime(r.startAt.year, r.startAt.month, r.startAt.day),
+    );
+    return '$dateStr • ${r.startTime} - ${r.endTime}';
+  }
+
+  String _shortMonth(int month) {
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return months[month - 1];
   }
 
   Widget _buildDetails(TrackingRequest r) {

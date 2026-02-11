@@ -1016,67 +1016,69 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
     required bool isSelected,
     required bool enabled,
   }) {
-    return Opacity(
-      opacity: enabled ? 1.0 : 0.4,
-      child: InkWell(
-        onTap: enabled ? () => Navigator.pop(ctx, date) : null,
-        child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          decoration: BoxDecoration(
+    return InkWell(
+      onTap: enabled ? () => Navigator.pop(ctx, date) : null,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? AppColors.kGreen.withOpacity(0.1)
+              : (!enabled ? Colors.grey[100] : Colors.grey[50]),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
             color: isSelected
-                ? AppColors.kGreen.withOpacity(0.1)
-                : Colors.grey[50],
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isSelected ? AppColors.kGreen : Colors.grey.shade300,
-              width: isSelected ? 2 : 1,
+                ? AppColors.kGreen
+                : (!enabled ? Colors.grey.shade200 : Colors.grey.shade300),
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              isNextDay ? Icons.nights_stay_outlined : Icons.today,
+              color: isSelected
+                  ? AppColors.kGreen
+                  : (!enabled ? Colors.grey[400] : Colors.grey[600]),
+              size: 20,
             ),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                isNextDay ? Icons.nights_stay_outlined : Icons.today,
-                color: isSelected ? AppColors.kGreen : Colors.grey[600],
-                size: 20,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      DateFormat('EEE d MMM yyyy').format(date),
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: isSelected ? AppColors.kGreen : Colors.black87,
-                      ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    DateFormat('EEE d MMM yyyy').format(date),
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: isSelected
+                          ? AppColors.kGreen
+                          : (!enabled ? Colors.grey[400] : Colors.black87),
                     ),
-                    Text(
-                      isNextDay
-                          ? (enabled
-                                ? 'Next day (overnight)'
-                                : 'Not available – venue closes before midnight')
-                          : 'Same day as start',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: isSelected
-                            ? AppColors.kGreen
-                            : (!enabled ? Colors.red[300] : Colors.grey[500]),
-                      ),
+                  ),
+                  Text(
+                    isNextDay
+                        ? (enabled
+                              ? 'Next day (overnight)'
+                              : 'Not available – venue closes before midnight')
+                        : 'Same day as start',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: !enabled && isNextDay
+                          ? FontWeight.w500
+                          : FontWeight.w400,
+                      color: isSelected
+                          ? AppColors.kGreen
+                          : (!enabled ? Colors.red[700] : Colors.grey[500]),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-              if (isSelected)
-                const Icon(
-                  Icons.check_circle,
-                  color: AppColors.kGreen,
-                  size: 22,
-                ),
-            ],
-          ),
+            ),
+            if (isSelected)
+              const Icon(Icons.check_circle, color: AppColors.kGreen, size: 22),
+          ],
         ),
       ),
     );
@@ -2629,7 +2631,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                                           ).format(_selectedDate!)
                                         : '--/--/----',
                                     style: TextStyle(
-                                      fontSize: 17,
+                                      fontSize: 16,
                                       fontWeight: FontWeight.w700,
                                       color: _selectedDate != null
                                           ? Colors.black87
@@ -2732,7 +2734,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                                           ).format(_selectedEndDate!)
                                         : '--/--/----',
                                     style: TextStyle(
-                                      fontSize: 17,
+                                      fontSize: 16,
                                       fontWeight: FontWeight.w700,
                                       color: _selectedEndDate != null
                                           ? Colors.black87
@@ -2771,7 +2773,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                           textColor = Colors.grey[500]!;
                         }
                         return Text(
-                          'Venue hours: $hoursStr',
+                          'Opening hours: $hoursStr',
                           style: TextStyle(fontSize: 12, color: textColor),
                         );
                       },

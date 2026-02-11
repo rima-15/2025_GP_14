@@ -386,16 +386,46 @@ class _HistoryPageState extends State<HistoryPage> {
     );
   }
 
+  String _shortMonth(int month) {
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    return months[month - 1];
+  }
+
   Widget _buildHistoryTile(HistoryTrackingRequest r) {
-    final dateStr = _formatDate(
-      DateTime(r.startAt.year, r.startAt.month, r.startAt.day),
-    );
     final isOvernight =
         r.endAt.day != r.startAt.day ||
         r.endAt.month != r.startAt.month ||
         r.endAt.year != r.startAt.year;
-    final suffix = isOvernight ? ' (next day)' : '';
-    final durationStr = '$dateStr • ${r.startTime} - ${r.endTime}$suffix';
+
+    final String durationStr;
+    if (isOvernight) {
+      final startDay = r.startAt.day;
+      final endDay = r.endAt.day;
+      final startMonth = _shortMonth(r.startAt.month);
+      final endMonth = _shortMonth(r.endAt.month);
+      final dateRange = r.startAt.month == r.endAt.month
+          ? '$startDay - $endDay $endMonth'
+          : '$startDay $startMonth - $endDay $endMonth';
+      durationStr = '$dateRange • ${r.startTime} - ${r.endTime}';
+    } else {
+      final dateStr = _formatDate(
+        DateTime(r.startAt.year, r.startAt.month, r.startAt.day),
+      );
+      durationStr = '$dateStr • ${r.startTime} - ${r.endTime}';
+    }
     final userLabel = r.isSent ? 'Tracked User' : 'Sender';
 
     return Container(
@@ -478,10 +508,7 @@ class _HistoryPageState extends State<HistoryPage> {
                               : '${r.otherUserName} (${r.otherUserPhone})',
                         ),
                         const SizedBox(height: 6),
-                        _labeledDetail(
-                          'Duration: ',
-                          durationStr,
-                        ),
+                        _labeledDetail('Duration: ', durationStr),
                         const SizedBox(height: 6),
                         _labeledDetail(
                           'Venue: ',
@@ -508,7 +535,7 @@ class _HistoryPageState extends State<HistoryPage> {
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w400,
-              color: Colors.grey[500],
+              color: Colors.grey[600],
             ),
           ),
           TextSpan(

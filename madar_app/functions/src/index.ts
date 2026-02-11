@@ -210,9 +210,14 @@ export const onTrackRequestStatusChanged = onDocumentUpdated(
 
 
 
-      // Only handle accepted/declined
+      // Only handle accepted/declined/terminated
 
-      if (after.status !== "accepted" && after.status !== "declined") return;
+      if (
+        after.status !== "accepted" &&
+        after.status !== "declined" &&
+        after.status !== "terminated"
+      )
+        return;
 
 
 
@@ -234,34 +239,41 @@ export const onTrackRequestStatusChanged = onDocumentUpdated(
 
 
 
-      const accepted = after.status === "accepted";
+      const status = after.status;
+      const accepted = status === "accepted";
+      const terminated = status === "terminated";
+      const receiverName =
+        (after.receiverName ?? "Someone").toString().trim() || "Someone";
 
-
+      const notifRef = terminated
+        ? db.collection("notifications").doc()
+        : null;
+      const notificationRequestId = terminated
+        ? notifRef!.id
+        : event.params.requestId;
 
       const message = {
-
         notification: {
-
-          title: accepted ? "Track Request Accepted" : "Track Request Declined",
-
-          body: accepted
-
-            ? `${after.receiverName} accepted your tracking request`
-
-            : `${after.receiverName} declined your tracking request`,
-
+          title: terminated
+            ? "Tracking Request Terminated"
+            : accepted
+              ? "Tracking Request Accepted"
+              : "Tracking Request Declined",
+          body: terminated
+            ? `${receiverName} stopped sharing the location with you`
+            : accepted
+              ? `${receiverName} accepted your tracking request`
+              : `${receiverName} declined your tracking request`,
         },
-
         data: {
-
-          type: accepted ? "trackAccepted" : "trackDeclined",
-
-          requestId: event.params.requestId,
-
+          type: terminated
+            ? "trackTerminated"
+            : accepted
+              ? "trackAccepted"
+              : "trackDeclined",
+          requestId: notificationRequestId,
         },
-
         tokens,
-
       };
 
 
@@ -270,33 +282,36 @@ export const onTrackRequestStatusChanged = onDocumentUpdated(
 
 
 
-      await db.collection("notifications").add({
-
-        userId: senderId,
-
-        type: accepted ? "trackAccepted" : "trackRejected",
-
-        requiresAction: false,
-
-        data: {
-
-          requestId: event.params.requestId,
-
-        },
-
-        title: accepted ? "Track Request Accepted" : "Track Request Declined",
-
-        body: accepted
-
-          ? `${after.receiverName} accepted your tracking request`
-
-          : `${after.receiverName} declined your tracking request`,
-
-        isRead: false,
-
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-
-      });
+      if (terminated) {
+        await notifRef!.set({
+          userId: senderId,
+          type: "trackTerminated",
+          requiresAction: false,
+          data: {
+            requestId: notificationRequestId,
+            trackRequestId: event.params.requestId,
+          },
+          title: "Tracking Request Terminated",
+          body: `${receiverName} stopped sharing the location with you`,
+          isRead: false,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      } else {
+        await db.collection("notifications").add({
+          userId: senderId,
+          type: accepted ? "trackAccepted" : "trackRejected",
+          requiresAction: false,
+          data: {
+            requestId: event.params.requestId,
+          },
+          title: accepted ? "Track Request Accepted" : "Track Request Declined",
+          body: accepted
+            ? `${receiverName} accepted your tracking request`
+            : `${receiverName} declined your tracking request`,
+          isRead: false,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
 
 
 

@@ -387,6 +387,36 @@ class _NotificationsPageState extends State<NotificationsPage> {
         });
   }
 
+  Stream<List<NotificationItem>> _trackTerminatedStream() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return const Stream.empty();
+
+    return FirebaseFirestore.instance
+        .collection('notifications')
+        .where('userId', isEqualTo: uid)
+        .where('type', isEqualTo: 'trackTerminated')
+        .snapshots()
+        .map((snap) {
+          return snap.docs.map((doc) {
+            final d = doc.data();
+
+            final ts =
+                (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+
+            return NotificationItem(
+              id: d['data']?['requestId'],
+              notificationDocId: doc.id,
+              type: NotificationType.trackTerminated,
+              title: d['title'] ?? 'Tracking Request Terminated',
+              message: d['body'] ?? '',
+              timestamp: ts,
+              isRead: d['isRead'] ?? false,
+              requiresAction: d['requiresAction'] == true,
+            );
+          }).toList();
+        });
+  }
+
   /*List<NotificationItem> get _visibleNotifications {
     if (_showAll) return _notifications;
     return _notifications.take(5).toList();
@@ -465,92 +495,107 @@ class _NotificationsPageState extends State<NotificationsPage> {
                         builder: (context, trackStartedSnap) {
                           final trackStarted = trackStartedSnap.data ?? [];
 
-                          if (!docMapSnap.hasData ||
-                              !notifSnap.hasData ||
-                              !incomingSnap.hasData ||
-                              !senderSnap.hasData ||
-                              !trackStartedSnap.hasData) {
-                            return const SizedBox();
-                          }
+                          return StreamBuilder<List<NotificationItem>>(
+                            stream: _trackTerminatedStream(),
+                            builder: (context, trackTerminatedSnap) {
+                              final trackTerminated =
+                                  trackTerminatedSnap.data ?? [];
 
-                          final merged =
-                              [
-                                    ...incomingTrack,
-                                    ...senderResponses,
-                                    ...trackStarted, // 🔥 الجديد
-                                  ]
-                                  .where((n) => notifDocMap.containsKey(n.id))
-                                  .toList();
+                              if (!docMapSnap.hasData ||
+                                  !notifSnap.hasData ||
+                                  !incomingSnap.hasData ||
+                                  !senderSnap.hasData ||
+                                  !trackStartedSnap.hasData ||
+                                  !trackTerminatedSnap.hasData) {
+                                return const SizedBox();
+                              }
 
-                          merged.sort(
-                            (a, b) => b.timestamp.compareTo(a.timestamp),
-                          );
+                              final merged =
+                                  [
+                                        ...incomingTrack,
+                                        ...senderResponses,
+                                        ...trackStarted, // 🔥 الجديد
+                                        ...trackTerminated,
+                                      ]
+                                      .where(
+                                        (n) => notifDocMap.containsKey(n.id),
+                                      )
+                                      .toList();
 
-                          // 🔥 inject notificationDocId
-                          for (final n in merged) {
-                            n.notificationDocId = notifDocMap[n.id];
+                              merged.sort(
+                                (a, b) => b.timestamp.compareTo(a.timestamp),
+                              );
 
-                            // 🔥 إذا ما له notification doc = اعتبره مقروء
-                            if (n.notificationDocId == null) {
-                              n.isRead = true;
-                            }
-                          }
+                              // 🔥 inject notificationDocId
+                              for (final n in merged) {
+                                n.notificationDocId = notifDocMap[n.id];
 
-                          final visible = _showAll
-                              ? merged
-                              : merged.take(5).toList();
+                                // 🔥 إذا ما له notification doc = اعتبره مقروء
+                                if (n.notificationDocId == null) {
+                                  n.isRead = true;
+                                }
+                              }
 
-                          if (merged.isEmpty) return _buildEmptyState();
+                              final visible = _showAll
+                                  ? merged
+                                  : merged.take(5).toList();
 
-                          return ListView(
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.fromLTRB(
-                                  16,
-                                  1,
-                                  10,
-                                  1,
-                                ),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.end,
-                                  children: const [],
-                                ),
-                              ),
+                              if (merged.isEmpty) return _buildEmptyState();
 
-                              ...visible.map((notif) {
-                                final live = readMap[notif.id] ?? notif.isRead;
-                                final frozen = _frozenReadMap[notif.id];
-                                final override = _localReadOverride[notif.id];
-
-                                notif.isRead =
-                                    override ??
-                                    (_freezeReadUI
-                                        ? (_frozenReadMap[notif.id] ??
-                                              notif.isRead)
-                                        : (readMap[notif.id] ?? notif.isRead));
-
-                                return _buildNotificationItem(notif);
-                              }),
-
-                              if (!_showAll && merged.length > 5)
-                                Padding(
-                                  padding: const EdgeInsets.all(5),
-                                  child: TextButton(
-                                    onPressed: () =>
-                                        setState(() => _showAll = true),
-                                    child: const Text(
-                                      'View All Notifications',
-                                      style: TextStyle(
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.w600,
-                                        color: AppColors.kGreen,
-                                      ),
+                              return ListView(
+                                children: [
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      16,
+                                      1,
+                                      10,
+                                      1,
+                                    ),
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.end,
+                                      children: const [],
                                     ),
                                   ),
-                                ),
 
-                              const SizedBox(height: 20),
-                            ],
+                                  ...visible.map((notif) {
+                                    final live =
+                                        readMap[notif.id] ?? notif.isRead;
+                                    final frozen = _frozenReadMap[notif.id];
+                                    final override =
+                                        _localReadOverride[notif.id];
+
+                                    notif.isRead =
+                                        override ??
+                                        (_freezeReadUI
+                                            ? (_frozenReadMap[notif.id] ??
+                                                  notif.isRead)
+                                            : (readMap[notif.id] ??
+                                                  notif.isRead));
+
+                                    return _buildNotificationItem(notif);
+                                  }),
+
+                                  if (!_showAll && merged.length > 5)
+                                    Padding(
+                                      padding: const EdgeInsets.all(5),
+                                      child: TextButton(
+                                        onPressed: () =>
+                                            setState(() => _showAll = true),
+                                        child: const Text(
+                                          'View All Notifications',
+                                          style: TextStyle(
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w600,
+                                            color: AppColors.kGreen,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+
+                                  const SizedBox(height: 20),
+                                ],
+                              );
+                            },
                           );
                         },
                       );
@@ -721,12 +766,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                   ).withOpacity(0.1),
                                   shape: BoxShape.circle,
                                 ),
-                                child: Icon(
-                                  _getNotificationIcon(notification.type),
-                                  color: _getNotificationColor(
-                                    notification.type,
-                                  ),
-                                  size: 20,
+                                child: _buildNotificationIcon(
+                                  notification.type,
                                 ),
                               ),
                               const SizedBox(width: 12),
@@ -1281,6 +1322,21 @@ class _NotificationsPageState extends State<NotificationsPage> {
     ].contains(notification.type);
   }
 
+  Widget _buildNotificationIcon(NotificationType type) {
+    final color = _getNotificationColor(type);
+    if (type == NotificationType.trackTerminated) {
+      return Stack(
+        alignment: Alignment.center,
+        children: [
+          // Icon(Icons.location_on, color: Colors.grey[400]!, size: 20),
+          Icon(Icons.block, color: AppColors.kError.withOpacity(0.8), size: 22),
+        ],
+      );
+    }
+
+    return Icon(_getNotificationIcon(type), color: color, size: 20);
+  }
+
   IconData _getNotificationIcon(NotificationType type) {
     switch (type) {
       case NotificationType.trackRequest:
@@ -1291,6 +1347,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
         return Icons.cancel_outlined;
       case NotificationType.trackStarted: //started
         return Icons.play_circle_outline;
+      case NotificationType.trackTerminated:
+        return Icons.block;
 
       case NotificationType.locationRefresh:
         return Icons.refresh;
@@ -1320,6 +1378,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
       case NotificationType.allArrived:
         return AppColors.kGreen;
       case NotificationType.trackRejected:
+      case NotificationType.trackTerminated:
       case NotificationType.participantRejected:
       case NotificationType.participantCancelled:
         return AppColors.kError;
@@ -1744,6 +1803,7 @@ enum NotificationType {
   trackAccepted,
   trackRejected,
   trackStarted, // 🔥 أضيفي هذا هنا
+  trackTerminated,
   locationRefresh,
   navigateRequest,
   meetingPointRequest,

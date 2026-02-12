@@ -512,6 +512,92 @@ export const onTrackStarted = onSchedule("every 1 minutes", async () => {
 
 /* ------------------------------------------------------------------
 
+   Track Completed Notification (Scheduled)
+
+-------------------------------------------------------------------*/
+
+export const onTrackCompleted = onSchedule("every 1 minutes", async () => {
+  const now = admin.firestore.Timestamp.now();
+
+  const snap = await db
+    .collection("trackRequests")
+    .where("status", "==", "accepted")
+    .where("endAt", "<=", now)
+    .get();
+
+  if (snap.empty) return;
+
+  const batch = db.batch();
+  const tokenCache = new Map<string, string[]>();
+
+  const getTokens = async (uid: string) => {
+    if (tokenCache.has(uid)) return tokenCache.get(uid)!;
+    const userDoc = await db.collection("users").doc(uid).get();
+    if (!userDoc.exists) {
+      tokenCache.set(uid, []);
+      return [];
+    }
+    const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
+    tokenCache.set(uid, tokens);
+    return tokens;
+  };
+
+  for (const doc of snap.docs) {
+    const data = doc.data();
+    if (data.completedNotified === true) continue;
+
+    const receiverId = data.receiverId;
+    if (!receiverId) continue;
+
+    const senderName =
+      (data.senderName ?? "Someone").toString().trim() || "Someone";
+
+    const receiverTokens = await getTokens(receiverId);
+    const notifRef = db.collection("notifications").doc();
+    const notifId = notifRef.id;
+
+    if (receiverTokens.length > 0) {
+      await admin.messaging().sendEachForMulticast({
+        notification: {
+          title: "Tracking Completed",
+          body: `Tracking session from ${senderName} has ended`,
+        },
+        data: {
+          type: "trackCompleted",
+          requestId: notifId,
+          trackRequestId: doc.id,
+        },
+        tokens: receiverTokens,
+      });
+    }
+
+    batch.set(notifRef, {
+      userId: receiverId,
+      type: "trackCompleted",
+      requiresAction: false,
+      isRead: false,
+      title: "Tracking Completed",
+      body: `Tracking session from ${senderName} has ended`,
+      data: {
+        requestId: notifId,
+        trackRequestId: doc.id,
+        senderId: data.senderId ?? null,
+      },
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    batch.update(doc.ref, {
+      status: "completed",
+      completedNotified: true,
+      completedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+
+  await batch.commit();
+});
+
+/* ------------------------------------------------------------------
+
    Unity Location Writer (HTTPS)
 
    Unity -> POST -> Cloud Function -> writes to users/{docId}.location

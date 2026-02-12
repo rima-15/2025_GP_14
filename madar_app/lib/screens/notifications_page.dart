@@ -280,6 +280,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
             bool isExpired = status == 'expired';
             if (status == 'accepted') actionLabel = 'Accepted';
             if (status == 'declined') actionLabel = 'Declined';
+            if (status == 'terminated') actionLabel = 'Terminated';
+            if (status == 'completed') actionLabel = 'Completed';
+            if (status == 'cancelled') actionLabel = 'Cancelled';
 
             return NotificationItem(
               id: doc.id,
@@ -307,50 +310,32 @@ class _NotificationsPageState extends State<NotificationsPage> {
     if (user == null) return const Stream.empty();
 
     return FirebaseFirestore.instance
-        .collection('trackRequests')
-        .where('senderId', isEqualTo: user.uid)
-        .where('status', whereIn: ['accepted', 'declined'])
-        .orderBy('createdAt', descending: true)
+        .collection('notifications')
+        .where('userId', isEqualTo: user.uid)
+        .where('type', whereIn: ['trackAccepted', 'trackRejected'])
         .snapshots()
         .map((snap) {
           return snap.docs.map((doc) {
             final d = doc.data();
-
-            final respondedAt =
-                (d['respondedAt'] as Timestamp?)?.toDate() ??
-                (d['createdAt'] as Timestamp?)?.toDate() ??
-                DateTime.now();
-
-            final startAt = (d['startAt'] as Timestamp?)?.toDate();
-            final endAt = (d['endAt'] as Timestamp?)?.toDate();
+            final ts =
+                (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+            final typeStr = (d['type'] ?? '').toString();
+            final titleStr = (d['title'] ?? '').toString();
 
             return NotificationItem(
-              id: doc.id,
-
-              type: d['status'] == 'accepted'
+              id: d['data']?['requestId'] ?? doc.id,
+              notificationDocId: doc.id,
+              type: typeStr == 'trackAccepted'
                   ? NotificationType.trackAccepted
                   : NotificationType.trackRejected,
-
-              title: d['status'] == 'accepted'
-                  ? 'Track Request Accepted'
-                  : 'Track Request Declined',
-
-              message: '',
-
-              timestamp: respondedAt,
-              isRead: true,
-
-              senderName: d['receiverName'],
-              senderPhone: d['receiverPhone'],
-              venueName: d['venueName'],
-
-              date: startAt != null
-                  ? DateFormat('EEE, MMM d').format(startAt)
-                  : '',
-              startTime: startAt != null
-                  ? DateFormat('h:mm a').format(startAt)
-                  : '',
-              endTime: endAt != null ? DateFormat('h:mm a').format(endAt) : '',
+              title: titleStr.isNotEmpty
+                  ? titleStr
+                  : (typeStr == 'trackAccepted'
+                      ? 'Track Request Accepted'
+                      : 'Track Request Declined'),
+              message: (d['body'] ?? '').toString(),
+              timestamp: ts,
+              isRead: d['isRead'] ?? false,
             );
           }).toList();
         });
@@ -408,6 +393,36 @@ class _NotificationsPageState extends State<NotificationsPage> {
               notificationDocId: doc.id,
               type: NotificationType.trackTerminated,
               title: d['title'] ?? 'Tracking Request Terminated',
+              message: d['body'] ?? '',
+              timestamp: ts,
+              isRead: d['isRead'] ?? false,
+              requiresAction: d['requiresAction'] == true,
+            );
+          }).toList();
+        });
+  }
+
+  Stream<List<NotificationItem>> _trackCompletedStream() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return const Stream.empty();
+
+    return FirebaseFirestore.instance
+        .collection('notifications')
+        .where('userId', isEqualTo: uid)
+        .where('type', isEqualTo: 'trackCompleted')
+        .snapshots()
+        .map((snap) {
+          return snap.docs.map((doc) {
+            final d = doc.data();
+
+            final ts =
+                (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+
+            return NotificationItem(
+              id: d['data']?['requestId'],
+              notificationDocId: doc.id,
+              type: NotificationType.trackCompleted,
+              title: d['title'] ?? 'Tracking Completed',
               message: d['body'] ?? '',
               timestamp: ts,
               isRead: d['isRead'] ?? false,
@@ -501,99 +516,107 @@ class _NotificationsPageState extends State<NotificationsPage> {
                               final trackTerminated =
                                   trackTerminatedSnap.data ?? [];
 
-                              if (!docMapSnap.hasData ||
-                                  !notifSnap.hasData ||
-                                  !incomingSnap.hasData ||
-                                  !senderSnap.hasData ||
-                                  !trackStartedSnap.hasData ||
-                                  !trackTerminatedSnap.hasData) {
-                                return const SizedBox();
-                              }
+                              return StreamBuilder<List<NotificationItem>>(
+                                stream: _trackCompletedStream(),
+                                builder: (context, trackCompletedSnap) {
+                                  final trackCompleted =
+                                      trackCompletedSnap.data ?? [];
 
-                              final merged =
-                                  [
-                                        ...incomingTrack,
-                                        ...senderResponses,
-                                        ...trackStarted, // 🔥 الجديد
-                                        ...trackTerminated,
-                                      ]
+                                  if (!docMapSnap.hasData ||
+                                      !notifSnap.hasData ||
+                                      !incomingSnap.hasData ||
+                                      !senderSnap.hasData ||
+                                      !trackStartedSnap.hasData ||
+                                      !trackTerminatedSnap.hasData ||
+                                      !trackCompletedSnap.hasData) {
+                                    return const SizedBox();
+                                  }
+
+                                  final merged = [
+                                    ...incomingTrack,
+                                    ...senderResponses,
+                                    ...trackStarted,
+                                    ...trackTerminated,
+                                    ...trackCompleted,
+                                  ]
                                       .where(
                                         (n) => notifDocMap.containsKey(n.id),
                                       )
                                       .toList();
 
-                              merged.sort(
-                                (a, b) => b.timestamp.compareTo(a.timestamp),
-                              );
+                                  merged.sort(
+                                    (a, b) =>
+                                        b.timestamp.compareTo(a.timestamp),
+                                  );
 
-                              // 🔥 inject notificationDocId
-                              for (final n in merged) {
-                                n.notificationDocId = notifDocMap[n.id];
+                                  // ?? inject notificationDocId
+                                  for (final n in merged) {
+                                    n.notificationDocId = notifDocMap[n.id];
 
-                                // 🔥 إذا ما له notification doc = اعتبره مقروء
-                                if (n.notificationDocId == null) {
-                                  n.isRead = true;
-                                }
-                              }
+                                    // ?? ??? ?? ?? notification doc = ?????? ?????
+                                    if (n.notificationDocId == null) {
+                                      n.isRead = true;
+                                    }
+                                  }
 
-                              final visible = _showAll
-                                  ? merged
-                                  : merged.take(5).toList();
+                                  final visible = _showAll
+                                      ? merged
+                                      : merged.take(5).toList();
 
-                              if (merged.isEmpty) return _buildEmptyState();
+                                  if (merged.isEmpty) return _buildEmptyState();
 
-                              return ListView(
-                                children: [
-                                  Padding(
-                                    padding: const EdgeInsets.fromLTRB(
-                                      16,
-                                      1,
-                                      10,
-                                      1,
-                                    ),
-                                    child: Row(
-                                      mainAxisAlignment: MainAxisAlignment.end,
-                                      children: const [],
-                                    ),
-                                  ),
-
-                                  ...visible.map((notif) {
-                                    final live =
-                                        readMap[notif.id] ?? notif.isRead;
-                                    final frozen = _frozenReadMap[notif.id];
-                                    final override =
-                                        _localReadOverride[notif.id];
-
-                                    notif.isRead =
-                                        override ??
-                                        (_freezeReadUI
-                                            ? (_frozenReadMap[notif.id] ??
-                                                  notif.isRead)
-                                            : (readMap[notif.id] ??
-                                                  notif.isRead));
-
-                                    return _buildNotificationItem(notif);
-                                  }),
-
-                                  if (!_showAll && merged.length > 5)
-                                    Padding(
-                                      padding: const EdgeInsets.all(5),
-                                      child: TextButton(
-                                        onPressed: () =>
-                                            setState(() => _showAll = true),
-                                        child: const Text(
-                                          'View All Notifications',
-                                          style: TextStyle(
-                                            fontSize: 15,
-                                            fontWeight: FontWeight.w600,
-                                            color: AppColors.kGreen,
-                                          ),
+                                  return ListView(
+                                    children: [
+                                      Padding(
+                                        padding: const EdgeInsets.fromLTRB(
+                                          16,
+                                          1,
+                                          10,
+                                          1,
+                                        ),
+                                        child: Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.end,
+                                          children: const [],
                                         ),
                                       ),
-                                    ),
 
-                                  const SizedBox(height: 20),
-                                ],
+                                      ...visible.map((notif) {
+                                        final override =
+                                            _localReadOverride[notif.id];
+
+                                        notif.isRead =
+                                            override ??
+                                            (_freezeReadUI
+                                                ? (_frozenReadMap[notif.id] ??
+                                                      notif.isRead)
+                                                : (readMap[notif.id] ??
+                                                      notif.isRead));
+
+                                        return _buildNotificationItem(notif);
+                                      }),
+
+                                      if (!_showAll && merged.length > 5)
+                                        Padding(
+                                          padding: const EdgeInsets.all(5),
+                                          child: TextButton(
+                                            onPressed: () =>
+                                                setState(() => _showAll = true),
+                                            child: const Text(
+                                              'View All Notifications',
+                                              style: TextStyle(
+                                                fontSize: 15,
+                                                fontWeight: FontWeight.w600,
+                                                color: AppColors.kGreen,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+
+                                      const SizedBox(height: 20),
+                                    ],
+                                  );
+                                },
                               );
                             },
                           );
@@ -601,7 +624,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                       );
                     },
                   );
-                }, // 🔥 هذا السطر ناقص عندك
+                },
               );
             },
           );
@@ -864,7 +887,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                   NotificationType.trackAccepted) ...[
                             // Short: First Last (phone) accepted/declined your request
                             Text(
-                              _formatAcceptDeclineMessage(notification),
+                              notification.message.trim().isNotEmpty
+                                  ? notification.message.trim()
+                                  : _formatAcceptDeclineMessage(notification),
                               style: TextStyle(
                                 fontSize: 14,
                                 color: Colors.grey[700],
@@ -1347,6 +1372,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
         return Icons.cancel_outlined;
       case NotificationType.trackStarted: //started
         return Icons.play_circle_outline;
+      case NotificationType.trackCompleted:
+        return Icons.check_circle_outline;
       case NotificationType.trackTerminated:
         return Icons.block;
 
@@ -1375,6 +1402,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
       case NotificationType.trackAccepted:
       case NotificationType.participantAccepted:
       case NotificationType.trackStarted:
+      case NotificationType.trackCompleted:
       case NotificationType.allArrived:
         return AppColors.kGreen;
       case NotificationType.trackRejected:
@@ -1804,6 +1832,7 @@ enum NotificationType {
   trackRejected,
   trackStarted, // 🔥 أضيفي هذا هنا
   trackTerminated,
+  trackCompleted,
   locationRefresh,
   navigateRequest,
   meetingPointRequest,
@@ -1859,3 +1888,4 @@ class NotificationItem {
     this.actionLabel,
   });
 }
+

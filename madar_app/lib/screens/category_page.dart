@@ -458,10 +458,10 @@ if (material.toUpperCase().startsWith('POI_')) {
         (data['poiMaterial'] ?? data['material'] ?? data['poiMat'])
             ?.toString()
             .trim();
-    final floorSrc =
-    (data['floorSrc'] ?? data['floor'] ?? data['level'] ?? 'GF')
-        .toString()
-        .trim();
+    final floorToken = (data['floorSrc'] ?? data['floor'] ?? data['level']);
+    // If floor is missing, pass empty string so PathOverview can auto-detect the floor
+    // from the merged POI JSON (GF/F1) instead of forcing GF.
+    final floorSrc = floorToken == null ? '' : floorToken.toString().trim();
 
     return InkWell(
       onTap: () => _openNavigationFlow(placeId, placeName, poiMaterial, floorSrc),

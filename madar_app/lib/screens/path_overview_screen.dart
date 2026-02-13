@@ -103,6 +103,70 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     return '';
   }
 
+  String _currentFloorLabel() {
+    final url = _currentFloor.trim();
+    if (url.isEmpty) return '';
+    for (final m in _venueMaps) {
+      if ((m['mapURL'] ?? '') == url) {
+        return (m['floorNumber'] ?? '').toString();
+      }
+    }
+    return '';
+  }
+
+  String _mapUrlForFloorLabel(String floorLabel) {
+    final want = floorLabel.trim();
+    if (want.isEmpty) return '';
+    // Prefer exact label match (GF/F1).
+    for (final m in _venueMaps) {
+      if (((m['floorNumber'] ?? '').toString()).trim() == want) {
+        return (m['mapURL'] ?? '').toString();
+      }
+    }
+    // Fallback: match by F_number ("0","1",...) if caller passes "F1"/"1".
+    final wantF = _toFNumber(want);
+    if (wantF.isNotEmpty) {
+      for (final m in _venueMaps) {
+        if (((m['F_number'] ?? '').toString()).trim() == wantF) {
+          return (m['mapURL'] ?? '').toString();
+        }
+      }
+    }
+    return '';
+  }
+
+  Future<void> _ensureFloorSelected(String floorLabel) async {
+    final label = floorLabel.trim();
+    if (label.isEmpty) return;
+
+    // If maps aren't loaded yet, defer the switch.
+    if (_venueMaps.isEmpty) {
+      _pendingFloorLabelToOpen = label;
+      return;
+    }
+
+    final desiredUrl = _mapUrlForFloorLabel(label);
+    if (desiredUrl.isEmpty) return;
+
+    if (_currentFloor.trim() != desiredUrl) {
+      setState(() => _currentFloor = desiredUrl);
+
+      // IMPORTANT: switching floors reloads the WebView, so the JS state (path dots)
+      // is wiped. We must recompute + re-push after navmesh reload and once JS is ready.
+      _pathPushed = false;
+      _jsReady = false;
+      _readyComputeRetry = 0;
+
+      // Reload navmesh for the new floor first.
+      await _loadNavmeshF1();
+
+      // Compute now if we can; if JS isn't ready yet, the "path_viewer_ready" handler
+      // will call this again.
+      _maybeComputeAndPushPath();
+    }
+  }
+
+
   bool _isSavedFloorActive() {
     // saved floor from Firestore (you store floor as 0/1/2...)
     final savedRaw = _desiredStartFloorLabel.isNotEmpty
@@ -120,12 +184,22 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
 
   WebViewController? _webCtrl;
   bool _jsReady = false;
+  int _readyComputeRetry = 0;
   Map<String, double>? _pendingUserPinGltf;
   String? _pendingPoiToHighlight;
 
   // ---- POI index (for resolving destination coords) ----
-  Map<String, Map<String, dynamic>>? _poiByNorm;
-  bool _poiLoading = false;
+// Supports multiple POI json formats:
+// 1) Legacy: { "pois": { "POIMAT_X": {x,y,z,floor?}, ... } }
+// 2) Merged-by-floor: { "floors": { "GF": { "pois": {...} }, "F1": { "pois": {...} } } }
+// 3) All-in-one list: { "pois": { "POIMAT_X": [ {x,y,z,floor}, ... ] } }
+//
+// We normalize POI/material keys to be resilient to casing, spaces, and ".001" suffixes.
+Map<String, Map<String, Map<String, dynamic>>>? _poiByFloorNorm; // floorKey -> normKey -> poiMap
+bool _poiLoading = false;
+
+// When Category page doesn't know the floor, we may discover the destination's floor from POI json.
+String? _pendingFloorLabelToOpen;
 
   // ---- Navmesh & path state ----
   NavMesh? _navmeshF1;
@@ -194,47 +268,126 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
   }
 
   Future<void> _loadPoiIndexIfNeeded() async {
-    if (_poiByNorm != null || _poiLoading) return;
+    if (_poiByFloorNorm != null || _poiLoading) return;
     _poiLoading = true;
     try {
       // Try common asset locations (you can prune later)
-      const candidates = <String>[
-        'assets/Solitaire_poi_GF.json',
-        'assets/nav_cor/Solitaire_poi_GF.json',
-        'assets/poi/Solitaire_poi_GF.json',
+
+// Debug: check AssetManifest to confirm the POI json is actually bundled.
+try {
+  final manifestRaw = await rootBundle.loadString('AssetManifest.json');
+  final manifest = json.decode(manifestRaw) as Map<String, dynamic>;
+  final keys = manifest.keys
+      .where((k) => k.toLowerCase().contains('pois') || k.toLowerCase().contains('solitaire_pois'))
+      .take(50)
+      .toList();
+  debugPrint('🧾 AssetManifest POI candidates: ' + keys.join(', '));
+} catch (_) {}
+
+final candidates = <String>[
+      // New (singular folder)
+      "assets/poi/solitaire_pois_merged.json",
+        // ✅ Preferred merged-by-floor format (recommended)
+        'assets/pois/solitaire_pois_merged.json',
+        'assets/solitaire_pois_merged.json',
+
+        // ✅ Older "all" format (if you use it)
+        'assets/pois/solitaire_pois_all.json',
+        'assets/solitaire_pois_all.json',
+
+        // ✅ Legacy per-floor names (keep for backward compatibility)
         'assets/pois/Solitaire_poi_GF.json',
+        'assets/Solitaire_poi_GF.json',
+        'assets/pois/Solitaire_poi_F1.json',
+        'assets/Solitaire_poi_F1.json',
       ];
 
       String? jsonStr;
+      String? loadedPath;
       for (final p in candidates) {
         try {
           jsonStr = await rootBundle.loadString(p);
+          loadedPath = p;
           debugPrint('✅ POI json loaded: $p');
           break;
         } catch (_) {}
       }
       if (jsonStr == null) {
-        debugPrint('❌ POI json not found in assets (Solitaire_poi_GF.json)');
+        debugPrint('❌ POI json not found in assets (merged/all/legacy candidates)');
         return;
       }
 
       final decoded = jsonDecode(jsonStr);
-      if (decoded is! Map || decoded['pois'] is! Map) {
-        debugPrint('❌ POI json format unexpected: missing "pois" map');
+      if (decoded is! Map) {
+        debugPrint('❌ POI json format unexpected: root is not an object');
+        return;
+      }
+
+      final byFloor = <String, Map<String, Map<String, dynamic>>>{};
+
+      void addPoi(String floorKey, String rawKey, Map rawValue) {
+        final fk = floorKey.trim().isEmpty ? 'GF' : floorKey.trim();
+        final key = rawKey.toString();
+        if (key.isEmpty) return;
+
+        final norm = _normPoiKey(key);
+        final val = Map<String, dynamic>.from(rawValue);
+
+        byFloor.putIfAbsent(fk, () => <String, Map<String, dynamic>>{});
+        byFloor[fk]![norm] = val;
+      }
+
+      // Case A: merged-by-floor: { floors: { GF: { pois: {...} }, F1: { pois: {...} } } }
+      if (decoded['floors'] is Map) {
+        final floors = decoded['floors'] as Map;
+        for (final fe in floors.entries) {
+          final fk = fe.key?.toString() ?? '';
+          final floorObj = fe.value;
+          if (floorObj is Map && floorObj['pois'] is Map) {
+            final pois = floorObj['pois'] as Map;
+            for (final pe in pois.entries) {
+              final k = pe.key?.toString() ?? '';
+              if (k.isEmpty) continue;
+              if (pe.value is Map) {
+                addPoi(fk, k, pe.value as Map);
+              }
+            }
+          }
+        }
+
+        _poiByFloorNorm = byFloor;
+        debugPrint('✅ POI index built (merged floors=${byFloor.keys.length}): total=${byFloor.values.fold<int>(0,(a,m)=>a+m.length)} from $loadedPath');
+        return;
+      }
+
+      // Case B/C: { pois: { POIMAT_X: {...} } } OR { pois: { POIMAT_X: [ {...},{...} ] } }
+      if (decoded['pois'] is! Map) {
+        debugPrint('❌ POI json format unexpected: missing "floors" or "pois"');
         return;
       }
 
       final pois = decoded['pois'] as Map;
-      final out = <String, Map<String, dynamic>>{};
       for (final e in pois.entries) {
         final key = e.key?.toString() ?? '';
         if (key.isEmpty) continue;
-        if (e.value is Map) {
-          out[_normPoiKey(key)] = Map<String, dynamic>.from(e.value as Map);
+
+        final v = e.value;
+
+        if (v is Map) {
+          final fk = (v['floor']?.toString() ?? '').trim();
+          addPoi(fk.isEmpty ? 'GF' : fk, key, v);
+        } else if (v is List) {
+          for (final item in v) {
+            if (item is Map) {
+              final fk = (item['floor']?.toString() ?? '').trim();
+              addPoi(fk.isEmpty ? 'GF' : fk, key, item);
+            }
+          }
         }
       }
-      _poiByNorm = out;
-      debugPrint('✅ POI index built: ${out.length} items');
+
+      _poiByFloorNorm = byFloor;
+      debugPrint('✅ POI index built (pois map floors=${byFloor.keys.length}): total=${byFloor.values.fold<int>(0,(a,m)=>a+m.length)} from $loadedPath');
     } catch (e) {
       debugPrint('❌ Failed to build POI index: $e');
     } finally {
@@ -245,21 +398,84 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
   Future<void> _resolveDestinationFromPoiJsonIfNeeded() async {
     if (_destPosBlender != null) return;
 
-    final name = (_pendingPoiToHighlight ?? widget.destinationPoiMaterial)
-        .trim();
+    final name = (_pendingPoiToHighlight ?? widget.destinationPoiMaterial).trim();
     if (name.isEmpty) return;
 
     await _loadPoiIndexIfNeeded();
-    final idx = _poiByNorm;
-    if (idx == null) return;
+    final byFloor = _poiByFloorNorm;
+    if (byFloor == null || byFloor.isEmpty) return;
 
     final norm = _normPoiKey(name);
-    final poi = idx[norm];
 
+    // Find which floors contain this POI/material.
+    final hits = <String>[];
+    for (final fk in byFloor.keys) {
+      final m = byFloor[fk];
+      if (m != null && m.containsKey(norm)) {
+        hits.add(fk);
+      }
+    }
+
+    if (hits.isEmpty) {
+      debugPrint('⚠️ Destination not found in POI json for "$name" (norm="$norm")');
+      return;
+    }
+
+    String floorLabelFromToken(String token) {
+      final t = token.trim();
+      if (t.isEmpty) return '';
+
+      // If it's a mapURL, resolve to a floor label via venue maps.
+      if (_looksLikeMapUrl(t)) {
+        for (final m in _venueMaps) {
+          if (((m['mapURL'] ?? '').toString()).trim() == t) {
+            return (m['floorNumber'] ?? '').toString();
+          }
+        }
+        return '';
+      }
+
+      final up = t.toUpperCase();
+      if (up == 'GF') return 'GF';
+      final mm = RegExp(r'^F\s*(\d+)$', caseSensitive: false).firstMatch(t);
+      if (mm != null) return 'F${mm.group(1)}';
+
+      // If it's numeric (0/1/2...) try to map to a floor label.
+      final fnum = _toFNumber(t);
+      if (fnum.isNotEmpty) {
+        for (final m in _venueMaps) {
+          if (((m['F_number'] ?? '').toString()).trim() == fnum) {
+            return (m['floorNumber'] ?? '').toString();
+          }
+        }
+      }
+      return t;
+    }
+
+    // Choose which floor to use if the POI exists on multiple floors.
+    String chosenFloor;
+    if (hits.length == 1) {
+      chosenFloor = hits.first;
+    } else {
+      // 1) If caller provided a usable floor token (GF/F1 or mapURL), prefer it.
+      final tokenFloor = floorLabelFromToken(widget.floorSrc);
+      if (tokenFloor.isNotEmpty && hits.contains(tokenFloor)) {
+        chosenFloor = tokenFloor;
+      } else {
+        // 2) Prefer the currently displayed floor if it contains the POI.
+        final cur = _currentFloorLabel();
+        if (cur.isNotEmpty && hits.contains(cur)) {
+          chosenFloor = cur;
+        } else {
+          // 3) Fallback: first match.
+          chosenFloor = hits.first;
+        }
+      }
+    }
+
+    final poi = byFloor[chosenFloor]?[norm];
     if (poi == null) {
-      debugPrint(
-        '⚠️ Destination not found in POI json for "$name" (norm="$norm")',
-      );
+      debugPrint('⚠️ POI found on floors=$hits but missing entry for chosen="$chosenFloor"');
       return;
     }
 
@@ -267,22 +483,19 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     final y = (poi['y'] as num?)?.toDouble();
     final z = (poi['z'] as num?)?.toDouble();
     if (x == null || y == null || z == null) {
-      debugPrint('⚠️ POI json missing x/y/z for "$name"');
+      debugPrint('⚠️ POI json missing x/y/z for "$name" on floor "$chosenFloor"');
       return;
     }
 
     setState(() {
       _destPosBlender = {'x': x, 'y': y, 'z': z};
-      // Optional: set floor label if present
-      final f = poi['floor']?.toString();
-      if (f != null && f.isNotEmpty) {
-        _originFloorLabel = f;
-      }
+      _pendingFloorLabelToOpen = chosenFloor;
     });
 
-    debugPrint(
-      '✅ Destination resolved from POI json: $name -> B=($_destPosBlender)',
-    );
+    // If Category didn't know the floor, auto-switch to the POI floor.
+    _ensureFloorSelected(chosenFloor);
+
+    debugPrint('✅ Destination resolved from POI json: $name -> floor=$chosenFloor B=$_destPosBlender');
     _maybeComputeAndPushPath();
   }
 
@@ -301,7 +514,18 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     return {'x': xb, 'y': zb, 'z': -yb};
   }
 
-  Future<void> _loadNavmeshF1() async {
+  
+  String _fallbackNavmeshForFloorLabel(String floorLabel) {
+    final fl = floorLabel.trim().toUpperCase();
+    if (fl == "F1" || fl == "1") return "assets/nav_cor/navmesh_F1.json";
+    if (fl == "GF" || fl == "G" || fl == "0") return "assets/nav_cor/navmesh_GF.json";
+    // Try infer from current floor URL if it contains tokens
+    final url = _currentFloor.toLowerCase();
+    if (url.contains("f1") || url.contains("floor1") || url.contains("_1")) return "assets/nav_cor/navmesh_F1.json";
+    return "assets/nav_cor/navmesh_GF.json";
+  }
+
+Future<void> _loadNavmeshF1() async {
     // Find the current floor’s navmesh from _venueMaps using _currentFloor (mapURL)
     String path = '';
     for (final m in _venueMaps) {
@@ -312,9 +536,12 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     }
 
     if (path.isEmpty) {
-      debugPrint('⚠️ No navmesh found for current floor mapURL=$_currentFloor');
-      _navmeshF1 = null;
-      return;
+      // If Firestore doesn't provide navmesh for this floor, fall back by floor label.
+      final fl = _currentFNumber().isNotEmpty
+          ? _currentFNumber()
+          : (_requestedFloorToken.isNotEmpty ? _requestedFloorToken : "GF");
+      path = _fallbackNavmeshForFloorLabel(fl);
+      debugPrint("⚠️ Navmesh missing for floor; using fallback: $path (floor=$fl)");
     }
 
     try {
@@ -662,10 +889,28 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
           _pushUserPinToJsPath(pin);
         }
         _pushDestinationHighlightToJsPath();
+        // Try to draw immediately, but also re-try a few times because:
+        // - WebView/model can become "ready" before navmesh/user/destination are loaded
+        // - floor switching recreates the WebView
         if (_pathPointsGltf.isNotEmpty && !_pathPushed) {
           _pushPathToJs();
         } else {
           _maybeComputeAndPushPath();
+        }
+
+        // Retry compute/push a few times (bounded) to survive race conditions.
+        _readyComputeRetry = 0;
+        for (final ms in <int>[150, 450, 900, 1400]) {
+          Future.delayed(Duration(milliseconds: ms), () {
+            if (!mounted || !_jsReady) return;
+            if (_readyComputeRetry >= 4) return;
+            _readyComputeRetry++;
+            if (_pathPointsGltf.isNotEmpty) {
+              if (!_pathPushed) _pushPathToJs();
+            } else {
+              _maybeComputeAndPushPath();
+            }
+          });
         }
       }
     } catch (_) {
@@ -1133,6 +1378,9 @@ const timer = setInterval(function() {
   void initState() {
     super.initState();
 
+    _requestedFloorToken = widget.floorSrc.trim();
+    _requestedFloorIsUrl = _looksLikeMapUrl(_requestedFloorToken);
+
     // Prefer opening the floor that VenuePage passed (if any).
     if (widget.floorSrc.trim().isNotEmpty) {
       _currentFloor = widget.floorSrc.trim();
@@ -1474,6 +1722,11 @@ const timer = setInterval(function() {
               }
             }
           });
+          // If Category didn't know the floor, we may have discovered it from POI json.
+          if (widget.floorSrc.trim().isEmpty && _pendingFloorLabelToOpen != null) {
+            _ensureFloorSelected(_pendingFloorLabelToOpen!);
+          }
+
           // ✅ ADD THIS LINE HERE (AFTER setState)
           _loadNavmeshF1();
         }
@@ -1895,16 +2148,16 @@ const timer = setInterval(function() {
             ),
           ),
         ),
-        onPressed: () {
-          setState(() {
-            _currentFloor = url;
-            _pathPushed = false;
-            _pathPointsGltf = [];
-          });
+        
+onPressed: () async {
+  // Clear current rendered path; it will be re-computed / re-pushed for the selected floor.
+  setState(() {
+    _pathPushed = false;
+    _pathPointsGltf = [];
+  });
 
-          _loadNavmeshF1();
-          _maybeComputeAndPushPath();
-        },
+  await _ensureFloorSelected(label);
+},
 
         child: Text(
           label,

@@ -275,14 +275,16 @@ class _NotificationsPageState extends State<NotificationsPage> {
                 : '';
 
             final status = (d['status'] ?? 'pending').toString();
+            final displayStatus =
+                (status == 'completed' || status == 'terminated')
+                    ? 'accepted'
+                    : status;
 
             String? actionLabel;
-            bool isExpired = status == 'expired';
-            if (status == 'accepted') actionLabel = 'Accepted';
-            if (status == 'declined') actionLabel = 'Declined';
-            if (status == 'terminated') actionLabel = 'Terminated';
-            if (status == 'completed') actionLabel = 'Completed';
-            if (status == 'cancelled') actionLabel = 'Cancelled';
+            bool isExpired = displayStatus == 'expired';
+            if (displayStatus == 'accepted') actionLabel = 'Accepted';
+            if (displayStatus == 'declined') actionLabel = 'Declined';
+            if (displayStatus == 'cancelled') actionLabel = 'Cancelled';
 
             return NotificationItem(
               id: doc.id,
@@ -293,6 +295,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
               timestamp: createdAt,
               isRead: false,
               isExpired: isExpired,
+              requestStatus: status,
               senderName: (d['senderName'] ?? '').toString(),
               senderPhone: (d['senderPhone'] ?? '').toString(),
               venueName: (d['venueName'] ?? '').toString(),
@@ -360,6 +363,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
             return NotificationItem(
               id: d['data']?['requestId'],
               notificationDocId: doc.id,
+              trackRequestId: d['data']?['trackRequestId'],
               type: NotificationType.trackStarted,
               title: d['title'] ?? 'Tracking Started',
               message: d['body'] ?? '',
@@ -391,6 +395,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
             return NotificationItem(
               id: d['data']?['requestId'],
               notificationDocId: doc.id,
+              trackRequestId: d['data']?['trackRequestId'],
               type: NotificationType.trackTerminated,
               title: d['title'] ?? 'Tracking Request Terminated',
               message: d['body'] ?? '',
@@ -421,6 +426,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
             return NotificationItem(
               id: d['data']?['requestId'],
               notificationDocId: doc.id,
+              trackRequestId: d['data']?['trackRequestId'],
               type: NotificationType.trackCompleted,
               title: d['title'] ?? 'Tracking Completed',
               message: d['body'] ?? '',
@@ -532,6 +538,11 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                     return const SizedBox();
                                   }
 
+                                  final trackRequestStatusById = {
+                                    for (final n in incomingTrack)
+                                      n.id: n.requestStatus ?? '',
+                                  };
+
                                   final merged = [
                                     ...incomingTrack,
                                     ...senderResponses,
@@ -593,7 +604,11 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                                 : (readMap[notif.id] ??
                                                       notif.isRead));
 
-                                        return _buildNotificationItem(notif);
+                                        return _buildNotificationItem(
+                                          notif,
+                                          trackRequestStatusById:
+                                              trackRequestStatusById,
+                                        );
                                       }),
 
                                       if (!_showAll && merged.length > 5)
@@ -661,7 +676,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
   // ---------- Notification Item ----------
 
-  Widget _buildNotificationItem(NotificationItem notification) {
+  Widget _buildNotificationItem(
+    NotificationItem notification, {
+    required Map<String, String> trackRequestStatusById,
+  }) {
     final currentOffset = _notificationOffsets[notification.id] ?? 0.0;
     final deleteButtonWidth = 70.0;
 
@@ -815,25 +833,12 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                         // Status Labels (Expired, Accepted, or Declined)
                                         if (notification.isExpired ||
                                             notification.actionLabel != null)
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 8,
-                                              vertical: 3,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: Colors.grey[200],
-                                              borderRadius:
-                                                  BorderRadius.circular(6),
-                                            ),
-                                            child: Text(
-                                              notification.actionLabel ??
-                                                  'Expired',
-                                              style: TextStyle(
-                                                fontSize: 11,
-                                                fontWeight: FontWeight.w600,
-                                                color: Colors.grey[600],
-                                              ),
-                                            ),
+                                          _notificationStatusBadge(
+                                            notification.isExpired
+                                                ? 'expired'
+                                                : (notification.actionLabel ??
+                                                        '')
+                                                    .toLowerCase(),
                                           ),
                                       ],
                                     ),
@@ -914,9 +919,21 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
                             Builder(
                               builder: (_) {
+                                final trackStatus =
+                                    notification.trackRequestId == null
+                                        ? null
+                                        : trackRequestStatusById[
+                                            notification.trackRequestId!
+                                          ];
+                                final isTerminated = trackStatus == 'terminated';
+                                final isCompleted = trackStatus == 'completed';
                                 final expired =
-                                    notification.endAt != null &&
-                                    DateTime.now().isAfter(notification.endAt!);
+                                    (notification.endAt != null &&
+                                        DateTime.now().isAfter(
+                                          notification.endAt!,
+                                        )) ||
+                                    isTerminated ||
+                                    isCompleted;
 
                                 return OutlinedButton(
                                   onPressed: expired
@@ -1761,6 +1778,63 @@ class _NotificationsPageState extends State<NotificationsPage> {
       );
     }
   }
+
+  Widget _notificationStatusBadge(String status) {
+    Color bg;
+    Color text;
+    String label;
+    switch (status) {
+      case 'accepted':
+        bg = AppColors.kGreen.withOpacity(0.1);
+        text = AppColors.kGreen;
+        label = 'Accepted';
+        break;
+      case 'declined':
+        bg = AppColors.kError.withOpacity(0.1);
+        text = AppColors.kError;
+        label = 'Declined';
+        break;
+      case 'expired':
+        bg = Colors.grey.withOpacity(0.15);
+        text = Colors.grey[700]!;
+        label = 'Expired';
+        break;
+      case 'terminated':
+        bg = AppColors.kError.withOpacity(0.1);
+        text = AppColors.kError;
+        label = 'Terminated';
+        break;
+      case 'cancelled':
+        bg = Colors.grey.withOpacity(0.15);
+        text = Colors.grey[700]!;
+        label = 'Cancelled';
+        break;
+      case 'completed':
+        bg = const Color.fromARGB(255, 12, 13, 10).withOpacity(0.1);
+        text = AppColors.kGreen;
+        label = 'Completed';
+        break;
+      default:
+        bg = Colors.grey.withOpacity(0.15);
+        text = Colors.grey[700]!;
+        label = status.isEmpty ? '—' : status;
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: text,
+        ),
+      ),
+    );
+  }
 }
 
 // ----------------------------------------------------------------------------
@@ -1847,6 +1921,8 @@ enum NotificationType {
 class NotificationItem {
   final String id;
   String? notificationDocId; // 🔥 جديد
+  final String? trackRequestId;
+  final String? requestStatus;
   final DateTime? endAt;
   final bool requiresAction;
 
@@ -1868,6 +1944,8 @@ class NotificationItem {
   NotificationItem({
     required this.id,
     this.notificationDocId,
+    this.trackRequestId,
+    this.requestStatus,
     this.endAt,
 
     this.requiresAction = false,

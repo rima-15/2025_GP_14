@@ -210,14 +210,64 @@ export const onTrackRequestStatusChanged = onDocumentUpdated(
 
 
 
-      // Only handle accepted/declined/terminated
+      // Only handle accepted/declined/terminated/cancelled
 
       if (
         after.status !== "accepted" &&
         after.status !== "declined" &&
-        after.status !== "terminated"
+        after.status !== "terminated" &&
+        after.status !== "cancelled"
       )
         return;
+
+      // Cancelled: notify receiver only if it was previously accepted
+      if (after.status === "cancelled") {
+        if (before.status !== "accepted") return;
+
+        const receiverId = after.receiverId;
+        if (!receiverId) return;
+
+        const receiverDoc = await db.collection("users").doc(receiverId).get();
+        if (!receiverDoc.exists) return;
+
+        const receiverTokens: string[] = receiverDoc.data()?.fcmTokens ?? [];
+        if (receiverTokens.length === 0) return;
+
+        const senderName =
+          (after.senderName ?? "Someone").toString().trim() || "Someone";
+
+        const notifRef = db.collection("notifications").doc();
+        const notifId = notifRef.id;
+
+        await admin.messaging().sendEachForMulticast({
+          notification: {
+            title: "Tracking Request Cancelled",
+            body: `${senderName} cancelled the tracking request`,
+          },
+          data: {
+            type: "trackCancelled",
+            requestId: notifId,
+            trackRequestId: event.params.requestId,
+          },
+          tokens: receiverTokens,
+        });
+
+        await notifRef.set({
+          userId: receiverId,
+          type: "trackCancelled",
+          requiresAction: false,
+          data: {
+            requestId: notifId,
+            trackRequestId: event.params.requestId,
+          },
+          title: "Tracking Request Cancelled",
+          body: `${senderName} cancelled the tracking request`,
+          isRead: false,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        return;
+      }
 
 
 

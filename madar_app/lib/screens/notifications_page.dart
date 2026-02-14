@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
 import 'package:madar_app/theme/theme.dart';
@@ -119,6 +120,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
   bool _showAll = false;
   final List<String> _respondedNotifications = [];
   final Map<String, double> _notificationOffsets = {};
+  Timer? _uiRefreshTimer;
   bool _freezeReadUI = true; // نخليها true طول ما الصفحة مفتوحة
   Map<String, bool> _frozenReadMap = {};
   final Map<String, bool> _localReadOverride = {}; // للي تبينه يختفي فوراً
@@ -128,9 +130,19 @@ class _NotificationsPageState extends State<NotificationsPage> {
   void initState() {
     super.initState();
 
+    _uiRefreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) setState(() {});
+    });
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _onOpenNotificationsPage();
     });
+  }
+
+  @override
+  void dispose() {
+    _uiRefreshTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _onOpenNotificationsPage() async {
@@ -275,13 +287,20 @@ class _NotificationsPageState extends State<NotificationsPage> {
                 : '';
 
             final status = (d['status'] ?? 'pending').toString();
+            final wasResponded = d['respondedAt'] != null;
+            final isTimeExpired =
+                endAt != null && DateTime.now().isAfter(endAt);
             final displayStatus =
-                (status == 'completed' || status == 'terminated')
-                    ? 'accepted'
-                    : status;
+                (status == 'completed' ||
+                    status == 'terminated' ||
+                    (status == 'cancelled' && wasResponded))
+                ? 'accepted'
+                : status;
 
             String? actionLabel;
-            bool isExpired = displayStatus == 'expired';
+            bool isExpired =
+                displayStatus == 'expired' ||
+                (status == 'pending' && isTimeExpired);
             if (displayStatus == 'accepted') actionLabel = 'Accepted';
             if (displayStatus == 'declined') actionLabel = 'Declined';
             if (displayStatus == 'cancelled') actionLabel = 'Cancelled';
@@ -296,6 +315,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
               isRead: false,
               isExpired: isExpired,
               requestStatus: status,
+              endAt: endAt,
               senderName: (d['senderName'] ?? '').toString(),
               senderPhone: (d['senderPhone'] ?? '').toString(),
               venueName: (d['venueName'] ?? '').toString(),
@@ -334,8 +354,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
               title: titleStr.isNotEmpty
                   ? titleStr
                   : (typeStr == 'trackAccepted'
-                      ? 'Track Request Accepted'
-                      : 'Track Request Declined'),
+                        ? 'Track Request Accepted'
+                        : 'Track Request Declined'),
               message: (d['body'] ?? '').toString(),
               timestamp: ts,
               isRead: d['isRead'] ?? false,
@@ -438,6 +458,37 @@ class _NotificationsPageState extends State<NotificationsPage> {
         });
   }
 
+  Stream<List<NotificationItem>> _trackCancelledStream() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return const Stream.empty();
+
+    return FirebaseFirestore.instance
+        .collection('notifications')
+        .where('userId', isEqualTo: uid)
+        .where('type', isEqualTo: 'trackCancelled')
+        .snapshots()
+        .map((snap) {
+          return snap.docs.map((doc) {
+            final d = doc.data();
+
+            final ts =
+                (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+
+            return NotificationItem(
+              id: d['data']?['requestId'],
+              notificationDocId: doc.id,
+              trackRequestId: d['data']?['trackRequestId'],
+              type: NotificationType.trackCancelled,
+              title: d['title'] ?? 'Tracking Request Cancelled',
+              message: d['body'] ?? '',
+              timestamp: ts,
+              isRead: d['isRead'] ?? false,
+              requiresAction: d['requiresAction'] == true,
+            );
+          }).toList();
+        });
+  }
+
   /*List<NotificationItem> get _visibleNotifications {
     if (_showAll) return _notifications;
     return _notifications.take(5).toList();
@@ -528,108 +579,124 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                   final trackCompleted =
                                       trackCompletedSnap.data ?? [];
 
-                                  if (!docMapSnap.hasData ||
-                                      !notifSnap.hasData ||
-                                      !incomingSnap.hasData ||
-                                      !senderSnap.hasData ||
-                                      !trackStartedSnap.hasData ||
-                                      !trackTerminatedSnap.hasData ||
-                                      !trackCompletedSnap.hasData) {
-                                    return const SizedBox();
-                                  }
+                                  return StreamBuilder<List<NotificationItem>>(
+                                    stream: _trackCancelledStream(),
+                                    builder: (context, trackCancelledSnap) {
+                                      final trackCancelled =
+                                          trackCancelledSnap.data ?? [];
 
-                                  final trackRequestStatusById = {
-                                    for (final n in incomingTrack)
-                                      n.id: n.requestStatus ?? '',
-                                  };
+                                      if (!docMapSnap.hasData ||
+                                          !notifSnap.hasData ||
+                                          !incomingSnap.hasData ||
+                                          !senderSnap.hasData ||
+                                          !trackStartedSnap.hasData ||
+                                          !trackTerminatedSnap.hasData ||
+                                          !trackCompletedSnap.hasData ||
+                                          !trackCancelledSnap.hasData) {
+                                        return const SizedBox();
+                                      }
 
-                                  final merged = [
-                                    ...incomingTrack,
-                                    ...senderResponses,
-                                    ...trackStarted,
-                                    ...trackTerminated,
-                                    ...trackCompleted,
-                                  ]
-                                      .where(
-                                        (n) => notifDocMap.containsKey(n.id),
-                                      )
-                                      .toList();
+                                      final trackRequestStatusById = {
+                                        for (final n in incomingTrack)
+                                          n.id: n.requestStatus ?? '',
+                                      };
 
-                                  merged.sort(
-                                    (a, b) =>
-                                        b.timestamp.compareTo(a.timestamp),
-                                  );
+                                      final merged =
+                                          [
+                                                ...incomingTrack,
+                                                ...senderResponses,
+                                                ...trackStarted,
+                                                ...trackTerminated,
+                                                ...trackCompleted,
+                                                ...trackCancelled,
+                                              ]
+                                              .where(
+                                                (n) => notifDocMap.containsKey(
+                                                  n.id,
+                                                ),
+                                              )
+                                              .toList();
 
-                                  // ?? inject notificationDocId
-                                  for (final n in merged) {
-                                    n.notificationDocId = notifDocMap[n.id];
+                                      merged.sort(
+                                        (a, b) =>
+                                            b.timestamp.compareTo(a.timestamp),
+                                      );
 
-                                    // ?? ??? ?? ?? notification doc = ?????? ?????
-                                    if (n.notificationDocId == null) {
-                                      n.isRead = true;
-                                    }
-                                  }
+                                      // ?? inject notificationDocId
+                                      for (final n in merged) {
+                                        n.notificationDocId = notifDocMap[n.id];
 
-                                  final visible = _showAll
-                                      ? merged
-                                      : merged.take(5).toList();
+                                        // ?? ??? ?? ?? notification doc = ?????? ?????
+                                        if (n.notificationDocId == null) {
+                                          n.isRead = true;
+                                        }
+                                      }
 
-                                  if (merged.isEmpty) return _buildEmptyState();
+                                      final visible = _showAll
+                                          ? merged
+                                          : merged.take(5).toList();
 
-                                  return ListView(
-                                    children: [
-                                      Padding(
-                                        padding: const EdgeInsets.fromLTRB(
-                                          16,
-                                          1,
-                                          10,
-                                          1,
-                                        ),
-                                        child: Row(
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.end,
-                                          children: const [],
-                                        ),
-                                      ),
+                                      if (merged.isEmpty)
+                                        return _buildEmptyState();
 
-                                      ...visible.map((notif) {
-                                        final override =
-                                            _localReadOverride[notif.id];
-
-                                        notif.isRead =
-                                            override ??
-                                            (_freezeReadUI
-                                                ? (_frozenReadMap[notif.id] ??
-                                                      notif.isRead)
-                                                : (readMap[notif.id] ??
-                                                      notif.isRead));
-
-                                        return _buildNotificationItem(
-                                          notif,
-                                          trackRequestStatusById:
-                                              trackRequestStatusById,
-                                        );
-                                      }),
-
-                                      if (!_showAll && merged.length > 5)
-                                        Padding(
-                                          padding: const EdgeInsets.all(5),
-                                          child: TextButton(
-                                            onPressed: () =>
-                                                setState(() => _showAll = true),
-                                            child: const Text(
-                                              'View All Notifications',
-                                              style: TextStyle(
-                                                fontSize: 15,
-                                                fontWeight: FontWeight.w600,
-                                                color: AppColors.kGreen,
-                                              ),
+                                      return ListView(
+                                        children: [
+                                          Padding(
+                                            padding: const EdgeInsets.fromLTRB(
+                                              16,
+                                              1,
+                                              10,
+                                              1,
+                                            ),
+                                            child: Row(
+                                              mainAxisAlignment:
+                                                  MainAxisAlignment.end,
+                                              children: const [],
                                             ),
                                           ),
-                                        ),
 
-                                      const SizedBox(height: 20),
-                                    ],
+                                          ...visible.map((notif) {
+                                            final override =
+                                                _localReadOverride[notif.id];
+
+                                            notif.isRead =
+                                                override ??
+                                                (_freezeReadUI
+                                                    ? (_frozenReadMap[notif
+                                                              .id] ??
+                                                          notif.isRead)
+                                                    : (readMap[notif.id] ??
+                                                          notif.isRead));
+
+                                            return _buildNotificationItem(
+                                              notif,
+                                              trackRequestStatusById:
+                                                  trackRequestStatusById,
+                                            );
+                                          }),
+
+                                          if (!_showAll && merged.length > 5)
+                                            Padding(
+                                              padding: const EdgeInsets.all(5),
+                                              child: TextButton(
+                                                onPressed: () => setState(
+                                                  () => _showAll = true,
+                                                ),
+                                                child: const Text(
+                                                  'View All Notifications',
+                                                  style: TextStyle(
+                                                    fontSize: 15,
+                                                    fontWeight: FontWeight.w600,
+                                                    color: AppColors.kGreen,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+
+                                          const SizedBox(height: 20),
+                                        ],
+                                      );
+                                    },
                                   );
                                 },
                               );
@@ -837,8 +904,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                             notification.isExpired
                                                 ? 'expired'
                                                 : (notification.actionLabel ??
-                                                        '')
-                                                    .toLowerCase(),
+                                                          '')
+                                                      .toLowerCase(),
                                           ),
                                       ],
                                     ),
@@ -921,11 +988,11 @@ class _NotificationsPageState extends State<NotificationsPage> {
                               builder: (_) {
                                 final trackStatus =
                                     notification.trackRequestId == null
-                                        ? null
-                                        : trackRequestStatusById[
-                                            notification.trackRequestId!
-                                          ];
-                                final isTerminated = trackStatus == 'terminated';
+                                    ? null
+                                    : trackRequestStatusById[notification
+                                          .trackRequestId!];
+                                final isTerminated =
+                                    trackStatus == 'terminated';
                                 final isCompleted = trackStatus == 'completed';
                                 final expired =
                                     (notification.endAt != null &&
@@ -1393,6 +1460,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
         return Icons.check_circle_outline;
       case NotificationType.trackTerminated:
         return Icons.block;
+      case NotificationType.trackCancelled:
+        return Icons.cancel_outlined;
 
       case NotificationType.locationRefresh:
         return Icons.refresh;
@@ -1426,6 +1495,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
       case NotificationType.trackTerminated:
       case NotificationType.participantRejected:
       case NotificationType.participantCancelled:
+        return AppColors.kError;
+      case NotificationType.trackCancelled:
         return AppColors.kError;
       default:
         return AppColors.kGreen;
@@ -1907,6 +1978,7 @@ enum NotificationType {
   trackStarted, // 🔥 أضيفي هذا هنا
   trackTerminated,
   trackCompleted,
+  trackCancelled,
   locationRefresh,
   navigateRequest,
   meetingPointRequest,
@@ -1966,4 +2038,3 @@ class NotificationItem {
     this.actionLabel,
   });
 }
-

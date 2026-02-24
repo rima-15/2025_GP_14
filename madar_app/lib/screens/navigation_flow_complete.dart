@@ -31,6 +31,7 @@ void showNavigationDialog(
   String destinationPoiMaterial = '',
   String floorSrc = '',
   Map<String, double>? destinationHitGltf,
+  String? destinationFloorLabel,
 }) {
   showModalBottomSheet(
     context: context,
@@ -42,6 +43,7 @@ void showNavigationDialog(
       destinationPoiMaterial: destinationPoiMaterial,
       floorSrc: floorSrc,
       destinationHitGltf: destinationHitGltf,
+      destinationFloorLabel: destinationFloorLabel,
     ),
   );
 }
@@ -63,6 +65,11 @@ class NavigateToShopDialog extends StatelessWidget {
   /// Destination hit point in glTF coords from the map hotspot (optional)
   final Map<String, double>? destinationHitGltf;
 
+  /// Optional destination floor label (e.g. "GF", "F1").
+  /// When provided, multi-floor routing can use connectors even if the POI JSON
+  /// doesn't contain this destination.
+  final String? destinationFloorLabel;
+
   const NavigateToShopDialog({
     super.key,
     required this.shopName,
@@ -70,6 +77,7 @@ class NavigateToShopDialog extends StatelessWidget {
     this.destinationPoiMaterial = '',
     this.floorSrc = '',
     this.destinationHitGltf,
+    this.destinationFloorLabel,
   });
 
   @override
@@ -148,7 +156,8 @@ class NavigateToShopDialog extends StatelessWidget {
                     destinationPoiMaterial: destinationPoiMaterial,
                     floorSrc: floorSrc,
                     destinationHitGltf: destinationHitGltf,
-                  ),
+                    destinationFloorLabel: destinationFloorLabel,
+                            ),
                 );
               },
             ),
@@ -373,6 +382,9 @@ class SetYourLocationDialog extends StatefulWidget {
 
   /// Destination hit point in glTF coords from the map hotspot (optional)
   final Map<String, double>? destinationHitGltf;
+
+  /// Optional destination floor label (e.g. "GF", "F1").
+  final String? destinationFloorLabel;
   final Map<String, double>? initialUserPinGltf;
   final String? initialFloorLabel;
 
@@ -383,6 +395,7 @@ class SetYourLocationDialog extends StatefulWidget {
     this.destinationPoiMaterial = '',
     this.floorSrc = '',
     this.destinationHitGltf,
+    this.destinationFloorLabel,
     this.initialUserPinGltf,
     this.initialFloorLabel,
   });
@@ -754,8 +767,8 @@ function setUserPin(viewer, pos) {
 // --- Flutter -> JS (move pin after Flutter-side snapping) ---
 window.__pendingUserPin = null;
 
-window.setUserPinFromFlutter = function(x, y, z) {
-  window.clearUserPinFromFlutter = function() {
+// Clear pin (can be called when switching to a different floor)
+window.clearUserPinFromFlutter = function() {
   const viewer = getViewer();
   if (!viewer) return;
 
@@ -767,6 +780,22 @@ window.setUserPinFromFlutter = function(x, y, z) {
     postToTest("🧹 clearUserPinFromFlutter");
   } catch(e) {}
 };
+
+// Set pin from Flutter (supports pending until model is ready)
+window.setUserPinFromFlutter = function(x, y, z) {
+  const viewer = getViewer();
+  const p = { x: Number(x), y: Number(y), z: Number(z) };
+
+  if (!viewer || !viewer.model) {
+    window.__pendingUserPin = p;
+    postToTest("⏳ setUserPinFromFlutter pending (viewer/model not ready)");
+    return false;
+  }
+
+  setUserPin(viewer, p);
+  window.__pendingUserPin = null;
+  postToTest("✅ setUserPinFromFlutter applied");
+  return true;
 };
 
 // --- Destination POI highlight (by material name) ---
@@ -1440,16 +1469,18 @@ const timer = setInterval(function() {
                         context,
                         MaterialPageRoute(
                           builder: (_) => PathOverviewScreen(
-                            shopName: widget.shopName,
-                            shopId: widget.shopId,
-                            startingMethod: 'pin',
-                            destinationPoiMaterial:
-                                widget.destinationPoiMaterial,
-                            floorSrc: widget.floorSrc.isNotEmpty
-                                ? widget.floorSrc
-                                : _currentFloorURL,
-                            destinationHitGltf: widget.destinationHitGltf,
-                          ),
+                        shopName: widget.shopName,
+                        shopId: widget.shopId,
+                        startingMethod: 'pin',
+                        destinationPoiMaterial: widget.destinationPoiMaterial,
+                        destinationHitGltf: widget.destinationHitGltf,
+                        destinationFloorLabel: widget.destinationFloorLabel,
+                        // IMPORTANT: floorSrc must be the USER'S CURRENT floor, not the destination's floor.
+                        floorSrc: _currentFloorURL.isNotEmpty
+                            ? _currentFloorURL
+                            : (widget.floorSrc.isNotEmpty ? widget.floorSrc : _currentFloorURL),
+                        originFloorLabel: _floorLabelForUrl(_currentFloorURL),
+                      )
                         ),
                       );
                     }
@@ -1674,9 +1705,15 @@ class PinStartLocationScreen extends SetYourLocationDialog {
     required String startingMethod,
 
     String destinationPoiMaterial = '',
+    String floorSrc = '',
+    Map<String, double>? destinationHitGltf,
+    String? destinationFloorLabel,
   }) : super(
          shopName: shopName,
          shopId: shopId,
          destinationPoiMaterial: destinationPoiMaterial,
+         floorSrc: floorSrc,
+         destinationHitGltf: destinationHitGltf,
+         destinationFloorLabel: destinationFloorLabel,
        );
 }

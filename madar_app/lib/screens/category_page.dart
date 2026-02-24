@@ -15,12 +15,14 @@ class CategoryPage extends StatefulWidget {
   final String categoryName;
   final String venueId;
   final String categoryId;
+  final String currentFloorSrc;
 
   const CategoryPage({
     super.key,
     required this.categoryName,
     required this.venueId,
     required this.categoryId,
+    required this.currentFloorSrc,
   });
 
   @override
@@ -29,6 +31,17 @@ class CategoryPage extends StatefulWidget {
 
 class _CategoryPageState extends State<CategoryPage>
     with AutomaticKeepAliveClientMixin {
+String _floorLabelFromSrc(String src) {
+  final s = (src).trim();
+  if (s.isEmpty) return '';
+  final file = s.split('/').last; // e.g. GF_map.glb, F1_map.glb
+  final m = RegExp(r'^(GF|F\d+)', caseSensitive: false).firstMatch(file);
+  if (m != null) return (m.group(1) ?? '').toUpperCase();
+  if (file.toLowerCase().contains('gf')) return 'GF';
+  final m2 = RegExp(r'f(\d+)', caseSensitive: false).firstMatch(file);
+  if (m2 != null) return 'F${m2.group(1)}';
+  return '';
+}
   @override
   bool get wantKeepAlive => true;
 
@@ -271,13 +284,16 @@ if (material.toUpperCase().startsWith('POI_')) {
       return;
     }
 
-    showNavigationDialog(
-  context,
-  placeName,
-  placeId,
-  destinationPoiMaterial: material,
-  floorSrc: floorSrc,
-);
+	showNavigationDialog(
+	context,
+	placeName,
+	placeId,
+	destinationPoiMaterial: material,
+	floorSrc: floorSrc,
+	// Pass destination floor label for multi-floor routing.
+	// Use the resolved `floorSrc` (already extracted from Firestore / place data).
+		destinationFloorLabel: _floorLabelFromSrc(floorSrc),
+	);
 
 
 }

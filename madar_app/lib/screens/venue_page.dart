@@ -1024,6 +1024,7 @@ class _VenuePageState extends State<VenuePage>
                           child: _DiscoverMoreSection(
                             venueId: effectiveVenueId,
                             getUrlFor: _imageUrlForCategory,
+                            currentFloorSrc: _currentFloor,
                           ),
                         ),
                         const SizedBox(height: 24),
@@ -1701,6 +1702,8 @@ return;
                       shopName: shopName,
                       shopId: destinationPoi,
                       startingMethod: 'camera',
+                      destinationPoiMaterial: destinationPoi,
+                      floorSrc: widget.currentFloor,
                     ),
                   ),
                 );
@@ -2425,6 +2428,8 @@ class _PinStartLocationScreenState extends State<PinStartLocationScreen> {
             shopName: widget.shopName,
             shopId: widget.destinationPoi,
             startingMethod: 'pin',
+            destinationPoiMaterial: widget.destinationPoi,
+            floorSrc: widget.floorSrc,
           ),
         ),
       );
@@ -2882,8 +2887,14 @@ sortedMaps.sort((a, b) {
 class _DiscoverMoreSection extends StatefulWidget {
   final String venueId;
   final Future<String?> Function(String) getUrlFor;
+  /// Current floor source (usually the current mapURL) so CategoryPage opens on the same floor.
+  final String currentFloorSrc;
 
-  const _DiscoverMoreSection({required this.venueId, required this.getUrlFor});
+  const _DiscoverMoreSection({
+    required this.venueId,
+    required this.getUrlFor,
+    required this.currentFloorSrc,
+  });
 
   @override
   State<_DiscoverMoreSection> createState() => _DiscoverMoreSectionState();
@@ -3001,6 +3012,7 @@ class _DiscoverMoreSectionState extends State<_DiscoverMoreSection>
                   categoryName: cat.name,
                   venueId: widget.venueId,
                   categoryId: cat.id,
+                  currentFloorSrc: widget.currentFloorSrc, // current floor mapURL
                 ),
               ),
             );

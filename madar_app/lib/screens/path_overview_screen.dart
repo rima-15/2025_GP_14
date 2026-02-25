@@ -82,7 +82,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
   // Caller-provided floor selector. Can be a mapURL (assets/...glb) or a label like "GF"/"F1"/"0"/"1".
   String _requestedFloorToken = '';
   bool _requestedFloorIsUrl = false;
-
+  static const double _unitToMeters = 69.32; // adjust based on your model
   bool _looksLikeMapUrl(String s) {
     final t = s.trim();
     if (t.isEmpty) return false;
@@ -224,6 +224,21 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       }
     }
     return '';
+  }
+
+  double _calculateTotalDistance() {
+    double total = 0.0;
+    _pathPointsByFloorGltf.forEach((floor, points) {
+      for (int i = 1; i < points.length; i++) {
+        final p1 = points[i - 1];
+        final p2 = points[i];
+        final dx = p1['x']! - p2['x']!;
+        final dy = p1['y']! - p2['y']!;
+        final dz = p1['z']! - p2['z']!;
+        total += math.sqrt(dx * dx + dy * dy + dz * dz);
+      }
+    });
+    return total;
   }
 
   bool _isPreferenceAvailableForCurrentRoute(String prefValue) {
@@ -1719,6 +1734,18 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
 
     _routeComputed = true;
 
+    // Compute total distance and estimate time
+    if (_pathPointsByFloorGltf.isNotEmpty) {
+      final rawDist = _calculateTotalDistance();
+      final totalDist = rawDist * _unitToMeters;
+      _estimatedDistance = '${totalDist.toStringAsFixed(0)} m';
+      final timeSeconds = totalDist / 1.4; // adjust speed as needed
+      final minutes = (timeSeconds / 60).ceil();
+      _estimatedTime = minutes < 1 ? '<1 min' : '$minutes min';
+    } else {
+      _estimatedDistance = '? m';
+      _estimatedTime = '? min';
+    }
     if (mounted) setState(() {});
     _syncOverlaysForCurrentFloor();
   }
@@ -2693,7 +2720,6 @@ const timer = setInterval(function() {
   }
 
   Future<void> _changePreference(String preference) async {
-    // Optional shortcut: tapping the same selected option resets to "All"
     final String nextPreference = (_selectedPreference == preference)
         ? 'any'
         : preference;
@@ -2716,25 +2742,10 @@ const timer = setInterval(function() {
 
     setState(() {
       _selectedPreference = nextPreference;
-
-      // Optional placeholder estimates (replace later with real route metrics)
-      if (nextPreference == 'elevator') {
-        _estimatedTime = '3 min';
-        _estimatedDistance = '180 m';
-      } else if (nextPreference == 'escalator') {
-        _estimatedTime = '2.5 min';
-        _estimatedDistance = '170 m';
-      } else if (nextPreference == 'stairs') {
-        _estimatedTime = '2 min';
-        _estimatedDistance = '166 m';
-      } else {
-        // "any" = All connectors / shortest route
-        _estimatedTime = '2 min';
-        _estimatedDistance = '166 m';
-      }
+      // No placeholder updates – real values come from recompute.
     });
 
-    // Recompute current route immediately so connector filtering takes effect.
+    // Recompute current route immediately
     try {
       final hadRoute = _routeComputed || _pathPointsByFloorGltf.isNotEmpty;
       final canCompute = _userPosBlender != null;

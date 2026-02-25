@@ -64,11 +64,11 @@ class PathOverviewScreen extends StatefulWidget {
   State<PathOverviewScreen> createState() => _PathOverviewScreenState();
 }
 
-
 class ConnectorLink {
   final String id;
   final String type; // e.g. "stairs", "elevator", "escalator"
-  final Map<String, Map<String, double>> endpointsByFNumber; // f_number -> Blender position
+  final Map<String, Map<String, double>>
+  endpointsByFNumber; // f_number -> Blender position
 
   const ConnectorLink({
     required this.id,
@@ -152,7 +152,8 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     }
 
     // Arabic ordinals (very lightweight).
-    if (up.contains('الاول') || up.contains('الأول') || up.contains('اول')) return '1';
+    if (up.contains('الاول') || up.contains('الأول') || up.contains('اول'))
+      return '1';
     if (up.contains('الثاني') || up.contains('ثاني')) return '2';
     if (up.contains('الثالث') || up.contains('ثالث')) return '3';
     if (up.contains('الرابع') || up.contains('رابع')) return '4';
@@ -169,37 +170,50 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     return '';
   }
 
+  int? _fNumberFromLabel(String? floorLabel) {
+    final s = (floorLabel ?? '').trim().toUpperCase();
+    if (s.isEmpty) return null;
+    if (s == 'GF' || s == 'G' || s == '0' || s == 'F0') return 0;
 
-/// Best-effort: turn any "floor token" into a label like GF / F1 / F2.
-/// Accepts: "GF", "G", "Ground", "F1", "1", "Floor 1", asset paths ".../F1_map.glb", "...navmesh_F1.json", etc.
-String _floorLabelFromToken(String? token) {
-  final raw = (token ?? '').trim();
-  if (raw.isEmpty) return '';
+    final m = RegExp(r'F?\s*(-?\d+)').firstMatch(s);
+    if (m != null) return int.tryParse(m.group(1)!);
 
-  final up = raw.toUpperCase();
-
-  // Common ground-floor tokens.
-  if (up == 'G' || up == 'GF' || up.contains('GROUND') || up.contains('GROUNDFLOOR')) {
-    return 'GF';
+    return null;
   }
 
-  // Try extract GF / F<number> from asset/path-like tokens.
-  final mPath = RegExp(r'(?:^|[^A-Z0-9])(GF|F\d+)(?:[^A-Z0-9]|$)').firstMatch(up);
-  if (mPath != null) return mPath.group(1)!;
+  /// Best-effort: turn any "floor token" into a label like GF / F1 / F2.
+  /// Accepts: "GF", "G", "Ground", "F1", "1", "Floor 1", asset paths ".../F1_map.glb", "...navmesh_F1.json", etc.
+  String _floorLabelFromToken(String? token) {
+    final raw = (token ?? '').trim();
+    if (raw.isEmpty) return '';
 
-  // Try parse into an F-number ('' if unknown).
-  final fnum = _toFNumber(up);
-  if (fnum.isEmpty) return '';
+    final up = raw.toUpperCase();
 
-  if (fnum == '0') return 'GF';
-  if (fnum.startsWith('-')) {
-    final n = fnum.substring(1);
-    return n.isEmpty ? '' : 'B$n';
+    // Common ground-floor tokens.
+    if (up == 'G' ||
+        up == 'GF' ||
+        up.contains('GROUND') ||
+        up.contains('GROUNDFLOOR')) {
+      return 'GF';
+    }
+
+    // Try extract GF / F<number> from asset/path-like tokens.
+    final mPath = RegExp(
+      r'(?:^|[^A-Z0-9])(GF|F\d+)(?:[^A-Z0-9]|$)',
+    ).firstMatch(up);
+    if (mPath != null) return mPath.group(1)!;
+
+    // Try parse into an F-number ('' if unknown).
+    final fnum = _toFNumber(up);
+    if (fnum.isEmpty) return '';
+
+    if (fnum == '0') return 'GF';
+    if (fnum.startsWith('-')) {
+      final n = fnum.substring(1);
+      return n.isEmpty ? '' : 'B$n';
+    }
+    return 'F$fnum';
   }
-  return 'F$fnum';
-}
-
-
 
   String _currentFNumber() {
     final url = _currentFloor.trim();
@@ -210,6 +224,39 @@ String _floorLabelFromToken(String? token) {
       }
     }
     return '';
+  }
+
+  bool _isPreferenceAvailableForCurrentRoute(String prefValue) {
+    final pref = prefValue.toLowerCase().trim();
+    if (pref == 'any') return true;
+
+    final startLabel = _desiredStartFloorLabel.isNotEmpty
+        ? _desiredStartFloorLabel
+        : _currentFloorLabel();
+    final destLabel =
+        (_destFloorLabelFixed ??
+                _destFloorLabel ??
+                widget.destinationFloorLabel ??
+                '')
+            .trim();
+    if (destLabel.isEmpty) return true;
+
+    final startF = _fNumberFromLabel(startLabel);
+    final destF = _fNumberFromLabel(destLabel);
+    if (startF == null || destF == null) return true;
+    if (startF == destF) return true;
+
+    bool linksFloors(ConnectorLink c) =>
+        c.endpointsByFNumber.containsKey(startF.toString()) &&
+        c.endpointsByFNumber.containsKey(destF.toString());
+
+    bool matchesPref(ConnectorLink c) {
+      final t = _normalizeConnectorType(c.type);
+      final dirOk = _connectorDirectionAllowed(t, startF, destF);
+      return dirOk && _connectorMatchesPreference(t, pref);
+    }
+
+    return _connectors.any((c) => linksFloors(c) && matchesPref(c));
   }
 
   String _navmeshForCurrentFloor() {
@@ -293,7 +340,6 @@ String _floorLabelFromToken(String? token) {
     }
   }
 
-
   bool _isSavedFloorActive() {
     // saved floor from Firestore (you store floor as 0/1/2...)
     final savedRaw = _desiredStartFloorLabel.isNotEmpty
@@ -316,19 +362,20 @@ String _floorLabelFromToken(String? token) {
   String? _pendingPoiToHighlight;
 
   // ---- POI index (for resolving destination coords) ----
-// Supports multiple POI json formats:
-// 1) Legacy: { "pois": { "POIMAT_X": {x,y,z,floor?}, ... } }
-// 2) Merged-by-floor: { "floors": { "GF": { "pois": {...} }, "F1": { "pois": {...} } } }
-// 3) All-in-one list: { "pois": { "POIMAT_X": [ {x,y,z,floor}, ... ] } }
-//
-// We normalize POI/material keys to be resilient to casing, spaces, and ".001" suffixes.
-Map<String, Map<String, Map<String, dynamic>>>? _poiByFloorNorm; // floorKey -> normKey -> poiMap
-bool _poiLoading = false;
+  // Supports multiple POI json formats:
+  // 1) Legacy: { "pois": { "POIMAT_X": {x,y,z,floor?}, ... } }
+  // 2) Merged-by-floor: { "floors": { "GF": { "pois": {...} }, "F1": { "pois": {...} } } }
+  // 3) All-in-one list: { "pois": { "POIMAT_X": [ {x,y,z,floor}, ... ] } }
+  //
+  // We normalize POI/material keys to be resilient to casing, spaces, and ".001" suffixes.
+  Map<String, Map<String, Map<String, dynamic>>>?
+  _poiByFloorNorm; // floorKey -> normKey -> poiMap
+  bool _poiLoading = false;
   bool _poiIndexLoaded = false; // set true after POI index built
   bool _booting = false; // true while boot sequence is running
 
-// When Category page doesn't know the floor, we may discover the destination's floor from POI json.
-String? _pendingFloorLabelToOpen;
+  // When Category page doesn't know the floor, we may discover the destination's floor from POI json.
+  String? _pendingFloorLabelToOpen;
 
   // ---- Navmesh & path state ----
   NavMesh? _navmeshF1;
@@ -344,9 +391,9 @@ String? _pendingFloorLabelToOpen;
   // Once we compute a route, we should NOT recompute it when the user switches floors.
   bool _routeComputed = false;
   String? _originFloorLabelFixed; // e.g. "GF", "F1"
-  String? _destFloorLabelFixed;   // e.g. "GF", "F1"
-  String? _originFNumberFixed;    // e.g. "0", "1"
-  String? _destFNumberFixed;      // e.g. "0", "1"
+  String? _destFloorLabelFixed; // e.g. "GF", "F1"
+  String? _originFNumberFixed; // e.g. "0", "1"
+  String? _destFNumberFixed; // e.g. "0", "1"
 
   // Multi-floor routing state
 
@@ -363,8 +410,8 @@ String? _pendingFloorLabelToOpen;
   final Map<String, String> _floorLabelByFNumber = {};
   // Cached lookups for connectors by floor (optional; helps debugging / future UI)
   final Map<String, List<ConnectorLink>> _connectorsByFloorLabel = {};
-  final Map<String, List<Map<String, dynamic>>> _connectorEndpointsByFloorLabel = {};
-
+  final Map<String, List<Map<String, dynamic>>>
+  _connectorEndpointsByFloorLabel = {};
 
   List<Map<String, double>> get _currentPathPointsGltf =>
       _pathPointsByFloorGltf[_currentFNumber()] ?? const [];
@@ -394,15 +441,24 @@ String? _pendingFloorLabelToOpen;
       }
     }
 
-    assetPath ??= _fallbackNavmeshAssetForLabel(_floorLabelByFNumber[fNumber] ?? (fNumber == "0" ? "GF" : (fNumber == "1" ? "F1" : _currentFloorLabel())));
+    assetPath ??= _fallbackNavmeshAssetForLabel(
+      _floorLabelByFNumber[fNumber] ??
+          (fNumber == "0"
+              ? "GF"
+              : (fNumber == "1" ? "F1" : _currentFloorLabel())),
+    );
 
     try {
       final nm = await NavMesh.loadAsset(assetPath!);
       _navmeshCache[fNumber] = nm;
-      debugPrint("✅ Navmesh loaded for floor $fNumber: $assetPath (v=${nm.v.length} t=${nm.t.length})");
+      debugPrint(
+        "✅ Navmesh loaded for floor $fNumber: $assetPath (v=${nm.v.length} t=${nm.t.length})",
+      );
       return nm;
     } catch (e) {
-      debugPrint("❌ Failed to load navmesh for floor $fNumber ($assetPath): $e");
+      debugPrint(
+        "❌ Failed to load navmesh for floor $fNumber ($assetPath): $e",
+      );
       return null;
     }
   }
@@ -433,7 +489,9 @@ String? _pendingFloorLabelToOpen;
         }
       }
       if (raw == null) {
-        debugPrint('❌ Connectors json not found in assets (checked: $candidates)');
+        debugPrint(
+          '❌ Connectors json not found in assets (checked: $candidates)',
+        );
         _connectorsByFloorLabel.clear();
         _connectorEndpointsByFloorLabel.clear();
         _connectorsLoaded = true;
@@ -444,19 +502,22 @@ String? _pendingFloorLabelToOpen;
       final List<dynamic> list = (decoded is List)
           ? decoded
           : (decoded is Map && decoded['connectors'] is List)
-              ? (decoded['connectors'] as List)
-              : const [];
+          ? (decoded['connectors'] as List)
+          : const [];
 
       final out = <ConnectorLink>[];
       for (final item in list) {
         if (item is! Map) continue;
 
-        final id = (item['id'] ?? item['name'] ?? item['connector_id'] ?? '').toString();
+        final id = (item['id'] ?? item['name'] ?? item['connector_id'] ?? '')
+            .toString();
         if (id.isEmpty) continue;
 
-        final type = (item['type'] ?? item['kind'] ?? item['mode'] ?? '').toString();
+        final type = (item['type'] ?? item['kind'] ?? item['mode'] ?? '')
+            .toString();
 
-        final endpointsRaw = (item['endpoints'] ?? item['floors'] ?? item['nodes']);
+        final endpointsRaw =
+            (item['endpoints'] ?? item['floors'] ?? item['nodes']);
         final endpoints = <String, Map<String, double>>{};
 
         if (endpointsRaw is List) {
@@ -469,19 +530,25 @@ String? _pendingFloorLabelToOpen;
               f = ep['floorNumber'].toString();
             } else if (ep['f_number'] != null) {
               f = ep['f_number'].toString();
-            } else if (ep['floor'] != null && (ep['floor'] is num || ep['floor'] is String)) {
+            } else if (ep['floor'] != null &&
+                (ep['floor'] is num || ep['floor'] is String)) {
               // If numeric floor index, assume it is already f_number.
               f = ep['floor'].toString();
-            } else if (ep['floorLabel'] != null || ep['floor_label'] != null || ep['label'] != null) {
-              final lbl = (ep['floorLabel'] ?? ep['floor_label'] ?? ep['label']).toString();
+            } else if (ep['floorLabel'] != null ||
+                ep['floor_label'] != null ||
+                ep['label'] != null) {
+              final lbl = (ep['floorLabel'] ?? ep['floor_label'] ?? ep['label'])
+                  .toString();
               f = _toFNumber(lbl);
             }
             if (f == null || f.isEmpty) continue;
 
             // Position (Blender coords)
             Map<String, dynamic>? posMap;
-            if (ep['position'] is Map) posMap = (ep['position'] as Map).cast<String, dynamic>();
-            if (posMap == null && ep['pos'] is Map) posMap = (ep['pos'] as Map).cast<String, dynamic>();
+            if (ep['position'] is Map)
+              posMap = (ep['position'] as Map).cast<String, dynamic>();
+            if (posMap == null && ep['pos'] is Map)
+              posMap = (ep['pos'] as Map).cast<String, dynamic>();
 
             double? x = _asDouble(posMap?['x'] ?? ep['x']);
             double? y = _asDouble(posMap?['y'] ?? ep['y']);
@@ -503,7 +570,9 @@ String? _pendingFloorLabelToOpen;
         }
 
         if (endpoints.isNotEmpty) {
-          out.add(ConnectorLink(id: id, type: type, endpointsByFNumber: endpoints));
+          out.add(
+            ConnectorLink(id: id, type: type, endpointsByFNumber: endpoints),
+          );
         }
       }
 
@@ -524,8 +593,9 @@ String? _pendingFloorLabelToOpen;
     await _pushPathToJs();
 
     // Show the user pin only on the start floor
-    final startLabel =
-        _desiredStartFloorLabel.isNotEmpty ? _desiredStartFloorLabel : _currentFloorLabel();
+    final startLabel = _desiredStartFloorLabel.isNotEmpty
+        ? _desiredStartFloorLabel
+        : _currentFloorLabel();
     final startF = _toFNumber(startLabel);
 
     final currF = _currentFNumber();
@@ -537,7 +607,12 @@ String? _pendingFloorLabelToOpen;
     }
 
     // Highlight destination only on destination floor (if we know it)
-    final destLabel = _destFloorLabelFixed ?? _destFloorLabel ?? widget.destinationFloorLabel ?? _floorLabelFromToken(widget.floorSrc) ?? '';
+    final destLabel =
+        _destFloorLabelFixed ??
+        _destFloorLabel ??
+        widget.destinationFloorLabel ??
+        _floorLabelFromToken(widget.floorSrc) ??
+        '';
     if (destLabel != null && destLabel.isNotEmpty) {
       final destF = _toFNumber(destLabel);
       if (currF == destF && _pendingPoiToHighlight != null) {
@@ -552,7 +627,6 @@ String? _pendingFloorLabelToOpen;
     return double.tryParse(v.toString());
   }
 
-
   // --- Connector type normalization ---
   // connectors_merged_world.json uses short codes like: stair, elev, esc_up, esc_dn.
   // Normalize them so routing + UI preferences work reliably.
@@ -560,8 +634,13 @@ String? _pendingFloorLabelToOpen;
     final t = raw.toLowerCase().trim();
     if (t == 'stair' || t == 'stairs') return 'stairs';
     if (t == 'elev' || t == 'elevator' || t == 'lift') return 'elevator';
-    if (t == 'esc_up' || t == 'escalator_up' || t == 'escalatorup') return 'escalator_up';
-    if (t == 'esc_dn' || t == 'esc_down' || t == 'escalator_down' || t == 'escalatordown') return 'escalator_down';
+    if (t == 'esc_up' || t == 'escalator_up' || t == 'escalatorup')
+      return 'escalator_up';
+    if (t == 'esc_dn' ||
+        t == 'esc_down' ||
+        t == 'escalator_down' ||
+        t == 'escalatordown')
+      return 'escalator_down';
     if (t.contains('esc') || t.contains('escalator')) return 'escalator';
     return t;
   }
@@ -580,6 +659,7 @@ String? _pendingFloorLabelToOpen;
     if (p == 'escalator') return t.startsWith('escalator');
     return t == p;
   }
+
   Future<void> _clearUserPinFromJs() async {
     final c = _webCtrl;
     if (c == null || !_jsReady) return;
@@ -658,7 +738,8 @@ String? _pendingFloorLabelToOpen;
 
       final fl = (p['floorLabel'] ?? p['floor'] ?? '').toString();
       if (fl.trim().isNotEmpty) {
-        _destPoiMaterialResolved = (p['materialName'] ?? poiMaterial).toString();
+        _destPoiMaterialResolved = (p['materialName'] ?? poiMaterial)
+            .toString();
         return fl.trim();
       }
 
@@ -668,7 +749,6 @@ String? _pendingFloorLabelToOpen;
 
     return null;
   }
-
 
   /// Normalize a floor label into a stable key for matching.
   ///
@@ -687,7 +767,8 @@ String? _pendingFloorLabelToOpen;
     final up = raw.toUpperCase();
 
     // Explicit ground floor labels.
-    if (up == 'G' || up == 'GF' || up == 'GROUND' || up.contains('GROUND')) return 'GF';
+    if (up == 'G' || up == 'GF' || up == 'GROUND' || up.contains('GROUND'))
+      return 'GF';
 
     // Numeric-only labels often appear in connectors ("0" == ground).
     final numOnly = RegExp(r'^-?\d+$').firstMatch(up);
@@ -714,8 +795,6 @@ String? _pendingFloorLabelToOpen;
     return up.replaceAll(RegExp(r'[^A-Z0-9]+'), '');
   }
 
-
-  
   Future<void> _loadPoiIndexIfNeeded() async {
     if (_poiIndexLoaded) return;
     if (_poiLoading) return;
@@ -737,7 +816,11 @@ String? _pendingFloorLabelToOpen;
       // the first occurrence wins (to keep behavior deterministic).
       final byFloor = <String, Map<String, Map<String, dynamic>>>{};
 
-      void addPoiAliases(String floor, Iterable<String> names, Map<String, dynamic> v) {
+      void addPoiAliases(
+        String floor,
+        Iterable<String> names,
+        Map<String, dynamic> v,
+      ) {
         if (floor.isEmpty || names.isEmpty) return;
 
         // Pick a single coordinate set (prefer explicit x/y/z)
@@ -748,7 +831,10 @@ String? _pendingFloorLabelToOpen;
 
         final floorKeyRaw = floor.trim();
         final floorKey = _normFloorKey(floorKeyRaw);
-        final bucket = byFloor.putIfAbsent(floorKey, () => <String, Map<String, dynamic>>{});
+        final bucket = byFloor.putIfAbsent(
+          floorKey,
+          () => <String, Map<String, dynamic>>{},
+        );
 
         for (final n in names) {
           final nn = _normPoiKey(n);
@@ -767,8 +853,8 @@ String? _pendingFloorLabelToOpen;
       }
 
       // Backward-compatible single-name helper
-      void addPoi(String floor, String name, Map<String, dynamic> v) => addPoiAliases(floor, [name], v);
-
+      void addPoi(String floor, String name, Map<String, dynamic> v) =>
+          addPoiAliases(floor, [name], v);
 
       String floorHintFromPath(String path) {
         final u = path.toUpperCase();
@@ -854,7 +940,8 @@ String? _pendingFloorLabelToOpen;
               String floor = '';
               try {
                 final fl = vm['floor']?.toString();
-                if (fl != null && fl.trim().isNotEmpty) floor = _floorLabelFromToken(fl);
+                if (fl != null && fl.trim().isNotEmpty)
+                  floor = _floorLabelFromToken(fl);
               } catch (_) {}
               if (floor.isEmpty) floor = floorHintFromPath(p);
               if (floor.isEmpty) floor = 'GF';
@@ -874,18 +961,19 @@ String? _pendingFloorLabelToOpen;
               String floor = '';
               try {
                 final fl = item['floor']?.toString();
-                if (fl != null && fl.trim().isNotEmpty) floor = _floorLabelFromToken(fl);
+                if (fl != null && fl.trim().isNotEmpty)
+                  floor = _floorLabelFromToken(fl);
               } catch (_) {}
               if (floor.isEmpty) floor = floorHintFromPath(p);
               if (floor.isEmpty) floor = 'GF';
-              final name = (item['name'] ?? item['material'] ?? item['id'])?.toString();
+              final name = (item['name'] ?? item['material'] ?? item['id'])
+                  ?.toString();
               if (name == null || name.isEmpty) continue;
               addPoi(floor, name, Map<String, dynamic>.from(item));
             }
           }
         }
       }
-
 
       // Fallback: load per-floor POI JSON referenced from Firestore venue maps (poiJsonPath).
       if ((!anyLoaded || byFloor.isEmpty) && _venueMaps.isNotEmpty) {
@@ -896,23 +984,32 @@ String? _pendingFloorLabelToOpen;
             final s = await rootBundle.loadString(p);
             final decoded = jsonDecode(s);
             anyLoaded = true;
-            final floorHint = _floorLabelFromToken((vm['floorNumber'] ?? vm['F_number'] ?? vm['title'] ?? '').toString());
+            final floorHint = _floorLabelFromToken(
+              (vm['floorNumber'] ?? vm['F_number'] ?? vm['title'] ?? '')
+                  .toString(),
+            );
             // Accept either {pois:[...]} or [...].
             List<dynamic> pois = [];
             if (decoded is Map) {
-              final v = decoded['pois'] ?? decoded['POIs'] ?? decoded['points'] ?? decoded['data'];
+              final v =
+                  decoded['pois'] ??
+                  decoded['POIs'] ??
+                  decoded['points'] ??
+                  decoded['data'];
               if (v is List) pois = v;
             } else if (decoded is List) {
               pois = decoded;
             }
             for (final item in pois) {
               if (item is Map) {
-                final name = (item['name'] ?? item['material'] ?? item['id'])?.toString();
+                final name = (item['name'] ?? item['material'] ?? item['id'])
+                    ?.toString();
                 if (name == null || name.isEmpty) continue;
                 String floor = '';
                 try {
                   final fl = item['floor']?.toString();
-                  if (fl != null && fl.trim().isNotEmpty) floor = _floorLabelFromToken(fl);
+                  if (fl != null && fl.trim().isNotEmpty)
+                    floor = _floorLabelFromToken(fl);
                 } catch (_) {}
                 if (floor.isEmpty) floor = floorHint;
                 if (floor.isEmpty) floor = 'GF';
@@ -931,7 +1028,9 @@ String? _pendingFloorLabelToOpen;
       }
 
       if (byFloor.isEmpty) {
-        debugPrint('❌ POI index is empty. Make sure you added POI JSON to pubspec.yaml assets (e.g. assets/nav_cor/solitaire_pois_merged.json).');
+        debugPrint(
+          '❌ POI index is empty. Make sure you added POI JSON to pubspec.yaml assets (e.g. assets/nav_cor/solitaire_pois_merged.json).',
+        );
       } else {
         _poiByFloorNorm = byFloor;
         _poiIndexLoaded = true;
@@ -942,23 +1041,25 @@ String? _pendingFloorLabelToOpen;
     }
   }
 
-
-Future<void> _resolveDestinationFromPoiJsonIfNeeded() async {
+  Future<void> _resolveDestinationFromPoiJsonIfNeeded() async {
     // If we already have a destination position, we still may need its floor label for connectors.
     if (_destPosBlender != null && !_isBlank(_destFloorLabel)) return;
 
-    final name = (_pendingPoiToHighlight ??
-            (widget.destinationPoiMaterial.trim().isNotEmpty
-                ? widget.destinationPoiMaterial
-                : (widget.destinationPoiName.trim().isNotEmpty
-                    ? widget.destinationPoiName
-                    : widget.shopName)))
-        .trim();
+    final name =
+        (_pendingPoiToHighlight ??
+                (widget.destinationPoiMaterial.trim().isNotEmpty
+                    ? widget.destinationPoiMaterial
+                    : (widget.destinationPoiName.trim().isNotEmpty
+                          ? widget.destinationPoiName
+                          : widget.shopName)))
+            .trim();
     if (name.isEmpty) return;
 
     await _loadPoiIndexIfNeeded();
     if (!_poiIndexLoaded) {
-      debugPrint('❌ Cannot resolve destination floor because POI index failed to load.');
+      debugPrint(
+        '❌ Cannot resolve destination floor because POI index failed to load.',
+      );
       return;
     }
     final byFloor = _poiByFloorNorm;
@@ -976,7 +1077,9 @@ Future<void> _resolveDestinationFromPoiJsonIfNeeded() async {
     }
 
     if (hits.isEmpty) {
-      debugPrint('⚠️ Destination not found in POI json for "$name" (norm="$norm")');
+      debugPrint(
+        '⚠️ Destination not found in POI json for "$name" (norm="$norm")',
+      );
       return;
     }
 
@@ -1020,21 +1123,26 @@ Future<void> _resolveDestinationFromPoiJsonIfNeeded() async {
     String chosenFloor = hits.first;
     if (hits.length > 1) {
       String? tokenFloor;
-      if (widget.destinationFloorLabel != null && widget.destinationFloorLabel!.trim().isNotEmpty) {
+      if (widget.destinationFloorLabel != null &&
+          widget.destinationFloorLabel!.trim().isNotEmpty) {
         tokenFloor = floorLabelFromToken(widget.destinationFloorLabel!);
       } // NOTE: do not bias by current floorSrc; it can hide cross-floor destinations
       // else if (widget.floorSrc.trim().isNotEmpty) {
       //   tokenFloor = floorLabelFromToken(widget.floorSrc);
       // }
 
-      if (tokenFloor != null && tokenFloor.isNotEmpty && hits.contains(tokenFloor)) {
+      if (tokenFloor != null &&
+          tokenFloor.isNotEmpty &&
+          hits.contains(tokenFloor)) {
         chosenFloor = tokenFloor;
       }
     }
 
     final poi = byFloor[chosenFloor]?[norm];
     if (poi == null) {
-      debugPrint('⚠️ POI found on floors=$hits but missing entry for chosen="$chosenFloor"');
+      debugPrint(
+        '⚠️ POI found on floors=$hits but missing entry for chosen="$chosenFloor"',
+      );
       return;
     }
 
@@ -1042,7 +1150,9 @@ Future<void> _resolveDestinationFromPoiJsonIfNeeded() async {
     final y = (poi['y'] as num?)?.toDouble();
     final z = (poi['z'] as num?)?.toDouble();
     if (x == null || y == null || z == null) {
-      debugPrint('⚠️ POI json missing x/y/z for "$name" on floor "$chosenFloor"');
+      debugPrint(
+        '⚠️ POI json missing x/y/z for "$name" on floor "$chosenFloor"',
+      );
       return;
     }
 
@@ -1053,7 +1163,8 @@ Future<void> _resolveDestinationFromPoiJsonIfNeeded() async {
       String bestLabel = chosenFloor;
       if (_venueMaps.isNotEmpty) {
         for (final vm in _venueMaps) {
-          final t = (vm['floorNumber'] ?? vm['title'] ?? vm['label'] ?? '').toString();
+          final t = (vm['floorNumber'] ?? vm['title'] ?? vm['label'] ?? '')
+              .toString();
           if (t.isEmpty) continue;
           if (_normFloorKey(t) == _normFloorKey(chosenFloor)) {
             bestLabel = t;
@@ -1065,7 +1176,9 @@ Future<void> _resolveDestinationFromPoiJsonIfNeeded() async {
       _destFloorLabel = bestLabel; // enables connectors/multi-floor routing
     });
 
-    debugPrint('✅ Destination resolved from POI json: $name -> floor=$chosenFloor B=$_destPosBlender');
+    debugPrint(
+      '✅ Destination resolved from POI json: $name -> floor=$chosenFloor B=$_destPosBlender',
+    );
 
     // During boot, we only store the pending floor label; floor selection will happen after maps load.
     if (!_booting && _venueMaps.isNotEmpty) {
@@ -1074,7 +1187,6 @@ Future<void> _resolveDestinationFromPoiJsonIfNeeded() async {
       _ensureFloorSelected(_pendingFloorLabelToOpen ?? chosenFloor);
       _maybeComputeAndPushPath();
     }
-  
 
     // If destination floor is still unknown, try inferring from destinationPoiMaterial
     // using the POI index loaded across floors.
@@ -1087,13 +1199,17 @@ Future<void> _resolveDestinationFromPoiJsonIfNeeded() async {
             _destFloorLabel = fk!.trim();
             _destFloorLabelFixed = fk.trim();
           });
-          debugPrint("✅ Destination floor inferred from POI index: $mat -> $fk"
-              + (_destPoiMaterialResolved != null ? " (resolvedMat=$_destPoiMaterialResolved)" : ""));
+          debugPrint(
+            "✅ Destination floor inferred from POI index: $mat -> $fk" +
+                (_destPoiMaterialResolved != null
+                    ? " (resolvedMat=$_destPoiMaterialResolved)"
+                    : ""),
+          );
         }
       }
     }
+  } // ---- Coordinate conversions ----
 
-}// ---- Coordinate conversions ----
   static Map<String, double> _gltfToBlender(Map<String, double> g) {
     final xg = g['x'] ?? 0.0;
     final yg = g['y'] ?? 0.0;
@@ -1108,19 +1224,22 @@ Future<void> _resolveDestinationFromPoiJsonIfNeeded() async {
     return {'x': xb, 'y': zb, 'z': -yb};
   }
 
-  
   String _fallbackNavmeshForFloorLabel(String floorLabel) {
     final fl = floorLabel.trim().toUpperCase();
     if (fl == "F1" || fl == "1") return "assets/nav_cor/navmesh_F1.json";
-    if (fl == "GF" || fl == "G" || fl == "0") return "assets/nav_cor/navmesh_GF.json";
+    if (fl == "GF" || fl == "G" || fl == "0")
+      return "assets/nav_cor/navmesh_GF.json";
     // Try infer from current floor URL if it contains tokens
     final url = _currentFloor.toLowerCase();
-    if (url.contains("f1") || url.contains("floor1") || url.contains("_1")) return "assets/nav_cor/navmesh_F1.json";
+    if (url.contains("f1") || url.contains("floor1") || url.contains("_1"))
+      return "assets/nav_cor/navmesh_F1.json";
     return "assets/nav_cor/navmesh_GF.json";
   }
 
-Future<void> _loadNavmeshF1() async {
-    final nm = await _ensureNavmeshLoadedForFNumber(_toFNumber(_currentFloorLabel()));
+  Future<void> _loadNavmeshF1() async {
+    final nm = await _ensureNavmeshLoadedForFNumber(
+      _toFNumber(_currentFloorLabel()),
+    );
     if (!mounted) return;
     setState(() {
       _navmeshF1 = nm;
@@ -1392,30 +1511,38 @@ Future<void> _loadNavmeshF1() async {
     if (_userPosBlender == null || _destPosBlender == null) return;
 
     // Determine floors
-    final startLabel = _originFloorLabelFixed ??
+    final startLabel =
+        _originFloorLabelFixed ??
         (_desiredStartFloorLabel.isNotEmpty ? _desiredStartFloorLabel : '');
     if (startLabel.trim().isEmpty) {
-      debugPrint('⚠️ Start floor unknown (no saved Firestore location yet) — abort routing');
+      debugPrint(
+        '⚠️ Start floor unknown (no saved Firestore location yet) — abort routing',
+      );
       return;
     }
-// Destination floor label: prefer fixed -> POI json -> caller -> infer from floorSrc token.
-    final destCandidateRaw = (_destFloorLabelFixed != null && _destFloorLabelFixed!.isNotEmpty)
+    // Destination floor label: prefer fixed -> POI json -> caller -> infer from floorSrc token.
+    final destCandidateRaw =
+        (_destFloorLabelFixed != null && _destFloorLabelFixed!.isNotEmpty)
         ? _destFloorLabelFixed!
         : ((_destFloorLabel != null && _destFloorLabel!.isNotEmpty)
-            ? _destFloorLabel!
-            : ((widget.destinationFloorLabel != null && widget.destinationFloorLabel!.isNotEmpty)
-                ? widget.destinationFloorLabel!
-                : ''));
+              ? _destFloorLabel!
+              : ((widget.destinationFloorLabel != null &&
+                        widget.destinationFloorLabel!.isNotEmpty)
+                    ? widget.destinationFloorLabel!
+                    : ''));
     // Normalize if the caller passed a map token/path.
-    final destCandidate = _floorLabelFromToken(destCandidateRaw) ?? destCandidateRaw;
+    final destCandidate =
+        _floorLabelFromToken(destCandidateRaw) ?? destCandidateRaw;
 
     // If still unknown, default to the ORIGIN floor (not the currently viewed floor),
     // so switching floors won't accidentally recompute a route with wrong navmesh.
     final destLabel = destCandidate.isNotEmpty ? destCandidate : startLabel;
     if (destCandidate.isEmpty) {
-      debugPrint('⚠️ Destination floor label unknown; defaulting to origin floor ($destLabel). Connectors will NOT be used.');
+      debugPrint(
+        '⚠️ Destination floor label unknown; defaulting to origin floor ($destLabel). Connectors will NOT be used.',
+      );
     }
-final startF = _toFNumber(startLabel);
+    final startF = _toFNumber(startLabel);
     final destF = _toFNumber(destLabel);
 
     // Lock floors for this navigation session (prevents weird paths when changing floors).
@@ -1423,7 +1550,6 @@ final startF = _toFNumber(startLabel);
     _destFloorLabelFixed ??= destLabel;
     _originFNumberFixed ??= startF;
     _destFNumberFixed ??= destF;
-
 
     final startNm = await _ensureNavmeshLoadedForFNumber(startF);
     final destNm = await _ensureNavmeshLoadedForFNumber(destF);
@@ -1473,109 +1599,88 @@ final startF = _toFNumber(startLabel);
     if (startF == destF) {
       final pts = computePathOn(startNm, _userPosBlender!, _destPosBlender!);
       final gltf = pts
-          .map((p) => _blenderToGltf({
-                'x': p[0],
-                'y': p[1],
-                'z': p[2],
-              }))
+          .map((p) => _blenderToGltf({'x': p[0], 'y': p[1], 'z': p[2]}))
           .toList();
       _pathPointsByFloorGltf[startF] = gltf;
     } else {
-      // Multi-floor: evaluate ALL valid connectors and pick the globally-shortest
-      // route = (start->connector on origin floor) + (connector penalty) + (connector on dest floor->destination).
-      final pref = _selectedPreference.toLowerCase(); // any / stairs / elevator / escalator
-
-      String normTypeOf(ConnectorLink c) => _normalizeConnectorType(c.type);
-
+      // Multi-floor: go from start -> connector(start floor), then connector(dest floor) -> destination.
+      final pref = _selectedPreference
+          .toLowerCase(); // any / stairs / elevator / escalator
       bool linksFloors(ConnectorLink c) =>
           c.endpointsByFNumber.containsKey(startF) &&
           c.endpointsByFNumber.containsKey(destF);
 
       bool directionOk(ConnectorLink c) {
-        final t = normTypeOf(c);
+        final t = _normalizeConnectorType(c.type);
         return _connectorDirectionAllowed(
           t,
-          int.tryParse(startF) ?? 0,
-          int.tryParse(destF) ?? 0,
+          int.tryParse(startF) ?? 1,
+          int.tryParse(destF) ?? 1,
         );
       }
 
       bool matchesPref(ConnectorLink c) {
-        final t = normTypeOf(c);
+        final t = _normalizeConnectorType(c.type);
         return directionOk(c) && _connectorMatchesPreference(t, pref);
       }
 
-      bool isZeroEndpoint(Map<String, double> p) =>
-          (p['x'] == 0.0 && p['y'] == 0.0 && p['z'] == 0.0);
-
-      double dist2d(List<double> a, List<double> b) =>
-          math.sqrt(math.pow(a[0] - b[0], 2) + math.pow(a[1] - b[1], 2));
-
-      // Small cost added for using certain connector types (for preference / realism).
-      // This does NOT replace actual navmesh distances; it's just a bias / penalty.
-      double connectorPenalty(String t) => 0.0;
-
       // 1) Try connectors that link floors AND match preference
-      final candidates = _connectors.where((c) => linksFloors(c) && matchesPref(c)).toList();
+      final candidates = _connectors
+          .where((c) => linksFloors(c) && matchesPref(c))
+          .toList();
 
       // 2) Fallback: ignore preference (still respect escalator direction)
       final pool = candidates.isNotEmpty
           ? candidates
           : _connectors.where((c) => linksFloors(c) && directionOk(c)).toList();
 
+      debugPrint(
+        '🧭 pref=' +
+            pref +
+            ' start=' +
+            startLabel +
+            '(' +
+            startF +
+            ') dest=' +
+            destLabel +
+            '(' +
+            destF +
+            ') ' +
+            'matched=' +
+            candidates.length.toString() +
+            ' pool=' +
+            pool.length.toString(),
+      );
+      if (pool.isNotEmpty) {
+        final preview = pool
+            .take(8)
+            .map((c) => '${_normalizeConnectorType(c.type)}:${c.id}')
+            .join(', ');
+        debugPrint(
+          '🧭 connector pool: ' + preview + (pool.length > 8 ? ' ...' : ''),
+        );
+      }
+
       if (pool.isEmpty) {
         debugPrint("⚠️ No connectors found linking $startLabel -> $destLabel");
         return;
       }
 
-      const maxSnapDelta = 3.0; // reject endpoints that are far off the walkable mesh
       double bestScore = double.infinity;
       ConnectorLink? best;
       List<List<double>> bestA = const [];
       List<List<double>> bestB = const [];
 
-      // Optional: print a small ranking table to verify global shortest selection.
-      final debugRows = <String>[];
-
       for (final c in pool) {
-        final t = normTypeOf(c);
-
-        final aPosBl = c.endpointsByFNumber[startF]!;
-        final bPosBl = c.endpointsByFNumber[destF]!;
-
-        // Skip placeholder/broken endpoints.
-        if (isZeroEndpoint(aPosBl) || isZeroEndpoint(bPosBl)) {
-          debugRows.add("skip ${c.type}:${c.id} (zero endpoint)");
-          continue;
-        }
-
-        // Snap delta sanity check (filters basement/F2 garbage exported into the wrong space).
-        final aRaw = [aPosBl['x']!, aPosBl['y']!, aPosBl['z']!];
-        final bRaw = [bPosBl['x']!, bPosBl['y']!, bPosBl['z']!];
-        final aSnap = startNm.snapPointXY(aRaw);
-        final bSnap = destNm.snapPointXY(bRaw);
-        final aDelta = dist2d(aRaw, aSnap);
-        final bDelta = dist2d(bRaw, bSnap);
-        if (aDelta > maxSnapDelta || bDelta > maxSnapDelta) {
-          debugRows.add("skip ${c.type}:${c.id} off-mesh (aΔ=${aDelta.toStringAsFixed(2)}, bΔ=${bDelta.toStringAsFixed(2)})");
-          continue;
-        }
-
-        final aPts = computePathOn(startNm, _userPosBlender!, aPosBl);
-        final bPts = computePathOn(destNm, bPosBl, _destPosBlender!);
+        final aPos = c.endpointsByFNumber[startF]!;
+        final bPos = c.endpointsByFNumber[destF]!;
+        final aPts = computePathOn(startNm, _userPosBlender!, aPos);
+        final bPts = computePathOn(destNm, bPos, _destPosBlender!);
 
         // Skip broken paths
-        if (aPts.length < 2 || bPts.length < 2) {
-          debugRows.add("skip ${c.type}:${c.id} (no path)");
-          continue;
-        }
+        if (aPts.length < 2 || bPts.length < 2) continue;
 
-        final lenA = pathLen(aPts);
-        final lenB = pathLen(bPts);
-        final score = lenA + lenB + connectorPenalty(t);
-
-        debugRows.add("${c.type}:${c.id} t=$t score=${score.toStringAsFixed(2)} (A=${lenA.toStringAsFixed(2)}, B=${lenB.toStringAsFixed(2)}, pen=${connectorPenalty(t).toStringAsFixed(2)})");
-
+        final score = pathLen(aPts) + pathLen(bPts);
         if (score < bestScore) {
           bestScore = score;
           best = c;
@@ -1586,21 +1691,20 @@ final startF = _toFNumber(startLabel);
 
       if (best == null) {
         debugPrint("⚠️ Could not compute a valid connector path.");
-        // Print a few rows to help diagnose.
-        for (final r in debugRows.take(8)) {
-          debugPrint("  $r");
-        }
         return;
       }
 
       _chosenConnectorId = '${best.type}:${best.id}';
+      debugPrint(
+        '✅ chosen connector pref=' +
+            pref +
+            ' -> ' +
+            _chosenConnectorId! +
+            ' score=' +
+            bestScore.toStringAsFixed(2),
+      );
       _connectorStartBlender = best.endpointsByFNumber[startF];
       _connectorDestBlender = best.endpointsByFNumber[destF];
-
-      debugPrint("✅ Chosen connector: $_chosenConnectorId bestScore=${bestScore.toStringAsFixed(2)}");
-      for (final r in debugRows.take(6)) {
-        debugPrint("  $r");
-      }
 
       final gltfA = bestA
           .map((p) => _blenderToGltf({'x': p[0], 'y': p[1], 'z': p[2]}))
@@ -1625,13 +1729,13 @@ final startF = _toFNumber(startLabel);
     try {
       final obj = jsonDecode(raw);
       if (obj is Map && obj['type'] == 'path_viewer_ready') {
-      _jsReady = true;
-      debugPrint("🟦 POI_CHANNEL: path_viewer_ready");
+        _jsReady = true;
+        debugPrint("🟦 POI_CHANNEL: path_viewer_ready");
 
-      // When the viewer is recreated (e.g., floor switch), redraw overlays for this floor.
-      _syncOverlaysForCurrentFloor();
-      return;
-    }
+        // When the viewer is recreated (e.g., floor switch), redraw overlays for this floor.
+        _syncOverlaysForCurrentFloor();
+        return;
+      }
     } catch (_) {
       // ignore non-JSON
     }
@@ -2111,10 +2215,12 @@ const timer = setInterval(function() {
     super.initState();
 
     // Apply any floors passed in by caller.
-    if (widget.originFloorLabel != null && widget.originFloorLabel!.isNotEmpty) {
+    if (widget.originFloorLabel != null &&
+        widget.originFloorLabel!.isNotEmpty) {
       _originFloorLabel = widget.originFloorLabel!;
     }
-    if (widget.destinationFloorLabel != null && widget.destinationFloorLabel!.isNotEmpty) {
+    if (widget.destinationFloorLabel != null &&
+        widget.destinationFloorLabel!.isNotEmpty) {
       _destFloorLabel = widget.destinationFloorLabel!;
     }
 
@@ -2414,29 +2520,29 @@ const timer = setInterval(function() {
   Future<void> _loadVenueMaps() async {
     setState(() => _mapsLoading = true);
 
-      // Prefer widget-provided venue maps (offline/local).
-      if (widget.venueMaps != null && widget.venueMaps!.isNotEmpty) {
-    // Keep the same static type as the widget field.
-    // Using Map<String, String>.from avoids widening to Map<String, dynamic>
-    // which later fails assignment.
-    final List<Map<String, String>> convertedMaps = widget.venueMaps!
-        .map((m) => Map<String, String>.from(m))
-        .toList();
-        if (mounted) {
-          setState(() {
-            _venueMaps = convertedMaps;
-      // Build floor label lookup (F_number -> floor label like GF/F1)
-      _floorLabelByFNumber.clear();
-      for (final m in _venueMaps) {
-        final f = (m["F_number"]?.toString() ?? "");
-        final lbl = (m["floorNumber"]?.toString() ?? "");
-        if (f.isNotEmpty && lbl.isNotEmpty) _floorLabelByFNumber[f] = lbl;
+    // Prefer widget-provided venue maps (offline/local).
+    if (widget.venueMaps != null && widget.venueMaps!.isNotEmpty) {
+      // Keep the same static type as the widget field.
+      // Using Map<String, String>.from avoids widening to Map<String, dynamic>
+      // which later fails assignment.
+      final List<Map<String, String>> convertedMaps = widget.venueMaps!
+          .map((m) => Map<String, String>.from(m))
+          .toList();
+      if (mounted) {
+        setState(() {
+          _venueMaps = convertedMaps;
+          // Build floor label lookup (F_number -> floor label like GF/F1)
+          _floorLabelByFNumber.clear();
+          for (final m in _venueMaps) {
+            final f = (m["F_number"]?.toString() ?? "");
+            final lbl = (m["floorNumber"]?.toString() ?? "");
+            if (f.isNotEmpty && lbl.isNotEmpty) _floorLabelByFNumber[f] = lbl;
+          }
+          _currentFloor = widget.originFloorSrc;
+        });
       }
-            _currentFloor = widget.originFloorSrc;
-          });
-        }
-        return;
-      }
+      return;
+    }
     try {
       final doc = await FirebaseFirestore.instance
           .collection('venues')
@@ -2452,20 +2558,22 @@ const timer = setInterval(function() {
             'F_number': (map['F_number'] ?? '').toString(), // "0", "1"
             'mapURL': (map['mapURL'] ?? '').toString(),
             'navmesh': (map['navmesh'] ?? '').toString(), // ✅ add
-            'poiJsonPath': (map['poiJsonPath'] ?? map['poi_json'] ?? map['poiJson'] ?? '').toString(),
+            'poiJsonPath':
+                (map['poiJsonPath'] ?? map['poi_json'] ?? map['poiJson'] ?? '')
+                    .toString(),
           };
         }).toList();
 
         if (mounted) {
           setState(() {
             _venueMaps = convertedMaps;
-      // Build floor label lookup (F_number -> floor label like GF/F1)
-      _floorLabelByFNumber.clear();
-      for (final m in _venueMaps) {
-        final f = (m["F_number"]?.toString() ?? "");
-        final lbl = (m["floorNumber"]?.toString() ?? "");
-        if (f.isNotEmpty && lbl.isNotEmpty) _floorLabelByFNumber[f] = lbl;
-      }
+            // Build floor label lookup (F_number -> floor label like GF/F1)
+            _floorLabelByFNumber.clear();
+            for (final m in _venueMaps) {
+              final f = (m["F_number"]?.toString() ?? "");
+              final lbl = (m["floorNumber"]?.toString() ?? "");
+              if (f.isNotEmpty && lbl.isNotEmpty) _floorLabelByFNumber[f] = lbl;
+            }
             if (convertedMaps.isNotEmpty) {
               // 1) Safe default.
               _currentFloor = convertedMaps.first['mapURL'] ?? '';
@@ -2527,7 +2635,8 @@ const timer = setInterval(function() {
           // Prefer showing the user's start floor if we already have it.
           if (_desiredStartFloorLabel.isNotEmpty) {
             _ensureFloorSelected(_desiredStartFloorLabel);
-          } else if (widget.floorSrc.trim().isEmpty && _pendingFloorLabelToOpen != null) {
+          } else if (widget.floorSrc.trim().isEmpty &&
+              _pendingFloorLabelToOpen != null) {
             _ensureFloorSelected(_pendingFloorLabelToOpen!);
           } else {
             _loadNavmeshF1();
@@ -2541,20 +2650,119 @@ const timer = setInterval(function() {
     }
   }
 
-  void _changePreference(String preference) {
+  bool _isPreferenceAvailableForCurrentTrip(String pref) {
+    final p = pref.toLowerCase().trim();
+    if (p.isEmpty || p == 'any') return true;
+
+    final startLabel = _originFloorLabel.trim();
+    final destLabel =
+        (_destFloorLabelFixed ??
+                _destFloorLabel ??
+                widget.destinationFloorLabel ??
+                '')
+            .trim();
+
+    // If floor labels are not resolved yet, don't block the UI.
+    if (startLabel.isEmpty || destLabel.isEmpty) return true;
+
+    final startFStr = _toFNumber(startLabel);
+    final destFStr = _toFNumber(destLabel);
+
+    // If parsing fails, don't block the UI.
+    if (startFStr.isEmpty || destFStr.isEmpty) return true;
+
+    // Same-floor trips don't need connectors; keep all prefs enabled.
+    if (startFStr == destFStr) return false;
+
+    final startF = int.tryParse(startFStr);
+    final destF = int.tryParse(destFStr);
+    if (startF == null || destF == null) return true;
+
+    for (final c in _connectors) {
+      final normType = _normalizeConnectorType(c.type);
+
+      // Respect both type and direction (e.g. esc_up vs esc_dn).
+      if (!_connectorMatchesPreference(normType, p)) continue;
+      if (!_connectorDirectionAllowed(normType, startF, destF)) continue;
+
+      final keys = c.endpointsByFNumber.keys.map((k) => k.toString()).toSet();
+      if (keys.contains(startFStr) && keys.contains(destFStr)) return true;
+    }
+
+    return false;
+  }
+
+  Future<void> _changePreference(String preference) async {
+    // Optional shortcut: tapping the same selected option resets to "All"
+    final String nextPreference = (_selectedPreference == preference)
+        ? 'any'
+        : preference;
+
+    if (!_isPreferenceAvailableForCurrentTrip(nextPreference)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            nextPreference == 'any'
+                ? 'No route is available for these floors.'
+                : 'No ${nextPreference.toLowerCase()} route is available for these floors.',
+          ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    debugPrint('🎛️ changePreference: $_selectedPreference -> $nextPreference');
+
     setState(() {
-      _selectedPreference = preference;
-      if (preference == 'elevator') {
+      _selectedPreference = nextPreference;
+
+      // Optional placeholder estimates (replace later with real route metrics)
+      if (nextPreference == 'elevator') {
         _estimatedTime = '3 min';
         _estimatedDistance = '180 m';
-      } else if (preference == 'escalator') {
+      } else if (nextPreference == 'escalator') {
         _estimatedTime = '2.5 min';
         _estimatedDistance = '170 m';
+      } else if (nextPreference == 'stairs') {
+        _estimatedTime = '2 min';
+        _estimatedDistance = '166 m';
       } else {
+        // "any" = All connectors / shortest route
         _estimatedTime = '2 min';
         _estimatedDistance = '166 m';
       }
     });
+
+    // Recompute current route immediately so connector filtering takes effect.
+    try {
+      final hadRoute = _routeComputed || _pathPointsByFloorGltf.isNotEmpty;
+      final canCompute = _userPosBlender != null;
+
+      if (hadRoute || canCompute) {
+        _routeComputed = false;
+        _pathPushed = false;
+        _chosenConnectorId = null;
+        _connectorStartBlender = null;
+        _connectorDestBlender = null;
+        _pathPointsByFloorGltf.clear();
+
+        await _maybeComputeAndPushPath();
+
+        debugPrint(
+          '🎛️ recompute done. chosen=' +
+              (_chosenConnectorId ?? 'none') +
+              ' routeComputed=' +
+              _routeComputed.toString() +
+              ' visibleFloor=' +
+              _currentFNumber() +
+              ' pathFloors=' +
+              _pathPointsByFloorGltf.keys.join(','),
+        );
+      }
+    } catch (e) {
+      debugPrint('⚠️ Failed to recompute route after preference change: $e');
+    }
   }
 
   @override
@@ -2622,7 +2830,8 @@ const timer = setInterval(function() {
 
                               // ✅ Critical: if path was computed before JS became ready,
                               // push it now. Otherwise compute + push once endpoints exist.
-                              if (_currentPathPointsGltf.isNotEmpty && !_pathPushed) {
+                              if (_currentPathPointsGltf.isNotEmpty &&
+                                  !_pathPushed) {
                                 _pushPathToJs();
                               } else {
                                 _maybeComputeAndPushPath();
@@ -2700,7 +2909,9 @@ const timer = setInterval(function() {
                               _locationRow(
                                 Icons.radio_button_checked,
                                 'Your location',
-                                (_originFloorLabel.isNotEmpty ? _originFloorLabel : _currentFloorLabel()),
+                                (_originFloorLabel.isNotEmpty
+                                    ? _originFloorLabel
+                                    : _currentFloorLabel()),
                                 const Color(0xFF6C6C6C),
                               ),
 
@@ -2752,6 +2963,9 @@ const timer = setInterval(function() {
                             'Stairs',
                             Icons.stairs,
                             'stairs',
+                            enabled: _isPreferenceAvailableForCurrentTrip(
+                              'stairs',
+                            ),
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -2760,6 +2974,9 @@ const timer = setInterval(function() {
                             'Elevator',
                             Icons.elevator,
                             'elevator',
+                            enabled: _isPreferenceAvailableForCurrentTrip(
+                              'elevator',
+                            ),
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -2768,6 +2985,9 @@ const timer = setInterval(function() {
                             'Escalator',
                             Icons.escalator,
                             'escalator',
+                            enabled: _isPreferenceAvailableForCurrentTrip(
+                              'escalator',
+                            ),
                           ),
                         ),
                       ],
@@ -2896,37 +3116,97 @@ const timer = setInterval(function() {
   Widget _preferenceButtonHorizontal(
     String label,
     IconData icon,
-    String value,
-  ) {
-    final isSelected = _selectedPreference == value;
-    return GestureDetector(
-      onTap: () => _changePreference(value),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-        decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFFE8E9E0) : Colors.white,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+    String value, {
+    bool enabled = true,
+  }) {
+    final bool isSelected = _selectedPreference == value;
+    final bool isDisabled = !enabled;
+
+    return Opacity(
+      opacity: isDisabled ? 0.45 : 1.0,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: isDisabled ? null : () => _changePreference(value),
+        child: Stack(
+          clipBehavior: Clip.none,
           children: [
-            Icon(
-              icon,
-              size: 20,
-              color: isSelected ? AppColors.kGreen : Colors.grey[500],
-            ),
-            const SizedBox(width: 6),
-            Flexible(
-              child: Text(
-                label,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: isSelected ? AppColors.kGreen : Colors.grey[600],
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+            // The button (original padding, unchanged)
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOut,
+              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+              decoration: BoxDecoration(
+                color: isSelected ? const Color(0xFFE8E9E0) : Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: isSelected
+                      ? AppColors.kGreen.withOpacity(0.30)
+                      : const Color(0x00000000),
+                  width: 1.2,
                 ),
-                overflow: TextOverflow.ellipsis,
+                boxShadow: isSelected
+                    ? [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.04),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    icon,
+                    size: 20,
+                    color: isDisabled
+                        ? Colors.grey[400]
+                        : (isSelected ? AppColors.kGreen : Colors.grey[500]),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: isDisabled
+                          ? Colors.grey[400]
+                          : (isSelected ? AppColors.kGreen : Colors.grey[600]),
+                      fontWeight: isSelected
+                          ? FontWeight.w700
+                          : FontWeight.w500,
+                    ),
+                  ),
+                ],
               ),
             ),
+            // Close icon – sits exactly on the top‑right border
+            if (isSelected && !isDisabled)
+              Positioned(
+                top: -3,
+                right: -3,
+                child: Container(
+                  width: 15,
+                  height: 15,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: AppColors.kGreen, width: 1.2),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.08),
+                        blurRadius: 2,
+                        offset: Offset(0, 1),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.close,
+                    size: 9,
+                    color: AppColors.kGreen,
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -2951,15 +3231,15 @@ const timer = setInterval(function() {
             ),
           ),
         ),
-        
-onPressed: () async {
-  // Clear current rendered path; it will be re-computed / re-pushed for the selected floor.
-  setState(() {
-    _pathPushed = false;
-  });
 
-  await _ensureFloorSelected(label);
-},
+        onPressed: () async {
+          // Clear current rendered path; it will be re-computed / re-pushed for the selected floor.
+          setState(() {
+            _pathPushed = false;
+          });
+
+          await _ensureFloorSelected(label);
+        },
 
         child: Text(
           label,

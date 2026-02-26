@@ -15,6 +15,7 @@ import 'package:model_viewer_plus/model_viewer_plus.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:madar_app/nav/navmesh.dart';
+import 'navigation_flow_complete.dart';
 
 class PathOverviewScreen extends StatefulWidget {
   final String shopName;
@@ -249,18 +250,6 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
 
   List<Map<String, dynamic>> _getAllPoisForSelection() {
     final List<Map<String, dynamic>> result = [];
-    // Add the "Use my location" option only if user has a saved location
-    if (_userPosBlender != null) {
-      result.add({
-        'name': '📍 Use my location',
-        'type': 'pin',
-        'floor': _floorLabelFromToken(_originFloorLabel) ?? _originFloorLabel,
-        'x': _userPosBlender!['x'],
-        'y': _userPosBlender!['y'],
-        'z': _userPosBlender!['z'],
-      });
-    }
-    // Add all POIs from the index
     // Add all POIs from the index
     if (_poiByFloorNorm != null) {
       _poiByFloorNorm!.forEach((floorKey, pois) {
@@ -2803,7 +2792,7 @@ const timer = setInterval(function() {
       return;
     }
 
-    final allPois = _getAllPoisForSelection(); // includes "Use my location"
+    final allPois = _getAllPoisForSelection(); // only POIs
     final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
@@ -2813,26 +2802,81 @@ const timer = setInterval(function() {
       },
     );
 
-    if (result != null) {
-      setState(() {
-        if (result['type'] == 'pin') {
-          _usePinAsStart = true;
-          _customStartPoi = null;
-          _desiredStartFloorLabel = _originFloorLabel; // pin floor
-        } else {
-          _usePinAsStart = false;
-          _customStartPoi = result;
-          _desiredStartFloorLabel = result['floor'];
-        }
-        // Clear any previously fixed start floor
-        _originFloorLabelFixed = null;
-        _originFNumberFixed = null;
-      });
-      _routeComputed = false;
-      _pathPointsByFloorGltf.clear();
-      _maybeComputeAndPushPath();
-      _ensureFloorSelected(_desiredStartFloorLabel);
+    if (result == null) return;
+
+    if (result['type'] == 'pin_placement') {
+      // Open the interactive pin‑placement dialog
+      final pinResult = await showModalBottomSheet<Map<String, dynamic>>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (context) => SetYourLocationDialog(
+          shopName: widget.shopName,
+          shopId: widget.shopId,
+          destinationPoiMaterial: widget.destinationPoiMaterial,
+          floorSrc: _currentFloor,
+          destinationHitGltf: widget.destinationHitGltf,
+          destinationFloorLabel: widget.destinationFloorLabel,
+          returnResultOnly: true,
+        ),
+      );
+
+      if (pinResult != null) {
+  final rawFloor = pinResult['floorLabel'];
+  final displayFloor = _floorLabelFromToken(rawFloor) ?? rawFloor;
+
+  setState(() {
+    _usePinAsStart = false;
+    _customStartPoi = {
+      'name': 'Your location',
+      'type': 'poi',
+      'floor': displayFloor,
+      'x': pinResult['blender']['x'],
+      'y': pinResult['blender']['y'],
+      'z': pinResult['blender']['z'],
+      'material': null,
+    };
+    _desiredStartFloorLabel = displayFloor;
+    _originFloorLabelFixed = null;
+    _originFNumberFixed = null;
+    _selectedPreference = 'any';
+        });
+        // Convert Blender to glTF for the pin
+        final blender = pinResult['blender'];
+        _pendingUserPinGltf = {
+          'x': blender['x'].toDouble(),
+          'y': blender['z'].toDouble(),
+          'z': -blender['y'].toDouble(),
+        };
+        _routeComputed = false;
+        _pathPointsByFloorGltf.clear();
+        _maybeComputeAndPushPath();
+        _ensureFloorSelected(_desiredStartFloorLabel);
+      }
+      return;
     }
+
+    // Existing handling for a POI
+    // Existing handling for a POI
+    setState(() {
+      _usePinAsStart = false;
+      _customStartPoi = result;
+      final displayFloor = _floorLabelFromToken(result['floor']) ?? result['floor'];
+      _desiredStartFloorLabel = result['floor'];
+      _originFloorLabelFixed = null;
+      _originFNumberFixed = null;
+      _selectedPreference = 'any';
+    });
+    // Convert POI Blender coordinates to glTF for the pin
+    _pendingUserPinGltf = {
+      'x': result['x'],
+      'y': result['z'],
+      'z': -result['y'],
+    };
+    _routeComputed = false;
+    _pathPointsByFloorGltf.clear();
+    _maybeComputeAndPushPath();
+    _ensureFloorSelected(_desiredStartFloorLabel);
   }
 
   Future<void> _showDestPicker() async {
@@ -2852,7 +2896,11 @@ const timer = setInterval(function() {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) {
-        return _PoiPickerSheet(pois: allPois, title: 'Select destination');
+        return _PoiPickerSheet(pois: 
+        allPois, 
+        title: 'Select destination',
+        showPinPlacement: false, 
+        );
       },
     );
 
@@ -2871,6 +2919,7 @@ const timer = setInterval(function() {
         // Clear previously fixed destination floor
         _destFloorLabelFixed = null;
         _destFNumberFixed = null;
+        _selectedPreference = 'any';
       });
 
       _routeComputed = false;
@@ -3354,7 +3403,12 @@ const timer = setInterval(function() {
 class _PoiPickerSheet extends StatefulWidget {
   final List<Map<String, dynamic>> pois;
   final String title;
-  const _PoiPickerSheet({required this.pois, required this.title});
+  final bool showPinPlacement;
+  const _PoiPickerSheet({
+    required this.pois, 
+    required this.title,
+    this.showPinPlacement = true,
+    });
 
   @override
   __PoiPickerSheetState createState() => __PoiPickerSheetState();
@@ -3387,98 +3441,149 @@ class __PoiPickerSheetState extends State<_PoiPickerSheet> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.7,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(24),
-          topRight: Radius.circular(24),
-        ),
+Widget build(BuildContext context) {
+  return Container(
+    height: MediaQuery.of(context).size.height * 0.7,
+    decoration: const BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.only(
+        topLeft: Radius.circular(24),
+        topRight: Radius.circular(24),
       ),
-      child: Column(
-        children: [
-          // Header
-          Container(
-            padding: const EdgeInsets.all(20),
-            child: Text(
-              widget.title,
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                color: Colors.black87,
-              ),
+    ),
+    child: Column(
+      children: [
+        // Header
+        Container(
+          padding: const EdgeInsets.all(20),
+          child: Text(
+            widget.title,
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              color: Colors.black87,
             ),
           ),
-          // Search Bar
+        ),
+
+        // Search Bar
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: TextField(
+            controller: _searchController,
+            decoration: InputDecoration(
+              hintText: 'Search',
+              hintStyle: TextStyle(color: Colors.grey[400]),
+              prefixIcon: Icon(Icons.search, color: Colors.grey.shade600),
+              filled: true,
+              fillColor: Colors.white,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: Colors.grey.shade300),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: Colors.grey.shade300),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: Colors.grey.shade300),
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 12,
+              ),
+            ),
+            cursorColor: AppColors.kGreen,
+          ),
+        ),
+
+        // Conditionally show the "Pin on Map" tile
+        if (widget.showPinPlacement) ...[
+          const SizedBox(height: 8),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                hintText: 'Search',
-                hintStyle: TextStyle(color: Colors.grey[400]),
-                prefixIcon: Icon(Icons.search, color: Colors.grey.shade600),
-                filled: true,
-                fillColor: Colors.white,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
-              ),
-              cursorColor: AppColors.kGreen,
-            ),
-          ),
-          const SizedBox(height: 16),
-          // List
-          Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              itemCount: _filtered.length,
-              itemBuilder: (context, index) {
-                final poi = _filtered[index];
-                final isPin = poi['type'] == 'pin';
-                return ListTile(
-                  contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                  leading: Icon(
-                    isPin ? Icons.my_location : Icons.store,
-                    color: isPin ? Colors.green : Colors.grey[600],
-                    size: 24,
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: () => Navigator.pop(context, {'type': 'pin_placement'}),
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 12,
+                    horizontal: 16,
                   ),
-                  title: Text(
-                    poi['name'],
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.black87,
+                  decoration: BoxDecoration(
+                    color: AppColors.kGreen.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: AppColors.kGreen.withOpacity(0.3),
                     ),
                   ),
-                  subtitle: Text(
-                    'Floor: ${poi['floor']}',
-                    style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.location_on_outlined,
+                        color: AppColors.kGreen,
+                        size: 24,
+                      ),
+                      const SizedBox(width: 12),
+                      const Text(
+                        'Pin on Map',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                          color: AppColors.kGreen,
+                        ),
+                      ),
+                    ],
                   ),
-                  onTap: () => Navigator.pop(context, poi),
-                );
-              },
+                ),
+              ),
             ),
           ),
         ],
-      ),
-    );
-  }
+
+        const SizedBox(height: 8),
+
+        // Divider – always present
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Divider(color: Colors.grey[300], thickness: 1),
+        ),
+
+        // List of POIs – always present
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            itemCount: _filtered.length,
+            itemBuilder: (context, index) {
+              final poi = _filtered[index];
+              return ListTile(
+                contentPadding: const EdgeInsets.symmetric(vertical: 4),
+                leading: Icon(Icons.store, color: Colors.grey[600], size: 24),
+                title: Text(
+                  poi['name'],
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                    color: Colors.black87,
+                  ),
+                ),
+                subtitle: Text(
+                  'Floor: ${poi['floor']}',
+                  style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                ),
+                onTap: () => Navigator.pop(context, poi),
+              );
+            },
+          ),
+        ),
+      ],
+    ),
+  );
+}
 }
 
 // ============================================================================

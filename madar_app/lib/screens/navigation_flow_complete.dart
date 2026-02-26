@@ -388,6 +388,13 @@ class SetYourLocationDialog extends StatefulWidget {
   final Map<String, double>? initialUserPinGltf;
   final String? initialFloorLabel;
 
+  /// If true, this screen will save to Firestore and then `pop(result)` instead
+  /// of navigating to [PathOverviewScreen].
+  ///
+  /// This is useful when you open "Set Your Location" from Path Overview to
+  /// edit the start location in-place.
+  final bool returnResultOnly;
+
   const SetYourLocationDialog({
     super.key,
     required this.shopName,
@@ -398,6 +405,7 @@ class SetYourLocationDialog extends StatefulWidget {
     this.destinationFloorLabel,
     this.initialUserPinGltf,
     this.initialFloorLabel,
+    this.returnResultOnly = false,
   });
 
   @override
@@ -1464,23 +1472,39 @@ const timer = setInterval(function() {
                       if (!ok) return;
                       if (!mounted) return;
 
+                      // If we were opened from Path Overview to edit the start
+                      // location, return the new pin + floor so the caller can
+                      // update in-place.
+                      if (widget.returnResultOnly) {
+                        final res = <String, dynamic>{
+                          'gltf': _pickedPosGltf,
+                          'blender': _pickedPosBlender,
+                          'floorLabel': _pickedFloorLabel.isNotEmpty
+                              ? _pickedFloorLabel
+                              : _floorLabelForUrl(_currentFloorURL),
+                        };
+                        Navigator.pop(context, res);
+                        return;
+                      }
+
                       Navigator.pop(context);
                       Navigator.pushReplacement(
                         context,
                         MaterialPageRoute(
                           builder: (_) => PathOverviewScreen(
-                        shopName: widget.shopName,
-                        shopId: widget.shopId,
-                        startingMethod: 'pin',
-                        destinationPoiMaterial: widget.destinationPoiMaterial,
-                        destinationHitGltf: widget.destinationHitGltf,
-                        destinationFloorLabel: widget.destinationFloorLabel,
-                        // IMPORTANT: floorSrc must be the USER'S CURRENT floor, not the destination's floor.
-                        floorSrc: _currentFloorURL.isNotEmpty
-                            ? _currentFloorURL
-                            : (widget.floorSrc.isNotEmpty ? widget.floorSrc : _currentFloorURL),
-                        originFloorLabel: _floorLabelForUrl(_currentFloorURL),
-                      )
+                              shopName: widget.shopName,
+                              shopId: widget.shopId,
+                              startingMethod: 'pin',
+                              destinationPoiMaterial: widget.destinationPoiMaterial,
+                              destinationHitGltf: widget.destinationHitGltf,
+                              destinationFloorLabel: widget.destinationFloorLabel,
+                              // IMPORTANT: floorSrc must be the USER'S CURRENT floor, not the destination's floor.
+                              floorSrc: _currentFloorURL.isNotEmpty
+                                  ? _currentFloorURL
+                                  : (widget.floorSrc.isNotEmpty
+                                      ? widget.floorSrc
+                                      : _currentFloorURL),
+                              originFloorLabel: _floorLabelForUrl(_currentFloorURL)),
                         ),
                       );
                     }

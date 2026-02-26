@@ -82,7 +82,8 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
   // Caller-provided floor selector. Can be a mapURL (assets/...glb) or a label like "GF"/"F1"/"0"/"1".
   String _requestedFloorToken = '';
   bool _requestedFloorIsUrl = false;
-  static const double _unitToMeters = 69.32; // adjust based on your model
+  static const double _unitToMeters =
+      69.32; // adjust based on your model 15/0.216394
   bool _looksLikeMapUrl(String s) {
     final t = s.trim();
     if (t.isEmpty) return false;
@@ -96,6 +97,11 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
   String _desiredStartFloorLabel = '';
   String _estimatedTime = '2 min';
   String _estimatedDistance = '166 m';
+
+  bool _usePinAsStart = true; // true = use Firestore pin
+  Map<String, dynamic>? _customStartPoi; // if _usePinAsStart is false
+  Map<String, dynamic>?
+  _selectedDestPoi; // never null (defaults to the passed shop)
 
   String _toFNumber(String? raw) {
     if (raw == null) return '';
@@ -239,6 +245,52 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       }
     });
     return total;
+  }
+
+  List<Map<String, dynamic>> _getAllPoisForSelection() {
+    final List<Map<String, dynamic>> result = [];
+    // Add the "Use my location" option only if user has a saved location
+    if (_userPosBlender != null) {
+      result.add({
+        'name': '📍 Use my location',
+        'type': 'pin',
+        'floor': _floorLabelFromToken(_originFloorLabel) ?? _originFloorLabel,
+        'x': _userPosBlender!['x'],
+        'y': _userPosBlender!['y'],
+        'z': _userPosBlender!['z'],
+      });
+    }
+    // Add all POIs from the index
+    // Add all POIs from the index
+    if (_poiByFloorNorm != null) {
+      _poiByFloorNorm!.forEach((floorKey, pois) {
+        pois.forEach((normKey, poi) {
+          String rawName = poi['name'] ?? normKey;
+          String displayName = _cleanPoiName(rawName);
+          result.add({
+            'name': displayName,
+            'type': 'poi',
+            'floor': floorKey,
+            'x': poi['x'],
+            'y': poi['y'],
+            'z': poi['z'],
+            'material': poi['materialName'] ?? normKey,
+          });
+        });
+      });
+    }
+    return result;
+  }
+
+  /// Removes "POIMAT_" prefix, trailing .001, and replaces underscores with spaces
+  String _cleanPoiName(String raw) {
+    String name = raw.replaceFirst(
+      RegExp(r'^POIMAT_', caseSensitive: false),
+      '',
+    );
+    name = name.replaceAll(RegExp(r'\.\d+$'), ''); // remove .001 etc.
+    name = name.replaceAll('_', ' ');
+    return name.trim();
   }
 
   bool _isPreferenceAvailableForCurrentRoute(String prefValue) {
@@ -1514,65 +1566,73 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
 
   Future<void> _maybeComputeAndPushPath() async {
     if (_booting) return;
-    // Ensure destination is resolved from POI json if the caller only supplied
-    // a POI material name.
     await _resolveDestinationFromPoiJsonIfNeeded();
     if (_routeComputed) {
-      // Route already computed; just (re)sync overlays for the currently viewed floor.
       await _syncOverlaysForCurrentFloor();
       return;
     }
 
-    if (_userPosBlender == null || _destPosBlender == null) return;
+    // Determine effective start and destination coordinates
+    Map<String, double>? effectiveStart;
+    String? effectiveStartFloor;
 
-    // Determine floors
-    final startLabel =
-        _originFloorLabelFixed ??
-        (_desiredStartFloorLabel.isNotEmpty ? _desiredStartFloorLabel : '');
-    if (startLabel.trim().isEmpty) {
-      debugPrint(
-        '⚠️ Start floor unknown (no saved Firestore location yet) — abort routing',
-      );
+    if (_usePinAsStart) {
+      effectiveStart = _userPosBlender;
+      effectiveStartFloor = _originFloorLabel;
+    } else {
+      effectiveStart = _customStartPoi != null
+          ? {
+              'x': _customStartPoi!['x'],
+              'y': _customStartPoi!['y'],
+              'z': _customStartPoi!['z'],
+            }
+          : null;
+      effectiveStartFloor = _customStartPoi?['floor'];
+    }
+
+    Map<String, double>? effectiveDest = _selectedDestPoi != null
+        ? {
+            'x': _selectedDestPoi!['x'],
+            'y': _selectedDestPoi!['y'],
+            'z': _selectedDestPoi!['z'],
+          }
+        : _destPosBlender;
+    String? effectiveDestFloor = _selectedDestPoi?['floor'] ?? _destFloorLabel;
+
+    if (effectiveStart == null || effectiveDest == null) {
+      debugPrint('⚠️ Missing start or destination coordinates');
+      await _syncOverlaysForCurrentFloor();
       return;
     }
-    // Destination floor label: prefer fixed -> POI json -> caller -> infer from floorSrc token.
-    final destCandidateRaw =
-        (_destFloorLabelFixed != null && _destFloorLabelFixed!.isNotEmpty)
-        ? _destFloorLabelFixed!
-        : ((_destFloorLabel != null && _destFloorLabel!.isNotEmpty)
-              ? _destFloorLabel!
-              : ((widget.destinationFloorLabel != null &&
-                        widget.destinationFloorLabel!.isNotEmpty)
-                    ? widget.destinationFloorLabel!
-                    : ''));
-    // Normalize if the caller passed a map token/path.
-    final destCandidate =
-        _floorLabelFromToken(destCandidateRaw) ?? destCandidateRaw;
 
-    // If still unknown, default to the ORIGIN floor (not the currently viewed floor),
-    // so switching floors won't accidentally recompute a route with wrong navmesh.
-    final destLabel = destCandidate.isNotEmpty ? destCandidate : startLabel;
-    if (destCandidate.isEmpty) {
-      debugPrint(
-        '⚠️ Destination floor label unknown; defaulting to origin floor ($destLabel). Connectors will NOT be used.',
-      );
+    // Determine floor labels
+    final startLabel = effectiveStartFloor ?? _desiredStartFloorLabel;
+    final destLabel = effectiveDestFloor ?? '';
+    if (startLabel.trim().isEmpty) {
+      debugPrint('⚠️ Start floor unknown — abort routing');
+      await _syncOverlaysForCurrentFloor();
+      return;
     }
-    final startF = _toFNumber(startLabel);
-    final destF = _toFNumber(destLabel);
+    // Normalize dest if needed
+    final destCandidate = _floorLabelFromToken(destLabel) ?? destLabel;
+    final destFloor = destCandidate.isNotEmpty ? destCandidate : startLabel;
 
-    // Lock floors for this navigation session (prevents weird paths when changing floors).
+    final startF = _toFNumber(startLabel);
+    final destF = _toFNumber(destFloor);
+
+    // Lock floors for this navigation session
     _originFloorLabelFixed ??= startLabel;
-    _destFloorLabelFixed ??= destLabel;
+    _destFloorLabelFixed ??= destFloor;
     _originFNumberFixed ??= startF;
     _destFNumberFixed ??= destF;
 
     final startNm = await _ensureNavmeshLoadedForFNumber(startF);
     final destNm = await _ensureNavmeshLoadedForFNumber(destF);
-    if (startNm == null || destNm == null) return;
-
-    // Always keep _navmeshF1 aligned to the currently visible floor (for legacy helpers).
+    if (startNm == null || destNm == null) {
+      await _syncOverlaysForCurrentFloor();
+      return;
+    }
     _navmeshF1 = _navmeshCache[_currentFloor];
-
     await _ensureConnectorsLoaded();
 
     // Reset previous path
@@ -1591,10 +1651,6 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       final b = nm.snapPointXY([bBl['x']!, bBl['y']!, bBl['z']!]);
       var raw = nm.findPathFunnelBlenderXY(start: a, goal: b);
       var sm = _smoothAndResamplePath(raw, nm);
-
-      // Fallback: some navmesh implementations may return an empty/single-point
-      // path when the start and goal are very close or in the same polygon.
-      // In that case, draw a simple straight-line path.
       if (sm.length < 2) {
         raw = [a, b];
         sm = _smoothAndResamplePath(raw, nm);
@@ -1612,15 +1668,13 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     }
 
     if (startF == destF) {
-      final pts = computePathOn(startNm, _userPosBlender!, _destPosBlender!);
+      final pts = computePathOn(startNm, effectiveStart, effectiveDest);
       final gltf = pts
           .map((p) => _blenderToGltf({'x': p[0], 'y': p[1], 'z': p[2]}))
           .toList();
       _pathPointsByFloorGltf[startF] = gltf;
     } else {
-      // Multi-floor: go from start -> connector(start floor), then connector(dest floor) -> destination.
-      final pref = _selectedPreference
-          .toLowerCase(); // any / stairs / elevator / escalator
+      final pref = _selectedPreference.toLowerCase();
       bool linksFloors(ConnectorLink c) =>
           c.endpointsByFNumber.containsKey(startF) &&
           c.endpointsByFNumber.containsKey(destF);
@@ -1639,45 +1693,19 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
         return directionOk(c) && _connectorMatchesPreference(t, pref);
       }
 
-      // 1) Try connectors that link floors AND match preference
       final candidates = _connectors
           .where((c) => linksFloors(c) && matchesPref(c))
           .toList();
-
-      // 2) Fallback: ignore preference (still respect escalator direction)
       final pool = candidates.isNotEmpty
           ? candidates
           : _connectors.where((c) => linksFloors(c) && directionOk(c)).toList();
 
       debugPrint(
-        '🧭 pref=' +
-            pref +
-            ' start=' +
-            startLabel +
-            '(' +
-            startF +
-            ') dest=' +
-            destLabel +
-            '(' +
-            destF +
-            ') ' +
-            'matched=' +
-            candidates.length.toString() +
-            ' pool=' +
-            pool.length.toString(),
+        '🧭 pref=$pref start=$startLabel($startF) dest=$destFloor($destF) matched=${candidates.length} pool=${pool.length}',
       );
-      if (pool.isNotEmpty) {
-        final preview = pool
-            .take(8)
-            .map((c) => '${_normalizeConnectorType(c.type)}:${c.id}')
-            .join(', ');
-        debugPrint(
-          '🧭 connector pool: ' + preview + (pool.length > 8 ? ' ...' : ''),
-        );
-      }
-
       if (pool.isEmpty) {
-        debugPrint("⚠️ No connectors found linking $startLabel -> $destLabel");
+        debugPrint("⚠️ No connectors found linking $startLabel -> $destFloor");
+        await _syncOverlaysForCurrentFloor();
         return;
       }
 
@@ -1689,12 +1717,9 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       for (final c in pool) {
         final aPos = c.endpointsByFNumber[startF]!;
         final bPos = c.endpointsByFNumber[destF]!;
-        final aPts = computePathOn(startNm, _userPosBlender!, aPos);
-        final bPts = computePathOn(destNm, bPos, _destPosBlender!);
-
-        // Skip broken paths
+        final aPts = computePathOn(startNm, effectiveStart, aPos);
+        final bPts = computePathOn(destNm, bPos, effectiveDest);
         if (aPts.length < 2 || bPts.length < 2) continue;
-
         final score = pathLen(aPts) + pathLen(bPts);
         if (score < bestScore) {
           bestScore = score;
@@ -1711,12 +1736,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
 
       _chosenConnectorId = '${best.type}:${best.id}';
       debugPrint(
-        '✅ chosen connector pref=' +
-            pref +
-            ' -> ' +
-            _chosenConnectorId! +
-            ' score=' +
-            bestScore.toStringAsFixed(2),
+        '✅ chosen connector pref=$pref -> $_chosenConnectorId score=${bestScore.toStringAsFixed(2)}',
       );
       _connectorStartBlender = best.endpointsByFNumber[startF];
       _connectorDestBlender = best.endpointsByFNumber[destF];
@@ -1734,14 +1754,18 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
 
     _routeComputed = true;
 
-    // Compute total distance and estimate time
     if (_pathPointsByFloorGltf.isNotEmpty) {
       final rawDist = _calculateTotalDistance();
       final totalDist = rawDist * _unitToMeters;
       _estimatedDistance = '${totalDist.toStringAsFixed(0)} m';
-      final timeSeconds = totalDist / 1.4; // adjust speed as needed
-      final minutes = (timeSeconds / 60).ceil();
-      _estimatedTime = minutes < 1 ? '<1 min' : '$minutes min';
+      final timeSeconds = totalDist / 1.4;
+      if (timeSeconds < 50) {
+        // less than 30 seconds → <1 min
+        _estimatedTime = 'Less than 1 min';
+      } else {
+        final minutes = (timeSeconds / 60).ceil();
+        _estimatedTime = '$minutes min';
+      }
     } else {
       _estimatedDistance = '? m';
       _estimatedTime = '? min';
@@ -2296,6 +2320,19 @@ const timer = setInterval(function() {
       // 3) Load user pin + preferred start floor (may set _desiredStartFloorLabel).
       await _loadUserBlenderPosition();
 
+      // Initialize selected destination POI if we have coordinates
+      if (_destPosBlender != null) {
+        _selectedDestPoi = {
+          'name': widget.shopName,
+          'type': 'poi',
+          'floor': _destFloorLabel ?? '',
+          'x': _destPosBlender!['x'],
+          'y': _destPosBlender!['y'],
+          'z': _destPosBlender!['z'],
+          'material': _pendingPoiToHighlight ?? '',
+        };
+      }
+
       // 4) Ensure we are on the best initial floor:
       //    prefer user start floor, otherwise destination floor.
       final target = (_desiredStartFloorLabel.isNotEmpty)
@@ -2681,7 +2718,9 @@ const timer = setInterval(function() {
     final p = pref.toLowerCase().trim();
     if (p.isEmpty || p == 'any') return true;
 
-    final startLabel = _originFloorLabel.trim();
+    final startLabel = _desiredStartFloorLabel.isNotEmpty
+        ? _desiredStartFloorLabel
+        : _originFloorLabel;
     final destLabel =
         (_destFloorLabelFixed ??
                 _destFloorLabel ??
@@ -2689,16 +2728,13 @@ const timer = setInterval(function() {
                 '')
             .trim();
 
-    // If floor labels are not resolved yet, don't block the UI.
     if (startLabel.isEmpty || destLabel.isEmpty) return true;
 
     final startFStr = _toFNumber(startLabel);
     final destFStr = _toFNumber(destLabel);
 
-    // If parsing fails, don't block the UI.
     if (startFStr.isEmpty || destFStr.isEmpty) return true;
 
-    // Same-floor trips don't need connectors; keep all prefs enabled.
     if (startFStr == destFStr) return false;
 
     final startF = int.tryParse(startFStr);
@@ -2707,15 +2743,11 @@ const timer = setInterval(function() {
 
     for (final c in _connectors) {
       final normType = _normalizeConnectorType(c.type);
-
-      // Respect both type and direction (e.g. esc_up vs esc_dn).
       if (!_connectorMatchesPreference(normType, p)) continue;
       if (!_connectorDirectionAllowed(normType, startF, destF)) continue;
-
       final keys = c.endpointsByFNumber.keys.map((k) => k.toString()).toSet();
       if (keys.contains(startFStr) && keys.contains(destFStr)) return true;
     }
-
     return false;
   }
 
@@ -2723,20 +2755,6 @@ const timer = setInterval(function() {
     final String nextPreference = (_selectedPreference == preference)
         ? 'any'
         : preference;
-
-    if (!_isPreferenceAvailableForCurrentTrip(nextPreference)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            nextPreference == 'any'
-                ? 'No route is available for these floors.'
-                : 'No ${nextPreference.toLowerCase()} route is available for these floors.',
-          ),
-          duration: const Duration(seconds: 2),
-        ),
-      );
-      return;
-    }
 
     debugPrint('🎛️ changePreference: $_selectedPreference -> $nextPreference');
 
@@ -2773,6 +2791,92 @@ const timer = setInterval(function() {
       }
     } catch (e) {
       debugPrint('⚠️ Failed to recompute route after preference change: $e');
+    }
+  }
+
+  Future<void> _showStartPicker() async {
+    await _loadPoiIndexIfNeeded();
+    if (!_poiIndexLoaded) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('POI data not loaded yet.')));
+      return;
+    }
+
+    final allPois = _getAllPoisForSelection(); // includes "Use my location"
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return _PoiPickerSheet(pois: allPois, title: 'Select start point');
+      },
+    );
+
+    if (result != null) {
+      setState(() {
+        if (result['type'] == 'pin') {
+          _usePinAsStart = true;
+          _customStartPoi = null;
+          _desiredStartFloorLabel = _originFloorLabel; // pin floor
+        } else {
+          _usePinAsStart = false;
+          _customStartPoi = result;
+          _desiredStartFloorLabel = result['floor'];
+        }
+        // Clear any previously fixed start floor
+        _originFloorLabelFixed = null;
+        _originFNumberFixed = null;
+      });
+      _routeComputed = false;
+      _pathPointsByFloorGltf.clear();
+      _maybeComputeAndPushPath();
+      _ensureFloorSelected(_desiredStartFloorLabel);
+    }
+  }
+
+  Future<void> _showDestPicker() async {
+    await _loadPoiIndexIfNeeded();
+    if (!_poiIndexLoaded) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('POI data not loaded yet.')));
+      return;
+    }
+
+    final allPois = _getAllPoisForSelection()
+        .where((p) => p['type'] == 'poi')
+        .toList();
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return _PoiPickerSheet(pois: allPois, title: 'Select destination');
+      },
+    );
+
+    if (result != null) {
+      setState(() {
+        _selectedDestPoi = result;
+        _destFloorLabel = result['floor'];
+        _destPosBlender = {
+          'x': result['x'],
+          'y': result['y'],
+          'z': result['z'],
+        };
+        // Update the material name for highlighting
+        _pendingPoiToHighlight = result['material']; // ← new line
+
+        // Clear previously fixed destination floor
+        _destFloorLabelFixed = null;
+        _destFNumberFixed = null;
+      });
+
+      _routeComputed = false;
+      _pathPointsByFloorGltf.clear();
+      _maybeComputeAndPushPath();
+      _ensureFloorSelected(_destFloorLabel!);
     }
   }
 
@@ -2917,13 +3021,21 @@ const timer = setInterval(function() {
                           child: Column(
                             children: [
                               // Origin Row
-                              _locationRow(
-                                Icons.radio_button_checked,
-                                'Your location',
-                                (_originFloorLabel.isNotEmpty
-                                    ? _originFloorLabel
-                                    : _currentFloorLabel()),
-                                const Color(0xFF6C6C6C),
+                              GestureDetector(
+                                onTap: _showStartPicker,
+                                child: _locationRow(
+                                  Icons.radio_button_checked,
+                                  _usePinAsStart
+                                      ? 'Your location'
+                                      : (_customStartPoi?['name'] ?? ''),
+                                  _usePinAsStart
+                                      ? (_floorLabelFromToken(
+                                              _originFloorLabel,
+                                            ) ??
+                                            _originFloorLabel)
+                                      : (_customStartPoi?['floor'] ?? ''),
+                                  const Color(0xFF6C6C6C),
+                                ),
                               ),
 
                               // Dotted Line
@@ -2952,11 +3064,17 @@ const timer = setInterval(function() {
                               ),
 
                               // Destination Row
-                              _locationRow(
-                                Icons.location_on,
-                                widget.shopName,
-                                _destFloorLabel ?? '--',
-                                const Color(0xFFC88D52),
+                              // Destination Row (tappable)
+                              GestureDetector(
+                                onTap: _showDestPicker,
+                                child: _locationRow(
+                                  Icons.location_on,
+                                  _selectedDestPoi?['name'] ?? widget.shopName,
+                                  _selectedDestPoi?['floor'] ??
+                                      _destFloorLabel ??
+                                      '--',
+                                  const Color(0xFFC88D52),
+                                ),
                               ),
                             ],
                           ),
@@ -3049,7 +3167,7 @@ const timer = setInterval(function() {
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              widget.shopName,
+                              _selectedDestPoi?['name'] ?? widget.shopName,
                               style: TextStyle(
                                 color: Colors.grey[500],
                                 fontSize: 16,
@@ -3123,7 +3241,6 @@ const timer = setInterval(function() {
     );
   }
 
-  // Horizontal preference button (icon next to text)
   Widget _preferenceButtonHorizontal(
     String label,
     IconData icon,
@@ -3132,93 +3249,62 @@ const timer = setInterval(function() {
   }) {
     final bool isSelected = _selectedPreference == value;
     final bool isDisabled = !enabled;
+    // When disabled, we treat the button as not selected for styling purposes
+    final bool showAsSelected = isSelected && !isDisabled;
 
     return Opacity(
       opacity: isDisabled ? 0.45 : 1.0,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: isDisabled ? null : () => _changePreference(value),
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            // The button (original padding, unchanged)
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              curve: Curves.easeOut,
-              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-              decoration: BoxDecoration(
-                color: isSelected ? const Color(0xFFE8E9E0) : Colors.white,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: isSelected
-                      ? AppColors.kGreen.withOpacity(0.30)
-                      : const Color(0x00000000),
-                  width: 1.2,
-                ),
-                boxShadow: isSelected
-                    ? [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.04),
-                          blurRadius: 8,
-                          offset: const Offset(0, 2),
-                        ),
-                      ]
-                    : null,
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    icon,
-                    size: 20,
-                    color: isDisabled
-                        ? Colors.grey[400]
-                        : (isSelected ? AppColors.kGreen : Colors.grey[500]),
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    label,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: isDisabled
-                          ? Colors.grey[400]
-                          : (isSelected ? AppColors.kGreen : Colors.grey[600]),
-                      fontWeight: isSelected
-                          ? FontWeight.w700
-                          : FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+          decoration: BoxDecoration(
+            color: showAsSelected ? const Color(0xFFE8E9E0) : Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: showAsSelected
+                  ? AppColors.kGreen.withOpacity(0.30)
+                  : const Color(0x00000000),
+              width: 1.2,
             ),
-            // Close icon – sits exactly on the top‑right border
-            if (isSelected && !isDisabled)
-              Positioned(
-                top: -3,
-                right: -3,
-                child: Container(
-                  width: 15,
-                  height: 15,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: AppColors.kGreen, width: 1.2),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.08),
-                        blurRadius: 2,
-                        offset: Offset(0, 1),
-                      ),
-                    ],
-                  ),
-                  child: const Icon(
-                    Icons.close,
-                    size: 9,
-                    color: AppColors.kGreen,
-                  ),
+            boxShadow: showAsSelected
+                ? [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.04),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 20,
+                color: isDisabled
+                    ? Colors.grey[400]
+                    : (showAsSelected ? AppColors.kGreen : Colors.grey[500]),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: isDisabled
+                      ? Colors.grey[400]
+                      : (showAsSelected ? AppColors.kGreen : Colors.grey[600]),
+                  fontWeight: showAsSelected
+                      ? FontWeight.w700
+                      : FontWeight.w500,
                 ),
               ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -3256,6 +3342,140 @@ const timer = setInterval(function() {
           label,
           style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
         ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// POI Picker Sheet (for selecting start/destination)
+// ============================================================================
+
+class _PoiPickerSheet extends StatefulWidget {
+  final List<Map<String, dynamic>> pois;
+  final String title;
+  const _PoiPickerSheet({required this.pois, required this.title});
+
+  @override
+  __PoiPickerSheetState createState() => __PoiPickerSheetState();
+}
+
+class __PoiPickerSheetState extends State<_PoiPickerSheet> {
+  final TextEditingController _searchController = TextEditingController();
+  List<Map<String, dynamic>> _filtered = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _filtered = widget.pois;
+    _searchController.addListener(_filter);
+  }
+
+  void _filter() {
+    final query = _searchController.text.toLowerCase();
+    setState(() {
+      _filtered = widget.pois.where((p) {
+        return p['name'].toLowerCase().contains(query);
+      }).toList();
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.7,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(24),
+          topRight: Radius.circular(24),
+        ),
+      ),
+      child: Column(
+        children: [
+          // Header
+          Container(
+            padding: const EdgeInsets.all(20),
+            child: Text(
+              widget.title,
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: Colors.black87,
+              ),
+            ),
+          ),
+          // Search Bar
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: 'Search',
+                hintStyle: TextStyle(color: Colors.grey[400]),
+                prefixIcon: Icon(Icons.search, color: Colors.grey.shade600),
+                filled: true,
+                fillColor: Colors.white,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
+              ),
+              cursorColor: AppColors.kGreen,
+            ),
+          ),
+          const SizedBox(height: 16),
+          // List
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              itemCount: _filtered.length,
+              itemBuilder: (context, index) {
+                final poi = _filtered[index];
+                final isPin = poi['type'] == 'pin';
+                return ListTile(
+                  contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                  leading: Icon(
+                    isPin ? Icons.my_location : Icons.store,
+                    color: isPin ? Colors.green : Colors.grey[600],
+                    size: 24,
+                  ),
+                  title: Text(
+                    poi['name'],
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.black87,
+                    ),
+                  ),
+                  subtitle: Text(
+                    'Floor: ${poi['floor']}',
+                    style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                  ),
+                  onTap: () => Navigator.pop(context, poi),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -1650,9 +1650,19 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
-          title: const Text(
-            'Overlapping Requests',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
+          title: Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'Overlapping Requests',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
+                ),
+              ),
+              GestureDetector(
+                onTap: () => Navigator.pop(ctx),
+                child: Icon(Icons.close, size: 20, color: Colors.grey[500]),
+              ),
+            ],
           ),
           content: SingleChildScrollView(
             child: Column(
@@ -1660,11 +1670,10 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'You already have scheduled requests that overlap with the selected time.',
+                  'You already have a scheduled tracking request overlapping with the selected time for the following friend(s):',
                   style: TextStyle(fontSize: 15, height: 1.4),
                 ),
                 const SizedBox(height: 16),
-                // Friends list with vertical green line (matches app design)
                 IntrinsicHeight(
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1703,10 +1712,10 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'The existing scheduled requests for these friends will be cancelled.',
+                  'Press Proceed to replace the previous request (it will be canceled), or Reject to keep it.',
                   style: TextStyle(
                     fontSize: 13,
-                    color: Colors.red[600],
+                    color: Colors.grey[600],
                     height: 1.4,
                   ),
                 ),
@@ -1717,8 +1726,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
           actions: [
             Row(
               children: [
-                Flexible(
-                  flex: 2,
+                Expanded(
                   child: SizedBox(
                     width: double.infinity,
                     child: TextButton(
@@ -1731,7 +1739,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                         ),
                       ),
                       child: const Text(
-                        'Go Back',
+                        'Reject',
                         style: TextStyle(
                           color: Colors.black87,
                           fontWeight: FontWeight.w600,
@@ -1742,8 +1750,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                   ),
                 ),
                 const SizedBox(width: 10),
-                Flexible(
-                  flex: 3,
+                Expanded(
                   child: SizedBox(
                     width: double.infinity,
                     child: TextButton(
@@ -1756,11 +1763,11 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                         ),
                       ),
                       child: const Text(
-                        'Replace & Continue',
+                        'Proceed',
                         style: TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
-                          fontSize: 14,
+                          fontSize: 15,
                         ),
                       ),
                     ),
@@ -2772,8 +2779,20 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                         } else {
                           textColor = Colors.grey[500]!;
                         }
+                        final String displayText;
+                        if (hoursStr == 'closed') {
+                          displayText = 'Venue is closed';
+                        } else if (hoursStr == 'temporarily closed') {
+                          displayText = 'Temporarily closed';
+                        } else if (isOpen24) {
+                          displayText = 'Open 24 hours';
+                        } else if (isNotAvailable) {
+                          displayText = 'Opening hours: not available';
+                        } else {
+                          displayText = 'Opening hours: $hoursStr';
+                        }
                         return Text(
-                          'Opening hours: $hoursStr',
+                          displayText,
                           style: TextStyle(fontSize: 12, color: textColor),
                         );
                       },

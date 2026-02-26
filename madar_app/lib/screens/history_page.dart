@@ -35,7 +35,17 @@ class HistoryTrackingRequest {
 }
 
 class HistoryPage extends StatefulWidget {
-  const HistoryPage({super.key});
+  const HistoryPage({
+    super.key,
+    this.initialFilterIndex,
+    this.initialHighlightRequestId,
+  });
+
+  /// 0 = Sent, 1 = Received
+  final int? initialFilterIndex;
+
+  /// When set, scroll to and briefly highlight this request.
+  final String? initialHighlightRequestId;
 
   @override
   State<HistoryPage> createState() => _HistoryPageState();
@@ -44,6 +54,8 @@ class HistoryPage extends StatefulWidget {
 class _HistoryPageState extends State<HistoryPage> {
   int _mainTabIndex = 0;
   int _trackingFilterIndex = 0;
+  String? _highlightRequestId;
+  final GlobalKey _highlightKey = GlobalKey();
 
   static const List<String> _mainTabs = ['Tracking', 'Meeting point'];
   static const List<String> _trackingFilters = ['Sent', 'Received'];
@@ -63,9 +75,19 @@ class _HistoryPageState extends State<HistoryPage> {
   @override
   void initState() {
     super.initState();
+    if (widget.initialFilterIndex != null) {
+      _trackingFilterIndex = widget.initialFilterIndex!;
+    }
+    _highlightRequestId = widget.initialHighlightRequestId;
     _sentStream = _createSentHistoryStream();
     _receivedStream = _createReceivedHistoryStream();
     _markStaleRequestsOnLoad();
+    // Clear highlight after a short delay
+    if (_highlightRequestId != null) {
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted) setState(() => _highlightRequestId = null);
+      });
+    }
   }
 
   /// One-time: mark pending/accepted requests past endAt as expired/completed when opening History.
@@ -374,10 +396,33 @@ class _HistoryPageState extends State<HistoryPage> {
             ),
           );
         }
+        // Scroll to highlighted request on first build
+        if (_highlightRequestId != null) {
+          final targetIdx = list.indexWhere(
+            (r) => r.id == _highlightRequestId,
+          );
+          if (targetIdx >= 0) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) return;
+              final ctx = _highlightKey.currentContext;
+              if (ctx != null) {
+                Scrollable.ensureVisible(
+                  ctx,
+                  alignment: 0.15,
+                  duration: const Duration(milliseconds: 450),
+                  curve: Curves.easeInOutCubic,
+                );
+              }
+            });
+          }
+        }
         return ListView.builder(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
           itemCount: list.length,
           itemBuilder: (context, i) => Padding(
+            key: list[i].id == _highlightRequestId
+                ? _highlightKey
+                : null,
             padding: const EdgeInsets.only(bottom: 12),
             child: _buildHistoryTile(list[i]),
           ),
@@ -410,29 +455,34 @@ class _HistoryPageState extends State<HistoryPage> {
         r.endAt.month != r.startAt.month ||
         r.endAt.year != r.startAt.year;
 
-    final String durationStr;
+    final String dateStr;
     if (isOvernight) {
       final startDay = r.startAt.day;
       final endDay = r.endAt.day;
       final startMonth = _shortMonth(r.startAt.month);
       final endMonth = _shortMonth(r.endAt.month);
-      final dateRange = r.startAt.month == r.endAt.month
+      dateStr = r.startAt.month == r.endAt.month
           ? '$startDay - $endDay $endMonth'
           : '$startDay $startMonth - $endDay $endMonth';
-      durationStr = '$dateRange • ${r.startTime} - ${r.endTime}';
     } else {
-      final dateStr = _formatDate(
+      dateStr = _formatDate(
         DateTime(r.startAt.year, r.startAt.month, r.startAt.day),
       );
-      durationStr = '$dateStr • ${r.startTime} - ${r.endTime}';
     }
+    final timeStr = '${r.startTime} - ${r.endTime}';
     final userLabel = r.isSent ? 'Tracked User' : 'Sender';
+    final isHighlighted = _highlightRequestId == r.id;
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isHighlighted
+            ? AppColors.kGreen.withOpacity(0.05)
+            : Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(
+          color: isHighlighted ? AppColors.kGreen : Colors.grey.shade200,
+          width: isHighlighted ? 2 : 1,
+        ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.04),
@@ -508,7 +558,13 @@ class _HistoryPageState extends State<HistoryPage> {
                               : '${r.otherUserName} (${r.otherUserPhone})',
                         ),
                         const SizedBox(height: 6),
-                        _labeledDetail('Duration: ', durationStr),
+                        Row(
+                          children: [
+                            _labeledDetail('Date: ', dateStr),
+                            const SizedBox(width: 16),
+                            _labeledDetail('Time: ', timeStr),
+                          ],
+                        ),
                         const SizedBox(height: 6),
                         _labeledDetail(
                           'Venue: ',
@@ -577,7 +633,7 @@ class _HistoryPageState extends State<HistoryPage> {
         label = 'Cancelled';
         break;
       case 'completed':
-        bg = const Color.fromARGB(255, 12, 13, 10).withOpacity(0.1);
+        bg = AppColors.kGreen.withOpacity(0.1);
         text = AppColors.kGreen;
         label = 'Completed';
         break;

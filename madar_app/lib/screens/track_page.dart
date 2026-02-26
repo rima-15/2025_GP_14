@@ -2067,28 +2067,29 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   }
 
   /// Build duration string with overnight "(next day)" support and • separator
-  String _buildDurationStr(TrackingRequest r) {
+  String _buildDateStr(TrackingRequest r) {
     final isOvernight =
         r.endAt.day != r.startAt.day ||
         r.endAt.month != r.startAt.month ||
         r.endAt.year != r.startAt.year;
 
     if (isOvernight) {
-      // Show date range: "1 - 2 Feb" or "31 Jan - 1 Feb"
       final startDay = r.startAt.day;
       final endDay = r.endAt.day;
       final startMonth = _shortMonth(r.startAt.month);
       final endMonth = _shortMonth(r.endAt.month);
-      final dateRange = r.startAt.month == r.endAt.month
+      return r.startAt.month == r.endAt.month
           ? '$startDay - $endDay $endMonth'
           : '$startDay $startMonth - $endDay $endMonth';
-      return '$dateRange • ${r.startTime} - ${r.endTime}';
     }
 
-    final dateStr = _formatDateForDuration(
+    return _formatDateForDuration(
       DateTime(r.startAt.year, r.startAt.month, r.startAt.day),
     );
-    return '$dateStr • ${r.startTime} - ${r.endTime}';
+  }
+
+  String _buildTimeStr(TrackingRequest r) {
+    return '${r.startTime} - ${r.endTime}';
   }
 
   String _shortMonth(int month) {
@@ -2114,7 +2115,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       label: 'Tracked User',
       name: r.trackedUserName,
       phone: r.trackedUserPhone,
-      duration: _buildDurationStr(r),
+      date: _buildDateStr(r),
+      time: _buildTimeStr(r),
       venue: r.venueName,
     );
   }
@@ -2124,7 +2126,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       label: 'Sender',
       name: r.senderName ?? 'Unknown',
       phone: r.senderPhone ?? '',
-      duration: _buildDurationStr(r),
+      date: _buildDateStr(r),
+      time: _buildTimeStr(r),
       venue: r.venueName,
     );
   }
@@ -2133,7 +2136,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     required String label,
     required String name,
     required String phone,
-    required String duration,
+    required String date,
+    required String time,
     required String venue,
   }) {
     return IntrinsicHeight(
@@ -2157,7 +2161,13 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                   phone.isEmpty ? name : '$name ($phone)',
                 ),
                 const SizedBox(height: 8),
-                _labeledDetail('Duration: ', duration),
+                Row(
+                  children: [
+                    _labeledDetail('Date: ', date),
+                    const SizedBox(width: 16),
+                    _labeledDetail('Time: ', time),
+                  ],
+                ),
                 const SizedBox(height: 8),
                 _labeledDetail('Venue: ', venue),
               ],

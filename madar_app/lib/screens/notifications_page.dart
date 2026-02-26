@@ -1550,32 +1550,84 @@ class _NotificationsPageState extends State<NotificationsPage> {
     return '$name$phone $action your request.';
   }
 
-  /// Navigate to source: track request -> Received; accepted/declined -> Sent. Request expanded.
+  /// Navigate to source: track-related notification → Track page or History page
+  /// based on the current request status.
   void _onNotificationTap(NotificationItem notification) async {
     setState(() {
       _localReadOverride[notification.id] = true;
       notification.isRead = true;
     });
 
-    // 🔥 أول شي: اعتبري الإشعار مقروء
     await _markNotificationAsReadByRequestId(notification.id);
 
-    if (notification.type == NotificationType.trackRequest ||
-        notification.type == NotificationType.trackAccepted ||
-        notification.type == NotificationType.trackRejected) {
-      // 0 = Received (incoming request), 1 = Sent (accepted/declined response)
-      final filterIndex = notification.type == NotificationType.trackRequest
-          ? 0
-          : 1;
+    final requestId = notification.id;
 
+    // Determine filter: Received vs Sent
+    // trackRequest/trackCancelled → current user is receiver → Received
+    // trackAccepted/trackRejected/trackStarted/trackTerminated/trackCompleted → Sent
+    int? filterIndex;
+    switch (notification.type) {
+      case NotificationType.trackRequest:
+      case NotificationType.trackCancelled:
+        filterIndex = 0; // Received
+        break;
+      case NotificationType.trackAccepted:
+      case NotificationType.trackRejected:
+      case NotificationType.trackStarted:
+      case NotificationType.trackTerminated:
+      case NotificationType.trackCompleted:
+        filterIndex = 1; // Sent
+        break;
+      default:
+        break;
+    }
+
+    if (filterIndex == null) return;
+
+    // Check the actual request status to determine Track page vs History page
+    const historyStatuses = [
+      'declined',
+      'expired',
+      'terminated',
+      'completed',
+      'cancelled',
+    ];
+
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('trackRequests')
+          .doc(requestId)
+          .get();
+      final status = (doc.data()?['status'] ?? '').toString();
+
+      if (!mounted) return;
+
+      if (historyStatuses.contains(status)) {
+        // Navigate to History page directly
+        Navigator.pop(context, {
+          'page': 'history',
+          'expandRequestId': requestId,
+          'filterIndex': filterIndex,
+        });
+      } else {
+        // Navigate to Track page (pending/accepted/active)
+        Navigator.pop(context, {
+          'page': 'track',
+          'tab': 2,
+          'expandRequestId': requestId,
+          'filterIndex': filterIndex,
+        });
+      }
+    } catch (e) {
+      // Fallback to Track page on error
+      if (!mounted) return;
       Navigator.pop(context, {
+        'page': 'track',
         'tab': 2,
-        'expandRequestId': notification.id,
+        'expandRequestId': requestId,
         'filterIndex': filterIndex,
       });
     }
-
-    // باقي الأنواع لاحقاً
   }
 
   Future<void> _markNotificationAsReadByRequestId(String requestId) async {

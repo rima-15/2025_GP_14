@@ -29,11 +29,23 @@ class _MainLayoutState extends State<MainLayout> {
   int _index = 0;
   final _homeKey = GlobalKey<HomePageState>();
 
+  // Track page parameters from notification navigation
+  String? _trackExpandRequestId;
+  int? _trackFilterIndex;
+
   late final pages = <Widget>[
     HomePage(key: _homeKey),
     const ExplorePage(),
-    const TrackPage(),
+    _buildTrackPage(),
   ];
+
+  Widget _buildTrackPage() {
+    return TrackPage(
+      key: ValueKey('track_${_trackExpandRequestId ?? 'default'}'),
+      initialExpandRequestId: _trackExpandRequestId,
+      initialFilterIndex: _trackFilterIndex,
+    );
+  }
 
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   String _firstName = '';
@@ -174,13 +186,39 @@ class _MainLayoutState extends State<MainLayout> {
 
                   return IconButton(
                     padding: const EdgeInsets.only(right: 16),
-                    onPressed: () {
-                      Navigator.push(
+                    onPressed: () async {
+                      final result = await Navigator.push<Map<String, dynamic>>(
                         context,
                         MaterialPageRoute(
                           builder: (_) => const NotificationsPage(),
                         ),
                       );
+                      if (result != null && mounted) {
+                        final page = result['page'] as String?;
+                        final expandId = result['expandRequestId'] as String?;
+                        final filterIdx = result['filterIndex'] as int?;
+
+                        if (page == 'history' && expandId != null) {
+                          // Navigate to History page
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => HistoryPage(
+                                initialFilterIndex: filterIdx,
+                                initialHighlightRequestId: expandId,
+                              ),
+                            ),
+                          );
+                        } else if (page == 'track' && expandId != null) {
+                          // Navigate to Track page tab with expanded request
+                          setState(() {
+                            _trackExpandRequestId = expandId;
+                            _trackFilterIndex = filterIdx;
+                            pages[2] = _buildTrackPage();
+                            _index = 2;
+                          });
+                        }
+                      }
                     },
                     icon: Stack(
                       clipBehavior: Clip.none,

@@ -157,7 +157,7 @@ class NavigateToShopDialog extends StatelessWidget {
                     floorSrc: floorSrc,
                     destinationHitGltf: destinationHitGltf,
                     destinationFloorLabel: destinationFloorLabel,
-                            ),
+                  ),
                 );
               },
             ),
@@ -486,6 +486,16 @@ class _SetYourLocationDialogState extends State<SetYourLocationDialog> {
     }
   }
 
+  DateTime? _toUtcDate(dynamic v) {
+    if (v == null) return null;
+    if (v is Timestamp) return v.toDate().toUtc();
+    if (v is int) return DateTime.fromMillisecondsSinceEpoch(v, isUtc: true);
+    if (v is num)
+      return DateTime.fromMillisecondsSinceEpoch(v.toInt(), isUtc: true);
+    if (v is String) return DateTime.tryParse(v)?.toUtc();
+    return null;
+  }
+
   /// Loads the last saved user location (if any). It reads from:
   /// users/{uid}.location.blenderPosition {x,y,z,floor}
   /// and sets the UI state (and preferred floor) accordingly.
@@ -503,6 +513,20 @@ class _SetYourLocationDialogState extends State<SetYourLocationDialog> {
       final location = data['location'];
       if (location is! Map) return;
 
+      // Timestamp check (already present)
+      final updatedAt = _toUtcDate(location['updatedAt']);
+      if (updatedAt != null) {
+        final oneHourAgo = DateTime.now().toUtc().subtract(
+          const Duration(hours: 1),
+        );
+        if (updatedAt.isBefore(oneHourAgo)) {
+          debugPrint('📍 Saved location is older than 1 hour – not loading.');
+          return;
+        }
+      } else {
+        debugPrint('📍 No updatedAt found – proceeding without time check.');
+      }
+
       final bp = location['blenderPosition'];
       if (bp is! Map) return;
 
@@ -517,7 +541,6 @@ class _SetYourLocationDialogState extends State<SetYourLocationDialog> {
       if (!mounted) return;
       final blenderRaw = {'x': x, 'y': y, 'z': z};
 
-      // Snap to navmesh if it is already loaded (keeps the pin on walkable floor).
       final blender = (_navmeshF1 != null)
           ? _navmeshF1!.snapBlenderPoint(blenderRaw)
           : blenderRaw;
@@ -529,12 +552,12 @@ class _SetYourLocationDialogState extends State<SetYourLocationDialog> {
         _pickedFloorLabel = floorLabel;
       });
 
-      // Update the visible pin if JS is ready (safe even if it isn't).
-      if (_jsReady && _pickedPosGltf != null) {
+      // Send pin (will be pending if WebView not ready)
+      if (_pickedPosGltf != null) {
         _pushUserPinToJs(_pickedPosGltf!);
       }
 
-      // If we already have maps loaded, switch to the saved floor.
+      // Switch to the saved floor if maps are already loaded
       if (floorLabel.isNotEmpty && _venueMaps.isNotEmpty) {
         final match = _venueMaps.firstWhere(
           (m) => (m['F_number'] ?? '') == floorLabel,
@@ -543,7 +566,13 @@ class _SetYourLocationDialogState extends State<SetYourLocationDialog> {
 
         final url = match['mapURL'] ?? '';
         if (url.isNotEmpty && mounted) {
-          setState(() => _currentFloorURL = url);
+          setState(() {
+            _currentFloorURL = url;
+          });
+          // ✅ Re‑send the pin after floor change so it appears on the correct floor
+          if (_pickedPosGltf != null) {
+            _pushUserPinToJs(_pickedPosGltf!);
+          }
         }
       }
     } catch (e) {
@@ -578,7 +607,11 @@ class _SetYourLocationDialogState extends State<SetYourLocationDialog> {
 
   Future<void> _pushUserPinToJs(Map<String, double> gltf) async {
     final c = _webCtrl;
-    if (c == null) return;
+    if (c == null) {
+      // No WebView yet – store the pin so it can be sent later
+      _pendingPinToSend = gltf;
+      return;
+    }
 
     if (!_jsBridgeReady) {
       _pendingPinToSend = gltf;
@@ -592,6 +625,7 @@ class _SetYourLocationDialogState extends State<SetYourLocationDialog> {
 
     final saved = _pickedFloorLabel.trim(); // "0"/"1"
     final current = _fNumberForUrl(_currentFloorURL); // "0"/"1"
+    debugPrint('📌 _pushUserPinToJs: saved="$saved", current="$current"');
 
     if (saved.isNotEmpty && current.isNotEmpty && saved != current) {
       try {
@@ -755,8 +789,6 @@ function ensureUserPinHotspot(viewer) {
 }
 
 function setUserPin(viewer, pos) {
-  // Some Android WebView builds don't refresh hotspot position
-  // when only data-position changes. Detach/attach forces refresh.
   const hs = ensureUserPinHotspot(viewer);
 
   if (hs.parentElement) {
@@ -764,12 +796,24 @@ function setUserPin(viewer, pos) {
     viewer.appendChild(hs);
   }
 
-  // Use raw numbers (no "m") for maximum compatibility
   hs.setAttribute('data-position', `${pos.x} ${pos.y} ${pos.z}`);
   hs.setAttribute('data-normal', `0 1 0`);
+  hs.setAttribute('data-visibility', 'visible');
+  hs.style.opacity = '1'; // Force visibility
 
   viewer.requestUpdate();
   requestAnimationFrame(() => viewer.requestUpdate());
+
+  // --- DEBUG: Log pin info after a short delay ---
+  setTimeout(() => {
+    const rect = hs.getBoundingClientRect();
+    postToTest(`🔍 Pin rect: ${rect.width}x${rect.height} at (${rect.left},${rect.top})`);
+    if (rect.width === 0 || rect.height === 0) {
+      postToTest("❌ Pin has zero size – not visible");
+    } else {
+      postToTest("✅ Pin has non-zero size – should be visible");
+    }
+  }, 500);
 }
 
 // --- Flutter -> JS (move pin after Flutter-side snapping) ---
@@ -1285,7 +1329,7 @@ const timer = setInterval(function() {
           'x': pos['x'],
           'y': pos['y'],
           'z': pos['z'],
-          'floor': floorValue,
+          'floor': floorValue.toString(),
         },
         'location.updatedAt': FieldValue.serverTimestamp(),
       });
@@ -1363,6 +1407,9 @@ const timer = setInterval(function() {
               }
             }
           });
+          if (mounted && _pickedPosGltf != null) {
+            _pushUserPinToJs(_pickedPosGltf!);
+          }
         }
       }
     } catch (e) {
@@ -1376,7 +1423,9 @@ const timer = setInterval(function() {
   Widget build(BuildContext context) {
     final screenHeight = MediaQuery.of(context).size.height;
 
-    final pinPlaced = _pickedPosGltf != null;
+    final pinPlaced =
+        _pickedPosGltf != null &&
+        _pickedFloorLabel == _fNumberForUrl(_currentFloorURL);
 
     // Match venue_page ordering: higher floors first (F2, F1, ... , GF last)
     final sortedMaps = List<Map<String, String>>.from(_venueMaps);
@@ -1492,19 +1541,23 @@ const timer = setInterval(function() {
                         context,
                         MaterialPageRoute(
                           builder: (_) => PathOverviewScreen(
-                              shopName: widget.shopName,
-                              shopId: widget.shopId,
-                              startingMethod: 'pin',
-                              destinationPoiMaterial: widget.destinationPoiMaterial,
-                              destinationHitGltf: widget.destinationHitGltf,
-                              destinationFloorLabel: widget.destinationFloorLabel,
-                              // IMPORTANT: floorSrc must be the USER'S CURRENT floor, not the destination's floor.
-                              floorSrc: _currentFloorURL.isNotEmpty
-                                  ? _currentFloorURL
-                                  : (widget.floorSrc.isNotEmpty
+                            shopName: widget.shopName,
+                            shopId: widget.shopId,
+                            startingMethod: 'pin',
+                            destinationPoiMaterial:
+                                widget.destinationPoiMaterial,
+                            destinationHitGltf: widget.destinationHitGltf,
+                            destinationFloorLabel: widget.destinationFloorLabel,
+                            // IMPORTANT: floorSrc must be the USER'S CURRENT floor, not the destination's floor.
+                            floorSrc: _currentFloorURL.isNotEmpty
+                                ? _currentFloorURL
+                                : (widget.floorSrc.isNotEmpty
                                       ? widget.floorSrc
                                       : _currentFloorURL),
-                              originFloorLabel: _floorLabelForUrl(_currentFloorURL)),
+                            originFloorLabel: _floorLabelForUrl(
+                              _currentFloorURL,
+                            ),
+                          ),
                         ),
                       );
                     }
@@ -1557,9 +1610,6 @@ const timer = setInterval(function() {
 
                 // New WebView instance -> JS is not ready yet
                 _jsBridgeReady = false;
-
-                // If we already have a saved pin, cache it and push once JS becomes ready
-                _pendingPinToSend = _pickedPosGltf;
               },
               javascriptChannels: {
                 JavascriptChannel(
@@ -1579,11 +1629,18 @@ const timer = setInterval(function() {
                         "window.setAllowedFloorMaterialFromFlutter('Allowed_floor');",
                       );
 
+                      // Send any pending pin (from previous attempts)
                       final p = _pendingPinToSend;
                       if (p != null) {
                         _pendingPinToSend = null;
                         _pushUserPinToJs(p);
                       }
+
+                      // 🔥 Also send the current pin if it exists (in case it wasn't pending)
+                      if (_pickedPosGltf != null) {
+                        _pushUserPinToJs(_pickedPosGltf!);
+                      }
+
                       _pushDestinationHighlightToJs();
                     }
                   },
@@ -1692,13 +1749,17 @@ const timer = setInterval(function() {
             ),
           ),
         ),
-        onPressed: () => setState(() {
-          _currentFloorURL = url;
-          _pickedPosGltf = null;
-          _pickedPosBlender = null;
-
-          _pickedFloorLabel = '';
-        }),
+        onPressed: () {
+          setState(() {
+            _currentFloorURL = url;
+            // Do NOT nullify _pickedPosGltf, _pickedPosBlender, or _pickedFloorLabel
+          });
+          // After the floor changes, tell the JavaScript side to update the pin visibility.
+          // This will show the pin if the new floor matches the pin's floor, otherwise hide it.
+          if (_pickedPosGltf != null) {
+            _pushUserPinToJs(_pickedPosGltf!);
+          }
+        },
         child: Text(
           label,
           style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
@@ -1707,10 +1768,6 @@ const timer = setInterval(function() {
     );
   }
 }
-
-// ============================================================================
-// 4. PATH OVERVIEW SCREEN - FIXED MAP VISIBILITY & CONSISTENT FLOOR SELECTORS
-// ============================================================================
 
 // ============================================================================
 // 4. PATH OVERVIEW SCREEN - FIXED MAP VISIBILITY & CONSISTENT FLOOR SELECTORS

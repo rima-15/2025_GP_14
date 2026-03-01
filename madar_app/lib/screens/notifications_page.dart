@@ -9,6 +9,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:madar_app/services/notification_service.dart';
+import 'package:madar_app/screens/navigation_flow_complete.dart';
 
 // ----------------------------------------------------------------------------
 // Notifications Page
@@ -391,6 +392,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
               isRead: d['isRead'] ?? false,
               endAt: (d['data']?['endAt'] as Timestamp?)?.toDate(), // 🔥
               requiresAction: d['requiresAction'] == true, // 🔥
+              actionTaken: d['actionTaken'] == true,
             );
           }).toList();
         });
@@ -1001,89 +1003,99 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                         )) ||
                                     isTerminated ||
                                     isCompleted;
+                                final actionTaken = notification.actionTaken;
+                                final disabled = expired || actionTaken;
 
-                                return OutlinedButton(
-                                  onPressed: expired
-                                      ? null
-                                      : () async {
-                                          // mark read
-                                          if (notification.notificationDocId !=
-                                              null) {
-                                            await FirebaseFirestore.instance
-                                                .collection('notifications')
-                                                .doc(
-                                                  notification
-                                                      .notificationDocId!,
-                                                )
-                                                .update({'isRead': true});
-                                          }
+                                return AbsorbPointer(
+                                  absorbing: disabled,
+                                  child: OutlinedButton(
+                                    onPressed: disabled
+                                        ? null
+                                        : () async {
+                                            // mark read
+                                            if (notification
+                                                    .notificationDocId !=
+                                                null) {
+                                              await FirebaseFirestore.instance
+                                                  .collection('notifications')
+                                                  .doc(
+                                                    notification
+                                                        .notificationDocId!,
+                                                  )
+                                                  .update({'isRead': true});
+                                            }
 
-                                          setState(() {
-                                            notification.isRead = true;
-                                            _localReadOverride[notification
-                                                    .id] =
-                                                true;
-                                          });
+                                            setState(() {
+                                              notification.isRead = true;
+                                              _localReadOverride[notification
+                                                      .id] =
+                                                  true;
+                                            });
 
-                                          // لاحقًا تربطين set location
-                                        },
-                                  style: ButtonStyle(
-                                    minimumSize:
-                                        MaterialStateProperty.all<Size>(
-                                          const Size(double.infinity, 40),
+                                            await _openSetLocationForTracking(
+                                              notification,
+                                            );
+                                          },
+                                    style: ButtonStyle(
+                                      minimumSize:
+                                          MaterialStateProperty.all<Size>(
+                                            const Size(double.infinity, 40),
+                                          ),
+                                      backgroundColor:
+                                          MaterialStateProperty.resolveWith<
+                                            Color
+                                          >((states) {
+                                            if (states.contains(
+                                              MaterialState.disabled,
+                                            )) {
+                                              return Colors.grey[300]!;
+                                            }
+                                            return AppColors.kGreen;
+                                          }),
+                                      foregroundColor:
+                                          MaterialStateProperty.resolveWith<
+                                            Color
+                                          >((states) {
+                                            if (states.contains(
+                                              MaterialState.disabled,
+                                            )) {
+                                              return Colors.grey[600]!;
+                                            }
+                                            return Colors.white;
+                                          }),
+                                      side:
+                                          MaterialStateProperty.resolveWith<
+                                            BorderSide
+                                          >((states) {
+                                            if (states.contains(
+                                              MaterialState.disabled,
+                                            )) {
+                                              return BorderSide.none;
+                                            }
+                                            return BorderSide(
+                                              color: AppColors.kGreen,
+                                              width: 0,
+                                            );
+                                          }),
+                                      shape: MaterialStateProperty.all(
+                                        RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
                                         ),
-                                    backgroundColor:
-                                        MaterialStateProperty.resolveWith<
-                                          Color
-                                        >((states) {
-                                          if (states.contains(
-                                            MaterialState.disabled,
-                                          )) {
-                                            return Colors.grey[300]!;
-                                          }
-                                          return AppColors.kGreen;
-                                        }),
-                                    foregroundColor:
-                                        MaterialStateProperty.resolveWith<
-                                          Color
-                                        >((states) {
-                                          if (states.contains(
-                                            MaterialState.disabled,
-                                          )) {
-                                            return Colors.grey[600]!;
-                                          }
-                                          return Colors.white;
-                                        }),
-                                    side:
-                                        MaterialStateProperty.resolveWith<
-                                          BorderSide
-                                        >((states) {
-                                          if (states.contains(
-                                            MaterialState.disabled,
-                                          )) {
-                                            return BorderSide.none;
-                                          }
-                                          return BorderSide(
-                                            color: AppColors.kGreen,
-                                            width: 0,
-                                          );
-                                        }),
-                                    shape: MaterialStateProperty.all(
-                                      RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(8),
                                       ),
                                     ),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: const [
-                                      Icon(
-                                        Icons.location_on_outlined,
-                                        size: 22,
-                                      ),
-                                      SizedBox(width: 8),
-                                      Text('Set My Location'),
-                                    ],
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: const [
+                                        Icon(
+                                          Icons.location_on_outlined,
+                                          size: 22,
+                                        ),
+                                        SizedBox(width: 8),
+                                        Text('Set My Location'),
+                                      ],
+                                    ),
                                   ),
                                 );
                               },
@@ -1902,6 +1914,51 @@ class _NotificationsPageState extends State<NotificationsPage> {
     }
   }
 
+  Future<void> _openSetLocationForTracking(
+    NotificationItem notification,
+  ) async {
+    final trackRequestId = notification.trackRequestId;
+    if (trackRequestId == null || trackRequestId.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Tracking request not found.')),
+      );
+      return;
+    }
+
+    String venueId = '';
+    String venueName = '';
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('trackRequests')
+          .doc(trackRequestId)
+          .get();
+      final data = doc.data();
+      if (data != null) {
+        venueId = (data['venueId'] ?? '').toString().trim();
+        venueName = (data['venueName'] ?? '').toString().trim();
+      }
+    } catch (e) {
+      debugPrint('Failed to load track request for location dialog: $e');
+    }
+
+    if (!mounted) return;
+
+    showNavigationDialog(
+      context,
+      venueName.isNotEmpty ? venueName : 'Set Location',
+      trackRequestId,
+      returnResultOnly: true,
+      dialogTitle: 'Set My Location',
+      dialogSubtitle: 'Choose how to set your location.',
+      venueId: venueId.isNotEmpty ? venueId : null,
+      trackingNotificationId:
+          (notification.notificationDocId ?? notification.id).trim().isNotEmpty
+          ? (notification.notificationDocId ?? notification.id)
+          : null,
+    );
+  }
+
   Widget _notificationStatusBadge(String status) {
     Color bg;
     Color text;
@@ -2049,6 +2106,7 @@ class NotificationItem {
   final String? requestStatus;
   final DateTime? endAt;
   final bool requiresAction;
+  final bool actionTaken;
 
   final NotificationType type;
   final String title;
@@ -2073,6 +2131,7 @@ class NotificationItem {
     this.endAt,
 
     this.requiresAction = false,
+    this.actionTaken = false,
 
     required this.type,
     required this.title,

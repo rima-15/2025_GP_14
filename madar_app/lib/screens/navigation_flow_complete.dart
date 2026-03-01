@@ -32,6 +32,11 @@ void showNavigationDialog(
   String floorSrc = '',
   Map<String, double>? destinationHitGltf,
   String? destinationFloorLabel,
+  bool returnResultOnly = false,
+  String? dialogTitle,
+  String? dialogSubtitle,
+  String? venueId,
+  String? trackingNotificationId,
 }) {
   showModalBottomSheet(
     context: context,
@@ -44,6 +49,11 @@ void showNavigationDialog(
       floorSrc: floorSrc,
       destinationHitGltf: destinationHitGltf,
       destinationFloorLabel: destinationFloorLabel,
+      returnResultOnly: returnResultOnly,
+      dialogTitle: dialogTitle,
+      dialogSubtitle: dialogSubtitle,
+      venueId: venueId,
+      trackingNotificationId: trackingNotificationId,
     ),
   );
 }
@@ -69,6 +79,11 @@ class NavigateToShopDialog extends StatelessWidget {
   /// When provided, multi-floor routing can use connectors even if the POI JSON
   /// doesn't contain this destination.
   final String? destinationFloorLabel;
+  final bool returnResultOnly;
+  final String? dialogTitle;
+  final String? dialogSubtitle;
+  final String? venueId;
+  final String? trackingNotificationId;
 
   const NavigateToShopDialog({
     super.key,
@@ -78,12 +93,25 @@ class NavigateToShopDialog extends StatelessWidget {
     this.floorSrc = '',
     this.destinationHitGltf,
     this.destinationFloorLabel,
+    this.returnResultOnly = false,
+    this.dialogTitle,
+    this.dialogSubtitle,
+    this.venueId,
+    this.trackingNotificationId,
   });
 
   @override
   Widget build(BuildContext context) {
     final screenHeight = MediaQuery.of(context).size.height;
     final isSmallScreen = screenHeight < 700;
+    final titleText =
+        (dialogTitle != null && dialogTitle!.trim().isNotEmpty)
+            ? dialogTitle!.trim()
+            : 'Navigate to $shopName';
+    final subtitleText =
+        (dialogSubtitle != null && dialogSubtitle!.trim().isNotEmpty)
+            ? dialogSubtitle!.trim()
+            : 'First, set your starting point.';
 
     return Container(
       decoration: const BoxDecoration(
@@ -116,7 +144,7 @@ class NavigateToShopDialog extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Navigate to $shopName',
+                        titleText,
                         style: TextStyle(
                           fontSize: isSmallScreen ? 20 : 22,
                           fontWeight: FontWeight.w600,
@@ -127,7 +155,7 @@ class NavigateToShopDialog extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        'First, set your starting point.',
+                        subtitleText,
                         style: TextStyle(fontSize: 14, color: Colors.grey[600]),
                       ),
                     ],
@@ -157,6 +185,9 @@ class NavigateToShopDialog extends StatelessWidget {
                     floorSrc: floorSrc,
                     destinationHitGltf: destinationHitGltf,
                     destinationFloorLabel: destinationFloorLabel,
+                    returnResultOnly: returnResultOnly,
+                    venueId: venueId,
+                    trackingNotificationId: trackingNotificationId,
                   ),
                 );
               },
@@ -185,6 +216,9 @@ class NavigateToShopDialog extends StatelessWidget {
                   destinationPoiMaterial,
                   floorSrc,
                   destinationHitGltf,
+                  returnResultOnly: returnResultOnly,
+                  venueId: venueId,
+                  trackingNotificationId: trackingNotificationId,
                 );
               },
             ),
@@ -202,6 +236,11 @@ class NavigateToShopDialog extends StatelessWidget {
     String destinationPoiMaterial,
     String floorSrc,
     Map<String, double>? destinationHitGltf,
+    {
+      bool returnResultOnly = false,
+      String? venueId,
+      String? trackingNotificationId,
+    }
   ) async {
     // 1) Camera permission
     final status = await Permission.camera.request();
@@ -332,6 +371,9 @@ class NavigateToShopDialog extends StatelessWidget {
           destinationHitGltf: destinationHitGltf,
           initialUserPinGltf: snappedGltf,
           initialFloorLabel: floorLabelFromScan,
+          returnResultOnly: returnResultOnly,
+          venueId: venueId,
+          trackingNotificationId: trackingNotificationId,
         ),
       );
     });
@@ -387,6 +429,8 @@ class SetYourLocationDialog extends StatefulWidget {
   final String? destinationFloorLabel;
   final Map<String, double>? initialUserPinGltf;
   final String? initialFloorLabel;
+  final String? venueId;
+  final String? trackingNotificationId;
 
   /// If true, this screen will save to Firestore and then `pop(result)` instead
   /// of navigating to [PathOverviewScreen].
@@ -405,6 +449,8 @@ class SetYourLocationDialog extends StatefulWidget {
     this.destinationFloorLabel,
     this.initialUserPinGltf,
     this.initialFloorLabel,
+    this.venueId,
+    this.trackingNotificationId,
     this.returnResultOnly = false,
   });
 
@@ -1353,12 +1399,16 @@ const timer = setInterval(function() {
     setState(() => _mapsLoading = true);
 
     try {
-      // Solitaire Place ID verified from your venue_page logic
+      // Use provided venueId or fallback to Solitaire (legacy default).
       const String solitaireId = 'ChIJcYTQDwDjLj4RZEiboV6gZzM';
+      final String effectiveVenueId =
+          (widget.venueId ?? '').trim().isNotEmpty
+              ? widget.venueId!.trim()
+              : solitaireId;
 
       final doc = await FirebaseFirestore.instance
           .collection('venues')
-          .doc(solitaireId)
+          .doc(effectiveVenueId)
           .get(const GetOptions(source: Source.serverAndCache));
 
       final data = doc.data();
@@ -1515,16 +1565,38 @@ const timer = setInterval(function() {
             child: PrimaryButton(
               text: 'Confirm Location',
               enabled: pinPlaced,
-              onPressed: pinPlaced
-                  ? () async {
-                      final ok = await _saveBlenderPosition();
-                      if (!ok) return;
-                      if (!mounted) return;
+                  onPressed: pinPlaced
+                      ? () async {
+                          final ok = await _saveBlenderPosition();
+                          if (!ok) return;
+                          if (!mounted) return;
 
-                      // If we were opened from Path Overview to edit the start
-                      // location, return the new pin + floor so the caller can
-                      // update in-place.
-                      if (widget.returnResultOnly) {
+                          if (widget.trackingNotificationId != null &&
+                              widget.trackingNotificationId!
+                                  .trim()
+                                  .isNotEmpty) {
+                            try {
+                              await FirebaseFirestore.instance
+                                  .collection('notifications')
+                                  .doc(widget.trackingNotificationId!.trim())
+                                  .update({'actionTaken': true});
+                            } catch (e) {
+                              debugPrint(
+                                'Failed to mark tracking location as saved: $e',
+                              );
+                            }
+                            if (mounted) {
+                              SnackbarHelper.showSuccess(
+                                context,
+                                'Your location is saved',
+                              );
+                            }
+                          }
+
+                          // If we were opened from Path Overview to edit the start
+                          // location, return the new pin + floor so the caller can
+                          // update in-place.
+                          if (widget.returnResultOnly) {
                         final res = <String, dynamic>{
                           'gltf': _pickedPosGltf,
                           'blender': _pickedPosBlender,

@@ -105,6 +105,7 @@ flutter:
      - assets/nav_cor/navmesh_F1.json
      - assets/poi/solitaire_pois_merged.json
      - assets/connectors/connectors_merged_local.json
+     - assets/poi/solitaire_entrances.json
      
 flutter_native_splash:
    color: "#FFFFFF"  

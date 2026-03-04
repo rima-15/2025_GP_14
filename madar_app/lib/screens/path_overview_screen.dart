@@ -469,6 +469,12 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
   final Map<String, List<Map<String, dynamic>>>
   _connectorEndpointsByFloorLabel = {};
 
+  // Entrances data
+  Map<String, List<Map<String, dynamic>>> _entrancesByPoi = {};
+  bool _entrancesLoaded = false;
+  List<Map<String, dynamic>>?
+  _destEntrances; // entrances for current destination
+
   List<Map<String, double>> get _currentPathPointsGltf =>
       _pathPointsByFloorGltf[_currentFNumber()] ?? const [];
 
@@ -643,39 +649,49 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
   }
 
   Future<void> _syncOverlaysForCurrentFloor() async {
-    if (!_jsReady) return;
+  if (!_jsReady) return;
 
-    // Push path for the visible floor
-    await _pushPathToJs();
+  // Push path for the visible floor
+  await _pushPathToJs();
+  debugPrint(
+    '📌 _syncOverlaysForCurrentFloor: pathPushed=$_pathPushed, jsReady=$_jsReady',
+  );
 
-    // Show the user pin only on the start floor
-    final startLabel = _desiredStartFloorLabel.isNotEmpty
-        ? _desiredStartFloorLabel
-        : _currentFloorLabel();
-    final startF = _toFNumber(startLabel);
+  // Show the user pin only on the start floor
+  final startLabel = _desiredStartFloorLabel.isNotEmpty
+      ? _desiredStartFloorLabel
+      : _currentFloorLabel();
+  final startF = _toFNumber(startLabel);
+  final currF = _currentFNumber();
 
-    final currF = _currentFNumber();
-
-    if (_pendingUserPinGltf != null && currF == startF) {
-      await _pushUserPinToJsPath(_pendingUserPinGltf!);
-    } else {
-      await _clearUserPinFromJs();
-    }
-
-    // Highlight destination only on destination floor (if we know it)
-    final destLabel =
-        _destFloorLabelFixed ??
-        _destFloorLabel ??
-        widget.destinationFloorLabel ??
-        _floorLabelFromToken(widget.floorSrc) ??
-        '';
-    if (destLabel != null && destLabel.isNotEmpty) {
-      final destF = _toFNumber(destLabel);
-      if (currF == destF && _pendingPoiToHighlight != null) {
-        await _pushDestinationHighlightToJsPath();
-      }
-    }
+  if (_pendingUserPinGltf != null && currF == startF) {
+    await _pushUserPinToJsPath(_pendingUserPinGltf!);
+  } else {
+    await _clearUserPinFromJs();
   }
+
+  // Show destination pin only on destination floor
+  final destLabel =
+      _destFloorLabelFixed ??
+      _destFloorLabel ??
+      widget.destinationFloorLabel ??
+      '';
+  if (destLabel.isNotEmpty) {
+    final destF = _toFNumber(destLabel);
+    if (currF == destF && _destPosBlender != null) {
+      final destGltf = _blenderToGltf(_destPosBlender!);
+      await _pushDestPinToJs(destGltf);
+    } else {
+      await _webCtrl?.runJavaScript('window.clearDestPinFromFlutter /*removed*/();');
+    }
+    debugPrint(
+      '🔍 destLabel="$destLabel", currF="$currF", destF="$destF", _destPosBlender=${_destPosBlender}',
+    );
+  }
+
+  // 🔥 ADD THIS LINE: ensure the highlight is updated for the new destination
+  await _pushDestinationHighlightToJsPath();
+}
 
   double? _asDouble(dynamic v) {
     if (v == null) return null;
@@ -763,11 +779,32 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     await c.runJavaScript('window.highlightPoiFromFlutter("$safe");');
   }
 
+  Future<void> _pushDestPinToJs(Map<String, double> gltf) async {
+    final c = _webCtrl;
+    if (c == null || !_jsReady) {
+      debugPrint('❌ _pushDestPinToJs: webCtrl or jsReady false');
+      return;
+    }
+    final x = gltf['x'];
+    final y = gltf['y'];
+    final z = gltf['z'];
+    if (x == null || y == null || z == null) {
+      debugPrint('❌ _pushDestPinToJs: invalid coordinates $gltf');
+      return;
+    }
+    debugPrint('📌 Calling setDestPinFromFlutter($x, $y, $z)');
+    try {
+      await c.runJavaScript('window.clearDestPinFromFlutter /*removed*/()');
+} catch (e) {
+      debugPrint('❌ pushDestPinToJs failed: $e');
+    }
+  }
+
   // ---- POI JSON loading / destination resolving ----
   String _normPoiKey(String s) {
     var n = (s).trim().toLowerCase();
     // remove blender numeric suffixes like .001
-    n = n.replaceAll(RegExp(r"\.[0-9]+\$"), "");
+    n = n.replaceAll(RegExp(r"\.[0-9]+$"), ""); // ✅ fixed
     // remove all separators/symbols to make matching resilient
     n = n.replaceAll(RegExp(r"[^a-z0-9]+"), "");
     // normalize "poimat" prefix (POIMAT_* in the glb)
@@ -1097,6 +1134,48 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     }
   }
 
+  Future<void> _loadEntrances() async {
+    try {
+      final String jsonStr = await rootBundle.loadString(
+        'assets/poi/solitaire_entrances.json',
+      );
+      final List<dynamic> list = jsonDecode(jsonStr);
+      final Map<String, List<Map<String, dynamic>>> map = {};
+
+      for (final item in list) {
+        if (item is! Map) continue;
+        final material = item['poiMaterial']?.toString();
+        if (material == null || material.isEmpty) continue;
+
+        // Normalize the key
+        final normKey = _normPoiKey(material);
+
+        final pos = item['pos'];
+        if (pos is Map) {
+          final x = (pos['x'] as num?)?.toDouble();
+          final y = (pos['y'] as num?)?.toDouble();
+          final z = (pos['z'] as num?)?.toDouble();
+          final floor = item['floor']?.toString() ?? 'GF';
+          if (x != null && y != null && z != null) {
+            map.putIfAbsent(normKey, () => []).add({
+              'x': x,
+              'y': y,
+              'z': z,
+              'floor': floor,
+              'id': item['id']?.toString(),
+            });
+          }
+        }
+      }
+
+      _entrancesByPoi = map;
+      _entrancesLoaded = true;
+      debugPrint('✅ Entrances loaded: ${map.length} POIs with entrances');
+    } catch (e) {
+      debugPrint('❌ Failed to load entrances: $e');
+    }
+  }
+
   Future<void> _resolveDestinationFromPoiJsonIfNeeded() async {
     // If we already have a destination position, we still may need its floor label for connectors.
     if (_destPosBlender != null && !_isBlank(_destFloorLabel)) return;
@@ -1110,6 +1189,27 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
                           : widget.shopName)))
             .trim();
     if (name.isEmpty) return;
+
+    // Check entrances first
+    final normName = _normPoiKey(name);
+    if (_entrancesByPoi.containsKey(normName)) {
+      final entrances = _entrancesByPoi[normName]!;
+      _destEntrances = entrances;
+
+      // Use the first entrance as a temporary destination
+      final first = entrances.first;
+      setState(() {
+        _destPosBlender ??= {'x': first['x'], 'y': first['y'], 'z': first['z']};
+        if (_destFloorLabel == null || _destFloorLabel!.isEmpty) {
+          _destFloorLabel = first['floor'];
+        }
+      });
+
+      debugPrint(
+        '✅ Destination has ${entrances.length} entrances, using first temporarily',
+      );
+      return; // entrances override the POI index
+    }
 
     await _loadPoiIndexIfNeeded();
     if (!_poiIndexLoaded) {
@@ -1579,19 +1679,87 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       effectiveStartFloor = _customStartPoi?['floor'];
     }
 
-    Map<String, double>? effectiveDest = _selectedDestPoi != null
-        ? {
-            'x': _selectedDestPoi!['x'],
-            'y': _selectedDestPoi!['y'],
-            'z': _selectedDestPoi!['z'],
-          }
-        : _destPosBlender;
+    Map<String, double>? effectiveDest = _destPosBlender ??
+        (_selectedDestPoi != null
+            ? {
+                'x': _selectedDestPoi!['x'],
+                'y': _selectedDestPoi!['y'],
+                'z': _selectedDestPoi!['z'],
+              }
+            : null);
     String? effectiveDestFloor = _selectedDestPoi?['floor'] ?? _destFloorLabel;
 
     if (effectiveStart == null || effectiveDest == null) {
       debugPrint('⚠️ Missing start or destination coordinates');
       await _syncOverlaysForCurrentFloor();
       return;
+    }
+
+    // If we have multiple entrances for the destination, pick the closest to the start
+    if (_destEntrances != null &&
+        _destEntrances!.isNotEmpty &&
+        effectiveStart != null) {
+      // Only compare if start and destination are on the same floor
+      final startFloor = _toFNumber(
+        effectiveStartFloor ?? _desiredStartFloorLabel,
+      );
+      final destFloor = _toFNumber(_destFloorLabel ?? '');
+
+      if (startFloor == destFloor) {
+        // Always route to an entrance (not the POI surface/center).
+        // If there is exactly 1 entrance, use it.
+        if (_destEntrances!.length == 1) {
+          final e = _destEntrances!.first;
+          final one = {
+            'x': (e['x'] as num).toDouble(),
+            'y': (e['y'] as num).toDouble(),
+            'z': (e['z'] as num).toDouble(),
+          };
+          debugPrint('🚪 Using only entrance: $one');
+          effectiveDest = one;
+          _destPosBlender = one;
+          if (_selectedDestPoi != null) {
+            _selectedDestPoi!['x'] = one['x'];
+            _selectedDestPoi!['y'] = one['y'];
+            _selectedDestPoi!['z'] = one['z'];
+          }
+        }
+        double bestDistSq = double.infinity;
+        Map<String, double>? bestEntrance;
+
+        for (final e in _destEntrances!) {
+          final dx = (e['x'] as double) - (effectiveStart['x'] ?? 0);
+          final dy = (e['y'] as double) - (effectiveStart['y'] ?? 0);
+          final dz = (e['z'] as double) - (effectiveStart['z'] ?? 0);
+          final distSq = dx * dx + dy * dy + dz * dz;
+          if (distSq < bestDistSq) {
+            bestDistSq = distSq;
+            bestEntrance = {
+              'x': (e['x'] as num).toDouble(),
+              'y': (e['y'] as num).toDouble(),
+              'z': (e['z'] as num).toDouble(),
+            };
+          }
+        }
+
+        if (bestEntrance != null) {
+          debugPrint('🎯 Raw entrance: $bestEntrance');
+          effectiveDest = bestEntrance;
+          // Update persistent state
+          _destPosBlender = bestEntrance;
+          if (_selectedDestPoi != null) {
+            _selectedDestPoi!['x'] = bestEntrance['x'];
+            _selectedDestPoi!['y'] = bestEntrance['y'];
+            _selectedDestPoi!['z'] = bestEntrance['z'];
+          }
+          debugPrint('✅ Chosen closest entrance');
+        }
+      } else {
+        // Floors differ – just keep the first entrance (already in _destPosBlender)
+        debugPrint(
+          '⚠️ Start and destination on different floors – using first entrance',
+        );
+      }
     }
 
     // Determine floor labels
@@ -1637,7 +1805,9 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       Map<String, double> bBl,
     ) {
       final a = nm.snapPointXY([aBl['x']!, aBl['y']!, aBl['z']!]);
-      final b = nm.snapPointXY([bBl['x']!, bBl['y']!, bBl['z']!]);
+      final b = nm.snapPointXY([bBl['x']!, bBl['y']!, bBl['z']!]); // snap destination to navmesh
+      debugPrint('🎯 Snapped start: $a');
+      debugPrint('🎯 Raw dest (unsnapped): $b');
       var raw = nm.findPathFunnelBlenderXY(start: a, goal: b);
       var sm = _smoothAndResamplePath(raw, nm);
       if (sm.length < 2) {
@@ -1657,7 +1827,8 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     }
 
     if (startF == destF) {
-      final pts = computePathOn(startNm, effectiveStart, effectiveDest);
+      if (effectiveStart == null || effectiveDest == null) return;
+      final pts = computePathOn(startNm, effectiveStart!, effectiveDest!);
       final gltf = pts
           .map((p) => _blenderToGltf({'x': p[0], 'y': p[1], 'z': p[2]}))
           .toList();
@@ -1706,8 +1877,9 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       for (final c in pool) {
         final aPos = c.endpointsByFNumber[startF]!;
         final bPos = c.endpointsByFNumber[destF]!;
-        final aPts = computePathOn(startNm, effectiveStart, aPos);
-        final bPts = computePathOn(destNm, bPos, effectiveDest);
+        if (effectiveStart == null || effectiveDest == null) continue;
+        final aPts = computePathOn(startNm, effectiveStart!, aPos);
+                final bPts = computePathOn(destNm, bPos, effectiveDest!);
         if (aPts.length < 2 || bPts.length < 2) continue;
         final score = pathLen(aPts) + pathLen(bPts);
         if (score < bestScore) {
@@ -1789,7 +1961,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
 
   static const String _pathViewerJs =
       r'''console.log("✅ PathViewer JS injected");
-
+postToTest("✅ PathViewer JS top-level executed");
 function postToPOI(obj) {
   try { POI_CHANNEL.postMessage(JSON.stringify(obj)); return true; } catch (e) { return false; }
 }
@@ -1797,7 +1969,11 @@ function postToTest(msg) {
   try { JS_TEST_CHANNEL.postMessage(msg); return true; } catch (e) { return false; }
 }
 function getViewer() { return document.querySelector('model-viewer'); }
-
+window.onerror = function(msg, url, line, col, error) {
+  postToTest("❌ JS Error: " + msg + " at " + line + ":" + col);
+  return true;
+};
+window.testDestPin = function() { postToTest("✅ testDestPin called"); }
 function ensurePinStyle() {
   if (document.getElementById("user_pin_hotspot_style")) return;
 
@@ -1979,7 +2155,6 @@ window.setPathFromFlutter = function(points) {
     return false;
   }
 };
-
 
 // --- Material highlight ---
 window.__poiOriginals = window.__poiOriginals || {};
@@ -2300,10 +2475,8 @@ const timer = setInterval(function() {
   Future<void> _boot() async {
     _booting = true;
     try {
-      // 1) Load maps first so POI fallbacks (poiJsonPath) can work.
       await _loadVenueMaps();
-
-      // 2) Resolve destination from POI index (may set _pendingFloorLabelToOpen).
+      await _loadEntrances();
       await _resolveDestinationFromPoiJsonIfNeeded();
 
       // 3) Load user pin + preferred start floor (may set _desiredStartFloorLabel).
@@ -2822,24 +2995,24 @@ const timer = setInterval(function() {
       );
 
       if (pinResult != null) {
-  final rawFloor = pinResult['floorLabel'];
-  final displayFloor = _floorLabelFromToken(rawFloor) ?? rawFloor;
+        final rawFloor = pinResult['floorLabel'];
+        final displayFloor = _floorLabelFromToken(rawFloor) ?? rawFloor;
 
-  setState(() {
-    _usePinAsStart = false;
-    _customStartPoi = {
-      'name': 'Your location',
-      'type': 'poi',
-      'floor': displayFloor,
-      'x': pinResult['blender']['x'],
-      'y': pinResult['blender']['y'],
-      'z': pinResult['blender']['z'],
-      'material': null,
-    };
-    _desiredStartFloorLabel = displayFloor;
-    _originFloorLabelFixed = null;
-    _originFNumberFixed = null;
-    _selectedPreference = 'any';
+        setState(() {
+          _usePinAsStart = false;
+          _customStartPoi = {
+            'name': 'Your location',
+            'type': 'poi',
+            'floor': displayFloor,
+            'x': pinResult['blender']['x'],
+            'y': pinResult['blender']['y'],
+            'z': pinResult['blender']['z'],
+            'material': null,
+          };
+          _desiredStartFloorLabel = displayFloor;
+          _originFloorLabelFixed = null;
+          _originFNumberFixed = null;
+          _selectedPreference = 'any';
         });
         // Convert Blender to glTF for the pin
         final blender = pinResult['blender'];
@@ -2861,7 +3034,8 @@ const timer = setInterval(function() {
     setState(() {
       _usePinAsStart = false;
       _customStartPoi = result;
-      final displayFloor = _floorLabelFromToken(result['floor']) ?? result['floor'];
+      final displayFloor =
+          _floorLabelFromToken(result['floor']) ?? result['floor'];
       _desiredStartFloorLabel = result['floor'];
       _originFloorLabelFixed = null;
       _originFNumberFixed = null;
@@ -2896,10 +3070,10 @@ const timer = setInterval(function() {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) {
-        return _PoiPickerSheet(pois: 
-        allPois, 
-        title: 'Select destination',
-        showPinPlacement: false, 
+        return _PoiPickerSheet(
+          pois: allPois,
+          title: 'Select destination',
+          showPinPlacement: false,
         );
       },
     );
@@ -3405,10 +3579,10 @@ class _PoiPickerSheet extends StatefulWidget {
   final String title;
   final bool showPinPlacement;
   const _PoiPickerSheet({
-    required this.pois, 
+    required this.pois,
     required this.title,
     this.showPinPlacement = true,
-    });
+  });
 
   @override
   __PoiPickerSheetState createState() => __PoiPickerSheetState();
@@ -3441,149 +3615,150 @@ class __PoiPickerSheetState extends State<_PoiPickerSheet> {
   }
 
   @override
-Widget build(BuildContext context) {
-  return Container(
-    height: MediaQuery.of(context).size.height * 0.7,
-    decoration: const BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.only(
-        topLeft: Radius.circular(24),
-        topRight: Radius.circular(24),
+  Widget build(BuildContext context) {
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.7,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(24),
+          topRight: Radius.circular(24),
+        ),
       ),
-    ),
-    child: Column(
-      children: [
-        // Header
-        Container(
-          padding: const EdgeInsets.all(20),
-          child: Text(
-            widget.title,
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-              color: Colors.black87,
-            ),
-          ),
-        ),
-
-        // Search Bar
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: TextField(
-            controller: _searchController,
-            decoration: InputDecoration(
-              hintText: 'Search',
-              hintStyle: TextStyle(color: Colors.grey[400]),
-              prefixIcon: Icon(Icons.search, color: Colors.grey.shade600),
-              filled: true,
-              fillColor: Colors.white,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: Colors.grey.shade300),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: Colors.grey.shade300),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: Colors.grey.shade300),
-              ),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 12,
+      child: Column(
+        children: [
+          // Header
+          Container(
+            padding: const EdgeInsets.all(20),
+            child: Text(
+              widget.title,
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: Colors.black87,
               ),
             ),
-            cursorColor: AppColors.kGreen,
           ),
-        ),
 
-        // Conditionally show the "Pin on Map" tile
-        if (widget.showPinPlacement) ...[
-          const SizedBox(height: 8),
+          // Search Bar
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: () => Navigator.pop(context, {'type': 'pin_placement'}),
-                borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    vertical: 12,
-                    horizontal: 16,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.kGreen.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: AppColors.kGreen.withOpacity(0.3),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: 'Search',
+                hintStyle: TextStyle(color: Colors.grey[400]),
+                prefixIcon: Icon(Icons.search, color: Colors.grey.shade600),
+                filled: true,
+                fillColor: Colors.white,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
+              ),
+              cursorColor: AppColors.kGreen,
+            ),
+          ),
+
+          // Conditionally show the "Pin on Map" tile
+          if (widget.showPinPlacement) ...[
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () =>
+                      Navigator.pop(context, {'type': 'pin_placement'}),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 12,
+                      horizontal: 16,
                     ),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.location_on_outlined,
-                        color: AppColors.kGreen,
-                        size: 24,
+                    decoration: BoxDecoration(
+                      color: AppColors.kGreen.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: AppColors.kGreen.withOpacity(0.3),
                       ),
-                      const SizedBox(width: 12),
-                      const Text(
-                        'Pin on Map',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.location_on_outlined,
                           color: AppColors.kGreen,
+                          size: 24,
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 12),
+                        const Text(
+                          'Pin on Map',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                            color: AppColors.kGreen,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
+            ),
+          ],
+
+          const SizedBox(height: 8),
+
+          // Divider – always present
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Divider(color: Colors.grey[300], thickness: 1),
+          ),
+
+          // List of POIs – always present
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              itemCount: _filtered.length,
+              itemBuilder: (context, index) {
+                final poi = _filtered[index];
+                return ListTile(
+                  contentPadding: const EdgeInsets.symmetric(vertical: 4),
+                  leading: Icon(Icons.store, color: Colors.grey[600], size: 24),
+                  title: Text(
+                    poi['name'],
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.black87,
+                    ),
+                  ),
+                  subtitle: Text(
+                    'Floor: ${poi['floor']}',
+                    style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                  ),
+                  onTap: () => Navigator.pop(context, poi),
+                );
+              },
             ),
           ),
         ],
-
-        const SizedBox(height: 8),
-
-        // Divider – always present
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Divider(color: Colors.grey[300], thickness: 1),
-        ),
-
-        // List of POIs – always present
-        Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            itemCount: _filtered.length,
-            itemBuilder: (context, index) {
-              final poi = _filtered[index];
-              return ListTile(
-                contentPadding: const EdgeInsets.symmetric(vertical: 4),
-                leading: Icon(Icons.store, color: Colors.grey[600], size: 24),
-                title: Text(
-                  poi['name'],
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w500,
-                    color: Colors.black87,
-                  ),
-                ),
-                subtitle: Text(
-                  'Floor: ${poi['floor']}',
-                  style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-                ),
-                onTap: () => Navigator.pop(context, poi),
-              );
-            },
-          ),
-        ),
-      ],
-    ),
-  );
-}
+      ),
+    );
+  }
 }
 
 // ============================================================================

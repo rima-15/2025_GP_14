@@ -6,6 +6,7 @@ import 'package:model_viewer_plus/model_viewer_plus.dart';
 import 'package:webview_flutter/webview_flutter.dart'
     show JavaScriptMessage, JavascriptChannel, WebViewController;
 import 'track_request_dialog.dart';
+import 'create_meeting_point_form.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:async';
 
@@ -770,6 +771,15 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     );
   }
 
+  void _showCreateMeetingPointForm() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => const CreateMeetingPointForm(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -856,7 +866,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 child: _pillButton(
                   icon: Icons.place_outlined,
                   label: 'Create Meeting Point',
-                  onTap: () {},
+                  onTap: _showCreateMeetingPointForm,
                 ),
               ),
               const SizedBox(width: 12),

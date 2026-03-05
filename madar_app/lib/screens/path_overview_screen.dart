@@ -649,49 +649,50 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
   }
 
   Future<void> _syncOverlaysForCurrentFloor() async {
-  if (!_jsReady) return;
+    if (!_jsReady) return;
 
-  // Push path for the visible floor
-  await _pushPathToJs();
-  debugPrint(
-    '📌 _syncOverlaysForCurrentFloor: pathPushed=$_pathPushed, jsReady=$_jsReady',
-  );
-
-  // Show the user pin only on the start floor
-  final startLabel = _desiredStartFloorLabel.isNotEmpty
-      ? _desiredStartFloorLabel
-      : _currentFloorLabel();
-  final startF = _toFNumber(startLabel);
-  final currF = _currentFNumber();
-
-  if (_pendingUserPinGltf != null && currF == startF) {
-    await _pushUserPinToJsPath(_pendingUserPinGltf!);
-  } else {
-    await _clearUserPinFromJs();
-  }
-
-  // Show destination pin only on destination floor
-  final destLabel =
-      _destFloorLabelFixed ??
-      _destFloorLabel ??
-      widget.destinationFloorLabel ??
-      '';
-  if (destLabel.isNotEmpty) {
-    final destF = _toFNumber(destLabel);
-    if (currF == destF && _destPosBlender != null) {
-      final destGltf = _blenderToGltf(_destPosBlender!);
-      await _pushDestPinToJs(destGltf);
-    } else {
-      await _webCtrl?.runJavaScript('window.clearDestPinFromFlutter /*removed*/();');
-    }
+    // Push path for the visible floor
+    await _pushPathToJs();
     debugPrint(
-      '🔍 destLabel="$destLabel", currF="$currF", destF="$destF", _destPosBlender=${_destPosBlender}',
+      '📌 _syncOverlaysForCurrentFloor: pathPushed=$_pathPushed, jsReady=$_jsReady',
     );
-  }
 
-  // 🔥 ADD THIS LINE: ensure the highlight is updated for the new destination
-  await _pushDestinationHighlightToJsPath();
-}
+    // Show the user pin only on the start floor
+    final startLabel = _desiredStartFloorLabel.isNotEmpty
+        ? _desiredStartFloorLabel
+        : _currentFloorLabel();
+    final startF = _toFNumber(startLabel);
+
+    final currF = _currentFNumber();
+
+    if (_pendingUserPinGltf != null && currF == startF) {
+      await _pushUserPinToJsPath(_pendingUserPinGltf!);
+    } else {
+      await _clearUserPinFromJs();
+    }
+
+    // Show destination pin only on destination floor
+    final destLabel =
+        _destFloorLabelFixed ??
+        _destFloorLabel ??
+        widget.destinationFloorLabel ??
+        '';
+    if (destLabel.isNotEmpty) {
+      final destF = _toFNumber(destLabel);
+      if (currF == destF && _destPosBlender != null) {
+        final destGltf = _blenderToGltf(_destPosBlender!);
+        await _pushDestPinToJs(destGltf);
+      } else {
+        await _webCtrl?.runJavaScript('window.clearDestPinFromFlutter();');
+      }
+      debugPrint(
+        '🔍 destLabel="$destLabel", currF="$currF", destF="$destF", _destPosBlender=${_destPosBlender}',
+      );
+    }
+
+    // 🔥 Ensure the destination POI is highlighted on its floor
+    await _pushDestinationHighlightToJsPath();
+  }
 
   double? _asDouble(dynamic v) {
     if (v == null) return null;
@@ -794,8 +795,9 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     }
     debugPrint('📌 Calling setDestPinFromFlutter($x, $y, $z)');
     try {
-      await c.runJavaScript('window.clearDestPinFromFlutter /*removed*/()');
-} catch (e) {
+      await c.runJavaScript('window.setDestPinFromFlutter($x,$y,$z);');
+      await c.runJavaScript('window.testDestPin();');
+    } catch (e) {
       debugPrint('❌ pushDestPinToJs failed: $e');
     }
   }
@@ -1163,6 +1165,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
               'z': z,
               'floor': floor,
               'id': item['id']?.toString(),
+              'material': material,
             });
           }
         }
@@ -1174,6 +1177,29 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     } catch (e) {
       debugPrint('❌ Failed to load entrances: $e');
     }
+  }
+
+  List<Map<String, dynamic>> _getAllPoisFromEntrances() {
+    final result = <Map<String, dynamic>>[];
+    _entrancesByPoi.forEach((normKey, entrances) {
+      if (entrances.isEmpty) return;
+      final first = entrances.first;
+      final material = first['material'] as String? ?? '';
+      final displayName = _cleanPoiName(
+        material.isNotEmpty ? material : normKey,
+      );
+      result.add({
+        'name': displayName,
+        'type': 'poi',
+        'floor': first['floor'] ?? '',
+        'x': first['x'],
+        'y': first['y'],
+        'z': first['z'],
+        'material': material,
+      });
+    });
+    result.sort((a, b) => a['name'].compareTo(b['name']));
+    return result;
   }
 
   Future<void> _resolveDestinationFromPoiJsonIfNeeded() async {
@@ -1679,7 +1705,8 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       effectiveStartFloor = _customStartPoi?['floor'];
     }
 
-    Map<String, double>? effectiveDest = _destPosBlender ??
+    Map<String, double>? effectiveDest =
+        _destPosBlender ??
         (_selectedDestPoi != null
             ? {
                 'x': _selectedDestPoi!['x'],
@@ -1697,7 +1724,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
 
     // If we have multiple entrances for the destination, pick the closest to the start
     if (_destEntrances != null &&
-        _destEntrances!.isNotEmpty &&
+        _destEntrances!.length > 1 &&
         effectiveStart != null) {
       // Only compare if start and destination are on the same floor
       final startFloor = _toFNumber(
@@ -1706,39 +1733,26 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       final destFloor = _toFNumber(_destFloorLabel ?? '');
 
       if (startFloor == destFloor) {
-        // Always route to an entrance (not the POI surface/center).
-        // If there is exactly 1 entrance, use it.
-        if (_destEntrances!.length == 1) {
-          final e = _destEntrances!.first;
-          final one = {
-            'x': (e['x'] as num).toDouble(),
-            'y': (e['y'] as num).toDouble(),
-            'z': (e['z'] as num).toDouble(),
-          };
-          debugPrint('🚪 Using only entrance: $one');
-          effectiveDest = one;
-          _destPosBlender = one;
-          if (_selectedDestPoi != null) {
-            _selectedDestPoi!['x'] = one['x'];
-            _selectedDestPoi!['y'] = one['y'];
-            _selectedDestPoi!['z'] = one['z'];
-          }
-        }
         double bestDistSq = double.infinity;
         Map<String, double>? bestEntrance;
 
-        for (final e in _destEntrances!) {
+        final sameFloorEntrances = _destEntrances!
+            .where(
+              (e) => _toFNumber(e['floor']?.toString() ?? '') == startFloor,
+            )
+            .toList();
+        final entrList = sameFloorEntrances.isNotEmpty
+            ? sameFloorEntrances
+            : _destEntrances!;
+
+        for (final e in entrList) {
           final dx = (e['x'] as double) - (effectiveStart['x'] ?? 0);
           final dy = (e['y'] as double) - (effectiveStart['y'] ?? 0);
           final dz = (e['z'] as double) - (effectiveStart['z'] ?? 0);
           final distSq = dx * dx + dy * dy + dz * dz;
           if (distSq < bestDistSq) {
             bestDistSq = distSq;
-            bestEntrance = {
-              'x': (e['x'] as num).toDouble(),
-              'y': (e['y'] as num).toDouble(),
-              'z': (e['z'] as num).toDouble(),
-            };
+            bestEntrance = {'x': e['x'], 'y': e['y'], 'z': e['z']};
           }
         }
 
@@ -1805,7 +1819,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       Map<String, double> bBl,
     ) {
       final a = nm.snapPointXY([aBl['x']!, aBl['y']!, aBl['z']!]);
-      final b = nm.snapPointXY([bBl['x']!, bBl['y']!, bBl['z']!]); // snap destination to navmesh
+      final b = [bBl['x']!, bBl['y']!, bBl['z']!]; // raw destination, no snap
       debugPrint('🎯 Snapped start: $a');
       debugPrint('🎯 Raw dest (unsnapped): $b');
       var raw = nm.findPathFunnelBlenderXY(start: a, goal: b);
@@ -1827,8 +1841,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     }
 
     if (startF == destF) {
-      if (effectiveStart == null || effectiveDest == null) return;
-      final pts = computePathOn(startNm, effectiveStart!, effectiveDest!);
+      final pts = computePathOn(startNm, effectiveStart, effectiveDest);
       final gltf = pts
           .map((p) => _blenderToGltf({'x': p[0], 'y': p[1], 'z': p[2]}))
           .toList();
@@ -1874,25 +1887,52 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       List<List<double>> bestA = const [];
       List<List<double>> bestB = const [];
 
+      // Build destination candidates (entrances on destination floor if available).
+      final destCandidates = <Map<String, double>>[];
+      if (_destEntrances != null && _destEntrances!.isNotEmpty) {
+        for (final e in _destEntrances!) {
+          final ef = _toFNumber(e['floor']?.toString() ?? '');
+          if (ef == destF) {
+            destCandidates.add({
+              'x': (e['x'] as num).toDouble(),
+              'y': (e['y'] as num).toDouble(),
+              'z': (e['z'] as num).toDouble(),
+            });
+          }
+        }
+      }
+      if (destCandidates.isEmpty && effectiveDest != null) {
+        destCandidates.add(effectiveDest);
+      }
+
+      Map<String, double>? bestDest;
       for (final c in pool) {
         final aPos = c.endpointsByFNumber[startF]!;
         final bPos = c.endpointsByFNumber[destF]!;
-        if (effectiveStart == null || effectiveDest == null) continue;
-        final aPts = computePathOn(startNm, effectiveStart!, aPos);
-                final bPts = computePathOn(destNm, bPos, effectiveDest!);
-        if (aPts.length < 2 || bPts.length < 2) continue;
-        final score = pathLen(aPts) + pathLen(bPts);
-        if (score < bestScore) {
-          bestScore = score;
-          best = c;
-          bestA = aPts;
-          bestB = bPts;
+        final aPts = computePathOn(startNm, effectiveStart, aPos);
+        if (aPts.length < 2) continue;
+
+        for (final d in destCandidates) {
+          final bPts = computePathOn(destNm, bPos, d);
+          if (bPts.length < 2) continue;
+          final score = pathLen(aPts) + pathLen(bPts);
+          if (score < bestScore) {
+            bestScore = score;
+            best = c;
+            bestA = aPts;
+            bestB = bPts;
+            bestDest = d;
+          }
         }
       }
-
       if (best == null) {
         debugPrint("⚠️ Could not compute a valid connector path.");
         return;
+      }
+
+      if (bestDest != null) {
+        effectiveDest = bestDest;
+        _destPosBlender = bestDest;
       }
 
       _chosenConnectorId = '${best.type}:${best.id}';
@@ -2154,6 +2194,113 @@ window.setPathFromFlutter = function(points) {
     postToTest('❌ setPathFromFlutter error: ' + e);
     return false;
   }
+};
+
+// --- Destination pin (green) ---
+window.__pendingDestPin = null;
+
+function ensureDestPinStyle() {
+postToTest("✅ _pathViewerJs script evaluated");
+  if (document.getElementById("dest_pin_hotspot_style")) return;
+  const style = document.createElement("style");
+  style.id = "dest_pin_hotspot_style";
+  style.textContent = `
+    .destPinHotspot{
+      pointer-events:none;
+      position:absolute;
+      left:0; top:0;
+      width:1px; height:1px;
+      transform: translate3d(var(--hotspot-x), var(--hotspot-y), 0px);
+      will-change: transform;
+      z-index: 1001;
+      opacity: var(--hotspot-visibility);
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function buildDestPinUI(el) {
+  if (el.__destPinBuilt) return;
+  el.__destPinBuilt = true;
+  var wrap = document.createElement("div");
+  wrap.style.position = "absolute";
+  wrap.style.left = "0";
+  wrap.style.top = "0";
+  wrap.style.transform = "translate(-50%, -92%)";
+  wrap.style.pointerEvents = "none";
+  var pin = document.createElement("div");
+  pin.style.width = "24px";
+  pin.style.height = "24px";
+  pin.style.background = "#34c759";
+  pin.style.borderRadius = "24px 24px 24px 0";
+  pin.style.transform = "rotate(-45deg)";
+  pin.style.position = "relative";
+  pin.style.boxShadow = "0 6px 14px rgba(0,0,0,0.35)";
+  pin.style.border = "2px solid rgba(255,255,255,0.85)";
+  var inner = document.createElement("div");
+  inner.style.width = "8px";
+  inner.style.height = "8px";
+  inner.style.background = "white";
+  inner.style.borderRadius = "999px";
+  inner.style.position = "absolute";
+  inner.style.left = "50%";
+  inner.style.top = "50%";
+  inner.style.transform = "translate(-50%, -50%)";
+  pin.appendChild(inner);
+  var shadow = document.createElement("div");
+  shadow.style.width = "18px";
+  shadow.style.height = "6px";
+  shadow.style.background = "rgba(0,0,0,0.25)";
+  shadow.style.borderRadius = "999px";
+  shadow.style.margin = "6px auto 0";
+  shadow.style.filter = "blur(1px)";
+  wrap.appendChild(pin);
+  wrap.appendChild(shadow);
+  el.appendChild(wrap);
+}
+
+function ensureDestPinHotspot(viewer) {
+  ensureDestPinStyle();
+  let hs = viewer.querySelector('#destPinHotspot');
+  if (!hs) {
+    hs = document.createElement('div');
+    hs.id = 'destPinHotspot';
+    hs.slot = 'hotspot-destpin';
+    hs.className = 'destPinHotspot';
+    viewer.appendChild(hs);
+  }
+  buildDestPinUI(hs);
+  return hs;
+}
+
+function setDestPin(viewer, pos) {
+  try {
+    const hs = ensureDestPinHotspot(viewer);
+    if (hs.parentElement) {
+      hs.parentElement.removeChild(hs);
+      viewer.appendChild(hs);
+    }
+    hs.setAttribute('data-position', `${pos.x} ${pos.y} ${pos.z}`);
+    hs.setAttribute('data-normal', `0 1 0`);
+    viewer.requestUpdate();
+  } catch(e) {
+    postToTest("❌ setDestPin error: " + e);
+  }
+}
+
+window.clearDestPinFromFlutter = function() {
+  const viewer = getViewer();
+  if (!viewer) return;
+  try {
+    const pin = viewer.querySelector('[slot="hotspot-destpin"]');
+    if (pin) pin.remove();
+    viewer.requestUpdate();
+    postToTest("🧹 clearDestPinFromFlutter");
+  } catch(e) {}
+};
+
+window.setDestPinFromFlutter = function(x, y, z) {
+  postToTest("🟢 setDestPinFromFlutter SIMPLE");
 };
 
 // --- Material highlight ---
@@ -2957,22 +3104,27 @@ const timer = setInterval(function() {
   }
 
   Future<void> _showStartPicker() async {
-    await _loadPoiIndexIfNeeded();
-    if (!_poiIndexLoaded) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('POI data not loaded yet.')));
-      return;
+    if (!_entrancesLoaded) {
+      await _loadEntrances();
+      if (!_entrancesLoaded) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Entrance data not loaded yet.')),
+        );
+        return;
+      }
     }
 
-    final allPois = _getAllPoisForSelection(); // only POIs
+    final allPois = _getAllPoisFromEntrances();
+
     final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) {
-        return _PoiPickerSheet(pois: allPois, title: 'Select start point');
-      },
+      builder: (context) => _PoiPickerSheet(
+        pois: allPois,
+        title: 'Select start point',
+        showPinPlacement: true,
+      ),
     );
 
     if (result == null) return;
@@ -3014,7 +3166,6 @@ const timer = setInterval(function() {
           _originFNumberFixed = null;
           _selectedPreference = 'any';
         });
-        // Convert Blender to glTF for the pin
         final blender = pinResult['blender'];
         _pendingUserPinGltf = {
           'x': blender['x'].toDouble(),
@@ -3029,19 +3180,17 @@ const timer = setInterval(function() {
       return;
     }
 
-    // Existing handling for a POI
-    // Existing handling for a POI
+    // POI selected from entrances
     setState(() {
       _usePinAsStart = false;
       _customStartPoi = result;
       final displayFloor =
           _floorLabelFromToken(result['floor']) ?? result['floor'];
-      _desiredStartFloorLabel = result['floor'];
+      _desiredStartFloorLabel = displayFloor;
       _originFloorLabelFixed = null;
       _originFNumberFixed = null;
       _selectedPreference = 'any';
     });
-    // Convert POI Blender coordinates to glTF for the pin
     _pendingUserPinGltf = {
       'x': result['x'],
       'y': result['z'],
@@ -3054,28 +3203,27 @@ const timer = setInterval(function() {
   }
 
   Future<void> _showDestPicker() async {
-    await _loadPoiIndexIfNeeded();
-    if (!_poiIndexLoaded) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('POI data not loaded yet.')));
-      return;
+    if (!_entrancesLoaded) {
+      await _loadEntrances();
+      if (!_entrancesLoaded) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Entrance data not loaded yet.')),
+        );
+        return;
+      }
     }
 
-    final allPois = _getAllPoisForSelection()
-        .where((p) => p['type'] == 'poi')
-        .toList();
+    final allPois = _getAllPoisFromEntrances();
+
     final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) {
-        return _PoiPickerSheet(
-          pois: allPois,
-          title: 'Select destination',
-          showPinPlacement: false,
-        );
-      },
+      builder: (context) => _PoiPickerSheet(
+        pois: allPois,
+        title: 'Select destination',
+        showPinPlacement: false,
+      ),
     );
 
     if (result != null) {
@@ -3087,19 +3235,25 @@ const timer = setInterval(function() {
           'y': result['y'],
           'z': result['z'],
         };
-        // Update the material name for highlighting
-        _pendingPoiToHighlight = result['material']; // ← new line
-
-        // Clear previously fixed destination floor
+        _pendingPoiToHighlight = result['material'];
         _destFloorLabelFixed = null;
         _destFNumberFixed = null;
         _selectedPreference = 'any';
       });
 
+      final normName = _normPoiKey(result['material']);
+      if (_entrancesByPoi.containsKey(normName)) {
+        _destEntrances = _entrancesByPoi[normName]!;
+      } else {
+        _destEntrances = null;
+      }
+
       _routeComputed = false;
       _pathPointsByFloorGltf.clear();
       _maybeComputeAndPushPath();
-      _ensureFloorSelected(_destFloorLabel!);
+      if (_originFloorLabelFixed == _destFloorLabel) {
+        _ensureFloorSelected(_destFloorLabel!);
+      }
     }
   }
 

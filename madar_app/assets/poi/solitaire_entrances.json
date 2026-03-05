@@ -867,5 +867,1017 @@
       "z": -0.020278003066778183
     },
     "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_0100 Home.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.03739098086953163,
+      "y": 0.6468021273612976,
+      "z": 0.0009530455572530627
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_1886.001",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.9211657643318176,
+      "y": 0.5703165531158447,
+      "z": 0.002084489678964019
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_A.P.C.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.6499853134155273,
+      "y": 0.764530599117279,
+      "z": 0.0016034897416830063
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_AAPE.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.875022292137146,
+      "y": 0.42909032106399536,
+      "z": 0.002084489678964019
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Abercrombie & Fitch.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 1.0192707777023315,
+      "y": 0.9212891459465027,
+      "z": 0.002084489678964019
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Adidas.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.10571660101413727,
+      "y": -1.595860481262207,
+      "z": 0.0017931722104549408
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Adidas.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.3028165102005005,
+      "y": -1.616381287574768,
+      "z": 0.0017931722104549408
+    },
+    "id": "2"
+  },
+  {
+    "poiMaterial": "POIMAT_Aigner.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.6076844930648804,
+      "y": 0.44789254665374756,
+      "z": 0.0016034897416830063
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Algarawi Kids.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.6934791803359985,
+      "y": -1.9546070098876953,
+      "z": 0.0017931722104549408
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Aljazeera.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.13838931918144226,
+      "y": 0.4471549093723297,
+      "z": 0.0009530449751764536
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Almajed Oud",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.05306324362754822,
+      "y": 1.3983699083328247,
+      "z": 0.00227562477812171
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Almajed Oud",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.1579473912715912,
+      "y": 1.503370761871338,
+      "z": 0.00227562477812171
+    },
+    "id": "2"
+  },
+  {
+    "poiMaterial": "POIMAT_Alromaizan.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.08597399294376373,
+      "y": -0.23011267185211182,
+      "z": 0.0016034897416830063
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Alzain.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.14501488208770752,
+      "y": -0.004337080288678408,
+      "z": 0.0009530449751764536
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Amouage.001",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.5512979626655579,
+      "y": 0.27027228474617004,
+      "z": 0.0016034897416830063
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Angel Cakes.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.34752535820007324,
+      "y": 0.04998569190502167,
+      "z": 0.0016034897416830063
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Archi.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.10237160325050354,
+      "y": 1.630487084388733,
+      "z": 0.00227562477812171
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Asics.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.7238782048225403,
+      "y": 0.734817624092102,
+      "z": 0.002722490346059203
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Assaf.001",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.14501488208770752,
+      "y": 0.23365895450115204,
+      "z": 0.0009530449751764536
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Befit.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.8530569672584534,
+      "y": -0.6635606288909912,
+      "z": 0.002722490346059203
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Birkenstock.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.3157033324241638,
+      "y": -0.2614569067955017,
+      "z": 0.0016034897416830063
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Cafe Bateel.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.44519636034965515,
+      "y": -1.1231235265731812,
+      "z": 0.001852111890912056
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Calvin Klein.002",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.7046709060668945,
+      "y": -1.2410833835601807,
+      "z": 0.0017931722104549408
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Casato.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.10139302164316177,
+      "y": 0.7104899883270264,
+      "z": 0.0009530458482913673
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Corneliani.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.6389123797416687,
+      "y": 0.5705174207687378,
+      "z": 0.0016034897416830063
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_DANI by DANIEL K.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.1536104381084442,
+      "y": -0.6731861233711243,
+      "z": 0.001852111890912056
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Derek Rose.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.31494641304016113,
+      "y": 0.9467825293540955,
+      "z": 0.00227562477812171
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Diademe Coutoure.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.5427507162094116,
+      "y": 1.085141658782959,
+      "z": 0.002722490346059203
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Diesel.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.7794698476791382,
+      "y": -0.26134392619132996,
+      "z": 0.0017931722104549408
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Eleventy.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.7410677671432495,
+      "y": -0.4810214638710022,
+      "z": 0.0017931722104549408
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Emporio Armani.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.39827126264572144,
+      "y": 0.8000637292861938,
+      "z": 0.0016034897416830063
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Faisal Aldayel.001",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.46332383155822754,
+      "y": 1.1683772802352905,
+      "z": 0.0009530449751764536
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Farsi.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.096373051404953,
+      "y": 1.2687556743621826,
+      "z": 0.0009530449751764536
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Fred Perry.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.7575591802597046,
+      "y": -0.3793379068374634,
+      "z": 0.0017931722104549408
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Hackett.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.7046709060668945,
+      "y": -1.507312297821045,
+      "z": 0.0017931722104549408
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Hanro.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.45110490918159485,
+      "y": 1.1671684980392456,
+      "z": 0.00227562477812171
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Hanro.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.45110490918159485,
+      "y": 0.9112275242805481,
+      "z": 0.00227562477812171
+    },
+    "id": "2"
+  },
+  {
+    "poiMaterial": "POIMAT_Hind Aloud.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.21463549137115479,
+      "y": 1.3467963933944702,
+      "z": 0.0009530449751764536
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Home Bakery.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.774549126625061,
+      "y": 1.0301350355148315,
+      "z": 0.002084489678964019
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Home Bakery.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.6134874224662781,
+      "y": 1.1671684980392456,
+      "z": 0.00227562477812171
+    },
+    "id": "2"
+  },
+  {
+    "poiMaterial": "POIMAT_Honor.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.7510060667991638,
+      "y": 0.24776725471019745,
+      "z": 0.0009530449751764536
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Hugo Boss.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.7150148153305054,
+      "y": -0.6553425192832947,
+      "z": 0.0017931722104549408
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Kate Spade.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.8035339117050171,
+      "y": 0.15623489022254944,
+      "z": 0.002084489678964019
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Kayanee.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.43861252069473267,
+      "y": 1.8984110355377197,
+      "z": 0.0009168647229671478
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Kiko.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.8530569672584534,
+      "y": -0.7762095928192139,
+      "z": 0.002722490346059203
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_LaBella.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.44207245111465454,
+      "y": 1.0424624681472778,
+      "z": 0.0009530449751764536
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Lavazza.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.4519607126712799,
+      "y": -0.34146222472190857,
+      "z": 0.001852111890912056
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Laverne.001",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.3984397053718567,
+      "y": 0.1771395355463028,
+      "z": 0.0009530449751764536
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Laverne.001",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.23914140462875366,
+      "y": 0.15027488768100739,
+      "z": 0.0009530449751764536
+    },
+    "id": "2"
+  },
+  {
+    "poiMaterial": "POIMAT_Le Moje.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 1.0842101573944092,
+      "y": 1.1223440170288086,
+      "z": 0.002084489678964019
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Levi's.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.8480643630027771,
+      "y": -0.38240158557891846,
+      "z": 0.002722490346059203
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Liu Jo.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.9632320404052734,
+      "y": 0.7106929421424866,
+      "z": 0.002084489678964019
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Lola Casademunt.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.7046709060668945,
+      "y": -0.9607425928115845,
+      "z": 0.0017931722104549408
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Lululemon.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.9425640106201172,
+      "y": 1.4813942909240723,
+      "z": 4.510534927248955e-05
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Magrabi.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.6485611796379089,
+      "y": -2.0050835609436035,
+      "z": 0.0017931722104549408
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Maje.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.4519607126712799,
+      "y": -0.8056626319885254,
+      "z": 0.001852111890912056
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Malik Aloud.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.05600917711853981,
+      "y": 0.5761710405349731,
+      "z": 0.0009530449751764536
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Mansam.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.35165369510650635,
+      "y": 1.2657517194747925,
+      "z": 0.0009530449751764536
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Mavi.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.8368526101112366,
+      "y": -0.10248693823814392,
+      "z": 0.002722490346059203
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_MCM.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.7847045063972473,
+      "y": 0.012420044280588627,
+      "z": 0.0021504568867385387
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Mumuso.001",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.8530569672584534,
+      "y": -1.1095243692398071,
+      "z": 0.0017931722104549408
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Mumuso.001",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.8530569672584534,
+      "y": -0.9126155972480774,
+      "z": 0.002722490346059203
+    },
+    "id": "2"
+  },
+  {
+    "poiMaterial": "POIMAT_Nanan.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 1.0514369010925293,
+      "y": 1.2550969123840332,
+      "z": 0.0026108138263225555
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_New Shanghai.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.7143121957778931,
+      "y": -1.5755387544631958,
+      "z": 0.0017931722104549408
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Patchi.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.043509453535079956,
+      "y": -0.9107167720794678,
+      "z": 0.001852111890912056
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Paul Smith.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.7942483425140381,
+      "y": -0.12461020052433014,
+      "z": 0.0017931722104549408
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Paul.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.2265198677778244,
+      "y": -0.9495782256126404,
+      "z": 0.001852111890912056
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Paul.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.27346938848495483,
+      "y": -1.062232494354248,
+      "z": 0.001852111890912056
+    },
+    "id": "2"
+  },
+  {
+    "poiMaterial": "POIMAT_Puma.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.6934791803359985,
+      "y": -1.8081419467926025,
+      "z": 0.0017931722104549408
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Ray-Ban.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.4519607126712799,
+      "y": -0.950818657875061,
+      "z": 0.001852111890912056
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Rituals.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.8368526101112366,
+      "y": 0.06584833562374115,
+      "z": 0.002722490346059203
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Roja.001",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.039957404136657715,
+      "y": -0.23011267185211182,
+      "z": 0.0016034897416830063
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Samsonite.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.8302828669548035,
+      "y": 0.23196819424629211,
+      "z": 0.002722490346059203
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Sandro.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.7046709060668945,
+      "y": -1.0961523056030273,
+      "z": 0.0017931722104549408
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Shaly.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.6300956606864929,
+      "y": 0.8109446167945862,
+      "z": 0.002722490346059203
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Simone Perele.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.18008916079998016,
+      "y": 0.7997573614120483,
+      "z": 0.0016034897416830063
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Skechers.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.8419946432113647,
+      "y": -0.23934155702590942,
+      "z": 0.002722490346059203
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Sun & Sand.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.3333650231361389,
+      "y": -1.8062196969985962,
+      "z": 0.0017931722104549408
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Sun & Sand.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.15316981077194214,
+      "y": -1.9118000268936157,
+      "z": 0.0017931722104549408
+    },
+    "id": "2"
+  },
+  {
+    "poiMaterial": "POIMAT_Swatch.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.8377179503440857,
+      "y": 0.2925831377506256,
+      "z": 0.002084489678964019
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Ted Baker.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.7150148153305054,
+      "y": -0.8207839131355286,
+      "z": 0.0017931722104549408
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_The Butcher Shop & Grill.001",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.339861661195755,
+      "y": -1.8636525869369507,
+      "z": 0.0017931722104549408
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Tommy Hilfiger.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.7046709060668945,
+      "y": -1.3871034383773804,
+      "z": 0.0017931722104549408
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_U Los Angeles.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.4519607126712799,
+      "y": -0.665386438369751,
+      "z": 0.001852111890912056
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Under Armour.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.19139808416366577,
+      "y": -1.2924132347106934,
+      "z": 0.001852111890912056
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Under Armour.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.12888091802597046,
+      "y": -1.2924132347106934,
+      "z": 0.001852111890912056
+    },
+    "id": "2"
+  },
+  {
+    "poiMaterial": "POIMAT_Venchi.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.18956929445266724,
+      "y": 1.1463769674301147,
+      "z": 0.00227562477812171
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Venchi.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.32631197571754456,
+      "y": 1.2067902088165283,
+      "z": 0.00227562477812171
+    },
+    "id": "2"
+  },
+  {
+    "poiMaterial": "POIMAT_Whites.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.8274264335632324,
+      "y": 0.5432560443878174,
+      "z": 0.002722490346059203
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Yessayan.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.4519607126712799,
+      "y": -0.5148041248321533,
+      "z": 0.001852111890912056
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Zavi.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": -0.8464266061782837,
+      "y": -0.5225093364715576,
+      "z": 0.002722490346059203
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Zimmerli.003",
+    "floor": "F1",
+    "category": "shops",
+    "pos": {
+      "x": 0.2887326180934906,
+      "y": 0.8006892204284668,
+      "z": 0.0016034897416830063
+    },
+    "id": "1"
   }
 ]

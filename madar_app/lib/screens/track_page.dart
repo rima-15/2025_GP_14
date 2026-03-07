@@ -47,6 +47,7 @@ class _TrackPageState extends State<TrackPage> {
   Timer? _clockTimer;
   // ===== Track Map (Pin JS) =====
   WebViewController? _trackMapController;
+  final Set<String> _refreshingRequestIds = {};
 
   /// 0 = Sent, 1 = Received (same order as History page)
   int _selectedFilterIndex = 0;
@@ -82,6 +83,8 @@ class _TrackPageState extends State<TrackPage> {
               id: d.id,
               trackedUserName: (data['receiverName'] ?? '').toString(),
               trackedUserPhone: (data['receiverPhone'] ?? '').toString(),
+              receiverId: (data['receiverId'] ?? '').toString(),
+              senderId: (data['senderId'] ?? '').toString(),
               status: (data['status'] ?? '').toString(),
 
               startAt: startAt,
@@ -123,6 +126,8 @@ class _TrackPageState extends State<TrackPage> {
               id: d.id,
               trackedUserName: (data['receiverName'] ?? '').toString(),
               trackedUserPhone: (data['receiverPhone'] ?? '').toString(),
+              receiverId: (data['receiverId'] ?? '').toString(),
+              senderId: (data['senderId'] ?? '').toString(),
               senderName: (data['senderName'] ?? 'Someone').toString(),
               senderPhone: (data['senderPhone'] ?? '').toString(),
               status: (data['status'] ?? '').toString(),
@@ -1901,6 +1906,72 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   }
 
   // Logic to update Firestore
+  Future<void> _requestLocationRefresh(TrackingRequest r) async {
+    if (_refreshingRequestIds.contains(r.id)) return;
+
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      if (mounted) {
+        SnackbarHelper.showError(
+          context,
+          'You must be signed in to send a refresh request.',
+        );
+      }
+      return;
+    }
+
+    if (r.receiverId.isEmpty) {
+      if (mounted) {
+        SnackbarHelper.showError(
+          context,
+          'Unable to find the tracked user for this request.',
+        );
+      }
+      return;
+    }
+
+    setState(() => _refreshingRequestIds.add(r.id));
+
+    try {
+      final refreshToken =
+          '${currentUser.uid}_${DateTime.now().millisecondsSinceEpoch}';
+      await FirebaseFirestore.instance
+          .collection('trackRequests')
+          .doc(r.id)
+          .update({
+            'refreshRequestId': refreshToken,
+            'refreshRequestedBy': currentUser.uid,
+            'refreshRequestedAt': FieldValue.serverTimestamp(),
+          });
+
+      if (mounted) {
+        final targetName = r.trackedUserName.isNotEmpty
+            ? r.trackedUserName
+            : (r.trackedUserPhone.isNotEmpty
+                  ? r.trackedUserPhone
+                  : 'friend');
+        SnackbarHelper.showSuccess(
+          context,
+          'Refresh location request sent to $targetName.',
+        );
+      }
+    } catch (e) {
+      debugPrint('Failed to request location refresh: $e');
+      if (mounted) {
+        SnackbarHelper.showError(
+          context,
+          'Failed to send refresh request. Please try again.',
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _refreshingRequestIds.remove(r.id));
+      } else {
+        _refreshingRequestIds.remove(r.id);
+      }
+    }
+  }
+
   Future<void> _updateRequestStatus(
     String requestId,
     String newStatus, {
@@ -2238,6 +2309,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
   // ========== ACTION BUTTONS - UPDATED ==========
   Widget _buildActionButtons(TrackingRequest r) {
+    final isSendingRefresh = _refreshingRequestIds.contains(r.id);
     return Row(
       children: [
         Expanded(
@@ -2265,7 +2337,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         const SizedBox(width: 12),
         Expanded(
           child: ElevatedButton.icon(
-            onPressed: () {},
+            onPressed: isSendingRefresh ? null : () => _requestLocationRefresh(r),
             icon: const Icon(Icons.refresh, size: 18),
             label: const Text(
               'Refresh Location',
@@ -2537,6 +2609,8 @@ class TrackingRequest {
   final String id;
   final String trackedUserName;
   final String trackedUserPhone;
+  final String receiverId;
+  final String senderId;
   final String status;
 
   final String? senderName; // Add this
@@ -2557,6 +2631,8 @@ class TrackingRequest {
     required this.id,
     required this.trackedUserName,
     required this.trackedUserPhone,
+    required this.receiverId,
+    required this.senderId,
     required this.senderName, // Add this
     required this.senderPhone, // Add this
     required this.status,

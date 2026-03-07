@@ -377,6 +377,192 @@ export const onTrackRequestStatusChanged = onDocumentUpdated(
 
 );
 
+
+/* ------------------------------------------------------------------
+
+   Refresh Location Request (Active Tracking)
+
+-------------------------------------------------------------------*/
+
+export const onTrackRefreshRequested = onDocumentUpdated(
+
+  "trackRequests/{requestId}",
+
+  async (event) => {
+
+    try {
+
+      const before = event.data?.before.data();
+
+      const after = event.data?.after.data();
+
+      if (!before || !after) return;
+
+
+
+      const beforeToken = (before.refreshRequestId ?? "").toString();
+
+      const afterToken = (after.refreshRequestId ?? "").toString();
+
+
+
+      // Only handle new refresh request tokens
+
+      if (!afterToken || afterToken === beforeToken) return;
+
+
+
+      // Only allow during active accepted tracking
+
+      if (after.status !== "accepted") return;
+
+
+
+      const toDate = (v: any) =>
+
+        v && typeof v.toDate === "function" ? v.toDate() : null;
+
+      const startAt = toDate(after.startAt);
+
+      const endAt = toDate(after.endAt);
+
+      if (!startAt || !endAt) return;
+
+
+
+      const now = new Date();
+
+      if (now < startAt || now > endAt) return;
+
+
+
+      const senderId = (after.senderId ?? "").toString();
+
+      const receiverId = (after.receiverId ?? "").toString();
+
+      if (!senderId || !receiverId) return;
+
+
+
+      const requestedBy = (after.refreshRequestedBy ?? "").toString();
+
+      if (requestedBy && requestedBy !== senderId) return;
+
+
+
+      const senderName =
+
+        (after.senderName ?? "Someone").toString().trim() || "Someone";
+
+
+
+      const title = "Refresh Location Request";
+
+      const body = `${senderName} asked to refresh your location`;
+
+
+
+      const receiverDoc = await db.collection("users").doc(receiverId).get();
+
+      if (!receiverDoc.exists) return;
+
+
+
+      const tokens: string[] = receiverDoc.data()?.fcmTokens ?? [];
+
+
+
+      const notifRef = db.collection("notifications").doc();
+
+      const notifId = notifRef.id;
+
+
+
+      if (tokens.length > 0) {
+
+        await admin.messaging().sendEachForMulticast({
+
+          notification: {
+
+            title,
+
+            body,
+
+          },
+
+          data: {
+
+            type: "locationRefresh",
+
+            requestId: notifId,
+
+            trackRequestId: event.params.requestId,
+
+          },
+
+          tokens,
+
+        });
+
+      }
+
+
+
+      await notifRef.set({
+
+        userId: receiverId,
+
+        type: "locationRefresh",
+
+        requiresAction: true,
+
+        actionTaken: false,
+
+        isRead: false,
+
+        title,
+
+        body,
+
+        data: {
+
+          requestId: notifId,
+
+          trackRequestId: event.params.requestId,
+
+          senderId,
+
+          senderName,
+
+          senderPhone: after.senderPhone ?? null,
+
+          venueId: after.venueId ?? null,
+
+          venueName: after.venueName ?? null,
+
+          endAt: after.endAt ?? null,
+
+          refreshRequestId: afterToken,
+
+        },
+
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+
+      });
+
+
+
+      console.log("Refresh location notification sent");
+
+    } catch (error) {
+
+      console.error("Error sending refresh location notification:", error);
+
+    }
+
+  }
+
+);
 /* ------------------------------------------------------------------
 
    🔔 Track Started Notification (Scheduled)
@@ -781,4 +967,7 @@ export const setUserLocation = onRequest({ cors: true }, async (req, res) => {
   }
 
 });
+
+
+
 

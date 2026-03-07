@@ -1579,7 +1579,10 @@ const timer = setInterval(function() {
                               await FirebaseFirestore.instance
                                   .collection('notifications')
                                   .doc(widget.trackingNotificationId!.trim())
-                                  .update({'actionTaken': true});
+                                  .update({
+                                    'actionTaken': true,
+                                    'isRead': true,
+                                  });
                             } catch (e) {
                               debugPrint(
                                 'Failed to mark tracking location as saved: $e',

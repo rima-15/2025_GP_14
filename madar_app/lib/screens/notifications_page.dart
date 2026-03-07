@@ -621,12 +621,11 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                       final trackCancelled =
                                           trackCancelledSnap.data ?? [];
 
-                                      return StreamBuilder<List<NotificationItem>>(
+                                      return StreamBuilder<
+                                        List<NotificationItem>
+                                      >(
                                         stream: _locationRefreshStream(),
-                                        builder: (
-                                          context,
-                                          locationRefreshSnap,
-                                        ) {
+                                        builder: (context, locationRefreshSnap) {
                                           final locationRefresh =
                                               locationRefreshSnap.data ?? [];
 
@@ -658,10 +657,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                                     ...locationRefresh,
                                                   ]
                                                   .where(
-                                                    (n) =>
-                                                        notifDocMap.containsKey(
-                                                          n.id,
-                                                        ),
+                                                    (n) => notifDocMap
+                                                        .containsKey(n.id),
                                                   )
                                                   .toList();
 
@@ -730,8 +727,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                               if (!_showAll &&
                                                   merged.length > 5)
                                                 Padding(
-                                                  padding:
-                                                      const EdgeInsets.all(5),
+                                                  padding: const EdgeInsets.all(
+                                                    5,
+                                                  ),
                                                   child: TextButton(
                                                     onPressed: () => setState(
                                                       () => _showAll = true,
@@ -742,8 +740,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                                         fontSize: 15,
                                                         fontWeight:
                                                             FontWeight.w600,
-                                                        color:
-                                                            AppColors.kGreen,
+                                                        color: AppColors.kGreen,
                                                       ),
                                                     ),
                                                   ),
@@ -1152,8 +1149,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                         Text('Set My Location'),
                                       ],
                                     ),
-                                    ),
-                                  );
+                                  ),
+                                );
                               },
                             ),
                           ],
@@ -1167,10 +1164,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                 final trackStatus =
                                     notification.trackRequestId == null
                                     ? null
-                                    : trackRequestStatusById[
-                                          notification.trackRequestId!
-                                        ];
-                                final isTerminated = trackStatus == 'terminated';
+                                    : trackRequestStatusById[notification
+                                          .trackRequestId!];
+                                final isTerminated =
+                                    trackStatus == 'terminated';
                                 final isCompleted = trackStatus == 'completed';
                                 final expired =
                                     (notification.endAt != null &&

@@ -180,6 +180,138 @@ export const onTrackRequestCreated = onDocumentCreated(
 
 );
 
+/* ------------------------------------------------------------------
+
+   Auto Refresh Location (Scheduled)
+
+   - If tracking is active and receiver hasn't updated location for 1 hour,
+     send "Refresh Your Location" notification from system.
+
+-------------------------------------------------------------------*/
+
+export const onAutoLocationRefresh = onSchedule(
+  "every 5 minutes",
+  async () => {
+    try {
+      const now = admin.firestore.Timestamp.now();
+
+      const snap = await db
+        .collection("trackRequests")
+        .where("status", "==", "accepted")
+        .where("startAt", "<=", now)
+        .get();
+
+      if (snap.empty) return;
+
+      const userCache = new Map<
+        string,
+        { tokens: string[]; updatedAt: admin.firestore.Timestamp | null }
+      >();
+
+      const getUserInfo = async (uid: string) => {
+        if (userCache.has(uid)) return userCache.get(uid)!;
+        const userDoc = await db.collection("users").doc(uid).get();
+        if (!userDoc.exists) {
+          const info = { tokens: [] as string[], updatedAt: null };
+          userCache.set(uid, info);
+          return info;
+        }
+        const data = userDoc.data() ?? {};
+        const tokens: string[] = data.fcmTokens ?? [];
+        const updatedAt: admin.firestore.Timestamp | null =
+          data.location?.updatedAt ?? null;
+        const info = { tokens, updatedAt };
+        userCache.set(uid, info);
+        return info;
+      };
+
+      const cutoff = new Date(now.toDate().getTime() - 10 * 60 * 1000);
+      const batch = db.batch();
+
+      for (const doc of snap.docs) {
+        const data = doc.data();
+        const endAt = data.endAt;
+        const endAtDate =
+          endAt && typeof endAt.toDate === "function" ? endAt.toDate() : null;
+        if (!endAtDate || endAtDate <= now.toDate()) continue;
+
+        const receiverId = (data.receiverId ?? "").toString().trim();
+        if (!receiverId) continue;
+
+        const userInfo = await getUserInfo(receiverId);
+        const lastUpdate =
+          userInfo.updatedAt &&
+          typeof userInfo.updatedAt.toDate === "function"
+            ? userInfo.updatedAt.toDate()
+            : null;
+
+        const lastAuto =
+          data.lastAutoRefreshAt &&
+          typeof data.lastAutoRefreshAt.toDate === "function"
+            ? data.lastAutoRefreshAt.toDate()
+            : null;
+
+        const isStale = !lastUpdate || lastUpdate <= cutoff;
+        const alreadyNotified =
+          lastAuto != null && (lastUpdate == null || lastAuto >= lastUpdate);
+
+        if (!isStale || alreadyNotified) continue;
+
+        const title = "Refresh Location Request";
+        const body = "You are in an active session, Please refresh your location for better accuracy";
+
+        const notifRef = db.collection("notifications").doc();
+        const notifId = notifRef.id;
+
+        if (userInfo.tokens.length > 0) {
+          await admin.messaging().sendEachForMulticast({
+            notification: {
+              title,
+              body,
+            },
+            data: {
+              type: "locationRefresh",
+              requestId: notifId,
+              trackRequestId: doc.id,
+            },
+            tokens: userInfo.tokens,
+          });
+        }
+
+        batch.set(notifRef, {
+          userId: receiverId,
+          type: "locationRefresh",
+          requiresAction: true,
+          actionTaken: false,
+          isRead: false,
+          title,
+          body,
+          data: {
+            requestId: notifId,
+            trackRequestId: doc.id,
+            senderId: data.senderId ?? null,
+            senderName: data.senderName ?? null,
+            senderPhone: data.senderPhone ?? null,
+            venueId: data.venueId ?? null,
+            venueName: data.venueName ?? null,
+            endAt: data.endAt ?? null,
+            system: true,
+          },
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        batch.update(doc.ref, {
+          lastAutoRefreshAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+
+      await batch.commit();
+    } catch (error) {
+      console.error("Error sending auto refresh notification:", error);
+    }
+  }
+);
+
 
 
 /* ------------------------------------------------------------------
@@ -645,7 +777,7 @@ export const onTrackStarted = onSchedule("every 1 minutes", async () => {
         await admin.messaging().sendEachForMulticast({
           notification: {
             title: "Tracking Started",
-            body: `${data.senderName} can now track your location`,
+            body: `${data.senderName} can now track your location, please set your location`,
           },
           data: {
             type: "trackStarted",

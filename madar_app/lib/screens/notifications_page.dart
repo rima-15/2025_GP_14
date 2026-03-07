@@ -491,6 +491,40 @@ class _NotificationsPageState extends State<NotificationsPage> {
         });
   }
 
+  Stream<List<NotificationItem>> _locationRefreshStream() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return const Stream.empty();
+
+    return FirebaseFirestore.instance
+        .collection('notifications')
+        .where('userId', isEqualTo: uid)
+        .where('type', isEqualTo: 'locationRefresh')
+        .snapshots()
+        .map((snap) {
+          return snap.docs.map((doc) {
+            final d = doc.data();
+            final ts =
+                (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+
+            return NotificationItem(
+              id: d['data']?['requestId'],
+              notificationDocId: doc.id,
+              trackRequestId: d['data']?['trackRequestId'],
+              type: NotificationType.locationRefresh,
+              title: d['title'] ?? 'Refresh Location Request',
+              message: d['body'] ?? '',
+              timestamp: ts,
+              isRead: d['isRead'] ?? false,
+              requiresAction: d['requiresAction'] == true,
+              actionTaken: d['actionTaken'] == true,
+              endAt: (d['data']?['endAt'] as Timestamp?)?.toDate(),
+              senderName: d['data']?['senderName'],
+              senderPhone: d['data']?['senderPhone'],
+            );
+          }).toList();
+        });
+  }
+
   /*List<NotificationItem> get _visibleNotifications {
     if (_showAll) return _notifications;
     return _notifications.take(5).toList();
@@ -587,116 +621,135 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                       final trackCancelled =
                                           trackCancelledSnap.data ?? [];
 
-                                      if (!docMapSnap.hasData ||
-                                          !notifSnap.hasData ||
-                                          !incomingSnap.hasData ||
-                                          !senderSnap.hasData ||
-                                          !trackStartedSnap.hasData ||
-                                          !trackTerminatedSnap.hasData ||
-                                          !trackCompletedSnap.hasData ||
-                                          !trackCancelledSnap.hasData) {
-                                        return const SizedBox();
-                                      }
+                                      return StreamBuilder<
+                                        List<NotificationItem>
+                                      >(
+                                        stream: _locationRefreshStream(),
+                                        builder: (context, locationRefreshSnap) {
+                                          final locationRefresh =
+                                              locationRefreshSnap.data ?? [];
 
-                                      final trackRequestStatusById = {
-                                        for (final n in incomingTrack)
-                                          n.id: n.requestStatus ?? '',
-                                      };
+                                          if (!docMapSnap.hasData ||
+                                              !notifSnap.hasData ||
+                                              !incomingSnap.hasData ||
+                                              !senderSnap.hasData ||
+                                              !trackStartedSnap.hasData ||
+                                              !trackTerminatedSnap.hasData ||
+                                              !trackCompletedSnap.hasData ||
+                                              !trackCancelledSnap.hasData ||
+                                              !locationRefreshSnap.hasData) {
+                                            return const SizedBox();
+                                          }
 
-                                      final merged =
-                                          [
-                                                ...incomingTrack,
-                                                ...senderResponses,
-                                                ...trackStarted,
-                                                ...trackTerminated,
-                                                ...trackCompleted,
-                                                ...trackCancelled,
-                                              ]
-                                              .where(
-                                                (n) => notifDocMap.containsKey(
-                                                  n.id,
-                                                ),
-                                              )
-                                              .toList();
+                                          final trackRequestStatusById = {
+                                            for (final n in incomingTrack)
+                                              n.id: n.requestStatus ?? '',
+                                          };
 
-                                      merged.sort(
-                                        (a, b) =>
-                                            b.timestamp.compareTo(a.timestamp),
-                                      );
+                                          final merged =
+                                              [
+                                                    ...incomingTrack,
+                                                    ...senderResponses,
+                                                    ...trackStarted,
+                                                    ...trackTerminated,
+                                                    ...trackCompleted,
+                                                    ...trackCancelled,
+                                                    ...locationRefresh,
+                                                  ]
+                                                  .where(
+                                                    (n) => notifDocMap
+                                                        .containsKey(n.id),
+                                                  )
+                                                  .toList();
 
-                                      // ?? inject notificationDocId
-                                      for (final n in merged) {
-                                        n.notificationDocId = notifDocMap[n.id];
-
-                                        // ?? ??? ?? ?? notification doc = ?????? ?????
-                                        if (n.notificationDocId == null) {
-                                          n.isRead = true;
-                                        }
-                                      }
-
-                                      final visible = _showAll
-                                          ? merged
-                                          : merged.take(5).toList();
-
-                                      if (merged.isEmpty)
-                                        return _buildEmptyState();
-
-                                      return ListView(
-                                        children: [
-                                          Padding(
-                                            padding: const EdgeInsets.fromLTRB(
-                                              16,
-                                              1,
-                                              10,
-                                              1,
+                                          merged.sort(
+                                            (a, b) => b.timestamp.compareTo(
+                                              a.timestamp,
                                             ),
-                                            child: Row(
-                                              mainAxisAlignment:
-                                                  MainAxisAlignment.end,
-                                              children: const [],
-                                            ),
-                                          ),
+                                          );
 
-                                          ...visible.map((notif) {
-                                            final override =
-                                                _localReadOverride[notif.id];
+                                          // ?? inject notificationDocId
+                                          for (final n in merged) {
+                                            n.notificationDocId =
+                                                notifDocMap[n.id];
 
-                                            notif.isRead =
-                                                override ??
-                                                (_freezeReadUI
-                                                    ? (_frozenReadMap[notif
-                                                              .id] ??
-                                                          notif.isRead)
-                                                    : (readMap[notif.id] ??
-                                                          notif.isRead));
+                                            // ?? ??? ?? ?? notification doc = ?????? ?????
+                                            if (n.notificationDocId == null) {
+                                              n.isRead = true;
+                                            }
+                                          }
 
-                                            return _buildNotificationItem(
-                                              notif,
-                                              trackRequestStatusById:
-                                                  trackRequestStatusById,
-                                            );
-                                          }),
+                                          final visible = _showAll
+                                              ? merged
+                                              : merged.take(5).toList();
 
-                                          if (!_showAll && merged.length > 5)
-                                            Padding(
-                                              padding: const EdgeInsets.all(5),
-                                              child: TextButton(
-                                                onPressed: () => setState(
-                                                  () => _showAll = true,
-                                                ),
-                                                child: const Text(
-                                                  'View All Notifications',
-                                                  style: TextStyle(
-                                                    fontSize: 15,
-                                                    fontWeight: FontWeight.w600,
-                                                    color: AppColors.kGreen,
-                                                  ),
+                                          if (merged.isEmpty)
+                                            return _buildEmptyState();
+
+                                          return ListView(
+                                            children: [
+                                              Padding(
+                                                padding:
+                                                    const EdgeInsets.fromLTRB(
+                                                      16,
+                                                      1,
+                                                      10,
+                                                      1,
+                                                    ),
+                                                child: Row(
+                                                  mainAxisAlignment:
+                                                      MainAxisAlignment.end,
+                                                  children: const [],
                                                 ),
                                               ),
-                                            ),
 
-                                          const SizedBox(height: 20),
-                                        ],
+                                              ...visible.map((notif) {
+                                                final override =
+                                                    _localReadOverride[notif
+                                                        .id];
+
+                                                notif.isRead =
+                                                    override ??
+                                                    (_freezeReadUI
+                                                        ? (_frozenReadMap[notif
+                                                                  .id] ??
+                                                              notif.isRead)
+                                                        : (readMap[notif.id] ??
+                                                              notif.isRead));
+
+                                                return _buildNotificationItem(
+                                                  notif,
+                                                  trackRequestStatusById:
+                                                      trackRequestStatusById,
+                                                );
+                                              }),
+
+                                              if (!_showAll &&
+                                                  merged.length > 5)
+                                                Padding(
+                                                  padding: const EdgeInsets.all(
+                                                    5,
+                                                  ),
+                                                  child: TextButton(
+                                                    onPressed: () => setState(
+                                                      () => _showAll = true,
+                                                    ),
+                                                    child: const Text(
+                                                      'View All Notifications',
+                                                      style: TextStyle(
+                                                        fontSize: 15,
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                        color: AppColors.kGreen,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+
+                                              const SizedBox(height: 20),
+                                            ],
+                                          );
+                                        },
                                       );
                                     },
                                   );
@@ -1101,6 +1154,110 @@ class _NotificationsPageState extends State<NotificationsPage> {
                               },
                             ),
                           ],
+                          if (notification.type ==
+                                  NotificationType.locationRefresh &&
+                              notification.requiresAction) ...[
+                            const SizedBox(height: 12),
+
+                            Builder(
+                              builder: (_) {
+                                final trackStatus =
+                                    notification.trackRequestId == null
+                                    ? null
+                                    : trackRequestStatusById[notification
+                                          .trackRequestId!];
+                                final isTerminated =
+                                    trackStatus == 'terminated';
+                                final isCompleted = trackStatus == 'completed';
+                                final expired =
+                                    (notification.endAt != null &&
+                                        DateTime.now().isAfter(
+                                          notification.endAt!,
+                                        )) ||
+                                    isTerminated ||
+                                    isCompleted;
+                                final actionTaken = notification.actionTaken;
+                                final disabled = expired || actionTaken;
+
+                                return AbsorbPointer(
+                                  absorbing: disabled,
+                                  child: OutlinedButton(
+                                    onPressed: disabled
+                                        ? null
+                                        : () async {
+                                            await _openSetLocationForTracking(
+                                              notification,
+                                              dialogTitle:
+                                                  'Refresh My Location',
+                                              dialogSubtitle:
+                                                  'Choose how to refresh your location.',
+                                            );
+                                          },
+                                    style: ButtonStyle(
+                                      minimumSize:
+                                          MaterialStateProperty.all<Size>(
+                                            const Size(double.infinity, 40),
+                                          ),
+                                      backgroundColor:
+                                          MaterialStateProperty.resolveWith<
+                                            Color
+                                          >((states) {
+                                            if (states.contains(
+                                              MaterialState.disabled,
+                                            )) {
+                                              return Colors.grey[300]!;
+                                            }
+                                            return AppColors.kGreen;
+                                          }),
+                                      foregroundColor:
+                                          MaterialStateProperty.resolveWith<
+                                            Color
+                                          >((states) {
+                                            if (states.contains(
+                                              MaterialState.disabled,
+                                            )) {
+                                              return Colors.grey[600]!;
+                                            }
+                                            return Colors.white;
+                                          }),
+                                      side:
+                                          MaterialStateProperty.resolveWith<
+                                            BorderSide
+                                          >((states) {
+                                            if (states.contains(
+                                              MaterialState.disabled,
+                                            )) {
+                                              return BorderSide.none;
+                                            }
+                                            return BorderSide(
+                                              color: AppColors.kGreen,
+                                              width: 0,
+                                            );
+                                          }),
+                                      shape: MaterialStateProperty.all(
+                                        RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: const [
+                                        Icon(
+                                          Icons.location_on_outlined,
+                                          size: 22,
+                                        ),
+                                        SizedBox(width: 8),
+                                        Text('Refresh My Location'),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
 
                           // Auto-accept timer
                           if (notification.autoAcceptTime != null &&
@@ -1243,7 +1400,6 @@ class _NotificationsPageState extends State<NotificationsPage> {
         }
         break;
 
-      case NotificationType.locationRefresh:
       case NotificationType.navigateRequest:
       case NotificationType.meetingLocationRefresh:
         return InkWell(
@@ -1435,7 +1591,6 @@ class _NotificationsPageState extends State<NotificationsPage> {
     // Show actions for these types
     return [
       NotificationType.trackRequest,
-      NotificationType.locationRefresh,
       NotificationType.navigateRequest,
       NotificationType.meetingPointRequest,
       NotificationType.meetingLocationRefresh,
@@ -1915,8 +2070,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
   }
 
   Future<void> _openSetLocationForTracking(
-    NotificationItem notification,
-  ) async {
+    NotificationItem notification, {
+    String? dialogTitle,
+    String? dialogSubtitle,
+  }) async {
     final trackRequestId = notification.trackRequestId;
     if (trackRequestId == null || trackRequestId.isEmpty) {
       if (!mounted) return;
@@ -1944,13 +2101,22 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
     if (!mounted) return;
 
+    final effectiveTitle =
+        (dialogTitle != null && dialogTitle.trim().isNotEmpty)
+        ? dialogTitle.trim()
+        : 'Set My Location';
+    final effectiveSubtitle =
+        (dialogSubtitle != null && dialogSubtitle.trim().isNotEmpty)
+        ? dialogSubtitle.trim()
+        : 'Choose how to set your location.';
+
     showNavigationDialog(
       context,
       venueName.isNotEmpty ? venueName : 'Set Location',
       trackRequestId,
       returnResultOnly: true,
-      dialogTitle: 'Set My Location',
-      dialogSubtitle: 'Choose how to set your location.',
+      dialogTitle: effectiveTitle,
+      dialogSubtitle: effectiveSubtitle,
       venueId: venueId.isNotEmpty ? venueId : null,
       trackingNotificationId:
           (notification.notificationDocId ?? notification.id).trim().isNotEmpty

@@ -68,10 +68,8 @@ class _TrackPageState
   String? _expandedRequestId;
   Timer? _clockTimer;
   // ===== Track Map (Pin JS) =====
-  WebViewController?
-  _trackMapController;
-  final Set<String>
-  _refreshingRequestIds = {};
+  WebViewController? _trackMapController;
+  final Set<String> _refreshingRequestIds = {};
 
   /// 0 = Sent, 1 = Received (same order as History page)
   int _selectedFilterIndex = 0;
@@ -140,25 +138,11 @@ class _TrackPageState
 
             return TrackingRequest(
               id: d.id,
-              trackedUserName:
-                  (data['receiverName'] ??
-                          '')
-                      .toString(),
-              trackedUserPhone:
-                  (data['receiverPhone'] ??
-                          '')
-                      .toString(),
-              receiverId:
-                  (data['receiverId'] ??
-                          '')
-                      .toString(),
-              senderId:
-                  (data['senderId'] ??
-                          '')
-                      .toString(),
-              status:
-                  (data['status'] ?? '')
-                      .toString(),
+              trackedUserName: (data['receiverName'] ?? '').toString(),
+              trackedUserPhone: (data['receiverPhone'] ?? '').toString(),
+              receiverId: (data['receiverId'] ?? '').toString(),
+              senderId: (data['senderId'] ?? '').toString(),
+              status: (data['status'] ?? '').toString(),
 
               startAt: startAt,
               endAt: endAt,
@@ -233,33 +217,13 @@ class _TrackPageState
 
             return TrackingRequest(
               id: d.id,
-              trackedUserName:
-                  (data['receiverName'] ??
-                          '')
-                      .toString(),
-              trackedUserPhone:
-                  (data['receiverPhone'] ??
-                          '')
-                      .toString(),
-              receiverId:
-                  (data['receiverId'] ??
-                          '')
-                      .toString(),
-              senderId:
-                  (data['senderId'] ??
-                          '')
-                      .toString(),
-              senderName:
-                  (data['senderName'] ??
-                          'Someone')
-                      .toString(),
-              senderPhone:
-                  (data['senderPhone'] ??
-                          '')
-                      .toString(),
-              status:
-                  (data['status'] ?? '')
-                      .toString(),
+              trackedUserName: (data['receiverName'] ?? '').toString(),
+              trackedUserPhone: (data['receiverPhone'] ?? '').toString(),
+              receiverId: (data['receiverId'] ?? '').toString(),
+              senderId: (data['senderId'] ?? '').toString(),
+              senderName: (data['senderName'] ?? 'Someone').toString(),
+              senderPhone: (data['senderPhone'] ?? '').toString(),
+              status: (data['status'] ?? '').toString(),
               startAt: startAt,
               endAt: endAt,
               startTime:
@@ -1170,6 +1134,24 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     );
   }
 
+  void _showCreateMeetingPointForm() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => const TrackRequestDialog(),
+    );
+  }
+
+  void _showCreateMeetingPointForm() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => const CreateMeetingPointForm(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1299,12 +1281,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               Expanded(
                 flex: 3,
                 child: _pillButton(
-                  icon: Icons
-                      .place_outlined,
-                  label:
-                      'Create Meeting Point',
-                  onTap:
-                      _showCreateMeetingPointForm,
+                  icon: Icons.place_outlined,
+                  label: 'Create Meeting Point',
+                  onTap: _showCreateMeetingPointForm,
                 ),
               ),
               const SizedBox(width: 12),
@@ -2907,17 +2886,10 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   }
 
   // Logic to update Firestore
-  Future<void> _requestLocationRefresh(
-    TrackingRequest r,
-  ) async {
-    if (_refreshingRequestIds.contains(
-      r.id,
-    ))
-      return;
+  Future<void> _requestLocationRefresh(TrackingRequest r) async {
+    if (_refreshingRequestIds.contains(r.id)) return;
 
-    final currentUser = FirebaseAuth
-        .instance
-        .currentUser;
+    final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) {
       if (mounted) {
         SnackbarHelper.showError(
@@ -2938,11 +2910,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       return;
     }
 
-    setState(
-      () => _refreshingRequestIds.add(
-        r.id,
-      ),
-    );
+    setState(() => _refreshingRequestIds.add(r.id));
 
     try {
       final refreshToken =
@@ -2951,21 +2919,15 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           .collection('trackRequests')
           .doc(r.id)
           .update({
-            'refreshRequestId':
-                refreshToken,
-            'refreshRequestedBy':
-                currentUser.uid,
-            'refreshRequestedAt':
-                FieldValue.serverTimestamp(),
+            'refreshRequestId': refreshToken,
+            'refreshRequestedBy': currentUser.uid,
+            'refreshRequestedAt': FieldValue.serverTimestamp(),
           });
 
       if (mounted) {
-        final targetName =
-            r.trackedUserName.isNotEmpty
+        final targetName = r.trackedUserName.isNotEmpty
             ? r.trackedUserName
-            : (r
-                      .trackedUserPhone
-                      .isNotEmpty
+            : (r.trackedUserPhone.isNotEmpty
                   ? r.trackedUserPhone
                   : 'friend');
         SnackbarHelper.showSuccess(
@@ -2974,9 +2936,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         );
       }
     } catch (e) {
-      debugPrint(
-        'Failed to request location refresh: $e',
-      );
+      debugPrint('Failed to request location refresh: $e');
       if (mounted) {
         SnackbarHelper.showError(
           context,
@@ -2985,14 +2945,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       }
     } finally {
       if (mounted) {
-        setState(
-          () => _refreshingRequestIds
-              .remove(r.id),
-        );
+        setState(() => _refreshingRequestIds.remove(r.id));
       } else {
-        _refreshingRequestIds.remove(
-          r.id,
-        );
+        _refreshingRequestIds.remove(r.id);
       }
     }
   }
@@ -3464,13 +3419,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   }
 
   // ========== ACTION BUTTONS - UPDATED ==========
-  Widget _buildActionButtons(
-    TrackingRequest r,
-  ) {
-    final isSendingRefresh =
-        _refreshingRequestIds.contains(
-          r.id,
-        );
+  Widget _buildActionButtons(TrackingRequest r) {
+    final isSendingRefresh = _refreshingRequestIds.contains(r.id);
     return Row(
       children: [
         Expanded(
@@ -3512,16 +3462,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         const SizedBox(width: 12),
         Expanded(
           child: ElevatedButton.icon(
-            onPressed: isSendingRefresh
-                ? null
-                : () =>
-                      _requestLocationRefresh(
-                        r,
-                      ),
-            icon: const Icon(
-              Icons.refresh,
-              size: 18,
-            ),
+            onPressed: isSendingRefresh ? null : () => _requestLocationRefresh(r),
+            icon: const Icon(Icons.refresh, size: 18),
             label: const Text(
               'Refresh Location',
               style: TextStyle(

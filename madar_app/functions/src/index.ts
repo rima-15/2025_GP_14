@@ -225,7 +225,7 @@ export const onAutoLocationRefresh = onSchedule(
         return info;
       };
 
-      const cutoff = new Date(now.toDate().getTime() - 10 * 60 * 1000);
+      const cutoff = new Date(now.toDate().getTime() - 60 * 60 * 1000);
       const batch = db.batch();
 
       for (const doc of snap.docs) {

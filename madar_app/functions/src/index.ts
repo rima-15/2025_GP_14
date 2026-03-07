@@ -794,7 +794,7 @@ export const onTrackStarted = onSchedule("every 1 minutes", async () => {
         requiresAction: true,
         isRead: false,
         title: "Tracking Started",
-        body: `${data.senderName} can now track your location`,
+        body: `${data.senderName} can now track your location, please set your location`,
         data: {
           requestId: receiverNotifId,
           trackRequestId: requestId,

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
 import 'package:madar_app/theme/theme.dart';
+import 'package:madar_app/screens/AR_page.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
 import 'package:webview_flutter/webview_flutter.dart'
@@ -12,7 +13,6 @@ import 'track_request_dialog.dart';
 import 'create_meeting_point_form.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:async';
-import 'package:madar_app/screens/AR_page.dart';
 
 const bool kFeatureEnabled = true;
 const String kSolitaireVenueId =
@@ -73,6 +73,20 @@ class _TrackPageState
   _trackMapController;
   final Set<String>
   _refreshingRequestIds = {};
+  static const Duration
+  _refreshCooldownDuration = Duration(
+    minutes: 10,
+  );
+  static const Duration
+  _refreshCooldownMessageDuration =
+      Duration(seconds: 3);
+  final Map<String, DateTime>
+  _refreshCooldownUntilByRequestId = {};
+  final Set<String>
+  _refreshCooldownMessageRequestIds =
+      {};
+  final Map<String, Timer>
+  _refreshCooldownMessageTimers = {};
 
   /// 0 = Sent, 1 = Received (same order as History page)
   int _selectedFilterIndex = 0;
@@ -129,6 +143,19 @@ class _TrackPageState
                 (data['endAt']
                         as Timestamp)
                     .toDate();
+            final refreshRequestedAtRaw =
+                data['refreshRequestedAt'];
+            final refreshRequestedAt =
+                refreshRequestedAtRaw
+                    is Timestamp
+                ? refreshRequestedAtRaw
+                      .toDate()
+                : null;
+            final refreshRequestedBy =
+                (data['refreshRequestedBy'] ??
+                        '')
+                    .toString()
+                    .trim();
 
             final startStr =
                 TimeOfDay.fromDateTime(
@@ -188,6 +215,13 @@ class _TrackPageState
                   (data['senderPhone'] ??
                           '')
                       .toString(),
+              refreshRequestedAt:
+                  refreshRequestedAt,
+              refreshRequestedBy:
+                  refreshRequestedBy
+                      .isEmpty
+                  ? null
+                  : refreshRequestedBy,
             );
           }).toList();
         });
@@ -231,6 +265,19 @@ class _TrackPageState
                 (data['endAt']
                         as Timestamp)
                     .toDate();
+            final refreshRequestedAtRaw =
+                data['refreshRequestedAt'];
+            final refreshRequestedAt =
+                refreshRequestedAtRaw
+                    is Timestamp
+                ? refreshRequestedAtRaw
+                      .toDate()
+                : null;
+            final refreshRequestedBy =
+                (data['refreshRequestedBy'] ??
+                        '')
+                    .toString()
+                    .trim();
 
             return TrackingRequest(
               id: d.id,
@@ -279,6 +326,13 @@ class _TrackPageState
                   (data['venueId'] ??
                           '')
                       .toString(),
+              refreshRequestedAt:
+                  refreshRequestedAt,
+              refreshRequestedBy:
+                  refreshRequestedBy
+                      .isEmpty
+                  ? null
+                  : refreshRequestedBy,
             );
           }).toList();
         });
@@ -876,7 +930,6 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     }
     _userLocSubs.clear();
 
-<<<<<<< HEAD
     for (final timer
         in _refreshCooldownMessageTimers
             .values) {
@@ -886,13 +939,6 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         .clear();
     _refreshCooldownMessageRequestIds
         .clear();
-=======
-    for (final timer in _refreshCooldownMessageTimers.values) {
-      timer.cancel();
-    }
-    _refreshCooldownMessageTimers.clear();
-    _refreshCooldownMessageRequestIds.clear();
->>>>>>> a5e445227f3219cef6321b2f13091779405590e2
 
     _scrollController.dispose();
     super.dispose();
@@ -1194,9 +1240,24 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
-        child: kFeatureEnabled
-            ? _buildFullContent()
-            : _buildComingSoon(),
+        child: Stack(
+          children: [
+            kFeatureEnabled
+                ? _buildFullContent()
+                : _buildComingSoon(),
+            if (_refreshCooldownMessageRequestIds
+                .isNotEmpty)
+              const Positioned(
+                left: 16,
+                right: 16,
+                bottom: 16,
+                child: ErrorMessageBox(
+                  message:
+                      'you cannot send many request within short period',
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -2925,6 +2986,94 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     }
   }
 
+  DateTime? _refreshCooldownUntil(
+    TrackingRequest r,
+  ) {
+    final localUntil =
+        _refreshCooldownUntilByRequestId[r
+            .id];
+    DateTime? serverUntil;
+    final currentUserId = FirebaseAuth
+        .instance
+        .currentUser
+        ?.uid;
+    if (currentUserId != null &&
+        r.refreshRequestedAt != null &&
+        r.refreshRequestedBy != null &&
+        r.refreshRequestedBy ==
+            currentUserId) {
+      serverUntil = r
+          .refreshRequestedAt!
+          .add(
+            _refreshCooldownDuration,
+          );
+    }
+
+    if (localUntil == null)
+      return serverUntil;
+    if (serverUntil == null)
+      return localUntil;
+    return localUntil.isAfter(
+          serverUntil,
+        )
+        ? localUntil
+        : serverUntil;
+  }
+
+  bool _isRefreshCooldownActive(
+    TrackingRequest r,
+  ) {
+    final until = _refreshCooldownUntil(
+      r,
+    );
+    if (until == null) return false;
+    return DateTime.now().isBefore(
+      until,
+    );
+  }
+
+  void _setRefreshCooldown(
+    String requestId,
+  ) {
+    _refreshCooldownUntilByRequestId[requestId] =
+        DateTime.now().add(
+          _refreshCooldownDuration,
+        );
+  }
+
+  void _showRefreshCooldownMessage(
+    String requestId,
+  ) {
+    _refreshCooldownMessageTimers[requestId]
+        ?.cancel();
+    if (mounted) {
+      setState(() {
+        _refreshCooldownMessageRequestIds
+            .add(requestId);
+      });
+    } else {
+      _refreshCooldownMessageRequestIds
+          .add(requestId);
+    }
+
+    _refreshCooldownMessageTimers[requestId] = Timer(
+      _refreshCooldownMessageDuration,
+      () {
+        _refreshCooldownMessageTimers
+            .remove(requestId);
+        if (!mounted) {
+          _refreshCooldownMessageRequestIds
+              .remove(requestId);
+          return;
+        }
+        setState(() {
+          _refreshCooldownMessageRequestIds
+              .remove(requestId);
+        });
+      },
+    );
+  }
+
   // Logic to update Firestore
   Future<void> _requestLocationRefresh(
     TrackingRequest r,
@@ -2933,6 +3082,10 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       r.id,
     ))
       return;
+    if (_isRefreshCooldownActive(r)) {
+      _showRefreshCooldownMessage(r.id);
+      return;
+    }
 
     final currentUser = FirebaseAuth
         .instance
@@ -2989,9 +3142,6 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                       .isNotEmpty
                   ? r.trackedUserPhone
                   : 'friend');
-=======
-            : (r.trackedUserPhone.isNotEmpty ? r.trackedUserPhone : 'friend');
->>>>>>> a5e445227f3219cef6321b2f13091779405590e2
         SnackbarHelper.showSuccess(
           context,
           'Refresh location request sent to $targetName.',
@@ -3540,10 +3690,6 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   Widget _buildActionButtons(
     TrackingRequest r,
   ) {
-    final isSendingRefresh =
-        _refreshingRequestIds.contains(
-          r.id,
-        );
     return Row(
       children: [
         Expanded(
@@ -3584,45 +3730,101 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           ),
         ),
         const SizedBox(width: 12),
-<<<<<<< HEAD
         Expanded(
-          child: ElevatedButton.icon(
-            onPressed: isSendingRefresh
-                ? null
-                : () =>
-                      _requestLocationRefresh(
-                        r,
-                      ),
-            icon: const Icon(
-              Icons.refresh,
-              size: 18,
-            ),
-            label: const Text(
-              'Refresh Location',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight:
-                    FontWeight.w600,
-              ),
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor:
-                  AppColors.kGreen,
-              foregroundColor:
-                  Colors.white,
-              padding:
-                  const EdgeInsets.symmetric(
-                    vertical: 12,
+          child: _buildRefreshButton(r),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRefreshButton(
+    TrackingRequest r,
+  ) {
+    final isSendingRefresh =
+        _refreshingRequestIds.contains(
+          r.id,
+        );
+    final isCooldownActive =
+        _isRefreshCooldownActive(r);
+    final isDisabled =
+        isSendingRefresh ||
+        isCooldownActive;
+
+    return Column(
+      crossAxisAlignment:
+          CrossAxisAlignment.stretch,
+      children: [
+        Stack(
+          alignment: Alignment.center,
+          children: [
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: isDisabled
+                    ? null
+                    : () =>
+                          _requestLocationRefresh(
+                            r,
+                          ),
+                icon: const Icon(
+                  Icons.refresh,
+                  size: 18,
+                ),
+                label: const Text(
+                  'Refresh Location',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight:
+                        FontWeight.w600,
                   ),
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius:
-                    BorderRadius.circular(
-                      12,
-                    ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor:
+                      AppColors.kGreen,
+                  foregroundColor:
+                      Colors.white,
+                  disabledBackgroundColor:
+                      AppColors.kGreen
+                          .withOpacity(
+                            0.4,
+                          ),
+                  disabledForegroundColor:
+                      Colors.white70,
+                  padding:
+                      const EdgeInsets.symmetric(
+                        vertical: 12,
+                      ),
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius:
+                        BorderRadius.circular(
+                          12,
+                        ),
+                  ),
+                ),
               ),
             ),
-          ),
+            if (isDisabled)
+              Positioned.fill(
+                child: Material(
+                  color: Colors
+                      .transparent,
+                  child: InkWell(
+                    borderRadius:
+                        BorderRadius.circular(
+                          12,
+                        ),
+                    onTap: () {
+                      if (isCooldownActive) {
+                        _showRefreshCooldownMessage(
+                          r.id,
+                        );
+                      }
+                    },
+                  ),
+                ),
+              ),
+          ],
         ),
       ],
     );

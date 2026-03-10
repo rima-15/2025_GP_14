@@ -107,8 +107,7 @@ flutter:
      - assets/poi/solitaire_pois_merged.json
      - assets/connectors/connectors_merged_local.json
      - assets/poi/solitaire_entrances.json
-     - assets/three/
-     - assets/three/map_viewer.html
+
      
 flutter_native_splash:
    color: "#FFFFFF"  

@@ -11,11 +11,25 @@ class UnityCameraPage
   final String? placeId;
   final bool isScanOnly;
 
+  // وضع التوجيه للصديق
+  final bool isFriendNavigation;
+  final double? friendX;
+  final double? friendY;
+  final double? friendZ;
+  final String? friendFloor;
+  final String? friendName;
+
   const UnityCameraPage({
     super.key,
     this.isNavigation = false,
     this.placeId,
     this.isScanOnly = false,
+    this.isFriendNavigation = false,
+    this.friendX,
+    this.friendY,
+    this.friendZ,
+    this.friendFloor,
+    this.friendName,
   });
 
   @override
@@ -148,7 +162,9 @@ class _UnityCameraPageState
     setState(() {
       _isUnityReady = true;
       _statusMessage =
-          widget.isNavigation
+          widget.isFriendNavigation
+          ? "Navigating to ${widget.friendName ?? 'friend'}..."
+          : widget.isNavigation
           ? "Starting navigation..."
           : (widget.isScanOnly
                 ? "Scanning location..."
@@ -229,7 +245,20 @@ class _UnityCameraPageState
 
     // Send mode
     final String modeMessage;
-    if (widget.isNavigation &&
+    if (widget.isFriendNavigation &&
+        widget.friendX != null &&
+        widget.friendY != null &&
+        widget.friendZ != null &&
+        widget.friendFloor != null) {
+      // إرسال إحداثيات الصديق مباشرة ليونتي
+      // Encode name to avoid colons breaking the split — replace : with |
+      final safeName =
+          (widget.friendName ??
+                  'Friend')
+              .replaceAll(':', '|');
+      modeMessage =
+          "NAVIGATE_TO_USER:${widget.friendX}:${widget.friendY}:${widget.friendZ}:${widget.friendFloor}:$safeName";
+    } else if (widget.isNavigation &&
         widget.placeId != null &&
         widget.placeId!.isNotEmpty) {
       modeMessage =

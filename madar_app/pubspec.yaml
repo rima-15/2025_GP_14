@@ -69,6 +69,7 @@ dependencies:
 
   # 3D map 
   model_viewer_plus: ^1.0.2
+  webview_flutter: ^4.8.0
 
 dev_dependencies:
   flutter_test:
@@ -106,6 +107,8 @@ flutter:
      - assets/poi/solitaire_pois_merged.json
      - assets/connectors/connectors_merged_local.json
      - assets/poi/solitaire_entrances.json
+     - assets/three/
+     - assets/three/map_viewer.html
      
 flutter_native_splash:
    color: "#FFFFFF"  

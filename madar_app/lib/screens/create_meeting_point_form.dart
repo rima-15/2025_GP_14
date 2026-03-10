@@ -312,18 +312,23 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     });
   }
 
+  bool get _canAddPhone {
+    final phone = _phoneCtrl.text.trim();
+    return phone.length == 9 && RegExp(r'^\d{9}$').hasMatch(phone);
+  }
+
   Future<void> _addFriendByPhone() async {
     if (_isAddingPhone) return;
 
-    final raw = _phoneCtrl.text.trim();
-    if (raw.length != 9 || !RegExp(r'^\d{9}$').hasMatch(raw)) {
+    if (!_canAddPhone) {
       setState(() {
         _phoneValid = false;
-        _phoneError = 'Enter a valid 9-digit number';
+        _phoneError = 'Enter 9 digits';
       });
       return;
     }
 
+    final raw = _phoneCtrl.text.trim();
     final phone = '+966$raw';
 
     if (_selectedFriends.any((f) => f.phone == phone)) {
@@ -353,11 +358,14 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       if (!mounted) return;
 
       if (q.docs.isEmpty) {
+        _phoneFocus.unfocus();
         setState(() {
           _isAddingPhone = false;
-          _phoneValid = false;
-          _phoneError = 'User not found in Madar';
+          _phoneCtrl.clear();
+          _phoneValid = true;
+          _phoneError = null;
         });
+        _showInviteToMadarDialog(phone);
         return;
       }
 
@@ -386,6 +394,127 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         _phoneValid = false;
         _phoneError = 'Could not verify. Try again.';
       });
+    }
+  }
+
+  static const String _inviteMessage =
+      "Hey! I'm using Madar for location sharing.\n"
+      "Join me using this invite link:\n"
+      "https://madar.app/invite";
+
+  void _showInviteToMadarDialog(String phone) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Invite to Madar?'),
+          content: Text(
+            "$phone isn't on Madar yet.\nSend them an invite to join?",
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.kGreen,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () async {
+                Navigator.pop(dialogContext);
+                await _shareInvite();
+              },
+              child: const Text('Send Invite'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _shareInvite() async {
+    try {
+      await Share.share(_inviteMessage, subject: 'Invite to Madar');
+    } catch (_) {
+      await Clipboard.setData(const ClipboardData(text: _inviteMessage));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Invite copied to clipboard.')),
+      );
+    }
+  }
+
+  static String _normalizePhone(String raw) {
+    var phone = raw.replaceAll(RegExp(r'\s+'), '').replaceAll('-', '');
+    if (phone.startsWith('+966')) phone = phone.substring(4);
+    if (phone.startsWith('966')) phone = phone.substring(3);
+    if (phone.startsWith('05') && phone.length >= 9) phone = phone.substring(2);
+    phone = phone.replaceAll(RegExp(r'[^\d]'), '');
+    if (phone.length >= 9) phone = phone.substring(phone.length - 9);
+    return phone.length == 9 ? '+966$phone' : '';
+  }
+
+  Future<void> _pickContact() async {
+    _phoneFocus.unfocus();
+
+    try {
+      final allowed = await FlutterContacts.requestPermission();
+      if (!allowed) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Contacts permission is required.')),
+        );
+        return;
+      }
+
+      final contacts = await FlutterContacts.getContacts(withProperties: true);
+      final items = <_ContactItem>[];
+      final seen = <String>{};
+
+      for (final c in contacts) {
+        if (c.phones.isEmpty) continue;
+        final name = c.displayName.trim().isEmpty ? 'Unknown' : c.displayName;
+        for (final p in c.phones) {
+          final normalized = _normalizePhone(p.number);
+          if (normalized.isEmpty || !seen.add(normalized)) continue;
+          items.add(_ContactItem(name: name, phone: normalized));
+        }
+      }
+
+      items.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      if (!mounted) return;
+
+      if (items.isEmpty) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('No valid contacts found.')));
+        return;
+      }
+
+      final selectedPhone = await showModalBottomSheet<String>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => _ContactListSheet(contacts: items),
+      );
+
+      if (!mounted || selectedPhone == null) return;
+      final local = selectedPhone.startsWith('+966')
+          ? selectedPhone.substring(4)
+          : selectedPhone;
+
+      setState(() {
+        _phoneCtrl.text = local;
+        _phoneCtrl.selection = TextSelection.collapsed(offset: local.length);
+        _phoneValid = true;
+        _phoneError = null;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not load contacts. Try again.')),
+      );
     }
   }
 
@@ -831,6 +960,8 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   }
 
   Widget _buildPhoneInputRow() {
+    final canTapAdd = _canAddPhone && !_isAddingPhone;
+
     return Row(
       children: [
         // Phone field
@@ -859,6 +990,12 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
                 fontSize: 15,
                 fontWeight: FontWeight.w500,
               ),
+              suffixIcon: _isPhoneFocused
+                  ? null
+                  : IconButton(
+                      icon: const Icon(Icons.contacts, color: AppColors.kGreen),
+                      onPressed: _pickContact,
+                    ),
               filled: true,
               fillColor: Colors.grey[50],
               border: OutlineInputBorder(
@@ -885,21 +1022,21 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
             ),
           ),
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: 12),
 
         // Add button
         GestureDetector(
-          onTap: _isAddingPhone ? null : _addFriendByPhone,
+          onTap: canTapAdd ? _addFriendByPhone : null,
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
             decoration: BoxDecoration(
-              color: _isAddingPhone ? Colors.grey[300] : AppColors.kGreen,
+              color: canTapAdd ? AppColors.kGreen : Colors.grey[300],
               borderRadius: BorderRadius.circular(12),
             ),
             child: Text(
               _isAddingPhone ? '...' : 'Add',
               style: TextStyle(
-                color: _isAddingPhone ? Colors.grey[500] : Colors.white,
+                color: canTapAdd ? Colors.white : Colors.grey[500],
                 fontWeight: FontWeight.w600,
                 fontSize: 15,
               ),
@@ -914,9 +1051,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           icon: const Icon(
             Icons.favorite_border,
             color: AppColors.kGreen,
-            size: 26,
+            size: 28,
           ),
-          padding: const EdgeInsets.all(10),
+          padding: const EdgeInsets.all(12),
           style: IconButton.styleFrom(
             backgroundColor: Colors.grey[100],
             shape: RoundedRectangleBorder(
@@ -2115,6 +2252,163 @@ class _FavoriteListSheetState extends State<_FavoriteListSheet> {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+class _ContactItem {
+  const _ContactItem({required this.name, required this.phone});
+
+  final String name;
+  final String phone;
+}
+
+class _ContactListSheet extends StatefulWidget {
+  const _ContactListSheet({required this.contacts});
+
+  final List<_ContactItem> contacts;
+
+  @override
+  State<_ContactListSheet> createState() => _ContactListSheetState();
+}
+
+class _ContactListSheetState extends State<_ContactListSheet> {
+  final TextEditingController _searchCtrl = TextEditingController();
+  List<_ContactItem> _filtered = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _filtered = List<_ContactItem>.from(widget.contacts);
+    _searchCtrl.addListener(_filter);
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  void _filter() {
+    final query = _searchCtrl.text.trim().toLowerCase();
+    setState(() {
+      if (query.isEmpty) {
+        _filtered = List<_ContactItem>.from(widget.contacts);
+      } else {
+        _filtered = widget.contacts
+            .where(
+              (c) =>
+                  c.name.toLowerCase().contains(query) || c.phone.contains(query),
+            )
+            .toList();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.82,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(24),
+          topRight: Radius.circular(24),
+        ),
+      ),
+      child: Column(
+        children: [
+          const SizedBox(height: 12),
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.grey[300],
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 10),
+            child: Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Select a contact',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black87,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close, color: Colors.black54),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: TextField(
+              controller: _searchCtrl,
+              decoration: InputDecoration(
+                hintText: 'Search',
+                hintStyle: TextStyle(color: Colors.grey[400]),
+                prefixIcon: Icon(Icons.search, color: Colors.grey[500]),
+                filled: true,
+                fillColor: Colors.white,
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
+              ),
+              cursorColor: AppColors.kGreen,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Expanded(
+            child: ListView.separated(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              itemCount: _filtered.length,
+              separatorBuilder: (_, __) =>
+                  const Divider(height: 1, thickness: 0.5),
+              itemBuilder: (_, i) {
+                final contact = _filtered[i];
+                return ListTile(
+                  contentPadding: const EdgeInsets.symmetric(vertical: 4),
+                  leading: CircleAvatar(
+                    radius: 20,
+                    backgroundColor: Colors.grey[300],
+                    child: Icon(Icons.person, color: Colors.grey[600], size: 20),
+                  ),
+                  title: Text(
+                    contact.name,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black87,
+                    ),
+                  ),
+                  subtitle: Text(
+                    contact.phone,
+                    style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                  ),
+                  onTap: () => Navigator.pop(context, contact.phone),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 // MODELS
 // ═════════════════════════════════════════════════════════════════════════════
 

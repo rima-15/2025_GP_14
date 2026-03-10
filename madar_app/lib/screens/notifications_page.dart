@@ -706,7 +706,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                               ...visible.map((notif) {
                                                 final override =
                                                     _localReadOverride[notif
-                                                        .id];
+                                                        .id] ??
+                                                    (notif.actionTaken
+                                                        ? true
+                                                        : null);
 
                                                 notif.isRead =
                                                     override ??

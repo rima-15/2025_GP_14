@@ -26,6 +26,75 @@ const db = admin.firestore();
 
 /* ------------------------------------------------------------------
 
+   Auto-mark Refresh Notifications When Location Updates
+
+   - If user's location.updatedAt is newer than a refresh notification,
+     mark it as read + actionTaken (from any source).
+
+-------------------------------------------------------------------*/
+
+export const onUserLocationUpdated = onDocumentUpdated(
+  "users/{userId}",
+  async (event) => {
+    try {
+      const before = event.data?.before.data();
+      const after = event.data?.after.data();
+      if (!after) return;
+
+      const toDate = (v: any) =>
+        v && typeof v.toDate === "function" ? v.toDate() : null;
+
+      const beforeUpdatedAt = toDate(before?.location?.updatedAt);
+      const afterUpdatedAt = toDate(after?.location?.updatedAt);
+
+      if (!afterUpdatedAt) return;
+      if (beforeUpdatedAt && afterUpdatedAt <= beforeUpdatedAt) return;
+
+      const userId = event.params.userId;
+      if (!userId) return;
+
+      const snap = await db
+        .collection("notifications")
+        .where("userId", "==", userId)
+        .where("type", "==", "locationRefresh")
+        .get();
+
+      if (snap.empty) return;
+
+      let batch = db.batch();
+      let ops = 0;
+      const commits: Promise<any>[] = [];
+
+      for (const doc of snap.docs) {
+        const data: any = doc.data() ?? {};
+        const createdAt = toDate(data.createdAt);
+        if (!createdAt) continue;
+        if (createdAt > afterUpdatedAt) continue;
+        if (data.actionTaken === true) continue;
+
+        batch.update(doc.ref, {
+          actionTaken: true,
+          isRead: true,
+          actionTakenAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        ops++;
+        if (ops >= 450) {
+          commits.push(batch.commit());
+          batch = db.batch();
+          ops = 0;
+        }
+      }
+
+      if (ops > 0) commits.push(batch.commit());
+      if (commits.length > 0) await Promise.all(commits);
+    } catch (error) {
+      console.error("Error marking refresh notifications as read:", error);
+    }
+  }
+);
+/* ------------------------------------------------------------------
+
    Track Request Push Notification (Created)
 
 -------------------------------------------------------------------*/
@@ -604,7 +673,32 @@ export const onTrackRefreshRequested = onDocumentUpdated(
 
 
 
-      const notifRef = db.collection("notifications").doc();
+      // Replace previous pending refresh notification (same sender + session)
+      const lastNotifId = (after.lastRefreshNotifId ?? "").toString();
+      let notifRef = lastNotifId
+        ? db.collection("notifications").doc(lastNotifId)
+        : db.collection("notifications").doc();
+      let reuseExisting = false;
+
+      if (lastNotifId) {
+        const lastSnap = await notifRef.get();
+        if (lastSnap.exists) {
+          const lastData: any = lastSnap.data() ?? {};
+          const lastPayload: any = lastData.data ?? {};
+          const matchesSession =
+            lastData.userId === receiverId &&
+            lastData.type === "locationRefresh" &&
+            lastPayload.trackRequestId === event.params.requestId &&
+            lastPayload.senderId === senderId &&
+            lastPayload.system !== true;
+          const pending = lastData.actionTaken !== true;
+          if (matchesSession && pending) reuseExisting = true;
+        }
+      }
+
+      if (!reuseExisting) {
+        notifRef = db.collection("notifications").doc();
+      }
 
       const notifId = notifRef.id;
 
@@ -675,11 +769,18 @@ export const onTrackRefreshRequested = onDocumentUpdated(
           endAt: after.endAt ?? null,
 
           refreshRequestId: afterToken,
+          system: false,
 
         },
 
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
 
+      });
+
+
+
+      await event.data!.after.ref.update({
+        lastRefreshNotifId: notifId,
       });
 
 

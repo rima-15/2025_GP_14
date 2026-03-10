@@ -438,6 +438,8 @@ class SetYourLocationDialog extends StatefulWidget {
   /// This is useful when you open "Set Your Location" from Path Overview to
   /// edit the start location in-place.
   final bool returnResultOnly;
+  final bool embeddedMode;
+  final ValueChanged<Map<String, dynamic>>? onLocationPicked;
 
   const SetYourLocationDialog({
     super.key,
@@ -452,6 +454,8 @@ class SetYourLocationDialog extends StatefulWidget {
     this.venueId,
     this.trackingNotificationId,
     this.returnResultOnly = false,
+    this.embeddedMode = false,
+    this.onLocationPicked,
   });
 
   @override
@@ -1308,6 +1312,12 @@ const timer = setInterval(function() {
             _pickedFloorLabel = floor;
           });
 
+          widget.onLocationPicked?.call({
+            'gltf': snappedGltf,
+            'blender': snappedBlender,
+            'floorLabel': floor,
+          });
+
           // ✅ Move the visible pin to the snapped position (Flutter -> JS)
           _pushUserPinToJs(snappedGltf);
 
@@ -1492,6 +1502,10 @@ const timer = setInterval(function() {
       final rb = floorRank(b['floorNumber'] ?? '');
       return rb.compareTo(ra);
     });
+
+    if (widget.embeddedMode) {
+      return _buildMapContent();
+    }
 
     return Container(
       decoration: const BoxDecoration(

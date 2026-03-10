@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -6,6 +6,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:madar_app/nav/navmesh.dart';
+import 'package:madar_app/screens/navigation_flow_complete.dart'
+    show SetYourLocationDialog;
+import 'package:madar_app/screens/AR_page.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
@@ -13,6 +17,8 @@ import 'package:share_plus/share_plus.dart';
 // ── DEV FLAG ──────────────────────────────────────────────────────────────────
 /// Set to true so the full wizard can be tested even outside a real venue.
 const bool forceVenueForTesting = true;
+const String _kTestVenueName = 'King Khalid International Airport';
+const String _kFallbackMapVenueId = 'ChIJcYTQDwDjLj4RZEiboV6gZzM';
 
 /// Geofence radius in metres – user must be this close to a venue centre.
 const double _kVenueGeofenceMeters = 150;
@@ -62,6 +68,10 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
   // ── Step 2: Location ──────────────────────────────────────────────────────
   _HostLocation? _hostLocation;
+  String? _mapVenueIdForLocation;
+  Map<String, double>? _step2InitialUserPinGltf;
+  String? _step2InitialFloorLabel;
+  int _step2MapVersion = 0;
 
   // ── Step 4: Participants ──────────────────────────────────────────────────
   /// Simulated participant list built from _selectedFriends at step 4 entry.
@@ -92,6 +102,8 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     _phoneFocus.addListener(() {
       setState(() => _isPhoneFocused = _phoneFocus.hasFocus);
     });
+    _prepareStep2MapVenueId();
+    _loadSavedStep2Location();
     _loadCurrentUser();
     _loadAndResolveVenue();
   }
@@ -141,9 +153,14 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         _venueId = matched.id;
         _venueName = matched.name;
       } else if (forceVenueForTesting && venues.isNotEmpty) {
-        // DEV override: always set the first venue so wizard can be tested.
-        _venueId = venues.first.id;
-        _venueName = venues.first.name; // no "(DEV)" label shown to user
+        // DEV override: prefer a stable 24h test venue.
+        final expected = _kTestVenueName.toLowerCase();
+        final testVenue = venues.firstWhere((v) {
+          final name = v.name.toLowerCase();
+          return name == expected || name.contains(expected);
+        }, orElse: () => venues.first);
+        _venueId = testVenue.id;
+        _venueName = testVenue.name; // no "(DEV)" label shown to user
       } else {
         _venueError =
             'You must be inside a supported venue to create a meeting point.';
@@ -151,6 +168,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
       if (!mounted) return;
       setState(() => _loadingVenue = false);
+      _prepareStep2MapVenueId();
 
       // Load active venue friends after venue is known.
       if (_venueId != null) _loadActiveVenueFriends();
@@ -160,6 +178,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         _loadingVenue = false;
         _venueError = 'Could not detect venue. Please try again.';
       });
+      _prepareStep2MapVenueId();
     }
   }
 
@@ -227,18 +246,11 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
-      // Fetch accepted track requests that are currently active for this venue.
+      // Fetch accepted track requests that are currently active for this venue
+      // where I am the sender (I am tracking them).
       final sentSnap = await FirebaseFirestore.instance
           .collection('trackRequests')
           .where('senderId', isEqualTo: user.uid)
-          .where('venueId', isEqualTo: _venueId)
-          .where('status', isEqualTo: 'accepted')
-          .limit(40)
-          .get();
-
-      final receivedSnap = await FirebaseFirestore.instance
-          .collection('trackRequests')
-          .where('receiverId', isEqualTo: user.uid)
           .where('venueId', isEqualTo: _venueId)
           .where('status', isEqualTo: 'accepted')
           .limit(40)
@@ -264,29 +276,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         );
       }
 
-      for (final doc in receivedSnap.docs) {
-        final d = doc.data();
-        final start = (d['startAt'] as Timestamp?)?.toDate();
-        final end = (d['endAt'] as Timestamp?)?.toDate();
-        if (start == null || end == null) continue;
-        if (now.isBefore(start) || now.isAfter(end)) continue;
-        final phone = d['senderPhone']?.toString() ?? '';
-        if (phone.isEmpty) continue;
-        final name = (d['senderName']?.toString().trim().isNotEmpty == true)
-            ? d['senderName'].toString().trim()
-            : phone;
-        byPhone.putIfAbsent(
-          phone,
-          () => _Friend(id: '', name: name, phone: phone, isFavorite: false),
-        );
-      }
-
       if (!mounted) return;
       setState(() {
-        // Exclude already-selected friends.
-        _activeVenueFriends = byPhone.values
-            .where((f) => !_selectedFriends.any((s) => s.phone == f.phone))
-            .toList();
+        _activeVenueFriends = byPhone.values.toList();
         _loadingActiveVenueFriends = false;
       });
     } catch (_) {
@@ -294,21 +286,22 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     }
   }
 
+  List<_Friend> get _remainingActiveVenueFriends => _activeVenueFriends
+      .where((f) => !_selectedFriends.any((s) => s.phone == f.phone))
+      .toList();
+
   // ─── Friend management ────────────────────────────────────────────────────
 
   void _addFriend(_Friend friend) {
     if (_selectedFriends.any((f) => f.phone == friend.phone)) return;
     setState(() {
       _selectedFriends.add(friend);
-      _activeVenueFriends.removeWhere((f) => f.phone == friend.phone);
     });
   }
 
   void _removeFriend(_Friend friend) {
     setState(() {
       _selectedFriends.removeWhere((f) => f.phone == friend.phone);
-      // Return to active list if applicable.
-      _loadActiveVenueFriends();
     });
   }
 
@@ -338,6 +331,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       });
       return;
     }
+
     if (_myPhone != null && _myPhone == phone) {
       setState(() {
         _phoneValid = false;
@@ -403,45 +397,133 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       "https://madar.app/invite";
 
   void _showInviteToMadarDialog(String phone) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final dialogPadding = screenWidth < 360 ? 20.0 : 28.0;
+
     showDialog(
       context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Invite to Madar?'),
-          content: Text(
-            "$phone isn't on Madar yet.\nSend them an invite to join?",
+      barrierDismissible: true,
+      builder: (BuildContext dialogContext) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.kGreen,
-                foregroundColor: Colors.white,
+          elevation: 0,
+          backgroundColor: Colors.transparent,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Container(
+                padding: EdgeInsets.all(dialogPadding),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(24),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.15),
+                      blurRadius: 20,
+                      offset: const Offset(0, 10),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(height: 8),
+                    Container(
+                      width: 80,
+                      height: 80,
+                      decoration: BoxDecoration(
+                        color: AppColors.kGreen.withOpacity(0.15),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Center(
+                        child: Icon(
+                          Icons.person_add_rounded,
+                          size: 42,
+                          color: AppColors.kGreen,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    const Text(
+                      'Invite to Madar?',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.kGreen,
+                        height: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      "This person isn't on Madar yet.\nInvite them to start sharing location.",
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 15,
+                        height: 1.5,
+                        color: Colors.grey[700],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () {
+                          Navigator.of(dialogContext).pop();
+                          _shareInvite(phone);
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.kGreen,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          elevation: 0,
+                        ),
+                        child: const Text(
+                          'Send Invite',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.3,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              onPressed: () async {
-                Navigator.pop(dialogContext);
-                await _shareInvite();
-              },
-              child: const Text('Send Invite'),
-            ),
-          ],
+              Positioned(
+                top: 12,
+                right: 12,
+                child: GestureDetector(
+                  onTap: () => Navigator.of(dialogContext).pop(),
+                  child: Icon(Icons.close, size: 22, color: Colors.grey[500]),
+                ),
+              ),
+            ],
+          ),
         );
       },
     );
   }
 
-  Future<void> _shareInvite() async {
+  Future<void> _shareInvite(String _phone) async {
     try {
       await Share.share(_inviteMessage, subject: 'Invite to Madar');
-    } catch (_) {
-      await Clipboard.setData(const ClipboardData(text: _inviteMessage));
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invite copied to clipboard.')),
-      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not open share. Link copied instead.'),
+            backgroundColor: AppColors.kGreen,
+          ),
+        );
+        Clipboard.setData(const ClipboardData(text: _inviteMessage));
+      }
     }
   }
 
@@ -482,21 +564,27 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         }
       }
 
-      items.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      items.sort(
+        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+      );
       if (!mounted) return;
 
       if (items.isEmpty) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('No valid contacts found.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No valid contacts found.')),
+        );
         return;
       }
 
-      final selectedPhone = await showModalBottomSheet<String>(
-        context: context,
-        isScrollControlled: true,
-        backgroundColor: Colors.transparent,
-        builder: (_) => _ContactListSheet(contacts: items),
+      final selectedPhone = await Navigator.push<String>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => SelectContactPage(
+            contacts: items,
+            inDbStatus: const <String, bool>{},
+            onInvite: _shareInvite,
+          ),
+        ),
       );
 
       if (!mounted || selectedPhone == null) return;
@@ -719,17 +807,31 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
   Widget _buildHeader() {
     const subtitles = [
-      'Select friends and type of meeting point',
+      'Select friends and where to meet',
       'Set your location',
       'Review & send',
       'Waiting for participants',
       'Suggested meeting point',
     ];
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 20, 8, 0),
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+      ),
       child: Row(
         children: [
-          const Icon(Icons.place_outlined, color: AppColors.kGreen, size: 28),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.grey[100],
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(
+              Icons.place_outlined,
+              color: AppColors.kGreen,
+              size: 24,
+            ),
+          ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -822,13 +924,21 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         if (_venueError != null) ...[
           const SizedBox(height: 8),
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.info_outline, size: 14, color: Colors.red[600]),
+              Padding(
+                padding: const EdgeInsets.only(top: 3),
+                child: Icon(
+                  Icons.info_outline,
+                  size: 14,
+                  color: AppColors.kError,
+                ),
+              ),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
                   _venueError!,
-                  style: TextStyle(fontSize: 13, color: Colors.red[600]),
+                  style: TextStyle(fontSize: 13, color: AppColors.kError),
                 ),
               ),
             ],
@@ -890,7 +1000,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
                 const SizedBox(height: 24),
 
                 // ── Place type (chips) ────────────────────────────────────
-                _sectionLabel('Select Type of Meeting Point'),
+                _sectionLabel('Select Where to Meet Your Friends'),
                 const SizedBox(height: 12),
                 _buildPlaceTypeChips(),
               ],
@@ -903,6 +1013,10 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   }
 
   Widget _venueReadOnlyField() {
+    final venueLabel =
+        _venueName ??
+        (_loadingVenue ? 'Detecting venue...' : 'No venue detected');
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
@@ -917,50 +1031,25 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           Icon(Icons.place_outlined, color: AppColors.kGreen, size: 20),
           const SizedBox(width: 12),
           Expanded(
-            child: _loadingVenue
-                ? Row(
-                    children: [
-                      SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.grey[400],
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Text(
-                        'Detecting venue...',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey[500],
-                          fontWeight: FontWeight.w400,
-                        ),
-                      ),
-                    ],
-                  )
-                : Text(
-                    _venueName ?? 'No venue detected',
-                    style: TextStyle(
-                      fontSize: 15,
-                      // Normal weight so it reads as non-editable
-                      fontWeight: FontWeight.w400,
-                      color: _venueName != null
-                          ? Colors.black54
-                          : Colors.grey[400],
-                    ),
-                  ),
+            child: Text(
+              venueLabel,
+              style: TextStyle(
+                fontSize: 15,
+                // Normal weight so it reads as non-editable
+                fontWeight: FontWeight.w400,
+                color: _venueName != null ? Colors.black54 : Colors.grey[500],
+              ),
+            ),
           ),
           // Subtle lock to indicate read-only without being obtrusive
-          if (!_loadingVenue)
-            Icon(Icons.lock_outline, size: 15, color: Colors.grey[400]),
+          Icon(Icons.lock_outline, size: 15, color: Colors.grey[400]),
         ],
       ),
     );
   }
 
   Widget _buildPhoneInputRow() {
-    final canTapAdd = _canAddPhone && !_isAddingPhone;
+    final canTapAdd = _canAddPhone;
 
     return Row(
       children: [
@@ -991,11 +1080,11 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
                 fontWeight: FontWeight.w500,
               ),
               suffixIcon: _isPhoneFocused
-                  ? null
-                  : IconButton(
+                  ? IconButton(
                       icon: const Icon(Icons.contacts, color: AppColors.kGreen),
                       onPressed: _pickContact,
-                    ),
+                    )
+                  : null,
               filled: true,
               fillColor: Colors.grey[50],
               border: OutlineInputBorder(
@@ -1028,13 +1117,13 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         GestureDetector(
           onTap: canTapAdd ? _addFriendByPhone : null,
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
             decoration: BoxDecoration(
               color: canTapAdd ? AppColors.kGreen : Colors.grey[300],
               borderRadius: BorderRadius.circular(12),
             ),
             child: Text(
-              _isAddingPhone ? '...' : 'Add',
+              'Add',
               style: TextStyle(
                 color: canTapAdd ? Colors.white : Colors.grey[500],
                 fontWeight: FontWeight.w600,
@@ -1067,29 +1156,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
   Widget _buildActiveVenueFriendsList() {
     final name = _venueName ?? 'venue';
-
-    if (_loadingActiveVenueFriends) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 14,
-              height: 14,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: Colors.grey[400],
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              'Loading active friends...',
-              style: TextStyle(fontSize: 13, color: Colors.grey[500]),
-            ),
-          ],
-        ),
-      );
-    }
+    final remaining = _remainingActiveVenueFriends;
 
     if (_activeVenueFriends.isEmpty) return const SizedBox.shrink();
 
@@ -1098,23 +1165,40 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       children: [
         // Label: "Active tracked friends at [venue]"
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Icon(Icons.groups_2_outlined, size: 16, color: Colors.grey[600]),
             const SizedBox(width: 6),
-            Text(
-              'Active tracked friends at $name',
-              style: TextStyle(
-                fontSize: 13,
-                color: Colors.grey[700],
-                fontWeight: FontWeight.w500,
+            Expanded(
+              child: Text(
+                'Active tracked friends at $name',
+                softWrap: true,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Colors.grey[700],
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ),
           ],
         ),
         const SizedBox(height: 8),
-        ..._activeVenueFriends.map(
-          (friend) => _buildActiveVenueFriendRow(friend),
-        ),
+        if (_loadingActiveVenueFriends && remaining.isEmpty)
+          const SizedBox.shrink()
+        else if (remaining.isEmpty)
+          Center(
+            child: Text(
+              'All Active tracked friends added.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey[600],
+                fontWeight: FontWeight.w400,
+              ),
+            ),
+          )
+        else
+          ...remaining.map((friend) => _buildActiveVenueFriendRow(friend)),
       ],
     );
   }
@@ -1164,7 +1248,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           // Heart icon
           Icon(
             friend.isFavorite ? Icons.favorite : Icons.favorite_border,
-            size: 18,
+            size: 22,
             color: friend.isFavorite ? Colors.red : Colors.grey[400],
           ),
           const SizedBox(width: 10),
@@ -1231,7 +1315,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           // Heart icon
           Icon(
             friend.isFavorite ? Icons.favorite : Icons.favorite_border,
-            size: 18,
+            size: 22,
             color: friend.isFavorite ? Colors.red : Colors.grey[400],
           ),
           const SizedBox(width: 8),
@@ -1327,149 +1411,400 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   // ─────────────────────────────────────────────────────────────────────────
 
   Widget _buildStep2() {
+    final mapVenueId = _mapVenueIdForLocation;
+    final hintText = _hostLocation != null
+        ? 'Location selected. Tap again to move it.'
+        : 'Tap on the 3D map to place your pin.';
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _sectionLabel('Set My Location'),
         const SizedBox(height: 8),
-        Text(
-          'Choose how you want to set your current location.',
-          style: TextStyle(fontSize: 13, color: Colors.grey[600]),
-        ),
-        const SizedBox(height: 20),
+        Text(hintText, style: TextStyle(fontSize: 13, color: Colors.grey[600])),
+        const SizedBox(height: 12),
 
-        // Two square buttons side by side
+        if (mapVenueId == null)
+          Container(
+            height: 400,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: Colors.grey.shade50,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.grey.shade200),
+            ),
+            child: const CircularProgressIndicator(color: AppColors.kGreen),
+          )
+        else
+          SizedBox(
+            height: 400,
+            child: SetYourLocationDialog(
+              key: ValueKey(
+                'meeting_step2_map_${mapVenueId}_$_step2MapVersion',
+              ),
+              shopName: _venueName ?? 'Meeting Point',
+              shopId: mapVenueId,
+              venueId: mapVenueId,
+              returnResultOnly: true,
+              initialUserPinGltf: _step2InitialUserPinGltf,
+              initialFloorLabel: _step2InitialFloorLabel,
+              embeddedMode: true,
+              onLocationPicked: (result) {
+                final g = result['gltf'];
+                final floorLabel = (result['floorLabel'] ?? '').toString();
+                if (g is Map) {
+                  final x = (g['x'] as num?)?.toDouble();
+                  final y = (g['y'] as num?)?.toDouble();
+                  final z = (g['z'] as num?)?.toDouble();
+                  if (x != null && y != null && z != null) {
+                    setState(() {
+                      _step2InitialUserPinGltf = {'x': x, 'y': y, 'z': z};
+                      _step2InitialFloorLabel = floorLabel;
+                    });
+                  }
+                }
+                _applyHostLocationFromSetLocationResult(
+                  result,
+                  fallback: 'Pinned location',
+                );
+              },
+            ),
+          ),
+
+        const SizedBox(height: 10),
         Row(
           children: [
-            Expanded(
-              child: _locationOptionSquare(
-                icon: Icons.location_on_outlined,
-                label: 'Pin on map',
-                onTap: _openMapPicker,
-              ),
+            Text(
+              'Prefer another way? ',
+              style: TextStyle(fontSize: 13, color: Colors.grey[600]),
             ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: _locationOptionSquare(
-                icon: Icons.camera_alt_outlined,
-                label: 'Scan with camera',
-                onTap: _scanWithCamera,
+            GestureDetector(
+              onTap: _scanWithCamera,
+              child: const Text(
+                'Scan with camera',
+                style: TextStyle(
+                  fontSize: 13.5,
+                  color: AppColors.kGreen,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ],
         ),
 
-        const SizedBox(height: 20),
-
-        // Location set confirmation
-        if (_hostLocation != null)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            decoration: BoxDecoration(
-              color: AppColors.kGreen.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppColors.kGreen.withOpacity(0.35)),
-            ),
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.check_circle,
-                  color: AppColors.kGreen,
-                  size: 22,
-                ),
-                const SizedBox(width: 10),
-                const Text(
-                  'Location set ✓',
-                  style: TextStyle(
-                    color: AppColors.kGreen,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 15,
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-        const SizedBox(height: 20),
+        const SizedBox(height: 12),
       ],
     );
   }
 
-  Widget _locationOptionSquare({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 26),
-        decoration: BoxDecoration(
-          color: Colors.grey[50],
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.grey.shade300),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: AppColors.kGreen, size: 32),
-            const SizedBox(height: 12),
-            Text(
-              label,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-                color: AppColors.kGreen,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+  DateTime? _toUtcDate(dynamic v) {
+    if (v == null) return null;
+    if (v is Timestamp) return v.toDate().toUtc();
+    if (v is int) return DateTime.fromMillisecondsSinceEpoch(v, isUtc: true);
+    if (v is num) {
+      return DateTime.fromMillisecondsSinceEpoch(v.toInt(), isUtc: true);
+    }
+    if (v is String) return DateTime.tryParse(v)?.toUtc();
+    return null;
   }
 
-  Future<void> _openMapPicker() async {
-    // Reuse the navigation flow's SetYourLocationDialog as a stub.
-    // For now, set a placeholder location and show confirmation.
-    setState(() {
-      _hostLocation = const _HostLocation(
-        latitude: 24.7136,
-        longitude: 46.6753,
-        label: 'Pinned location',
-      );
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Map picker: placeholder location set.'),
-        duration: Duration(seconds: 2),
-      ),
-    );
+  Map<String, double> _blenderToGltf(Map<String, double> b) {
+    // Blender (Z up) -> glTF (Y up)
+    return {'x': b['x'] ?? 0, 'y': (b['z'] ?? 0), 'z': -(b['y'] ?? 0)};
+  }
+
+  Future<void> _loadSavedStep2Location() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      final userDocRef = await _resolveUserDocRef(user);
+      final doc = await userDocRef.get();
+      final data = doc.data();
+      if (data == null) return;
+
+      final location = data['location'];
+      if (location is! Map) return;
+
+      final updatedAt = _toUtcDate(location['updatedAt']);
+      if (updatedAt != null) {
+        final oneHourAgo = DateTime.now().toUtc().subtract(
+          const Duration(hours: 1),
+        );
+        if (updatedAt.isBefore(oneHourAgo)) return;
+      }
+
+      final bp = location['blenderPosition'];
+      if (bp is! Map) return;
+
+      final x = (bp['x'] as num?)?.toDouble();
+      final y = (bp['y'] as num?)?.toDouble();
+      final z = (bp['z'] as num?)?.toDouble();
+      final floorRaw = bp['floor'];
+      if (x == null || y == null || z == null) return;
+
+      final floorLabel = floorRaw == null ? '' : floorRaw.toString();
+      final blenderRaw = {'x': x, 'y': y, 'z': z};
+
+      NavMesh? nav;
+      try {
+        nav = await NavMesh.loadAsset('assets/nav_cor/navmesh_GF.json');
+      } catch (_) {
+        nav = null;
+      }
+
+      final blender = (nav == null)
+          ? blenderRaw
+          : nav.snapBlenderPoint(blenderRaw);
+      final gltf = _blenderToGltf(blender);
+
+      if (!mounted) return;
+      if (_hostLocation != null) return;
+
+      setState(() {
+        _step2InitialUserPinGltf = gltf;
+        _step2InitialFloorLabel = floorLabel;
+        _step2MapVersion++;
+        _hostLocation = _HostLocation(
+          latitude: blender['x'] ?? x,
+          longitude: blender['z'] ?? z,
+          label: floorLabel.isNotEmpty
+              ? 'Current location ($floorLabel)'
+              : 'Current location',
+        );
+      });
+    } catch (_) {}
   }
 
   Future<void> _scanWithCamera() async {
     final status = await Permission.camera.request();
     if (!mounted) return;
+
     if (!status.isGranted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Camera permission is required.')),
-      );
+      if (status.isPermanentlyDenied) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Camera permission required. Please enable in Settings.',
+            ),
+          ),
+        );
+        openAppSettings();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Camera permission is required.')),
+        );
+      }
       return;
     }
-    // Stub: set a placeholder location.
-    setState(() {
-      _hostLocation = const _HostLocation(
-        latitude: 24.7136,
-        longitude: 46.6753,
-        label: 'Camera scan',
-      );
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('You must be signed in.')));
+      return;
+    }
+
+    final scanStartUtc = DateTime.now().toUtc();
+    final userDocRef = await _resolveUserDocRef(user);
+
+    DateTime? toUtcDate(dynamic v) {
+      if (v == null) return null;
+      if (v is Timestamp) return v.toDate().toUtc();
+      if (v is int) return DateTime.fromMillisecondsSinceEpoch(v, isUtc: true);
+      if (v is num) {
+        return DateTime.fromMillisecondsSinceEpoch(v.toInt(), isUtc: true);
+      }
+      if (v is String) return DateTime.tryParse(v)?.toUtc();
+      return null;
+    }
+
+    NavMesh? nav;
+    try {
+      nav = await NavMesh.loadAsset('assets/nav_cor/navmesh_GF.json');
+    } catch (_) {
+      nav = null;
+    }
+
+    bool didReturn = false;
+    late final StreamSubscription sub;
+
+    sub = userDocRef.snapshots().listen((snap) async {
+      if (didReturn) return;
+
+      final data = snap.data();
+      if (data == null) return;
+
+      final loc = data['location'];
+      if (loc is! Map) return;
+
+      final updatedAtUtc = toUtcDate(loc['updatedAt']);
+      if (updatedAtUtc == null || !updatedAtUtc.isAfter(scanStartUtc)) return;
+
+      final bp = loc['blenderPosition'];
+      if (bp is! Map) return;
+
+      final x = (bp['x'] as num?)?.toDouble();
+      final y = (bp['y'] as num?)?.toDouble();
+      final z = (bp['z'] as num?)?.toDouble();
+      final floor = bp['floor'];
+
+      if (x == null || y == null || z == null) return;
+
+      var snapped = <String, double>{'x': x, 'y': y, 'z': z};
+      if (nav != null) {
+        try {
+          snapped = nav!.snapBlenderPoint(snapped);
+        } catch (_) {}
+      }
+
+      didReturn = true;
+
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+
+      await sub.cancel();
+      if (!mounted) return;
+
+      final snappedGltf = <String, double>{
+        'x': snapped['x'] ?? x,
+        'y': snapped['y'] ?? y,
+        'z': snapped['z'] ?? z,
+      };
+
+      final floorLabelFromScan = floor == null ? '' : floor.toString();
+      setState(() {
+        _step2InitialUserPinGltf = snappedGltf;
+        _step2InitialFloorLabel = floorLabelFromScan;
+        _step2MapVersion++;
+      });
+
+      await _applyHostLocationFromSetLocationResult({
+        'gltf': snappedGltf,
+        'blender': snapped,
+        'floorLabel': floorLabelFromScan,
+      }, fallback: 'Camera scan');
     });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Camera scan: placeholder location set.'),
-        duration: Duration(seconds: 2),
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const UnityCameraPage(isScanOnly: true),
       ),
     );
+
+    if (!didReturn) {
+      try {
+        await sub.cancel();
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _applyHostLocationFromSetLocationResult(
+    Map<String, dynamic> result, {
+    required String fallback,
+  }) async {
+    final blender = result['blender'];
+    final gltf = result['gltf'];
+    final floorLabel = (result['floorLabel'] ?? '').toString().trim();
+
+    double? x;
+    double? z;
+
+    if (blender is Map) {
+      x = (blender['x'] as num?)?.toDouble();
+      z = (blender['z'] as num?)?.toDouble();
+    }
+
+    if ((x == null || z == null) && gltf is Map) {
+      x ??= (gltf['x'] as num?)?.toDouble();
+      z ??= (gltf['z'] as num?)?.toDouble();
+    }
+
+    if (x == null || z == null) {
+      final pos = await _getPositionOrNull();
+      x = pos?.latitude;
+      z = pos?.longitude;
+    }
+
+    if (x == null || z == null || !mounted) return;
+
+    final label = floorLabel.isNotEmpty
+        ? 'Current location ($floorLabel)'
+        : fallback;
+    setState(() {
+      _hostLocation = _HostLocation(latitude: x!, longitude: z!, label: label);
+    });
+  }
+
+  Future<DocumentReference<Map<String, dynamic>>> _resolveUserDocRef(
+    User user,
+  ) async {
+    final users = FirebaseFirestore.instance.collection('users');
+
+    final email = user.email;
+    if (email != null && email.isNotEmpty) {
+      final snap = await users.where('email', isEqualTo: email).limit(1).get();
+      if (snap.docs.isNotEmpty) {
+        return snap.docs.first.reference;
+      }
+    }
+
+    return users.doc(user.uid);
+  }
+
+  Future<String> _resolveMapVenueId() async {
+    Future<bool> hasMap(String id) async {
+      if (id.trim().isEmpty) return false;
+      try {
+        final doc = await FirebaseFirestore.instance
+            .collection('venues')
+            .doc(id.trim())
+            .get(const GetOptions(source: Source.serverAndCache));
+        final data = doc.data();
+        return data != null &&
+            data['map'] is List &&
+            (data['map'] as List).isNotEmpty;
+      } catch (_) {
+        return false;
+      }
+    }
+
+    if (_venueId != null && await hasMap(_venueId!)) {
+      return _venueId!;
+    }
+
+    if (await hasMap(_kFallbackMapVenueId)) {
+      return _kFallbackMapVenueId;
+    }
+
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('venues')
+          .limit(50)
+          .get(const GetOptions(source: Source.serverAndCache));
+      for (final d in snap.docs) {
+        final data = d.data();
+        if (data['map'] is List && (data['map'] as List).isNotEmpty) {
+          return d.id;
+        }
+      }
+    } catch (_) {}
+
+    return (_venueId ?? _kFallbackMapVenueId).trim();
+  }
+
+  Future<void> _prepareStep2MapVenueId() async {
+    final resolved = await _resolveMapVenueId();
+    if (!mounted) return;
+    if (_mapVenueIdForLocation != resolved) {
+      setState(() {
+        _mapVenueIdForLocation = resolved;
+        _step2MapVersion++;
+      });
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1503,12 +1838,15 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
                   children: [
                     _summaryRow('Venue', _venueName ?? '—'),
                     const SizedBox(height: 10),
-                    _summaryRow('Place type', _selectedPlaceTypes.join(', ')),
+                    _summaryRow(
+                      'Where to meet',
+                      _selectedPlaceTypes.join(', '),
+                    ),
                     const SizedBox(height: 10),
                     _summaryRow(
                       'My location',
                       _hostLocation != null
-                          ? '${_hostLocation!.label} ✓'
+                          ? 'Current location set'
                           : 'Not set',
                     ),
                     const SizedBox(height: 10),
@@ -1569,9 +1907,12 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SizedBox(
-          width: 90,
+          width: 130,
           child: Text(
             '$label:',
+            maxLines: 1,
+            softWrap: false,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: 13,
               color: Colors.black54,
@@ -1646,12 +1987,14 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         // Participant rows
         ..._participants.map(_buildParticipantRow),
 
-        const SizedBox(height: 24),
+        const SizedBox(height: 7),
 
         // Hint text
-        Center(
+        Align(
+          alignment: Alignment.centerLeft,
           child: Text(
-            '(you can proceed with accepted participants)',
+            'Note: you can proceed with accepted participants',
+            textAlign: TextAlign.left,
             style: TextStyle(fontSize: 12, color: Colors.grey[400]),
           ),
         ),
@@ -1717,7 +2060,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           // Heart
           Icon(
             p.friend.isFavorite ? Icons.favorite : Icons.favorite_border,
-            size: 18,
+            size: 22,
             color: p.friend.isFavorite ? Colors.red : Colors.grey[400],
           ),
           const SizedBox(width: 10),
@@ -1846,25 +2189,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         ),
         const SizedBox(height: 12),
 
-        // Reject button (outlined)
-        SizedBox(
-          width: double.infinity,
-          height: 52,
-          child: OutlinedButton(
-            onPressed: _rejectSuggestedMeetingPoint,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.kGreen,
-              side: BorderSide(color: AppColors.kGreen.withOpacity(0.45)),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
-              textStyle: const TextStyle(
-                fontWeight: FontWeight.w600,
-                fontSize: 15,
-              ),
-            ),
-            child: const Text('Reject'),
-          ),
+        SecondaryButton(
+          text: 'Reject',
+          onPressed: _rejectSuggestedMeetingPoint,
         ),
         const SizedBox(height: 20),
       ],
@@ -1895,22 +2222,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           // Back button (shown from step 2 onwards, except step 4)
           if (_step > 1 && _step != 4) ...[
             Expanded(
-              child: OutlinedButton(
-                onPressed: _goBack,
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size.fromHeight(52),
-                  foregroundColor: AppColors.kGreen,
-                  side: BorderSide(color: AppColors.kGreen.withOpacity(0.45)),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  textStyle: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 15,
-                  ),
-                ),
-                child: const Text('Back'),
-              ),
+              child: SecondaryButton(text: 'Back', onPressed: _goBack),
             ),
             const SizedBox(width: 12),
           ],
@@ -2259,102 +2571,165 @@ class _ContactItem {
   final String phone;
 }
 
-class _ContactListSheet extends StatefulWidget {
-  const _ContactListSheet({required this.contacts});
-
+class SelectContactPage extends StatefulWidget {
   final List<_ContactItem> contacts;
+  final Map<String, bool> inDbStatus;
+  final void Function(String phone) onInvite;
+
+  const SelectContactPage({
+    super.key,
+    required this.contacts,
+    required this.inDbStatus,
+    required this.onInvite,
+  });
 
   @override
-  State<_ContactListSheet> createState() => _ContactListSheetState();
+  State<SelectContactPage> createState() => _SelectContactPageState();
 }
 
-class _ContactListSheetState extends State<_ContactListSheet> {
-  final TextEditingController _searchCtrl = TextEditingController();
-  List<_ContactItem> _filtered = [];
+class _SelectContactPageState extends State<SelectContactPage> {
+  final _searchController = TextEditingController();
+  late Map<String, bool> _localInDbStatus;
+  bool _isCheckingDb = false;
 
   @override
   void initState() {
     super.initState();
-    _filtered = List<_ContactItem>.from(widget.contacts);
-    _searchCtrl.addListener(_filter);
+    _localInDbStatus = Map.from(widget.inDbStatus);
+    _searchController.addListener(() => setState(() {}));
+    _checkRemainingContacts();
   }
 
   @override
   void dispose() {
-    _searchCtrl.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
-  void _filter() {
-    final query = _searchCtrl.text.trim().toLowerCase();
-    setState(() {
-      if (query.isEmpty) {
-        _filtered = List<_ContactItem>.from(widget.contacts);
-      } else {
-        _filtered = widget.contacts
-            .where(
-              (c) =>
-                  c.name.toLowerCase().contains(query) || c.phone.contains(query),
-            )
-            .toList();
-      }
-    });
+  Future<void> _checkRemainingContacts() async {
+    if (_isCheckingDb) return;
+    _isCheckingDb = true;
+
+    final toCheck = widget.contacts
+        .where((c) => !_localInDbStatus.containsKey(c.phone))
+        .toList();
+
+    if (toCheck.isEmpty) {
+      _isCheckingDb = false;
+      return;
+    }
+
+    const batchSize = 10;
+    for (var i = 0; i < toCheck.length; i += batchSize) {
+      if (!mounted) return;
+      final batch = toCheck.skip(i).take(batchSize).toList();
+
+      await Future.wait(
+        batch.map((item) async {
+          try {
+            final query = await FirebaseFirestore.instance
+                .collection('users')
+                .where('phone', isEqualTo: item.phone)
+                .limit(1)
+                .get();
+            if (mounted) {
+              setState(() {
+                _localInDbStatus[item.phone] = query.docs.isNotEmpty;
+              });
+            }
+          } catch (_) {
+            if (mounted) {
+              setState(() {
+                _localInDbStatus[item.phone] = false;
+              });
+            }
+          }
+        }),
+      );
+    }
+
+    _isCheckingDb = false;
+  }
+
+  List<_ContactItem> get _filteredItems {
+    final q = _searchController.text.trim().toLowerCase();
+    if (q.isEmpty) return widget.contacts;
+    return widget.contacts
+        .where((i) => i.name.toLowerCase().contains(q) || i.phone.contains(q))
+        .toList();
+  }
+
+  Map<String, List<_ContactItem>> get _grouped {
+    final map = <String, List<_ContactItem>>{};
+    for (final i in _filteredItems) {
+      final letter = i.name.isNotEmpty ? i.name[0].toUpperCase() : '#';
+      map.putIfAbsent(letter, () => []).add(i);
+    }
+    return map;
+  }
+
+  Color _avatarColor(String name) {
+    const colors = [
+      Color(0xFF4CAF50),
+      Color(0xFF2196F3),
+      Color(0xFF9C27B0),
+      Color(0xFF009688),
+      Color(0xFFE91E63),
+      Color(0xFFFF5722),
+    ];
+    return colors[name.hashCode.abs() % colors.length];
+  }
+
+  String _initial(String name) {
+    final parts = name.trim().split(RegExp(r'\s+'));
+    if (parts.length >= 2) {
+      final a = parts[0].isNotEmpty ? parts[0][0] : '';
+      final b = parts[1].isNotEmpty ? parts[1][0] : '';
+      return (a + b).toUpperCase();
+    }
+    return name.isNotEmpty ? name[0].toUpperCase() : '?';
   }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.82,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(24),
-          topRight: Radius.circular(24),
+    final grouped = _grouped;
+    final keys = grouped.keys.toList()..sort();
+
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: AppColors.kGreen),
+          onPressed: () => Navigator.pop(context),
+        ),
+        centerTitle: true,
+        title: const Text(
+          'Select a contact',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            color: Colors.black87,
+          ),
         ),
       ),
-      child: Column(
+      body: Column(
         children: [
-          const SizedBox(height: 12),
-          Container(
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: Colors.grey[300],
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 10),
-            child: Row(
-              children: [
-                const Expanded(
-                  child: Text(
-                    'Select a contact',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.black87,
-                    ),
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close, color: Colors.black54),
-                  onPressed: () => Navigator.pop(context),
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
             child: TextField(
-              controller: _searchCtrl,
+              controller: _searchController,
               decoration: InputDecoration(
                 hintText: 'Search',
                 hintStyle: TextStyle(color: Colors.grey[400]),
-                prefixIcon: Icon(Icons.search, color: Colors.grey[500]),
+                prefixIcon: Icon(Icons.search, color: Colors.grey.shade600),
                 filled: true,
                 fillColor: Colors.white,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide(color: Colors.grey.shade300),
@@ -2371,41 +2746,204 @@ class _ContactListSheetState extends State<_ContactListSheet> {
               cursorColor: AppColors.kGreen,
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 16),
           Expanded(
-            child: ListView.separated(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              itemCount: _filtered.length,
-              separatorBuilder: (_, __) =>
-                  const Divider(height: 1, thickness: 0.5),
-              itemBuilder: (_, i) {
-                final contact = _filtered[i];
-                return ListTile(
-                  contentPadding: const EdgeInsets.symmetric(vertical: 4),
-                  leading: CircleAvatar(
-                    radius: 20,
-                    backgroundColor: Colors.grey[300],
-                    child: Icon(Icons.person, color: Colors.grey[600], size: 20),
-                  ),
-                  title: Text(
-                    contact.name,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.black87,
+            child: widget.contacts.isEmpty
+                ? const Center(
+                    child: CircularProgressIndicator(color: AppColors.kGreen),
+                  )
+                : keys.isEmpty
+                ? Center(
+                    child: Text(
+                      'No contacts',
+                      style: TextStyle(color: Colors.grey[600]),
                     ),
+                  )
+                : Stack(
+                    children: [
+                      ListView.builder(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        itemCount: keys.fold<int>(
+                          0,
+                          (sum, k) => sum + 1 + grouped[k]!.length,
+                        ),
+                        itemBuilder: (context, index) {
+                          int total = 0;
+                          for (final k in keys) {
+                            final list = grouped[k]!;
+                            if (index == total) {
+                              return Padding(
+                                padding: const EdgeInsets.only(
+                                  top: 8,
+                                  bottom: 4,
+                                ),
+                                child: Text(
+                                  k,
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.grey[600],
+                                  ),
+                                ),
+                              );
+                            }
+                            total += 1;
+                            final rowIndex = index - total;
+                            if (rowIndex < list.length) {
+                              final item = list[rowIndex];
+                              final inDb = _localInDbStatus[item.phone];
+                              final loading = !_localInDbStatus.containsKey(
+                                item.phone,
+                              );
+                              return _ContactRow(
+                                name: item.name,
+                                phone: item.phone,
+                                avatarColor: _avatarColor(item.name),
+                                initial: _initial(item.name),
+                                inDb: inDb,
+                                loading: loading,
+                                onInvite: () => widget.onInvite(item.phone),
+                                onTap: () {
+                                  if (inDb == true) {
+                                    Navigator.pop(context, item.phone);
+                                  }
+                                },
+                              );
+                            }
+                            total += list.length;
+                          }
+                          return const SizedBox.shrink();
+                        },
+                      ),
+                      Positioned(
+                        right: 4,
+                        top: 0,
+                        bottom: 0,
+                        child: Center(
+                          child: SingleChildScrollView(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ#'
+                                  .split('')
+                                  .map(
+                                    (c) => Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 1,
+                                      ),
+                                      child: Text(
+                                        c,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.grey[500],
+                                        ),
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  subtitle: Text(
-                    contact.phone,
-                    style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                  ),
-                  onTap: () => Navigator.pop(context, contact.phone),
-                );
-              },
-            ),
           ),
         ],
       ),
+    );
+  }
+}
+
+class _ContactRow extends StatelessWidget {
+  final String name;
+  final String phone;
+  final Color avatarColor;
+  final String initial;
+  final bool? inDb;
+  final bool loading;
+  final VoidCallback onInvite;
+  final VoidCallback onTap;
+
+  const _ContactRow({
+    required this.name,
+    required this.phone,
+    required this.avatarColor,
+    required this.initial,
+    required this.inDb,
+    required this.loading,
+    required this.onInvite,
+    required this.onTap,
+  });
+
+  String get _displayPhone {
+    if (phone.startsWith('+966') && phone.length == 13) {
+      final digits = phone.substring(4);
+      return '+966 ${digits.substring(0, 2)} ${digits.substring(2, 5)} ${digits.substring(5)}';
+    }
+    return phone;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final showInvite = inDb == false && !loading;
+
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(vertical: 4),
+      leading: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(color: avatarColor, shape: BoxShape.circle),
+        child: Center(
+          child: Text(
+            initial,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+              fontSize: 16,
+            ),
+          ),
+        ),
+      ),
+      title: Text(
+        name,
+        style: const TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.w500,
+          color: Colors.black87,
+        ),
+      ),
+      subtitle: Text(
+        _displayPhone,
+        style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+      ),
+      trailing: loading
+          ? const SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: AppColors.kGreen,
+              ),
+            )
+          : showInvite
+          ? OutlinedButton(
+              onPressed: onInvite,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.kGreen,
+                side: const BorderSide(color: AppColors.kGreen),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 6,
+                ),
+                minimumSize: Size.zero,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              ),
+              child: const Text('Invite'),
+            )
+          : null,
+      onTap: inDb == true ? onTap : null,
     );
   }
 }

@@ -682,14 +682,14 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     _listenToActiveTrackedUsers();
   }
 
-  // ضعّيها داخل _TrackPageState (فوق أو تحت)
+  // Place it inside _TrackPageState (above or below)
   Map<String, double> _blenderToGltf({
     required double x,
     required double y,
     required double z,
   }) {
     // Blender (Z-up) -> glTF (Y-up)
-    // ✅ بدون عكس X
+    // ? Without flipping X
     return {'x': x, 'y': z, 'z': -y};
   }
 
@@ -845,7 +845,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 return;
               }
 
-              // ✅ التحويل إلى glTF مثل مبدأ الـ Navigation (وبدون عكس X)
+              // ? Convert to glTF like Navigation (without flipping X)
               final gltf =
                   _blenderToGltf(
                     x: bx,
@@ -1615,7 +1615,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                           controller;
 
                       _pendingPinApply =
-                          true; // ✅ مهم
+                          true; // ? Important
 
                       _applyPinsWhenViewerReady();
                     },
@@ -3641,7 +3641,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   void _navigateToFriend(
     TrackingRequest r,
   ) {
-    // نأخذ الإحداثيات من الذاكرة — محدّثة دائماً عبر الـ listener
+    // Get coordinates from memory ? always updated via the listener
     final pos =
         _trackedPosByUser[r.receiverId];
     final floor =
@@ -3661,15 +3661,15 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       return;
     }
 
-    // pos هنا بصيغة glTF (بعد _blenderToGltf) — نحتاج نرجع للـ blenderPosition الأصلي
-    // عكس _blenderToGltf: x=x, y=-z, z=y
+    // pos is in glTF format (after _blenderToGltf) ? convert back to original blenderPosition
+    // Inverse of _blenderToGltf: x=x, y=-z, z=y
     final bx = pos['x'] ?? 0.0;
     final by =
         pos['z'] ??
-        0.0; // z في glTF = -y في blender → y = -z_gltf لكن احنا نريد y الأصلي
+        0.0; // z in glTF = -y in blender ? y = -z_gltf, but we want original y
     final bz =
         -(pos['y'] ??
-            0.0); // y في glTF = z في blender
+            0.0); // y in glTF = z in blender
 
     Navigator.push(
       context,

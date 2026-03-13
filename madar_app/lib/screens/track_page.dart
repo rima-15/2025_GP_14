@@ -649,8 +649,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     int attempts = 0;
     const maxAttempts = 25; // ~2.5 seconds
     _scrollToTargetTimer?.cancel();
-    _scrollToTargetTimer =
-        Timer.periodic(const Duration(milliseconds: 100), (_) {
+    _scrollToTargetTimer = Timer.periodic(const Duration(milliseconds: 100), (
+      _,
+    ) {
       if (!mounted || attempts >= maxAttempts) {
         _scrollToTargetTimer?.cancel();
         _scrollToTargetTimer = null;
@@ -681,16 +682,13 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     if (_highlightClearScheduled) return;
     _highlightClearScheduled = true;
     _highlightClearTimer?.cancel();
-    _highlightClearTimer = Timer(
-      const Duration(seconds: 3),
-      () {
-        if (!mounted) return;
-        setState(() {
-          _highlightRequestId = null;
-          _highlightClearScheduled = false;
-        });
-      },
-    );
+    _highlightClearTimer = Timer(const Duration(seconds: 3), () {
+      if (!mounted) return;
+      setState(() {
+        _highlightRequestId = null;
+        _highlightClearScheduled = false;
+      });
+    });
   }
 
   @override
@@ -1049,16 +1047,12 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
   Widget _buildRequestsLoading() {
     return Padding(
-      padding: const EdgeInsets.symmetric(
-        vertical: 32,
-      ),
+      padding: const EdgeInsets.symmetric(vertical: 32),
       child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: const [
-            CircularProgressIndicator(
-              color: AppColors.kGreen,
-            ),
+            CircularProgressIndicator(color: AppColors.kGreen),
             SizedBox(height: 12),
             Text(
               'Loading requests...',
@@ -2279,8 +2273,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
     return Container(
       decoration: BoxDecoration(
-        color:
-            isHighlighted ? AppColors.kGreen.withOpacity(0.05) : Colors.white,
+        color: isHighlighted
+            ? AppColors.kGreen.withOpacity(0.05)
+            : Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isHighlighted ? AppColors.kGreen : Colors.grey.shade200,
@@ -2389,8 +2384,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
     return Container(
       decoration: BoxDecoration(
-        color:
-            isHighlighted ? AppColors.kGreen.withOpacity(0.05) : Colors.white,
+        color: isHighlighted
+            ? AppColors.kGreen.withOpacity(0.05)
+            : Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isHighlighted ? AppColors.kGreen : Colors.grey.shade200,
@@ -2605,8 +2601,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         : (r.senderName ?? 'Unknown');
     return Container(
       decoration: BoxDecoration(
-        color:
-            isHighlighted ? AppColors.kGreen.withOpacity(0.05) : Colors.white,
+        color: isHighlighted
+            ? AppColors.kGreen.withOpacity(0.05)
+            : Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isHighlighted ? AppColors.kGreen : Colors.grey.shade200,
@@ -2703,8 +2700,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         : (r.senderName ?? 'Unknown');
     return Container(
       decoration: BoxDecoration(
-        color:
-            isHighlighted ? AppColors.kGreen.withOpacity(0.05) : Colors.white,
+        color: isHighlighted
+            ? AppColors.kGreen.withOpacity(0.05)
+            : Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isHighlighted ? AppColors.kGreen : Colors.grey.shade200,

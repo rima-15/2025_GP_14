@@ -16,6 +16,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:madar_app/nav/navmesh.dart';
 import 'navigation_flow_complete.dart';
+import 'package:madar_app/screens/AR_page.dart';
 
 class PathOverviewScreen extends StatefulWidget {
   final String shopName;
@@ -2853,41 +2854,52 @@ const timer = setInterval(function() {
 
   /// Open AR navigation with validation
   Future<void> _openNavigationAR() async {
-    // Validate world position before proceeding
-    final hasPosition = await _hasWorldPosition(widget.shopId);
-
-    if (!hasPosition) {
-      if (!mounted) return;
-      _showNoPositionDialog(widget.shopName);
+    // Ensure we have destination coordinates
+    if (_destPosBlender == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Destination not ready.')));
+      }
       return;
     }
 
-    // Request camera permission
-    final status = await Permission.camera.request();
-
-    if (status.isGranted) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Camera page not connected yet')),
-      );
-    } else if (status.isPermanentlyDenied) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Camera permission is permanently denied. Please enable it from Settings.',
-          ),
-        ),
-      );
-      openAppSettings();
-    } else {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Camera permission is required to use AR.'),
-        ),
-      );
+    // Get destination floor in numeric form (F_number)
+    final destFloor = _destFNumberFixed ?? _toFNumber(_destFloorLabel ?? '');
+    if (destFloor.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Destination floor unknown.')),
+        );
+      }
+      return;
     }
+
+    // Camera permission check (optional – can be inside UnityCameraPage as well)
+    final status = await Permission.camera.request();
+    if (!status.isGranted) {
+      if (status.isPermanentlyDenied) {
+        openAppSettings();
+      }
+      return;
+    }
+
+    if (!mounted) return;
+
+    // Launch AR navigation with friend's data
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => UnityCameraPage(
+          isFriendNavigation: true,
+          friendX: _destPosBlender!['x']!,
+          friendY: _destPosBlender!['y']!,
+          friendZ: _destPosBlender!['z']!,
+          friendFloor: destFloor,
+          friendName: _selectedDestPoi?['name'] ?? widget.shopName,
+        ),
+      ),
+    );
   }
 
   Future<void> _loadVenueMaps() async {
@@ -3410,7 +3422,12 @@ const timer = setInterval(function() {
                                               _originFloorLabel,
                                             ) ??
                                             _originFloorLabel)
-                                      : (_customStartPoi?['floor'] ?? ''),
+                                      : (_customStartPoi?['floor'] != null
+                                            ? (_floorLabelFromToken(
+                                                    _customStartPoi!['floor'],
+                                                  ) ??
+                                                  _customStartPoi!['floor'])
+                                            : ''),
                                   const Color(0xFF6C6C6C),
                                 ),
                               ),
@@ -3447,9 +3464,17 @@ const timer = setInterval(function() {
                                 child: _locationRow(
                                   Icons.location_on,
                                   _selectedDestPoi?['name'] ?? widget.shopName,
-                                  _selectedDestPoi?['floor'] ??
-                                      _destFloorLabel ??
-                                      '--',
+                                  _selectedDestPoi?['floor'] != null
+                                      ? (_floorLabelFromToken(
+                                              _selectedDestPoi!['floor'],
+                                            ) ??
+                                            _selectedDestPoi!['floor'])
+                                      : (_destFloorLabel != null
+                                            ? (_floorLabelFromToken(
+                                                    _destFloorLabel,
+                                                  ) ??
+                                                  _destFloorLabel)
+                                            : '--'),
                                   const Color(0xFFC88D52),
                                 ),
                               ),

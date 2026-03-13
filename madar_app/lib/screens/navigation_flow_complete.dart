@@ -104,14 +104,13 @@ class NavigateToShopDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final screenHeight = MediaQuery.of(context).size.height;
     final isSmallScreen = screenHeight < 700;
-    final titleText =
-        (dialogTitle != null && dialogTitle!.trim().isNotEmpty)
-            ? dialogTitle!.trim()
-            : 'Navigate to $shopName';
+    final titleText = (dialogTitle != null && dialogTitle!.trim().isNotEmpty)
+        ? dialogTitle!.trim()
+        : 'Navigate to $shopName';
     final subtitleText =
         (dialogSubtitle != null && dialogSubtitle!.trim().isNotEmpty)
-            ? dialogSubtitle!.trim()
-            : 'First, set your starting point.';
+        ? dialogSubtitle!.trim()
+        : 'First, set your starting point.';
 
     return Container(
       decoration: const BoxDecoration(
@@ -235,13 +234,11 @@ class NavigateToShopDialog extends StatelessWidget {
     String shopId,
     String destinationPoiMaterial,
     String floorSrc,
-    Map<String, double>? destinationHitGltf,
-    {
-      bool returnResultOnly = false,
-      String? venueId,
-      String? trackingNotificationId,
-    }
-  ) async {
+    Map<String, double>? destinationHitGltf, {
+    bool returnResultOnly = false,
+    String? venueId,
+    String? trackingNotificationId,
+  }) async {
     // 1) Camera permission
     final status = await Permission.camera.request();
     if (!context.mounted) return;
@@ -431,6 +428,8 @@ class SetYourLocationDialog extends StatefulWidget {
   final String? initialFloorLabel;
   final String? venueId;
   final String? trackingNotificationId;
+  final String? headerTitle;
+  final String? headerSubtitle;
 
   /// If true, this screen will save to Firestore and then `pop(result)` instead
   /// of navigating to [PathOverviewScreen].
@@ -453,6 +452,8 @@ class SetYourLocationDialog extends StatefulWidget {
     this.initialFloorLabel,
     this.venueId,
     this.trackingNotificationId,
+    this.headerTitle,
+    this.headerSubtitle,
     this.returnResultOnly = false,
     this.embeddedMode = false,
     this.onLocationPicked,
@@ -1411,10 +1412,9 @@ const timer = setInterval(function() {
     try {
       // Use provided venueId or fallback to Solitaire (legacy default).
       const String solitaireId = 'ChIJcYTQDwDjLj4RZEiboV6gZzM';
-      final String effectiveVenueId =
-          (widget.venueId ?? '').trim().isNotEmpty
-              ? widget.venueId!.trim()
-              : solitaireId;
+      final String effectiveVenueId = (widget.venueId ?? '').trim().isNotEmpty
+          ? widget.venueId!.trim()
+          : solitaireId;
 
       final doc = await FirebaseFirestore.instance
           .collection('venues')
@@ -1543,7 +1543,10 @@ const timer = setInterval(function() {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Set Your Location',
+                        (widget.headerTitle != null &&
+                                widget.headerTitle!.trim().isNotEmpty)
+                            ? widget.headerTitle!.trim()
+                            : 'Set Your Location',
                         style: TextStyle(
                           fontSize: screenHeight < 700 ? 20 : 22,
                           fontWeight: FontWeight.w600,
@@ -1552,9 +1555,12 @@ const timer = setInterval(function() {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        pinPlaced
-                            ? 'Location selected. Tap again to move it.'
-                            : 'Tap on the 3D map to place your pin.',
+                        (widget.headerSubtitle != null &&
+                                widget.headerSubtitle!.trim().isNotEmpty)
+                            ? widget.headerSubtitle!.trim()
+                            : (pinPlaced
+                                  ? 'Location selected. Tap again to move it.'
+                                  : 'Tap on the 3D map to place your pin.'),
                         style: TextStyle(fontSize: 14, color: Colors.grey[600]),
                       ),
                     ],
@@ -1579,41 +1585,36 @@ const timer = setInterval(function() {
             child: PrimaryButton(
               text: 'Confirm Location',
               enabled: pinPlaced,
-                  onPressed: pinPlaced
-                      ? () async {
-                          final ok = await _saveBlenderPosition();
-                          if (!ok) return;
-                          if (!mounted) return;
+              onPressed: pinPlaced
+                  ? () async {
+                      final ok = await _saveBlenderPosition();
+                      if (!ok) return;
+                      if (!mounted) return;
 
-                          if (widget.trackingNotificationId != null &&
-                              widget.trackingNotificationId!
-                                  .trim()
-                                  .isNotEmpty) {
-                            try {
-                              await FirebaseFirestore.instance
-                                  .collection('notifications')
-                                  .doc(widget.trackingNotificationId!.trim())
-                                  .update({
-                                    'actionTaken': true,
-                                    'isRead': true,
-                                  });
-                            } catch (e) {
-                              debugPrint(
-                                'Failed to mark tracking location as saved: $e',
-                              );
-                            }
-                            if (mounted) {
-                              SnackbarHelper.showSuccess(
-                                context,
-                                'Your location is saved',
-                              );
-                            }
-                          }
+                      if (widget.trackingNotificationId != null &&
+                          widget.trackingNotificationId!.trim().isNotEmpty) {
+                        try {
+                          await FirebaseFirestore.instance
+                              .collection('notifications')
+                              .doc(widget.trackingNotificationId!.trim())
+                              .update({'actionTaken': true, 'isRead': true});
+                        } catch (e) {
+                          debugPrint(
+                            'Failed to mark tracking location as saved: $e',
+                          );
+                        }
+                        if (mounted) {
+                          SnackbarHelper.showSuccess(
+                            context,
+                            'Your location is saved',
+                          );
+                        }
+                      }
 
-                          // If we were opened from Path Overview to edit the start
-                          // location, return the new pin + floor so the caller can
-                          // update in-place.
-                          if (widget.returnResultOnly) {
+                      // If we were opened from Path Overview to edit the start
+                      // location, return the new pin + floor so the caller can
+                      // update in-place.
+                      if (widget.returnResultOnly) {
                         final res = <String, dynamic>{
                           'gltf': _pickedPosGltf,
                           'blender': _pickedPosBlender,
@@ -1625,8 +1626,9 @@ const timer = setInterval(function() {
                         return;
                       }
 
-                      Navigator.pop(context);
-                      Navigator.pushReplacement(
+                      Navigator.pop(context); // closes the bottom sheet
+                      Navigator.push(
+                        // was pushReplacement
                         context,
                         MaterialPageRoute(
                           builder: (_) => PathOverviewScreen(
@@ -1637,7 +1639,6 @@ const timer = setInterval(function() {
                                 widget.destinationPoiMaterial,
                             destinationHitGltf: widget.destinationHitGltf,
                             destinationFloorLabel: widget.destinationFloorLabel,
-                            // IMPORTANT: floorSrc must be the USER'S CURRENT floor, not the destination's floor.
                             floorSrc: _currentFloorURL.isNotEmpty
                                 ? _currentFloorURL
                                 : (widget.floorSrc.isNotEmpty

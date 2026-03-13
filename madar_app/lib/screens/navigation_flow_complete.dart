@@ -431,6 +431,8 @@ class SetYourLocationDialog extends StatefulWidget {
   final String? initialFloorLabel;
   final String? venueId;
   final String? trackingNotificationId;
+  final String? headerTitle;
+  final String? headerSubtitle;
 
   /// If true, this screen will save to Firestore and then `pop(result)` instead
   /// of navigating to [PathOverviewScreen].
@@ -453,6 +455,8 @@ class SetYourLocationDialog extends StatefulWidget {
     this.initialFloorLabel,
     this.venueId,
     this.trackingNotificationId,
+    this.headerTitle,
+    this.headerSubtitle,
     this.returnResultOnly = false,
     this.embeddedMode = false,
     this.onLocationPicked,
@@ -1543,7 +1547,10 @@ const timer = setInterval(function() {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Set Your Location',
+                        (widget.headerTitle != null &&
+                                widget.headerTitle!.trim().isNotEmpty)
+                            ? widget.headerTitle!.trim()
+                            : 'Set Your Location',
                         style: TextStyle(
                           fontSize: screenHeight < 700 ? 20 : 22,
                           fontWeight: FontWeight.w600,
@@ -1552,9 +1559,12 @@ const timer = setInterval(function() {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        pinPlaced
-                            ? 'Location selected. Tap again to move it.'
-                            : 'Tap on the 3D map to place your pin.',
+                        (widget.headerSubtitle != null &&
+                                widget.headerSubtitle!.trim().isNotEmpty)
+                            ? widget.headerSubtitle!.trim()
+                            : (pinPlaced
+                                  ? 'Location selected. Tap again to move it.'
+                                  : 'Tap on the 3D map to place your pin.'),
                         style: TextStyle(fontSize: 14, color: Colors.grey[600]),
                       ),
                     ],

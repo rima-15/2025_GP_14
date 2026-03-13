@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -10,6 +10,7 @@ import 'package:madar_app/nav/navmesh.dart';
 import 'package:madar_app/screens/navigation_flow_complete.dart'
     show SetYourLocationDialog;
 import 'package:madar_app/screens/AR_page.dart';
+import 'package:madar_app/screens/meeting_point_draft_storage.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
@@ -23,10 +24,558 @@ const String _kFallbackMapVenueId = 'ChIJcYTQDwDjLj4RZEiboV6gZzM';
 /// Geofence radius in metres – user must be this close to a venue centre.
 const double _kVenueGeofenceMeters = 150;
 
+class MeetingPointParticipant {
+  const MeetingPointParticipant({
+    required this.userId,
+    required this.name,
+    required this.phone,
+    required this.status,
+    this.respondedAt,
+    this.updatedAt,
+  });
+
+  final String userId;
+  final String name;
+  final String phone;
+  final String status; // pending | accepted | declined
+  final DateTime? respondedAt;
+  final DateTime? updatedAt;
+
+  bool get isPending => status == 'pending';
+  bool get isAccepted => status == 'accepted';
+  bool get isDeclined => status == 'declined';
+
+  MeetingPointParticipant copyWith({
+    String? status,
+    DateTime? respondedAt,
+    DateTime? updatedAt,
+  }) {
+    return MeetingPointParticipant(
+      userId: userId,
+      name: name,
+      phone: phone,
+      status: status ?? this.status,
+      respondedAt: respondedAt ?? this.respondedAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'userId': userId,
+      'name': name,
+      'phone': phone,
+      'status': status,
+      'respondedAt': respondedAt == null
+          ? null
+          : Timestamp.fromDate(respondedAt!),
+      'updatedAt': updatedAt == null ? null : Timestamp.fromDate(updatedAt!),
+    };
+  }
+
+  static MeetingPointParticipant? fromMap(Map<String, dynamic> raw) {
+    final userId = (raw['userId'] ?? '').toString().trim();
+    if (userId.isEmpty) return null;
+    final statusRaw = (raw['status'] ?? 'pending').toString().trim();
+    var status = 'pending';
+    switch (statusRaw) {
+      case 'accepted':
+        status = 'accepted';
+        break;
+      case 'declined':
+        status = 'declined';
+        break;
+      default:
+        status = 'pending';
+    }
+    return MeetingPointParticipant(
+      userId: userId,
+      name: (raw['name'] ?? '').toString(),
+      phone: (raw['phone'] ?? '').toString(),
+      status: status,
+      respondedAt: _meetingPointAsDateTime(raw['respondedAt']),
+      updatedAt: _meetingPointAsDateTime(raw['updatedAt']),
+    );
+  }
+}
+
+class MeetingPointRecord {
+  const MeetingPointRecord({
+    required this.id,
+    required this.hostId,
+    required this.hostName,
+    required this.hostPhone,
+    required this.venueId,
+    required this.venueName,
+    required this.placeCategories,
+    required this.hostLocation,
+    required this.hostStep,
+    required this.status,
+    required this.isActive,
+    required this.participants,
+    required this.memberUserIds,
+    this.createdAt,
+    this.updatedAt,
+    this.waitDeadline,
+    this.suggestDeadline,
+  });
+
+  final String id;
+  final String hostId;
+  final String hostName;
+  final String hostPhone;
+  final String venueId;
+  final String venueName;
+  final List<String> placeCategories;
+  final Map<String, dynamic>? hostLocation;
+  final int hostStep;
+  final String status;
+  final bool isActive;
+  final List<MeetingPointParticipant> participants;
+  final List<String> memberUserIds;
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
+  final DateTime? waitDeadline;
+  final DateTime? suggestDeadline;
+
+  bool isHost(String uid) => uid == hostId;
+
+  MeetingPointParticipant? participantFor(String uid) {
+    for (final p in participants) {
+      if (p.userId == uid) return p;
+    }
+    return null;
+  }
+
+  int get invitedCount => participants.length;
+  int get acceptedCount => participants.where((p) => p.isAccepted).length;
+  int get pendingCount => participants.where((p) => p.isPending).length;
+  int get declinedCount => participants.where((p) => p.isDeclined).length;
+
+  DateTime? get activeDeadline {
+    if (hostStep == 4) return waitDeadline;
+    if (hostStep == 5) return suggestDeadline;
+    return null;
+  }
+
+  static MeetingPointRecord? fromDoc(
+    DocumentSnapshot<Map<String, dynamic>> doc,
+  ) {
+    final data = doc.data();
+    if (data == null) return null;
+    final hostId = (data['hostId'] ?? '').toString().trim();
+    if (hostId.isEmpty) return null;
+
+    final participantsRaw = data['participants'];
+    final participants = (participantsRaw is List)
+        ? participantsRaw
+              .whereType<Map>()
+              .map(
+                (e) => MeetingPointParticipant.fromMap(
+                  Map<String, dynamic>.from(e),
+                ),
+              )
+              .whereType<MeetingPointParticipant>()
+              .toList()
+        : <MeetingPointParticipant>[];
+
+    final membersRaw = data['memberUserIds'];
+    final members = (membersRaw is List)
+        ? membersRaw
+              .map((e) => e?.toString().trim() ?? '')
+              .where((e) => e.isNotEmpty)
+              .toList()
+        : <String>[];
+
+    final placeCategoriesRaw = data['placeCategories'];
+    final placeCategories = (placeCategoriesRaw is List)
+        ? placeCategoriesRaw
+              .map((e) => e?.toString().trim() ?? '')
+              .where((e) => e.isNotEmpty)
+              .toList()
+        : <String>[];
+
+    final hostStepRaw = data['hostStep'];
+    final hostStep = (hostStepRaw is num) ? hostStepRaw.toInt() : 4;
+
+    return MeetingPointRecord(
+      id: doc.id,
+      hostId: hostId,
+      hostName: (data['hostName'] ?? '').toString(),
+      hostPhone: (data['hostPhone'] ?? '').toString(),
+      venueId: (data['venueId'] ?? '').toString(),
+      venueName: (data['venueName'] ?? '').toString(),
+      placeCategories: placeCategories,
+      hostLocation: data['hostLocation'] is Map
+          ? Map<String, dynamic>.from(data['hostLocation'] as Map)
+          : null,
+      hostStep: hostStep.clamp(1, 5).toInt(),
+      status: (data['status'] ?? '').toString(),
+      isActive: data['isActive'] == true,
+      participants: participants,
+      memberUserIds: members,
+      createdAt: _meetingPointAsDateTime(data['createdAt']),
+      updatedAt: _meetingPointAsDateTime(data['updatedAt']),
+      waitDeadline: _meetingPointAsDateTime(data['waitDeadline']),
+      suggestDeadline: _meetingPointAsDateTime(data['suggestDeadline']),
+    );
+  }
+}
+
+class MeetingPointService {
+  static const String collectionName = 'meetingPoints';
+
+  static CollectionReference<Map<String, dynamic>> get _col =>
+      FirebaseFirestore.instance.collection(collectionName);
+
+  static const Duration _kSuggestDuration = Duration(minutes: 5);
+
+  static bool _isFullyDeclinedActive(MeetingPointRecord meeting) {
+    if (!meeting.isActive) return false;
+    if (meeting.participants.isEmpty) return false;
+    return meeting.acceptedCount == 0 &&
+        meeting.pendingCount == 0 &&
+        meeting.declinedCount == meeting.invitedCount;
+  }
+
+  static bool _isMeetingBlockingForUser(
+    MeetingPointRecord meeting,
+    String uid,
+  ) {
+    final normalizedStatus = meeting.status.trim().toLowerCase();
+    if (normalizedStatus == 'cancelled' ||
+        normalizedStatus == 'confirmed' ||
+        normalizedStatus == 'completed') {
+      return false;
+    }
+    if (!meeting.isActive) return false;
+    if (_isFullyDeclinedActive(meeting)) return false;
+    if (meeting.hostId == uid) return true;
+    final me = meeting.participantFor(uid);
+    if (me == null) return false;
+    return !me.isDeclined;
+  }
+
+  static Stream<MeetingPointRecord?> watchActiveForCurrentUser() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || uid.trim().isEmpty) return Stream.value(null);
+
+    return _col.where('memberUserIds', arrayContains: uid).snapshots().map((
+      snap,
+    ) {
+      final meetings = snap.docs
+          .map(MeetingPointRecord.fromDoc)
+          .whereType<MeetingPointRecord>()
+          .toList();
+
+      meetings.sort((a, b) {
+        final at = a.updatedAt ?? a.createdAt ?? DateTime(1970);
+        final bt = b.updatedAt ?? b.createdAt ?? DateTime(1970);
+        return bt.compareTo(at);
+      });
+
+      final active = meetings
+          .where((m) => _isMeetingBlockingForUser(m, uid))
+          .toList();
+      return active.isEmpty ? null : active.first;
+    });
+  }
+
+  /// Keep the meeting point flow consistent even when the host closes the form.
+  ///
+  /// This runs client-side (from Track page) and performs only safe transitions:
+  /// - Step 4 expired: cancel if nobody accepted; otherwise move to step 5.
+  /// - Step 5 expired: auto-accept (same as your current form behavior).
+  /// - All declined: cancel (host or invitee can do this; rules allow it).
+  static Future<void> maybeMaintain(MeetingPointRecord meeting) async {
+    if (!meeting.isActive) return;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || uid.trim().isEmpty) return;
+
+    final now = DateTime.now();
+    final normalizedStatus = meeting.status.trim().toLowerCase();
+    if (normalizedStatus == 'cancelled' ||
+        normalizedStatus == 'completed' ||
+        normalizedStatus == 'confirmed' ||
+        normalizedStatus == 'active') {
+      return;
+    }
+
+    // If everyone declined, end it (prevents ghost active meetings).
+    final allDeclined = meeting.participants.isNotEmpty &&
+        meeting.participants.every((p) => p.isDeclined);
+    if (allDeclined) {
+      try {
+        await _col.doc(meeting.id).update({
+          'status': 'cancelled',
+          'isActive': false,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      } catch (_) {}
+      return;
+    }
+
+    // Host-only timed transitions.
+    if (meeting.hostId != uid) return;
+
+    if (meeting.hostStep == 4 && meeting.waitDeadline != null) {
+      if (!meeting.waitDeadline!.isAfter(now)) {
+        if (meeting.acceptedCount <= 0) {
+          try {
+            await _col.doc(meeting.id).update({
+              'status': 'cancelled',
+              'isActive': false,
+              'updatedAt': FieldValue.serverTimestamp(),
+            });
+          } catch (_) {}
+        } else {
+          try {
+            await _col.doc(meeting.id).update({
+              'hostStep': 5,
+              'status': 'waiting_host_confirmation',
+              'suggestDeadline': Timestamp.fromDate(now.add(_kSuggestDuration)),
+              'updatedAt': FieldValue.serverTimestamp(),
+            });
+          } catch (_) {}
+        }
+      }
+      return;
+    }
+
+    if (meeting.hostStep == 5 && meeting.suggestDeadline != null) {
+      if (!meeting.suggestDeadline!.isAfter(now)) {
+        try {
+          await markHostDecision(meetingPointId: meeting.id, accepted: true);
+        } catch (_) {}
+      }
+      return;
+    }
+  }
+
+  static Future<MeetingPointRecord?> getById(String meetingPointId) async {
+    final id = meetingPointId.trim();
+    if (id.isEmpty) return null;
+    final doc = await _col.doc(id).get();
+    return MeetingPointRecord.fromDoc(doc);
+  }
+
+  static Future<MeetingPointRecord?> getActiveHostedByCurrentUser() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || uid.trim().isEmpty) return null;
+
+    final snap = await _col
+        .where('hostId', isEqualTo: uid)
+        .where('isActive', isEqualTo: true)
+        .get();
+    final items = snap.docs
+        .map(MeetingPointRecord.fromDoc)
+        .whereType<MeetingPointRecord>()
+        .toList();
+    if (items.isEmpty) return null;
+    items.sort((a, b) {
+      final at = a.updatedAt ?? a.createdAt ?? DateTime(1970);
+      final bt = b.updatedAt ?? b.createdAt ?? DateTime(1970);
+      return bt.compareTo(at);
+    });
+    for (final meeting in items) {
+      if (_isFullyDeclinedActive(meeting)) {
+        try {
+          await _col.doc(meeting.id).update({
+            'status': 'cancelled',
+            'isActive': false,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        } catch (_) {}
+        continue;
+      }
+      return meeting;
+    }
+    return null;
+  }
+
+  static Future<MeetingPointRecord?> getBlockingMeetingForCurrentUser() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || uid.trim().isEmpty) return null;
+
+    final snap = await _col.where('memberUserIds', arrayContains: uid).get();
+    final meetings = snap.docs
+        .map(MeetingPointRecord.fromDoc)
+        .whereType<MeetingPointRecord>()
+        .toList();
+    if (meetings.isEmpty) return null;
+
+    meetings.sort((a, b) {
+      final at = a.updatedAt ?? a.createdAt ?? DateTime(1970);
+      final bt = b.updatedAt ?? b.createdAt ?? DateTime(1970);
+      return bt.compareTo(at);
+    });
+
+    for (final meeting in meetings) {
+      if (_isFullyDeclinedActive(meeting) && meeting.hostId == uid) {
+        try {
+          await _col.doc(meeting.id).update({
+            'status': 'cancelled',
+            'isActive': false,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        } catch (_) {}
+        continue;
+      }
+      if (_isMeetingBlockingForUser(meeting, uid)) return meeting;
+    }
+    return null;
+  }
+
+  static Future<String> createMeetingPoint({
+    required String hostId,
+    required String hostName,
+    required String hostPhone,
+    required String venueId,
+    required String venueName,
+    required List<String> placeCategories,
+    required Map<String, dynamic>? hostLocation,
+    required List<MeetingPointParticipant> participants,
+    required DateTime waitDeadline,
+  }) async {
+    final docRef = _col.doc();
+    final invitedUserIds = participants.map((p) => p.userId).toSet().toList();
+    final memberUserIds = <String>{hostId, ...invitedUserIds}.toList();
+
+    final batch = FirebaseFirestore.instance.batch();
+    batch.set(docRef, {
+      'hostId': hostId,
+      'hostName': hostName,
+      'hostPhone': hostPhone,
+      'venueId': venueId,
+      'venueName': venueName,
+      'placeCategories': placeCategories,
+      'hostLocation': hostLocation,
+      'hostStep': 4,
+      'status': 'waiting_participants',
+      'isActive': true,
+      'participants': participants.map((p) => p.toMap()).toList(),
+      'invitedUserIds': invitedUserIds,
+      'memberUserIds': memberUserIds,
+      'waitDeadline': Timestamp.fromDate(waitDeadline),
+      'suggestDeadline': null,
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    await batch.commit();
+    return docRef.id;
+  }
+
+  static Future<void> updateHostProgress({
+    required String meetingPointId,
+    required int hostStep,
+    List<MeetingPointParticipant>? participants,
+    DateTime? waitDeadline,
+    DateTime? suggestDeadline,
+    String? status,
+    bool? isActive,
+  }) async {
+    final payload = <String, dynamic>{
+      'hostStep': hostStep.clamp(1, 5),
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+    if (participants != null) {
+      payload['participants'] = participants.map((p) => p.toMap()).toList();
+    }
+    if (waitDeadline != null) {
+      payload['waitDeadline'] = Timestamp.fromDate(waitDeadline);
+    }
+    if (suggestDeadline != null) {
+      payload['suggestDeadline'] = Timestamp.fromDate(suggestDeadline);
+    }
+    if (status != null) payload['status'] = status;
+    if (isActive != null) payload['isActive'] = isActive;
+
+    await _col.doc(meetingPointId).update(payload);
+  }
+
+  static Future<void> markHostDecision({
+    required String meetingPointId,
+    required bool accepted,
+  }) async {
+    await _col.doc(meetingPointId).update({
+      'status': accepted ? 'active' : 'cancelled',
+      'isActive': false,
+      'updatedAt': FieldValue.serverTimestamp(),
+      'hostStep': 5,
+    });
+  }
+
+  static Future<void> respondToInvitation({
+    required String meetingPointId,
+    required bool accepted,
+  }) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || uid.trim().isEmpty) return;
+
+    final ref = _col.doc(meetingPointId);
+    final doc = await ref.get();
+    final meeting = MeetingPointRecord.fromDoc(doc);
+    if (meeting == null) return;
+
+    final index = meeting.participants.indexWhere((p) => p.userId == uid);
+    if (index < 0) return;
+
+    final now = DateTime.now();
+    final newStatus = accepted ? 'accepted' : 'declined';
+    final updatedParticipants = List<MeetingPointParticipant>.from(
+      meeting.participants,
+    );
+    updatedParticipants[index] = updatedParticipants[index].copyWith(
+      status: newStatus,
+      respondedAt: now,
+      updatedAt: now,
+    );
+
+    final payload = <String, dynamic>{
+      'participants': updatedParticipants.map((p) => p.toMap()).toList(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+
+    final allDeclined =
+        updatedParticipants.isNotEmpty &&
+        updatedParticipants.every((p) => p.isDeclined);
+    if (allDeclined) {
+      payload['status'] = 'cancelled';
+      payload['isActive'] = false;
+    }
+
+    try {
+      await ref.update(payload);
+    } catch (_) {
+      await ref.update({
+        'participants': updatedParticipants.map((p) => p.toMap()).toList(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    }
+  }
+}
+
+DateTime? _meetingPointAsDateTime(dynamic raw) {
+  if (raw is Timestamp) return raw.toDate();
+  if (raw is DateTime) return raw;
+  if (raw is int) return DateTime.fromMillisecondsSinceEpoch(raw);
+  if (raw is num) return DateTime.fromMillisecondsSinceEpoch(raw.toInt());
+  if (raw is String) return DateTime.tryParse(raw);
+  return null;
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 class CreateMeetingPointForm extends StatefulWidget {
-  const CreateMeetingPointForm({super.key});
+  const CreateMeetingPointForm({
+    super.key,
+    this.resumeDraft = false,
+    this.meetingPointId,
+  });
+
+  final bool resumeDraft;
+  final String? meetingPointId;
 
   @override
   State<CreateMeetingPointForm> createState() => _CreateMeetingPointFormState();
@@ -57,14 +606,14 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   bool _loadingActiveVenueFriends = false;
 
   // ── Step 1: Place Type ───────────────────────────────────────────────────
-  final List<String> _allPlaceTypes = [
+  final List<String> _allPlaceCategories = [
     'Any',
     'Café',
     'Restaurant',
     'Shop',
     'Entrance',
   ];
-  final Set<String> _selectedPlaceTypes = {'Any'};
+  final Set<String> _selectedPlaceCategories = {'Any'};
 
   // ── Step 2: Location ──────────────────────────────────────────────────────
   _HostLocation? _hostLocation;
@@ -79,20 +628,27 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
   /// Step-4 10-minute countdown.
   Timer? _waitTimer;
-  int _waitSecondsLeft = 600; // 10 min
+  int _waitSecondsLeft = 10; // 10 min
 
   /// Proceed button unlock delay (5 s) before checking real acceptance.
   bool _proceedUnlocked = false;
   Timer? _proceedTimer;
+  DateTime? _proceedUnlockAt;
+  DateTime? _waitDeadline;
 
   // ── Step 5: Suggested meeting point ──────────────────────────────────────
   /// 5-minute timer for host to accept/reject.
   Timer? _suggestTimer;
   int _suggestSecondsLeft = 300; // 5 min
+  DateTime? _suggestDeadline;
 
   // ── Cached current user ───────────────────────────────────────────────────
   String? _myPhone;
   String? _myName;
+  bool _shouldManageDraft = false;
+  bool _allowDisposeDraftSave = true;
+  String? _meetingPointId;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _meetingPointSub;
 
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -106,15 +662,27 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     _loadSavedStep2Location();
     _loadCurrentUser();
     _loadAndResolveVenue();
+    _meetingPointId = widget.meetingPointId?.trim();
+    if (_meetingPointId != null && _meetingPointId!.isNotEmpty) {
+      _shouldManageDraft = true;
+      unawaited(_restoreFromMeetingPoint(_meetingPointId!));
+    } else if (widget.resumeDraft) {
+      _shouldManageDraft = true;
+      unawaited(_restoreMeetingProgress());
+    }
   }
 
   @override
   void dispose() {
+    if (_allowDisposeDraftSave && _shouldManageDraft) {
+      unawaited(_persistDraftIfNeeded());
+    }
     _phoneCtrl.dispose();
     _phoneFocus.dispose();
     _waitTimer?.cancel();
     _proceedTimer?.cancel();
     _suggestTimer?.cancel();
+    _meetingPointSub?.cancel();
     super.dispose();
   }
 
@@ -266,13 +834,19 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         if (start == null || end == null) continue;
         if (now.isBefore(start) || now.isAfter(end)) continue;
         final phone = d['receiverPhone']?.toString() ?? '';
+        final receiverId = (d['receiverId'] ?? '').toString().trim();
         if (phone.isEmpty) continue;
         final name = (d['receiverName']?.toString().trim().isNotEmpty == true)
             ? d['receiverName'].toString().trim()
             : phone;
         byPhone.putIfAbsent(
           phone,
-          () => _Friend(id: '', name: name, phone: phone, isFavorite: false),
+          () => _Friend(
+            id: receiverId,
+            name: name,
+            phone: phone,
+            isFavorite: false,
+          ),
         );
       }
 
@@ -621,6 +1195,468 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     }
   }
 
+  bool get _isResumableDraftStep => _step == 4 || _step == 5;
+
+  Future<void> _handleExitRequested() async {
+    await _persistDraftIfNeeded();
+    if (!mounted) return;
+    Navigator.pop(context);
+  }
+
+  Future<void> _restoreMeetingProgress() async {
+    final restoredLocal = await _restoreDraftIfAvailable();
+    if (restoredLocal) return;
+
+    final activeHostMeeting =
+        await MeetingPointService.getActiveHostedByCurrentUser();
+    if (!mounted || activeHostMeeting == null) return;
+    await _restoreFromMeetingPoint(activeHostMeeting.id);
+  }
+
+  Future<bool> _restoreDraftIfAvailable() async {
+    final snap = await MeetingPointDraftStorage.loadForCurrentUser();
+    if (snap == null || !mounted) return false;
+    if (snap.step < 4 || snap.step > 5) return false;
+
+    final restoredFriends = snap.selectedFriends
+        .map(_friendFromDraft)
+        .whereType<_Friend>()
+        .toList();
+    final restoredParticipants = snap.participants
+        .map(_participantFromDraft)
+        .whereType<_Participant>()
+        .toList();
+
+    final restoredPlaceCategories = snap.placeCategories.toSet();
+    if (restoredPlaceCategories.isEmpty) restoredPlaceCategories.add('Any');
+
+    final host = _hostLocationFromDraft(snap.hostLocationRaw);
+    final restoredWaitLeft = _intFromDynamic(snap.data['waitSecondsLeft'], 600);
+    final restoredSuggestLeft = _intFromDynamic(
+      snap.data['suggestSecondsLeft'],
+      300,
+    );
+    final restoredMeetingPointId = (snap.data['meetingPointId'] ?? '')
+        .toString()
+        .trim();
+
+    setState(() {
+      _meetingPointId = restoredMeetingPointId.isEmpty
+          ? _meetingPointId
+          : restoredMeetingPointId;
+      _step = snap.step;
+      _venueId = snap.venueId;
+      _venueName = snap.venueName ?? _venueName;
+
+      _selectedFriends
+        ..clear()
+        ..addAll(restoredFriends);
+      _selectedPlaceCategories
+        ..clear()
+        ..addAll(restoredPlaceCategories);
+
+      if (host != null) {
+        _hostLocation = host;
+      }
+
+      _participants = restoredParticipants.isEmpty
+          ? restoredFriends
+                .map(
+                  (f) => _Participant(
+                    friend: f,
+                    status: _ParticipantStatus.pending,
+                  ),
+                )
+                .toList()
+          : restoredParticipants;
+
+      _waitSecondsLeft = restoredWaitLeft.clamp(0, 600).toInt();
+      _suggestSecondsLeft = restoredSuggestLeft.clamp(0, 300).toInt();
+      _proceedUnlocked = _boolFromDynamic(snap.data['proceedUnlocked'], true);
+      _waitDeadline = _dateFromEpoch(snap.data['waitDeadlineMs']);
+      _suggestDeadline = _dateFromEpoch(snap.data['suggestDeadlineMs']);
+      _proceedUnlockAt = _dateFromEpoch(snap.data['proceedUnlockAtMs']);
+    });
+
+    if (_step == 4) {
+      _startProceedUnlockTimer();
+      _startStep4WaitCountdown();
+    } else if (_step == 5) {
+      _startStep5SuggestCountdown();
+    }
+    if (_meetingPointId != null && _meetingPointId!.isNotEmpty) {
+      _startMeetingSubscription(_meetingPointId!);
+    }
+    return true;
+  }
+
+  Future<void> _restoreFromMeetingPoint(String meetingPointId) async {
+    final meeting = await MeetingPointService.getById(meetingPointId);
+    final myUid = FirebaseAuth.instance.currentUser?.uid;
+    if (!mounted || meeting == null || myUid == null) return;
+    if (!meeting.isHost(myUid)) return;
+
+    _meetingPointId = meeting.id;
+    _shouldManageDraft = true;
+
+    final restoredFriends = meeting.participants
+        .map(
+          (p) => _Friend(
+            id: p.userId,
+            name: p.name.trim().isEmpty ? p.phone : p.name,
+            phone: p.phone,
+            isFavorite: false,
+          ),
+        )
+        .toList();
+
+    final restoredParticipants = meeting.participants
+        .map(_participantFromCloud)
+        .toList();
+
+    final waitLeft = meeting.waitDeadline == null
+        ? _waitSecondsLeft
+        : meeting.waitDeadline!
+              .difference(DateTime.now())
+              .inSeconds
+              .clamp(0, 600);
+    final suggestLeft = meeting.suggestDeadline == null
+        ? _suggestSecondsLeft
+        : meeting.suggestDeadline!
+              .difference(DateTime.now())
+              .inSeconds
+              .clamp(0, 300);
+
+    setState(() {
+      _step = meeting.hostStep.clamp(1, 5).toInt();
+      _venueId = meeting.venueId.isEmpty ? _venueId : meeting.venueId;
+      _venueName = meeting.venueName.isEmpty ? _venueName : meeting.venueName;
+      _selectedFriends
+        ..clear()
+        ..addAll(restoredFriends);
+      _selectedPlaceCategories
+        ..clear()
+        ..addAll(
+          meeting.placeCategories.isEmpty ? {'Any'} : meeting.placeCategories,
+        );
+      _hostLocation =
+          _hostLocationFromCloud(meeting.hostLocation) ?? _hostLocation;
+      _participants = restoredParticipants;
+      _waitDeadline = meeting.waitDeadline;
+      _suggestDeadline = meeting.suggestDeadline;
+      _waitSecondsLeft = waitLeft.toInt();
+      _suggestSecondsLeft = suggestLeft.toInt();
+      _proceedUnlocked = true;
+    });
+
+    if (_step == 4) {
+      _startStep4WaitCountdown();
+    } else if (_step == 5) {
+      _startStep5SuggestCountdown();
+    }
+
+    _startMeetingSubscription(meeting.id);
+  }
+
+  void _startMeetingSubscription(String meetingPointId) {
+    _meetingPointSub?.cancel();
+    _meetingPointSub = FirebaseFirestore.instance
+        .collection(MeetingPointService.collectionName)
+        .doc(meetingPointId)
+        .snapshots()
+        .listen((doc) {
+          final meeting = MeetingPointRecord.fromDoc(doc);
+          if (!mounted || meeting == null) return;
+          final uid = FirebaseAuth.instance.currentUser?.uid;
+          if (uid == null || !meeting.isHost(uid)) return;
+
+          final participants = meeting.participants
+              .map(_participantFromCloud)
+              .toList();
+          final nextStep = meeting.hostStep.clamp(1, 5).toInt();
+          final waitLeft = meeting.waitDeadline == null
+              ? _waitSecondsLeft
+              : meeting.waitDeadline!
+                    .difference(DateTime.now())
+                    .inSeconds
+                    .clamp(0, 600);
+          final suggestLeft = meeting.suggestDeadline == null
+              ? _suggestSecondsLeft
+              : meeting.suggestDeadline!
+                    .difference(DateTime.now())
+                    .inSeconds
+                    .clamp(0, 300);
+
+          setState(() {
+            _participants = participants;
+            _waitDeadline = meeting.waitDeadline;
+            _suggestDeadline = meeting.suggestDeadline;
+            _waitSecondsLeft = waitLeft.toInt();
+            _suggestSecondsLeft = suggestLeft.toInt();
+            _step = nextStep;
+          });
+
+          if (_step == 4) {
+            _startStep4WaitCountdown();
+          } else if (_step == 5) {
+            _startStep5SuggestCountdown();
+          }
+        });
+  }
+
+  Future<void> _persistDraftIfNeeded() async {
+    if (!_shouldManageDraft || !_isResumableDraftStep) return;
+    final payload = <String, dynamic>{
+      'step': _step,
+      'meetingPointId': _meetingPointId,
+      'venueId': _venueId,
+      'venueName': _venueName,
+      'placeCategories': _selectedPlaceCategories.toList(),
+      'hostLocation': _hostLocation?.toMap(),
+      'selectedFriends': _selectedFriends.map(_friendToDraft).toList(),
+      'participants': _participants.map(_participantToDraft).toList(),
+      'waitSecondsLeft': _waitSecondsLeft,
+      'suggestSecondsLeft': _suggestSecondsLeft,
+      'proceedUnlocked': _proceedUnlocked,
+      'waitDeadlineMs': _waitDeadline?.millisecondsSinceEpoch,
+      'suggestDeadlineMs': _suggestDeadline?.millisecondsSinceEpoch,
+      'proceedUnlockAtMs': _proceedUnlockAt?.millisecondsSinceEpoch,
+      'updatedAtMs': DateTime.now().millisecondsSinceEpoch,
+    };
+    await MeetingPointDraftStorage.saveForCurrentUser(payload);
+    await _syncMeetingPointProgress();
+  }
+
+  Future<void> _clearManagedDraft() async {
+    if (!_shouldManageDraft) return;
+    await MeetingPointDraftStorage.clearForCurrentUser();
+  }
+
+  Future<void> _syncMeetingPointProgress({
+    String? status,
+    bool? isActive,
+  }) async {
+    final id = _meetingPointId;
+    if (id == null || id.trim().isEmpty) return;
+    try {
+      await MeetingPointService.updateHostProgress(
+        meetingPointId: id,
+        hostStep: _step,
+        participants: _participants.map(_participantToCloud).toList(),
+        waitDeadline: _step == 4 ? _waitDeadline : null,
+        suggestDeadline: _step == 5 ? _suggestDeadline : null,
+        status: status,
+        isActive: isActive,
+      );
+    } catch (e) {
+      debugPrint('Failed to sync meeting point progress: $e');
+    }
+  }
+
+  Future<void> _completeAndClose({
+    required bool success,
+    required String message,
+  }) async {
+    _allowDisposeDraftSave = false;
+    await _clearManagedDraft();
+    if (!mounted) return;
+    Navigator.pop(context);
+    if (success) {
+      SnackbarHelper.showSuccess(context, message);
+    } else {
+      SnackbarHelper.showError(context, message);
+    }
+  }
+
+  void _startProceedUnlockTimer() {
+    _proceedTimer?.cancel();
+    if (_proceedUnlocked) return;
+
+    final unlockAt = _proceedUnlockAt;
+    if (unlockAt == null) {
+      setState(() => _proceedUnlocked = true);
+      return;
+    }
+
+    final remaining = unlockAt.difference(DateTime.now());
+    if (remaining.inMilliseconds <= 0) {
+      if (mounted) setState(() => _proceedUnlocked = true);
+      return;
+    }
+
+    _proceedTimer = Timer(remaining, () {
+      if (!mounted) return;
+      setState(() => _proceedUnlocked = true);
+      unawaited(_persistDraftIfNeeded());
+    });
+  }
+
+  void _startStep4WaitCountdown() {
+    _waitTimer?.cancel();
+    _waitDeadline ??= DateTime.now().add(Duration(seconds: _waitSecondsLeft));
+
+    void onTick() {
+      if (!mounted) return;
+      final left = _waitDeadline!.difference(DateTime.now()).inSeconds;
+      if (left <= 0) {
+        _waitTimer?.cancel();
+        setState(() => _waitSecondsLeft = 0);
+        _onWaitTimerExpired();
+        return;
+      }
+      setState(() => _waitSecondsLeft = left);
+    }
+
+    onTick();
+    _waitTimer = Timer.periodic(const Duration(seconds: 1), (_) => onTick());
+  }
+
+  void _startStep5SuggestCountdown() {
+    _suggestTimer?.cancel();
+    _suggestDeadline ??= DateTime.now().add(
+      Duration(seconds: _suggestSecondsLeft),
+    );
+
+    void onTick() {
+      if (!mounted) return;
+      final left = _suggestDeadline!.difference(DateTime.now()).inSeconds;
+      if (left <= 0) {
+        _suggestTimer?.cancel();
+        setState(() => _suggestSecondsLeft = 0);
+        _acceptSuggestedMeetingPoint();
+        return;
+      }
+      setState(() => _suggestSecondsLeft = left);
+    }
+
+    onTick();
+    _suggestTimer = Timer.periodic(const Duration(seconds: 1), (_) => onTick());
+  }
+
+  DateTime? _dateFromEpoch(dynamic value) {
+    if (value is int) {
+      return DateTime.fromMillisecondsSinceEpoch(value);
+    }
+    if (value is num) {
+      return DateTime.fromMillisecondsSinceEpoch(value.toInt());
+    }
+    if (value is String) {
+      return DateTime.tryParse(value);
+    }
+    return null;
+  }
+
+  int _intFromDynamic(dynamic value, int fallback) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value) ?? fallback;
+    return fallback;
+  }
+
+  bool _boolFromDynamic(dynamic value, bool fallback) {
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    if (value is String) {
+      final v = value.toLowerCase().trim();
+      if (v == 'true' || v == '1') return true;
+      if (v == 'false' || v == '0') return false;
+    }
+    return fallback;
+  }
+
+  Map<String, dynamic> _friendToDraft(_Friend f) {
+    return {
+      'id': f.id,
+      'name': f.name,
+      'phone': f.phone,
+      'isFavorite': f.isFavorite,
+    };
+  }
+
+  _Friend? _friendFromDraft(Map<String, dynamic> raw) {
+    final phone = (raw['phone'] ?? '').toString().trim();
+    if (phone.isEmpty) return null;
+    return _Friend(
+      id: (raw['id'] ?? '').toString(),
+      name: (raw['name'] ?? '').toString().trim().isEmpty
+          ? phone
+          : raw['name'].toString(),
+      phone: phone,
+      isFavorite: _boolFromDynamic(raw['isFavorite'], false),
+    );
+  }
+
+  Map<String, dynamic> _participantToDraft(_Participant p) {
+    return {'friend': _friendToDraft(p.friend), 'status': p.status.name};
+  }
+
+  _Participant? _participantFromDraft(Map<String, dynamic> raw) {
+    final friendRaw = raw['friend'];
+    if (friendRaw is! Map) return null;
+    final friend = _friendFromDraft(Map<String, dynamic>.from(friendRaw));
+    if (friend == null) return null;
+
+    final status = _statusFromDraft((raw['status'] ?? '').toString());
+    return _Participant(friend: friend, status: status);
+  }
+
+  MeetingPointParticipant _participantToCloud(_Participant p) {
+    return MeetingPointParticipant(
+      userId: p.friend.id,
+      name: p.friend.name,
+      phone: p.friend.phone,
+      status: p.status.name,
+    );
+  }
+
+  _Participant _participantFromCloud(MeetingPointParticipant p) {
+    return _Participant(
+      friend: _Friend(
+        id: p.userId,
+        name: p.name.trim().isEmpty ? p.phone : p.name,
+        phone: p.phone,
+        isFavorite: false,
+      ),
+      status: _statusFromDraft(p.status),
+    );
+  }
+
+  _ParticipantStatus _statusFromDraft(String raw) {
+    switch (raw) {
+      case 'accepted':
+        return _ParticipantStatus.accepted;
+      case 'declined':
+        return _ParticipantStatus.declined;
+      default:
+        return _ParticipantStatus.pending;
+    }
+  }
+
+  _HostLocation? _hostLocationFromDraft(dynamic raw) {
+    if (raw is! Map) return null;
+    final map = Map<String, dynamic>.from(raw);
+    final lat = (map['latitude'] as num?)?.toDouble();
+    final lng = (map['longitude'] as num?)?.toDouble();
+    if (lat == null || lng == null) return null;
+    return _HostLocation(
+      latitude: lat,
+      longitude: lng,
+      label: (map['label'] ?? 'Set location').toString(),
+    );
+  }
+
+  _HostLocation? _hostLocationFromCloud(Map<String, dynamic>? raw) {
+    if (raw == null) return null;
+    final lat = (raw['latitude'] as num?)?.toDouble();
+    final lng = (raw['longitude'] as num?)?.toDouble();
+    if (lat == null || lng == null) return null;
+    return _HostLocation(
+      latitude: lat,
+      longitude: lng,
+      label: (raw['label'] ?? 'Set location').toString(),
+    );
+  }
+
   // ─── Step navigation ──────────────────────────────────────────────────────
 
   void _goNext() {
@@ -634,6 +1670,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       _initStep5();
     }
     setState(() => _step++);
+    unawaited(_persistDraftIfNeeded());
   }
 
   void _goBack() {
@@ -645,102 +1682,119 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       _suggestTimer?.cancel();
     }
     setState(() => _step--);
+    unawaited(_persistDraftIfNeeded());
   }
 
   void _initStep4() {
-    // Build participant list from selected friends.
-    _participants = _selectedFriends
-        .map((f) => _Participant(friend: f, status: _ParticipantStatus.pending))
-        .toList();
+    _shouldManageDraft = true;
+
+    if (_participants.isEmpty) {
+      // Build participant list from selected friends.
+      _participants = _selectedFriends
+          .map(
+            (f) => _Participant(friend: f, status: _ParticipantStatus.pending),
+          )
+          .toList();
+    }
 
     // 10-minute countdown.
-    _waitSecondsLeft = 600;
-    _waitTimer?.cancel();
-    _waitTimer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (!mounted) {
-        t.cancel();
-        return;
-      }
-      setState(() {
-        _waitSecondsLeft--;
-        if (_waitSecondsLeft <= 0) {
-          t.cancel();
-          _onWaitTimerExpired();
-        }
-      });
-    });
+    _waitSecondsLeft = 60;
+    _waitDeadline = DateTime.now().add(const Duration(minutes: 1));
+    _startStep4WaitCountdown();
 
     // Unlock "Proceed" after 5 seconds (UI demo).
     _proceedUnlocked = false;
-    _proceedTimer?.cancel();
-    _proceedTimer = Timer(const Duration(seconds: 5), () {
-      if (mounted) setState(() => _proceedUnlocked = true);
-    });
+    _proceedUnlockAt = DateTime.now().add(const Duration(seconds: 5));
+    _startProceedUnlockTimer();
 
-    // Simulate a participant accepting after 3 s for demo purposes.
-    Future.delayed(const Duration(seconds: 3), () {
-      if (!mounted || _step != 4) return;
-      if (_participants.isNotEmpty) {
-        setState(() {
-          _participants[0] = _participants[0].copyWith(
-            status: _ParticipantStatus.accepted,
-          );
-        });
-      }
-    });
+    if (_meetingPointId != null) {
+      _startMeetingSubscription(_meetingPointId!);
+      unawaited(
+        _syncMeetingPointProgress(
+          status: 'waiting_participants',
+          isActive: true,
+        ),
+      );
+    }
+    unawaited(_persistDraftIfNeeded());
   }
 
   void _onWaitTimerExpired() {
+    _waitTimer?.cancel();
+
     final anyAccepted = _participants.any(
       (p) => p.status == _ParticipantStatus.accepted,
     );
     if (!anyAccepted) {
       // No one accepted → cancel meeting point.
+      unawaited(
+        _syncMeetingPointProgress(status: 'cancelled', isActive: false),
+      );
       if (mounted) {
-        Navigator.pop(context);
-        SnackbarHelper.showError(
-          context,
-          'Meeting point cancelled – no participants accepted.',
+        unawaited(
+          _completeAndClose(
+            success: false,
+            message: 'Meeting point cancelled – no participants accepted.',
+          ),
         );
       }
     } else {
       // At least one accepted → advance to step 5.
       _initStep5();
-      if (mounted) setState(() => _step = 5);
+      if (mounted) {
+        setState(() => _step = 5);
+      }
+      unawaited(
+        _syncMeetingPointProgress(
+          status: 'waiting_host_confirmation',
+          isActive: true,
+        ),
+      );
+      unawaited(_persistDraftIfNeeded());
     }
   }
 
   void _initStep5() {
     _suggestSecondsLeft = 300;
-    _suggestTimer?.cancel();
-    _suggestTimer = Timer.periodic(const Duration(seconds: 1), (t) {
-      if (!mounted) {
-        t.cancel();
-        return;
-      }
-      setState(() {
-        _suggestSecondsLeft--;
-        if (_suggestSecondsLeft <= 0) {
-          t.cancel();
-          // Timer expired → auto-accept.
-          _acceptSuggestedMeetingPoint();
-        }
-      });
-    });
+    _suggestDeadline = DateTime.now().add(const Duration(minutes: 5));
+    _startStep5SuggestCountdown();
+    unawaited(
+      _syncMeetingPointProgress(
+        status: 'waiting_host_confirmation',
+        isActive: true,
+      ),
+    );
+    unawaited(_persistDraftIfNeeded());
   }
 
   void _acceptSuggestedMeetingPoint() {
     _suggestTimer?.cancel();
-    if (!mounted) return;
-    Navigator.pop(context);
-    SnackbarHelper.showSuccess(context, 'Meeting point accepted!');
+    if (_meetingPointId != null) {
+      unawaited(
+        MeetingPointService.markHostDecision(
+          meetingPointId: _meetingPointId!,
+          accepted: true,
+        ),
+      );
+    }
+    unawaited(
+      _completeAndClose(success: true, message: 'Meeting point accepted!'),
+    );
   }
 
   void _rejectSuggestedMeetingPoint() {
     _suggestTimer?.cancel();
-    if (!mounted) return;
-    Navigator.pop(context);
-    SnackbarHelper.showError(context, 'Meeting point rejected.');
+    if (_meetingPointId != null) {
+      unawaited(
+        MeetingPointService.markHostDecision(
+          meetingPointId: _meetingPointId!,
+          accepted: false,
+        ),
+      );
+    }
+    unawaited(
+      _completeAndClose(success: false, message: 'Meeting point rejected.'),
+    );
   }
 
   // ─── Step-level gate conditions ───────────────────────────────────────────
@@ -754,22 +1808,131 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     return _participants.any((p) => p.status == _ParticipantStatus.accepted);
   }
 
-  // ─── Stubs ────────────────────────────────────────────────────────────────
+  // ─── Firestore meeting point creation ─────────────────────────────────────
 
   Future<void> _sendInvites() async {
-    final payload = {
-      'venueId': _venueId,
-      'venueName': _venueName,
-      'placeTypes': _selectedPlaceTypes.toList(),
-      'hostLocation': _hostLocation?.toMap(),
-      'invitedFriendIds': _selectedFriends
-          .map((f) => f.id)
-          .where((id) => id.isNotEmpty)
-          .toList(),
-    };
-    debugPrint('Meeting point payload: $payload');
-    // Stub delay.
-    await Future<void>.delayed(const Duration(milliseconds: 600));
+    final host = FirebaseAuth.instance.currentUser;
+    if (host == null) {
+      throw Exception('You must be signed in to create a meeting point.');
+    }
+    if (_venueId == null || _venueName == null || _hostLocation == null) {
+      throw Exception(
+        'Please complete venue and location before sending invites.',
+      );
+    }
+
+    try {
+      final blockingMeeting =
+          await MeetingPointService.getBlockingMeetingForCurrentUser();
+      if (blockingMeeting != null && blockingMeeting.isActive) {
+        if (blockingMeeting.hostId == host.uid) {
+          throw Exception('You already have an active meeting point.');
+        }
+        throw Exception(
+          'Respond to your current meeting invitation before creating a new meeting point.',
+        );
+      }
+    } on FirebaseException catch (e) {
+      // Some rule setups reject the pre-check query. Do not block invite sending
+      // when this guard cannot be evaluated server-side.
+      debugPrint('Meeting pre-check skipped due Firestore rules: ${e.code}');
+    }
+
+    final participants = <MeetingPointParticipant>[];
+    final unresolvedFriends = <String>[];
+    for (final friend in _selectedFriends) {
+      var userId = friend.id.trim();
+      if (userId.isEmpty) {
+        userId = await _resolveUserIdByPhone(friend.phone);
+      }
+      if (userId.isEmpty) {
+        unresolvedFriends.add(
+          friend.name.isNotEmpty ? friend.name : friend.phone,
+        );
+        continue;
+      }
+      participants.add(
+        MeetingPointParticipant(
+          userId: userId,
+          name: friend.name,
+          phone: friend.phone,
+          status: 'pending',
+        ),
+      );
+    }
+
+    if (participants.isEmpty) {
+      throw Exception(
+        'Select at least one registered friend before sending invites.',
+      );
+    }
+    if (unresolvedFriends.isNotEmpty) {
+      throw Exception(
+        'Some selected friends are not registered users: ${unresolvedFriends.join(', ')}.',
+      );
+    }
+
+    final hostName = (_myName ?? '').trim().isNotEmpty
+        ? _myName!.trim()
+        : (host.displayName ?? '').trim();
+
+    final meetingPointId = await MeetingPointService.createMeetingPoint(
+      hostId: host.uid,
+      hostName: hostName.isNotEmpty ? hostName : 'Host',
+      hostPhone: (_myPhone ?? '').trim(),
+      venueId: _venueId!,
+      venueName: _venueName!,
+      placeCategories: _selectedPlaceCategories.toList(),
+      hostLocation: _hostLocation?.toMap(),
+      participants: participants,
+      waitDeadline: DateTime.now().add(const Duration(minutes: 1)),
+    );
+
+    _meetingPointId = meetingPointId;
+    _selectedFriends
+      ..clear()
+      ..addAll(
+        participants
+            .map(
+              (p) => _Friend(
+                id: p.userId,
+                name: p.name,
+                phone: p.phone,
+                isFavorite: false,
+              ),
+            )
+            .toList(),
+      );
+    _participants = participants
+        .map(
+          (p) => _Participant(
+            friend: _Friend(
+              id: p.userId,
+              name: p.name,
+              phone: p.phone,
+              isFavorite: false,
+            ),
+            status: _statusFromDraft(p.status),
+          ),
+        )
+        .toList();
+    _startMeetingSubscription(meetingPointId);
+  }
+
+  Future<String> _resolveUserIdByPhone(String phone) async {
+    final normalized = phone.trim();
+    if (normalized.isEmpty) return '';
+    try {
+      final q = await FirebaseFirestore.instance
+          .collection('users')
+          .where('phone', isEqualTo: normalized)
+          .limit(1)
+          .get();
+      if (q.docs.isEmpty) return '';
+      return q.docs.first.id;
+    } catch (_) {
+      return '';
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -778,27 +1941,33 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.9,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(24),
-          topRight: Radius.circular(24),
-        ),
-      ),
-      child: Column(
-        children: [
-          _buildHeader(),
-          _buildProgressBar(),
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
-              child: _buildStepBody(),
-            ),
+    return WillPopScope(
+      onWillPop: () async {
+        await _handleExitRequested();
+        return false;
+      },
+      child: Container(
+        height: MediaQuery.of(context).size.height * 0.9,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(24),
+            topRight: Radius.circular(24),
           ),
-          _buildFooter(),
-        ],
+        ),
+        child: Column(
+          children: [
+            _buildHeader(),
+            _buildProgressBar(),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+                child: _buildStepBody(),
+              ),
+            ),
+            _buildFooter(),
+          ],
+        ),
       ),
     );
   }
@@ -854,7 +2023,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           ),
           IconButton(
             icon: const Icon(Icons.close, color: Colors.black54),
-            onPressed: () => Navigator.pop(context),
+            onPressed: _handleExitRequested,
           ),
         ],
       ),
@@ -1338,8 +2507,8 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     return Wrap(
       spacing: 10,
       runSpacing: 10,
-      children: _allPlaceTypes.map((type) {
-        final selected = _selectedPlaceTypes.contains(type);
+      children: _allPlaceCategories.map((type) {
+        final selected = _selectedPlaceCategories.contains(type);
         return GestureDetector(
           onTap: () {
             setState(() {
@@ -1385,24 +2554,24 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
     // "Any" must be exclusive.
     if (type == any) {
-      _selectedPlaceTypes
+      _selectedPlaceCategories
         ..clear()
         ..add(any);
       return;
     }
 
     // Choosing any specific type should always unselect "Any".
-    _selectedPlaceTypes.remove(any);
+    _selectedPlaceCategories.remove(any);
 
-    if (_selectedPlaceTypes.contains(type)) {
-      _selectedPlaceTypes.remove(type);
+    if (_selectedPlaceCategories.contains(type)) {
+      _selectedPlaceCategories.remove(type);
     } else {
-      _selectedPlaceTypes.add(type);
+      _selectedPlaceCategories.add(type);
     }
 
     // Keep at least one selected.
-    if (_selectedPlaceTypes.isEmpty) {
-      _selectedPlaceTypes.add(any);
+    if (_selectedPlaceCategories.isEmpty) {
+      _selectedPlaceCategories.add(any);
     }
   }
 
@@ -1655,7 +2824,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       var snapped = <String, double>{'x': x, 'y': y, 'z': z};
       if (nav != null) {
         try {
-          snapped = nav!.snapBlenderPoint(snapped);
+          snapped = nav.snapBlenderPoint(snapped);
         } catch (_) {}
       }
 
@@ -1840,7 +3009,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
                     const SizedBox(height: 10),
                     _summaryRow(
                       'Where to meet',
-                      _selectedPlaceTypes.join(', '),
+                      _selectedPlaceCategories.join(', '),
                     ),
                     const SizedBox(height: 10),
                     _summaryRow(
@@ -1935,10 +3104,19 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   }
 
   Future<void> _sendInvitesAndAdvance() async {
-    await _sendInvites();
-    if (!mounted) return;
-    _initStep4();
-    setState(() => _step = 4);
+    try {
+      await _sendInvites();
+      if (!mounted) return;
+      _initStep4();
+      setState(() => _step = 4);
+      unawaited(_persistDraftIfNeeded());
+    } catch (e) {
+      if (!mounted) return;
+      SnackbarHelper.showError(
+        context,
+        e.toString().replaceFirst('Exception: ', ''),
+      );
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────

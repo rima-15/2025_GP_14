@@ -34,6 +34,26 @@ class HistoryTrackingRequest {
   });
 }
 
+class HistoryMeetingPoint {
+  final String id;
+  final String status;
+  final String venueName;
+  final String hostName;
+  final String hostPhone;
+  final bool isHost;
+  final DateTime updatedAt;
+
+  HistoryMeetingPoint({
+    required this.id,
+    required this.status,
+    required this.venueName,
+    required this.hostName,
+    required this.hostPhone,
+    required this.isHost,
+    required this.updatedAt,
+  });
+}
+
 class HistoryPage extends StatefulWidget {
   const HistoryPage({
     super.key,
@@ -68,9 +88,16 @@ class _HistoryPageState extends State<HistoryPage> {
     'completed',
     'cancelled',
   ];
+  static const List<String> _meetingPointHistoryStatuses = [
+    'cancelled',
+    'completed',
+    'active',
+    'confirmed',
+  ];
 
   late final Stream<List<HistoryTrackingRequest>> _sentStream;
   late final Stream<List<HistoryTrackingRequest>> _receivedStream;
+  late final Stream<List<HistoryMeetingPoint>> _meetingPointHistoryStream;
 
   @override
   void initState() {
@@ -81,6 +108,7 @@ class _HistoryPageState extends State<HistoryPage> {
     _highlightRequestId = widget.initialHighlightRequestId;
     _sentStream = _createSentHistoryStream();
     _receivedStream = _createReceivedHistoryStream();
+    _meetingPointHistoryStream = _createMeetingPointHistoryStream();
     _markStaleRequestsOnLoad();
     // Clear highlight after a short delay
     if (_highlightRequestId != null) {
@@ -205,6 +233,57 @@ class _HistoryPageState extends State<HistoryPage> {
     if (value == null) return null;
     if (value is Timestamp) return value.toDate();
     return null;
+  }
+
+  Stream<List<HistoryMeetingPoint>> _createMeetingPointHistoryStream() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return Stream.value([]);
+
+    return FirebaseFirestore.instance
+        .collection('meetingPoints')
+        .where('memberUserIds', arrayContains: uid)
+        .snapshots()
+        .map((snap) {
+          final list = snap.docs
+              .map((d) => _docToHistoryMeetingPoint(d, uid))
+              .whereType<HistoryMeetingPoint>()
+              .toList();
+          list.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+          return list;
+        })
+        .handleError((e, st) {
+          debugPrint('Meeting point history stream error: $e');
+        });
+  }
+
+  HistoryMeetingPoint? _docToHistoryMeetingPoint(
+    QueryDocumentSnapshot<Map<String, dynamic>> d,
+    String uid,
+  ) {
+    final data = d.data();
+    final isActive = data['isActive'] == true;
+    final status = (data['status'] ?? '').toString().trim().toLowerCase();
+    if (isActive) return null;
+    if (!_meetingPointHistoryStatuses.contains(status)) return null;
+
+    final hostId = (data['hostId'] ?? '').toString();
+    final venueName = (data['venueName'] ?? '').toString();
+    final hostName = (data['hostName'] ?? '').toString();
+    final hostPhone = (data['hostPhone'] ?? '').toString();
+    final updatedAt =
+        _parseTimestamp(data['updatedAt']) ??
+        _parseTimestamp(data['createdAt']) ??
+        DateTime.now();
+
+    return HistoryMeetingPoint(
+      id: d.id,
+      status: status,
+      venueName: venueName,
+      hostName: hostName,
+      hostPhone: hostPhone,
+      isHost: hostId == uid,
+      updatedAt: updatedAt,
+    );
   }
 
   String _formatDate(DateTime d) {
@@ -637,6 +716,16 @@ class _HistoryPageState extends State<HistoryPage> {
         text = AppColors.kGreen;
         label = 'Completed';
         break;
+      case 'active':
+        bg = AppColors.kGreen.withOpacity(0.1);
+        text = AppColors.kGreen;
+        label = 'Active';
+        break;
+      case 'confirmed':
+        bg = AppColors.kGreen.withOpacity(0.1);
+        text = AppColors.kGreen;
+        label = 'Active';
+        break;
       default:
         bg = Colors.grey.withOpacity(0.15);
         text = Colors.grey[700]!;
@@ -660,15 +749,105 @@ class _HistoryPageState extends State<HistoryPage> {
   }
 
   Widget _buildMeetingPointTab() {
-    return Center(
-      child: Text(
-        'No meeting points Request',
-        style: TextStyle(
-          fontSize: 15,
-          color: Colors.grey[600],
-          fontWeight: FontWeight.w500,
-        ),
-      ),
+    return StreamBuilder<List<HistoryMeetingPoint>>(
+      stream: _meetingPointHistoryStream,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Center(
+            child: Text(
+              'Couldn\'t load meeting points history.',
+              style: TextStyle(
+                fontSize: 15,
+                color: Colors.grey[600],
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          );
+        }
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
+          return const Center(
+            child: CircularProgressIndicator(color: AppColors.kGreen),
+          );
+        }
+        final list = snapshot.data ?? [];
+        if (list.isEmpty) {
+          return Center(
+            child: Text(
+              'No meeting points history',
+              style: TextStyle(
+                fontSize: 15,
+                color: Colors.grey[600],
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          );
+        }
+
+        return ListView.separated(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          itemCount: list.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 10),
+          itemBuilder: (context, index) {
+            final item = list[index];
+            return Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.grey.shade200),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.03),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          item.venueName.isEmpty ? 'Meeting Point' : item.venueName,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.black87,
+                          ),
+                        ),
+                      ),
+                      _historyStatusBadge(item.status),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    item.isHost
+                        ? 'Role: Host'
+                        : 'Host: ${item.hostName.isEmpty ? '-' : item.hostName}',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.grey[700],
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    _formatDate(item.updatedAt),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[600],
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }

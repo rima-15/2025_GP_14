@@ -122,14 +122,25 @@ class _NotificationsPageState extends State<NotificationsPage> {
   final List<String> _respondedNotifications = [];
   final Map<String, double> _notificationOffsets = {};
   Timer? _uiRefreshTimer;
-  bool _freezeReadUI = true; // نخليها true طول ما الصفحة مفتوحة
+  bool _freezeReadUI = true; // Keep true while the page is open
   Map<String, bool> _frozenReadMap = {};
-  final Map<String, bool> _localReadOverride = {}; // للي تبينه يختفي فوراً
+  bool _isRefreshing = false;
+  bool _exitReadTriggered = false;
+  bool _autoMarkRunning = false;
+  final Set<String> _expiredActionDocIdsThisVisit = {};
+
+  // Cache across page opens (app still alive)
+  static List<NotificationItem> _cachedMerged = [];
+  static bool _cacheReady = false;
+  static String? _cacheUserId;
+  final Map<String, bool> _localReadOverride =
+      {}; // For items that should disappear immediately
 
   // Read or Unread notifications
   @override
   void initState() {
     super.initState();
+    _ensureCacheUser();
 
     _uiRefreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (mounted) setState(() {});
@@ -142,14 +153,31 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
   @override
   void dispose() {
+    unawaited(_markReadOnExit());
     _uiRefreshTimer?.cancel();
     super.dispose();
   }
 
+  void _ensureCacheUser() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (_cacheUserId != uid) {
+      _cacheUserId = uid;
+      _cacheReady = false;
+      _cachedMerged = [];
+    }
+  }
+
+  Future<void> _markReadOnExit() async {
+    if (_exitReadTriggered) return;
+    _exitReadTriggered = true;
+    await _markAllNotificationsAsRead();
+    await _markExpiredActionsAsReadOnExit();
+  }
+
   Future<void> _onOpenNotificationsPage() async {
-    await _freezeCurrentReadMap(); // 1) جمدي الحالة الحالية (قبل التحديث)
-    await _markAllNotificationsAsRead(); // 2) حدّثي Firestore (بس UI ما يتغير)
-    await NotificationService.clearAllSystemNotifications(); // 3) امسحي badge
+    await _freezeCurrentReadMap(); // 1) Freeze current state (before update)
+    await _markAllNotificationsAsRead(); // 2) Update Firestore (UI stays the same)
+    await NotificationService.clearAllSystemNotifications(); // 3) Clear badge
   }
 
   Future<void> _freezeCurrentReadMap() async {
@@ -198,19 +226,86 @@ class _NotificationsPageState extends State<NotificationsPage> {
       final currentUid = user.uid;
 
       // trackStarted:
-      // اقرأها تلقائياً فقط إذا أنا المرسل
+      // Auto-read only if I am the sender
       if (type == 'trackStarted' && senderId == currentUid) {
         batch.update(doc.reference, {'isRead': true});
         continue;
       }
 
-      // باقي الإشعارات اللي تحتاج أكشن
+      // Other notifications that require action
       if (requiresAction) continue;
 
       batch.update(doc.reference, {'isRead': true});
     }
 
     await batch.commit();
+  }
+
+  Future<void> _refreshNotifications() async {
+    if (_isRefreshing) return;
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    setState(() => _isRefreshing = true);
+
+    try {
+      // Mark non-action notifications as read on pull-to-refresh
+      await _markAllNotificationsAsRead();
+
+      final results = await Future.wait([
+        _notificationDocMap().first,
+        _notificationsReadMap().first,
+        _incomingTrackRequestsStream().first,
+        _senderResponsesStream().first,
+        _trackStartedStream().first,
+        _trackTerminatedStream().first,
+        _trackCompletedStream().first,
+        _trackCancelledStream().first,
+        _locationRefreshStream().first,
+      ]);
+
+      final notifDocMap = results[0] as Map<String, String>;
+      final readMap = results[1] as Map<String, bool>;
+      final incomingTrack = results[2] as List<NotificationItem>;
+      final senderResponses = results[3] as List<NotificationItem>;
+      final trackStarted = results[4] as List<NotificationItem>;
+      final trackTerminated = results[5] as List<NotificationItem>;
+      final trackCompleted = results[6] as List<NotificationItem>;
+      final trackCancelled = results[7] as List<NotificationItem>;
+      final locationRefresh = results[8] as List<NotificationItem>;
+
+      final merged = _mergeNotifications(
+        incomingTrack: incomingTrack,
+        senderResponses: senderResponses,
+        trackStarted: trackStarted,
+        trackTerminated: trackTerminated,
+        trackCompleted: trackCompleted,
+        trackCancelled: trackCancelled,
+        locationRefresh: locationRefresh,
+        notifDocMap: notifDocMap,
+      );
+
+      _cachedMerged = merged;
+      _cacheReady = true;
+      _cacheUserId = user.uid;
+
+      if (mounted) {
+        final updatedReadMap = Map<String, bool>.from(readMap);
+        for (final n in merged) {
+          if (!n.requiresAction) {
+            updatedReadMap[n.id] = true;
+          }
+        }
+        setState(() {
+          _isRefreshing = false;
+          _frozenReadMap = updatedReadMap;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _isRefreshing = false);
+      }
+    }
   }
 
   //dot of notification
@@ -228,7 +323,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
           for (final doc in snap.docs) {
             final data = doc.data();
 
-            final key = data['data']?['requestId']; // ✅ نفس notif.id
+            final key = data['data']?['requestId']; // ? Same as notif.id
             final isRead = data['isRead'] ?? false;
 
             if (key != null) {
@@ -314,6 +409,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
               message: '',
               timestamp: createdAt,
               isRead: false,
+              requiresAction: status == 'pending' && !isTimeExpired,
               isExpired: isExpired,
               requestStatus: status,
               endAt: endAt,
@@ -555,222 +651,343 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.grey[50],
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        centerTitle: true,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: AppColors.kGreen),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text(
-          'Notifications',
-          style: TextStyle(
-            color: AppColors.kGreen,
-            fontWeight: FontWeight.w600,
+    return WillPopScope(
+      onWillPop: () async {
+        await _markReadOnExit();
+        return true;
+      },
+      child: Scaffold(
+        backgroundColor: Colors.grey[50],
+        appBar: AppBar(
+          backgroundColor: Colors.white,
+          elevation: 0,
+          centerTitle: true,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: AppColors.kGreen),
+            onPressed: () async {
+              await _markReadOnExit();
+              if (mounted) Navigator.pop(context);
+            },
+          ),
+          title: const Text(
+            'Notifications',
+            style: TextStyle(
+              color: AppColors.kGreen,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(1),
+            child: Container(height: 1, color: Colors.grey[300]),
           ),
         ),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1),
-          child: Container(height: 1, color: Colors.grey[300]),
+
+        body: StreamBuilder<Map<String, String>>(
+          stream: _notificationDocMap(), // 🔥 NEW
+          builder: (context, docMapSnap) {
+            final notifDocMap = docMapSnap.data ?? {};
+
+            return StreamBuilder<Map<String, bool>>(
+              stream: _notificationsReadMap(),
+              builder: (context, notifSnap) {
+                final readMap = notifSnap.data ?? _frozenReadMap;
+
+                return StreamBuilder<List<NotificationItem>>(
+                  stream: _incomingTrackRequestsStream(),
+                  builder: (context, incomingSnap) {
+                    final incomingTrack = incomingSnap.data ?? [];
+
+                    return StreamBuilder<List<NotificationItem>>(
+                      stream: _senderResponsesStream(),
+                      builder: (context, senderSnap) {
+                        final senderResponses = senderSnap.data ?? [];
+
+                        return StreamBuilder<List<NotificationItem>>(
+                          stream: _trackStartedStream(),
+                          builder: (context, trackStartedSnap) {
+                            final trackStarted = trackStartedSnap.data ?? [];
+
+                            return StreamBuilder<List<NotificationItem>>(
+                              stream: _trackTerminatedStream(),
+                              builder: (context, trackTerminatedSnap) {
+                                final trackTerminated =
+                                    trackTerminatedSnap.data ?? [];
+
+                                return StreamBuilder<List<NotificationItem>>(
+                                  stream: _trackCompletedStream(),
+                                  builder: (context, trackCompletedSnap) {
+                                    final trackCompleted =
+                                        trackCompletedSnap.data ?? [];
+
+                                    return StreamBuilder<
+                                      List<NotificationItem>
+                                    >(
+                                      stream: _trackCancelledStream(),
+                                      builder: (context, trackCancelledSnap) {
+                                        final trackCancelled =
+                                            trackCancelledSnap.data ?? [];
+
+                                        return StreamBuilder<
+                                          List<NotificationItem>
+                                        >(
+                                          stream: _locationRefreshStream(),
+                                          builder: (context, locationRefreshSnap) {
+                                            final locationRefresh =
+                                                locationRefreshSnap.data ?? [];
+
+                                            final hasAllData =
+                                                docMapSnap.hasData &&
+                                                notifSnap.hasData &&
+                                                incomingSnap.hasData &&
+                                                senderSnap.hasData &&
+                                                trackStartedSnap.hasData &&
+                                                trackTerminatedSnap.hasData &&
+                                                trackCompletedSnap.hasData &&
+                                                trackCancelledSnap.hasData &&
+                                                locationRefreshSnap.hasData;
+
+                                            if (!hasAllData) {
+                                              if (_cacheReady) {
+                                                return _buildNotificationsList(
+                                                  merged: _cachedMerged,
+                                                  readMap: readMap,
+                                                );
+                                              }
+                                              return _buildInitialLoader();
+                                            }
+
+                                            final merged = _mergeNotifications(
+                                              incomingTrack: incomingTrack,
+                                              senderResponses: senderResponses,
+                                              trackStarted: trackStarted,
+                                              trackTerminated: trackTerminated,
+                                              trackCompleted: trackCompleted,
+                                              trackCancelled: trackCancelled,
+                                              locationRefresh: locationRefresh,
+                                              notifDocMap: notifDocMap,
+                                            );
+
+                                            _cachedMerged = merged;
+                                            _cacheReady = true;
+
+                                            return _buildNotificationsList(
+                                              merged: merged,
+                                              readMap: readMap,
+                                            );
+                                          },
+                                        );
+                                      },
+                                    );
+                                  },
+                                );
+                              },
+                            );
+                          },
+                        );
+                      },
+                    );
+                  },
+                );
+              },
+            );
+          },
         ),
       ),
+    );
+  }
 
-      body: StreamBuilder<Map<String, String>>(
-        stream: _notificationDocMap(), // 🔥 NEW
-        builder: (context, docMapSnap) {
-          final notifDocMap = docMapSnap.data ?? {};
+  Widget _buildInitialLoader() {
+    return const Center(
+      child: CircularProgressIndicator(color: AppColors.kGreen),
+    );
+  }
 
-          return StreamBuilder<Map<String, bool>>(
-            stream: _notificationsReadMap(),
-            builder: (context, notifSnap) {
-              final readMap = notifSnap.data ?? {};
+  List<NotificationItem> _mergeNotifications({
+    required List<NotificationItem> incomingTrack,
+    required List<NotificationItem> senderResponses,
+    required List<NotificationItem> trackStarted,
+    required List<NotificationItem> trackTerminated,
+    required List<NotificationItem> trackCompleted,
+    required List<NotificationItem> trackCancelled,
+    required List<NotificationItem> locationRefresh,
+    required Map<String, String> notifDocMap,
+  }) {
+    final merged = [
+      ...incomingTrack,
+      ...senderResponses,
+      ...trackStarted,
+      ...trackTerminated,
+      ...trackCompleted,
+      ...trackCancelled,
+      ...locationRefresh,
+    ].where((n) => notifDocMap.containsKey(n.id)).toList();
 
-              return StreamBuilder<List<NotificationItem>>(
-                stream: _incomingTrackRequestsStream(),
-                builder: (context, incomingSnap) {
-                  final incomingTrack = incomingSnap.data ?? [];
+    merged.sort((a, b) => b.timestamp.compareTo(a.timestamp));
 
-                  return StreamBuilder<List<NotificationItem>>(
-                    stream: _senderResponsesStream(),
-                    builder: (context, senderSnap) {
-                      final senderResponses = senderSnap.data ?? [];
+    // Inject notificationDocId
+    for (final n in merged) {
+      n.notificationDocId = notifDocMap[n.id];
+      if (n.notificationDocId == null) {
+        n.isRead = true;
+      }
+    }
 
-                      return StreamBuilder<List<NotificationItem>>(
-                        stream: _trackStartedStream(),
-                        builder: (context, trackStartedSnap) {
-                          final trackStarted = trackStartedSnap.data ?? [];
+    return merged;
+  }
 
-                          return StreamBuilder<List<NotificationItem>>(
-                            stream: _trackTerminatedStream(),
-                            builder: (context, trackTerminatedSnap) {
-                              final trackTerminated =
-                                  trackTerminatedSnap.data ?? [];
+  Map<String, String> _buildTrackRequestStatusMap(
+    List<NotificationItem> merged,
+  ) {
+    final map = <String, String>{};
+    for (final n in merged) {
+      if (n.type == NotificationType.trackRequest) {
+        map[n.id] = n.requestStatus ?? '';
+      }
+    }
+    return map;
+  }
 
-                              return StreamBuilder<List<NotificationItem>>(
-                                stream: _trackCompletedStream(),
-                                builder: (context, trackCompletedSnap) {
-                                  final trackCompleted =
-                                      trackCompletedSnap.data ?? [];
+  Widget _buildNotificationsList({
+    required List<NotificationItem> merged,
+    required Map<String, bool> readMap,
+  }) {
+    final trackRequestStatusById = _buildTrackRequestStatusMap(merged);
+    unawaited(_collectExpiredActionsForExit(merged, trackRequestStatusById));
+    final visible = _showAll ? merged : merged.take(5).toList();
 
-                                  return StreamBuilder<List<NotificationItem>>(
-                                    stream: _trackCancelledStream(),
-                                    builder: (context, trackCancelledSnap) {
-                                      final trackCancelled =
-                                          trackCancelledSnap.data ?? [];
+    if (merged.isEmpty) {
+      return RefreshIndicator(
+        color: AppColors.kGreen,
+        backgroundColor: Colors.white,
+        onRefresh: _refreshNotifications,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [const SizedBox(height: 120), _buildEmptyState()],
+        ),
+      );
+    }
 
-                                      return StreamBuilder<
-                                        List<NotificationItem>
-                                      >(
-                                        stream: _locationRefreshStream(),
-                                        builder: (context, locationRefreshSnap) {
-                                          final locationRefresh =
-                                              locationRefreshSnap.data ?? [];
+    return RefreshIndicator(
+      color: AppColors.kGreen,
+      backgroundColor: Colors.white,
+      onRefresh: _refreshNotifications,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 1, 10, 1),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: const [],
+            ),
+          ),
+          ...visible.map((notif) {
+            final override =
+                _localReadOverride[notif.id] ??
+                (notif.actionTaken ? true : null);
 
-                                          if (!docMapSnap.hasData ||
-                                              !notifSnap.hasData ||
-                                              !incomingSnap.hasData ||
-                                              !senderSnap.hasData ||
-                                              !trackStartedSnap.hasData ||
-                                              !trackTerminatedSnap.hasData ||
-                                              !trackCompletedSnap.hasData ||
-                                              !trackCancelledSnap.hasData ||
-                                              !locationRefreshSnap.hasData) {
-                                            return const SizedBox();
-                                          }
+            notif.isRead =
+                override ??
+                (_freezeReadUI
+                    ? (_frozenReadMap[notif.id] ?? notif.isRead)
+                    : (readMap[notif.id] ?? notif.isRead));
 
-                                          final trackRequestStatusById = {
-                                            for (final n in incomingTrack)
-                                              n.id: n.requestStatus ?? '',
-                                          };
-
-                                          final merged =
-                                              [
-                                                    ...incomingTrack,
-                                                    ...senderResponses,
-                                                    ...trackStarted,
-                                                    ...trackTerminated,
-                                                    ...trackCompleted,
-                                                    ...trackCancelled,
-                                                    ...locationRefresh,
-                                                  ]
-                                                  .where(
-                                                    (n) => notifDocMap
-                                                        .containsKey(n.id),
-                                                  )
-                                                  .toList();
-
-                                          merged.sort(
-                                            (a, b) => b.timestamp.compareTo(
-                                              a.timestamp,
-                                            ),
-                                          );
-
-                                          // ?? inject notificationDocId
-                                          for (final n in merged) {
-                                            n.notificationDocId =
-                                                notifDocMap[n.id];
-
-                                            // ?? ??? ?? ?? notification doc = ?????? ?????
-                                            if (n.notificationDocId == null) {
-                                              n.isRead = true;
-                                            }
-                                          }
-
-                                          final visible = _showAll
-                                              ? merged
-                                              : merged.take(5).toList();
-
-                                          if (merged.isEmpty)
-                                            return _buildEmptyState();
-
-                                          return ListView(
-                                            children: [
-                                              Padding(
-                                                padding:
-                                                    const EdgeInsets.fromLTRB(
-                                                      16,
-                                                      1,
-                                                      10,
-                                                      1,
-                                                    ),
-                                                child: Row(
-                                                  mainAxisAlignment:
-                                                      MainAxisAlignment.end,
-                                                  children: const [],
-                                                ),
-                                              ),
-
-                                              ...visible.map((notif) {
-                                                final override =
-                                                    _localReadOverride[notif
-                                                        .id] ??
-                                                    (notif.actionTaken
-                                                        ? true
-                                                        : null);
-
-                                                notif.isRead =
-                                                    override ??
-                                                    (_freezeReadUI
-                                                        ? (_frozenReadMap[notif
-                                                                  .id] ??
-                                                              notif.isRead)
-                                                        : (readMap[notif.id] ??
-                                                              notif.isRead));
-
-                                                return _buildNotificationItem(
-                                                  notif,
-                                                  trackRequestStatusById:
-                                                      trackRequestStatusById,
-                                                );
-                                              }),
-
-                                              if (!_showAll &&
-                                                  merged.length > 5)
-                                                Padding(
-                                                  padding: const EdgeInsets.all(
-                                                    5,
-                                                  ),
-                                                  child: TextButton(
-                                                    onPressed: () => setState(
-                                                      () => _showAll = true,
-                                                    ),
-                                                    child: const Text(
-                                                      'View All Notifications',
-                                                      style: TextStyle(
-                                                        fontSize: 15,
-                                                        fontWeight:
-                                                            FontWeight.w600,
-                                                        color: AppColors.kGreen,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ),
-
-                                              const SizedBox(height: 20),
-                                            ],
-                                          );
-                                        },
-                                      );
-                                    },
-                                  );
-                                },
-                              );
-                            },
-                          );
-                        },
-                      );
-                    },
-                  );
-                },
-              );
-            },
-          );
-        },
+            return _buildNotificationItem(
+              notif,
+              trackRequestStatusById: trackRequestStatusById,
+            );
+          }),
+          if (!_showAll && merged.length > 5)
+            Padding(
+              padding: const EdgeInsets.all(5),
+              child: TextButton(
+                onPressed: () => setState(() => _showAll = true),
+                child: const Text(
+                  'View All Notifications',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.kGreen,
+                  ),
+                ),
+              ),
+            ),
+          const SizedBox(height: 20),
+        ],
       ),
     );
+  }
+
+  bool _isActionExpired(
+    NotificationItem notification,
+    Map<String, String> trackRequestStatusById,
+  ) {
+    if (notification.type == NotificationType.trackRequest) {
+      final status = (notification.requestStatus ?? '').toLowerCase();
+      final notPending = status.isNotEmpty && status != 'pending';
+      return notification.isExpired || notPending;
+    }
+
+    if (notification.type == NotificationType.trackStarted ||
+        notification.type == NotificationType.locationRefresh) {
+      final status = notification.trackRequestId == null
+          ? null
+          : trackRequestStatusById[notification.trackRequestId!];
+      final endedByStatus =
+          status == 'terminated' ||
+          status == 'completed' ||
+          status == 'cancelled' ||
+          status == 'declined' ||
+          status == 'expired';
+      final endedByTime =
+          notification.endAt != null &&
+          DateTime.now().isAfter(notification.endAt!);
+      return endedByStatus || endedByTime;
+    }
+
+    return false;
+  }
+
+  Future<void> _collectExpiredActionsForExit(
+    List<NotificationItem> merged,
+    Map<String, String> trackRequestStatusById,
+  ) async {
+    if (_autoMarkRunning) return;
+    _autoMarkRunning = true;
+
+    try {
+      for (final n in merged) {
+        final isActionType =
+            n.type == NotificationType.trackRequest ||
+            ((n.type == NotificationType.trackStarted ||
+                    n.type == NotificationType.locationRefresh) &&
+                n.requiresAction);
+        if (!isActionType) continue;
+        if (!_isActionExpired(n, trackRequestStatusById)) continue;
+        final docId = n.notificationDocId;
+        if (docId == null || docId.isEmpty) continue;
+        _expiredActionDocIdsThisVisit.add(docId);
+      }
+    } finally {
+      _autoMarkRunning = false;
+    }
+  }
+
+  Future<void> _markExpiredActionsAsReadOnExit() async {
+    if (_expiredActionDocIdsThisVisit.isEmpty) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final batch = FirebaseFirestore.instance.batch();
+    for (final docId in _expiredActionDocIdsThisVisit) {
+      batch.update(
+        FirebaseFirestore.instance.collection('notifications').doc(docId),
+        {'isRead': true},
+      );
+    }
+
+    await batch.commit();
   }
 
   // ---------- Empty State ----------
@@ -1095,7 +1312,14 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                     style: ButtonStyle(
                                       minimumSize:
                                           MaterialStateProperty.all<Size>(
-                                            const Size(double.infinity, 40),
+                                            const Size(double.infinity, 45),
+                                          ),
+                                      padding:
+                                          MaterialStateProperty.all<EdgeInsets>(
+                                            const EdgeInsets.symmetric(
+                                              horizontal: 14,
+                                              vertical: 6,
+                                            ),
                                           ),
                                       backgroundColor:
                                           MaterialStateProperty.resolveWith<
@@ -1149,7 +1373,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                           size: 22,
                                         ),
                                         SizedBox(width: 8),
-                                        Text('Set My Location'),
+                                        Text(
+                                          'Set My Location',
+                                          style: TextStyle(fontSize: 14),
+                                        ),
                                       ],
                                     ),
                                   ),
@@ -1199,7 +1426,14 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                     style: ButtonStyle(
                                       minimumSize:
                                           MaterialStateProperty.all<Size>(
-                                            const Size(double.infinity, 40),
+                                            const Size(double.infinity, 45),
+                                          ),
+                                      padding:
+                                          MaterialStateProperty.all<EdgeInsets>(
+                                            const EdgeInsets.symmetric(
+                                              horizontal: 14,
+                                              vertical: 6,
+                                            ),
                                           ),
                                       backgroundColor:
                                           MaterialStateProperty.resolveWith<
@@ -1253,7 +1487,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                           size: 22,
                                         ),
                                         SizedBox(width: 8),
-                                        Text('Refresh My Location'),
+                                        Text(
+                                          'Refresh My Location',
+                                          style: TextStyle(fontSize: 14),
+                                        ),
                                       ],
                                     ),
                                   ),
@@ -1811,7 +2048,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
         .limit(1)
         .get();
 
-    if (q.docs.isEmpty) return; // ما فيه notification مرتبطة بهذا الطلب
+    if (q.docs.isEmpty) return; // No notification linked to this request
 
     await q.docs.first.reference.update({'isRead': true});
   }
@@ -1965,7 +2202,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
               'status': 'accepted',
               'respondedAt': FieldValue.serverTimestamp(),
               'startNotified': false,
-              'startNotifiedUsers': [], // ✅ أضيفي هذا السطر
+              'startNotifiedUsers': [], // ? Add this line
             });
 
         await _markNotificationAsReadByRequestId(notification.id);
@@ -1974,7 +2211,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
           notification.actionLabel = "Accepted";
           notification.isRead = true;
 
-          _localReadOverride[notification.id] = true; // 🔥 هذا المهم
+          _localReadOverride[notification.id] = true; // ?? This is important
 
           _respondedNotifications.add(notification.id);
         });
@@ -2253,7 +2490,7 @@ enum NotificationType {
   trackRequest,
   trackAccepted,
   trackRejected,
-  trackStarted, // 🔥 أضيفي هذا هنا
+  trackStarted, // ?? Add this here
   trackTerminated,
   trackCompleted,
   trackCancelled,
@@ -2270,7 +2507,7 @@ enum NotificationType {
 
 class NotificationItem {
   final String id;
-  String? notificationDocId; // 🔥 جديد
+  String? notificationDocId; // ?? New
   final String? trackRequestId;
   final String? requestStatus;
   final DateTime? endAt;

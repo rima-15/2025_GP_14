@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
 import 'package:madar_app/theme/theme.dart';
 import 'package:madar_app/screens/AR_page.dart';
+import 'package:madar_app/screens/navigation_flow_complete.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
 import 'package:webview_flutter/webview_flutter.dart'
@@ -3223,7 +3224,6 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
   // ========== NAVIGATE TO FRIEND ==========
   void _navigateToFriend(TrackingRequest r) {
-    // نأخذ الإحداثيات من الذاكرة — محدّثة دائماً عبر الـ listener
     final pos = _trackedPosByUser[r.receiverId];
     final floor = _trackedFloorByUser[r.receiverId] ?? '0';
     final friendName = r.trackedUserName.isNotEmpty
@@ -3238,26 +3238,16 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       return;
     }
 
-    // pos هنا بصيغة glTF (بعد _blenderToGltf) — نحتاج نرجع للـ blenderPosition الأصلي
-    // عكس _blenderToGltf: x=x, y=-z, z=y
-    final bx = pos['x'] ?? 0.0;
-    final by =
-        pos['z'] ??
-        0.0; // z في glTF = -y في blender → y = -z_gltf لكن احنا نريد y الأصلي
-    final bz = -(pos['y'] ?? 0.0); // y في glTF = z في blender
-
-    Navigator.push(
+    // pos is already in glTF format (x, y, z)
+    showNavigationDialog(
       context,
-      MaterialPageRoute(
-        builder: (_) => UnityCameraPage(
-          isFriendNavigation: true,
-          friendX: bx,
-          friendY: by,
-          friendZ: bz,
-          friendFloor: floor,
-          friendName: friendName,
-        ),
-      ),
+      friendName, // shopName
+      r.receiverId, // shopId (friend's userId)
+      destinationPoiMaterial: '', // no material
+      floorSrc: '', // not needed
+      destinationHitGltf: pos, // friend's glTF coordinates
+      destinationFloorLabel: floor, // raw floor string (e.g. "0")
+      venueId: r.venueId, // same venue
     );
   }
 

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -56,6 +57,8 @@ class _HistoryPageState extends State<HistoryPage> {
   int _trackingFilterIndex = 0;
   String? _highlightRequestId;
   final GlobalKey _highlightKey = GlobalKey();
+  Timer? _highlightClearTimer;
+  bool _highlightClearScheduled = false;
 
   static const List<String> _mainTabs = ['Tracking', 'Meeting point'];
   static const List<String> _trackingFilters = ['Sent', 'Received'];
@@ -82,12 +85,12 @@ class _HistoryPageState extends State<HistoryPage> {
     _sentStream = _createSentHistoryStream();
     _receivedStream = _createReceivedHistoryStream();
     _markStaleRequestsOnLoad();
-    // Clear highlight after a short delay
-    if (_highlightRequestId != null) {
-      Future.delayed(const Duration(seconds: 3), () {
-        if (mounted) setState(() => _highlightRequestId = null);
-      });
-    }
+  }
+
+  @override
+  void dispose() {
+    _highlightClearTimer?.cancel();
+    super.dispose();
   }
 
   /// One-time: mark pending/accepted requests past endAt as expired/completed when opening History.
@@ -414,6 +417,20 @@ class _HistoryPageState extends State<HistoryPage> {
                 );
               }
             });
+            if (!_highlightClearScheduled) {
+              _highlightClearScheduled = true;
+              _highlightClearTimer?.cancel();
+              _highlightClearTimer = Timer(
+                const Duration(seconds: 3),
+                () {
+                  if (!mounted) return;
+                  setState(() {
+                    _highlightRequestId = null;
+                    _highlightClearScheduled = false;
+                  });
+                },
+              );
+            }
           }
         }
         return ListView.builder(

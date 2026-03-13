@@ -67,6 +67,9 @@ class _TrackPageState
       [];
   bool _mapsLoading = false;
   String? _expandedRequestId;
+  String? _highlightRequestId;
+  Timer? _highlightClearTimer;
+  bool _highlightClearScheduled = false;
   Timer? _clockTimer;
   // ===== Track Map (Pin JS) =====
   WebViewController?
@@ -661,6 +664,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         null) {
       _expandedRequestId =
           widget.initialExpandRequestId;
+      _highlightRequestId =
+          widget.initialExpandRequestId;
       // Notification passes 0 = Received, 1 = Sent; we use 0 = Sent, 1 = Received
       _selectedFilterIndex =
           widget.initialFilterIndex !=
@@ -892,6 +897,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           _scrollToTargetTimer
               ?.cancel();
           _scrollToTargetTimer = null;
+          _startHighlightClearTimer();
           WidgetsBinding.instance
               .addPostFrameCallback((
                 _,
@@ -916,11 +922,28 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     );
   }
 
+  void _startHighlightClearTimer() {
+    if (_highlightClearScheduled) return;
+    _highlightClearScheduled = true;
+    _highlightClearTimer?.cancel();
+    _highlightClearTimer = Timer(
+      const Duration(seconds: 3),
+      () {
+        if (!mounted) return;
+        setState(() {
+          _highlightRequestId = null;
+          _highlightClearScheduled = false;
+        });
+      },
+    );
+  }
+
   @override
   @override
   void dispose() {
     _clockTimer?.cancel();
     _scrollToTargetTimer?.cancel();
+    _highlightClearTimer?.cancel();
     _activeReqSub?.cancel();
 
     // cancel all tracked-users subscriptions
@@ -1289,6 +1312,33 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   static const List<String> _mainTabs =
       ['Tracking', 'Meeting point'];
 
+  Widget _buildRequestsLoading() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        vertical: 32,
+      ),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: const [
+            CircularProgressIndicator(
+              color: AppColors.kGreen,
+            ),
+            SizedBox(height: 12),
+            Text(
+              'Loading requests...',
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildFullContent() {
     return ListView(
       controller: _scrollController,
@@ -1337,6 +1387,13 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               stream:
                   _sentRequestsStream(),
               builder: (context, snapshot) {
+                if (widget.initialExpandRequestId !=
+                        null &&
+                    snapshot.connectionState ==
+                        ConnectionState.waiting &&
+                    !snapshot.hasData) {
+                  return _buildRequestsLoading();
+                }
                 final all =
                     snapshot.data ?? [];
                 final upcoming =
@@ -1356,6 +1413,13 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               stream:
                   _incomingRequestsStream(),
               builder: (context, snapshot) {
+                if (widget.initialExpandRequestId !=
+                        null &&
+                    snapshot.connectionState ==
+                        ConnectionState.waiting &&
+                    !snapshot.hasData) {
+                  return _buildRequestsLoading();
+                }
                 final incoming =
                     snapshot.data ?? [];
                 final scheduled =
@@ -2095,6 +2159,14 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   ) {
     final isExpanded =
         _expandedRequestId == r.id;
+    final isHighlighted =
+        _highlightRequestId == r.id;
+    if (isHighlighted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _startHighlightClearTimer();
+      });
+    }
     final now = DateTime.now();
     final bool isPending =
         r.status == 'pending' &&
@@ -2105,11 +2177,16 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isHighlighted
+            ? AppColors.kGreen.withOpacity(0.05)
+            : Colors.white,
         borderRadius:
             BorderRadius.circular(16),
         border: Border.all(
-          color: Colors.grey.shade200,
+          color: isHighlighted
+              ? AppColors.kGreen
+              : Colors.grey.shade200,
+          width: isHighlighted ? 2 : 1,
         ),
         boxShadow: [
           BoxShadow(
@@ -2264,17 +2341,30 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   ) {
     final isExpanded =
         _expandedRequestId == r.id;
+    final isHighlighted =
+        _highlightRequestId == r.id;
+    if (isHighlighted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _startHighlightClearTimer();
+      });
+    }
     final lastSeen = _timeAgo(
       r.startAt,
     );
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isHighlighted
+            ? AppColors.kGreen.withOpacity(0.05)
+            : Colors.white,
         borderRadius:
             BorderRadius.circular(16),
         border: Border.all(
-          color: Colors.grey.shade200,
+          color: isHighlighted
+              ? AppColors.kGreen
+              : Colors.grey.shade200,
+          width: isHighlighted ? 2 : 1,
         ),
         boxShadow: [
           BoxShadow(
@@ -2586,6 +2676,14 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   ) {
     final isExpanded =
         _expandedRequestId == r.id;
+    final isHighlighted =
+        _highlightRequestId == r.id;
+    if (isHighlighted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _startHighlightClearTimer();
+      });
+    }
     // For sent requests: show receiver name. For received: show sender name.
     final displayName =
         r.trackedUserName.isNotEmpty
@@ -2593,11 +2691,16 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         : (r.senderName ?? 'Unknown');
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isHighlighted
+            ? AppColors.kGreen.withOpacity(0.05)
+            : Colors.white,
         borderRadius:
             BorderRadius.circular(16),
         border: Border.all(
-          color: Colors.grey.shade200,
+          color: isHighlighted
+              ? AppColors.kGreen
+              : Colors.grey.shade200,
+          width: isHighlighted ? 2 : 1,
         ),
         boxShadow: [
           BoxShadow(
@@ -2728,6 +2831,14 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   ) {
     final isExpanded =
         _expandedRequestId == r.id;
+    final isHighlighted =
+        _highlightRequestId == r.id;
+    if (isHighlighted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _startHighlightClearTimer();
+      });
+    }
     // For sent requests: show receiver name. For received: show sender name.
     final displayName =
         r.trackedUserName.isNotEmpty
@@ -2735,11 +2846,16 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         : (r.senderName ?? 'Unknown');
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isHighlighted
+            ? AppColors.kGreen.withOpacity(0.05)
+            : Colors.white,
         borderRadius:
             BorderRadius.circular(16),
         border: Border.all(
-          color: Colors.grey.shade200,
+          color: isHighlighted
+              ? AppColors.kGreen
+              : Colors.grey.shade200,
+          width: isHighlighted ? 2 : 1,
         ),
         boxShadow: [
           BoxShadow(

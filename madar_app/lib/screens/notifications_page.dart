@@ -123,6 +123,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
   final Map<String, double> _notificationOffsets = {};
   Timer? _uiRefreshTimer;
   bool _freezeReadUI = true; // Keep true while the page is open
+  bool _initialFreezeReady = false;
   Map<String, bool> _frozenReadMap = {};
   bool _isRefreshing = false;
   bool _exitReadTriggered = false;
@@ -141,6 +142,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
   void initState() {
     super.initState();
     _ensureCacheUser();
+    _initialFreezeReady = false;
 
     _uiRefreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (mounted) setState(() {});
@@ -202,6 +204,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
     setState(() {
       _frozenReadMap = map;
       _freezeReadUI = true;
+      _initialFreezeReady = true;
     });
   }
 
@@ -606,6 +609,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
               id: d['data']?['requestId'],
               notificationDocId: doc.id,
               trackRequestId: d['data']?['trackRequestId'],
+              senderId: (d['data']?['senderId'] ?? '').toString(),
+              isSystem: d['data']?['system'] == true || d['system'] == true,
               type: NotificationType.locationRefresh,
               title: d['title'] ?? 'Refresh Location Request',
               message: d['body'] ?? '',
@@ -747,7 +752,11 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                                 locationRefreshSnap.hasData;
 
                                             if (!hasAllData) {
-                                              if (_cacheReady) {
+                                              if (_cacheReady &&
+                                                  _initialFreezeReady) {
+                                                _applyDerivedStateForCache(
+                                                  _cachedMerged,
+                                                );
                                                 return _buildNotificationsList(
                                                   merged: _cachedMerged,
                                                   readMap: readMap,
@@ -833,6 +842,22 @@ class _NotificationsPageState extends State<NotificationsPage> {
     }
 
     return merged;
+  }
+
+  void _applyDerivedStateForCache(List<NotificationItem> merged) {
+    final now = DateTime.now();
+    for (final n in merged) {
+      if (n.type == NotificationType.trackRequest) {
+        final status = (n.requestStatus ?? '').toLowerCase().trim();
+        if (status == 'expired') {
+          n.isExpired = true;
+          continue;
+        }
+        if (status == 'pending' && n.endAt != null) {
+          n.isExpired = now.isAfter(n.endAt!);
+        }
+      }
+    }
   }
 
   Map<String, String> _buildTrackRequestStatusMap(
@@ -1957,6 +1982,20 @@ class _NotificationsPageState extends State<NotificationsPage> {
     return '$name$phone $action your request.';
   }
 
+  bool _isSystemLocationRefresh(NotificationItem notification) {
+    if (notification.isSystem) return true;
+    final senderId = notification.senderId?.trim() ?? '';
+    final hasSenderName =
+        notification.senderName?.trim().isNotEmpty == true;
+    final hasSenderPhone =
+        notification.senderPhone?.trim().isNotEmpty == true;
+    if (senderId.toLowerCase() == 'system') return true;
+    if (senderId.isEmpty) {
+      return !hasSenderName && !hasSenderPhone;
+    }
+    return false;
+  }
+
   /// Navigate to source: track-related notification → Track page or History page
   /// based on the current request status.
   void _onNotificationTap(NotificationItem notification) async {
@@ -1965,17 +2004,24 @@ class _NotificationsPageState extends State<NotificationsPage> {
       notification.isRead = true;
     });
 
-    await _markNotificationAsReadByRequestId(notification.id);
+    unawaited(_markNotificationAsReadByRequestId(notification.id));
 
-    final requestId = notification.id;
+    // System location refresh should not navigate on card tap.
+    if (notification.type == NotificationType.locationRefresh &&
+        _isSystemLocationRefresh(notification)) {
+      return;
+    }
 
-    // Determine filter: Received vs Sent
-    // trackRequest/trackCancelled → current user is receiver → Received
-    // trackAccepted/trackRejected/trackStarted/trackTerminated/trackCompleted → Sent
+    final hasTrackRequestId = notification.trackRequestId != null &&
+        notification.trackRequestId!.trim().isNotEmpty;
+    String requestId = notification.id;
+
+    // Fallback filter by type
     int? filterIndex;
     switch (notification.type) {
       case NotificationType.trackRequest:
       case NotificationType.trackCancelled:
+      case NotificationType.locationRefresh:
         filterIndex = 0; // Received
         break;
       case NotificationType.trackAccepted:
@@ -1989,9 +2035,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
         break;
     }
 
-    if (filterIndex == null) return;
-
-    // Check the actual request status to determine Track page vs History page
+    // Decide destination based on real request status (cache-first)
     const historyStatuses = [
       'declined',
       'expired',
@@ -2000,41 +2044,218 @@ class _NotificationsPageState extends State<NotificationsPage> {
       'cancelled',
     ];
 
+    if (notification.type == NotificationType.trackRequest) {
+      final rawStatus = (notification.requestStatus ?? '')
+          .toString()
+          .toLowerCase()
+          .trim();
+      final endedByTime = notification.endAt != null &&
+          DateTime.now().isAfter(notification.endAt!);
+      final isHistory =
+          historyStatuses.contains(rawStatus) ||
+          notification.isExpired ||
+          endedByTime;
+
+      if (!mounted) return;
+      Navigator.pop(context, {
+        'page': isHistory ? 'history' : 'track',
+        'tab': isHistory ? null : 2,
+        'expandRequestId': notification.id,
+        'filterIndex': filterIndex,
+      });
+      return;
+    }
+
+    final candidateIds = <String>[];
+    if (hasTrackRequestId) {
+      candidateIds.add(notification.trackRequestId!.trim());
+    }
+    candidateIds.add(notification.id);
+
+    if (notification.notificationDocId != null) {
+      final idsFromNotifDoc = await _fetchTrackRequestIdsFromNotificationDoc(
+        notification.notificationDocId!,
+      );
+      for (final id in idsFromNotifDoc) {
+        if (id.isNotEmpty && !candidateIds.contains(id)) {
+          candidateIds.add(id);
+        }
+      }
+    }
+
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    Map<String, dynamic>? requestData;
+    for (final id in candidateIds) {
+      if (id.trim().isEmpty) continue;
+      final lookup = await _lookupTrackRequestByAnyId(id);
+      if (lookup != null) {
+        requestId = lookup.id;
+        requestData = lookup.data;
+        break;
+      }
+    }
+
+    if (requestData == null && candidateIds.isNotEmpty) {
+      requestId = candidateIds.first;
+    }
+
+    if (uid != null && requestData != null) {
+      final senderId = (requestData['senderId'] ?? '').toString().trim();
+      final receiverId = (requestData['receiverId'] ?? '').toString().trim();
+      if (senderId == uid) {
+        filterIndex = 1; // Sent
+      } else if (receiverId == uid) {
+        filterIndex = 0; // Received
+      }
+    }
+
+    if (filterIndex == null) return;
+
+    final rawStatus = (requestData?['status'] ?? notification.requestStatus ?? '')
+        .toString()
+        .toLowerCase()
+        .trim();
+    final endedByTime = notification.endAt != null &&
+        DateTime.now().isAfter(notification.endAt!);
+
+    bool isHistory =
+        notification.type == NotificationType.trackRejected ||
+        notification.type == NotificationType.trackTerminated ||
+        notification.type == NotificationType.trackCompleted ||
+        notification.type == NotificationType.trackCancelled;
+
+    if (rawStatus.isNotEmpty) {
+      isHistory = isHistory || historyStatuses.contains(rawStatus);
+    }
+    if (!isHistory && (notification.isExpired || endedByTime)) {
+      isHistory = true;
+    }
+
+    if (!mounted) return;
+
+    Navigator.pop(context, {
+      'page': isHistory ? 'history' : 'track',
+      'tab': isHistory ? null : 2,
+      'expandRequestId': requestId,
+      'filterIndex': filterIndex,
+    });
+  }
+
+  Future<Map<String, dynamic>?> _fetchTrackRequestDataCacheFirst(
+    String requestId,
+  ) async {
+    try {
+      final cached = await FirebaseFirestore.instance
+          .collection('trackRequests')
+          .doc(requestId)
+          .get(const GetOptions(source: Source.cache));
+      if (cached.data() != null) return cached.data();
+    } catch (_) {}
+
     try {
       final doc = await FirebaseFirestore.instance
           .collection('trackRequests')
           .doc(requestId)
           .get();
-      final status = (doc.data()?['status'] ?? '').toString();
-
-      if (!mounted) return;
-
-      if (historyStatuses.contains(status)) {
-        // Navigate to History page directly
-        Navigator.pop(context, {
-          'page': 'history',
-          'expandRequestId': requestId,
-          'filterIndex': filterIndex,
-        });
-      } else {
-        // Navigate to Track page (pending/accepted/active)
-        Navigator.pop(context, {
-          'page': 'track',
-          'tab': 2,
-          'expandRequestId': requestId,
-          'filterIndex': filterIndex,
-        });
-      }
-    } catch (e) {
-      // Fallback to Track page on error
-      if (!mounted) return;
-      Navigator.pop(context, {
-        'page': 'track',
-        'tab': 2,
-        'expandRequestId': requestId,
-        'filterIndex': filterIndex,
-      });
+      return doc.data();
+    } catch (_) {
+      return null;
     }
+  }
+
+  Future<_TrackRequestLookupResult?> _lookupTrackRequestByAnyId(
+    String id,
+  ) async {
+    // 1) direct doc id (cache then server)
+    final doc = await _fetchTrackRequestDataCacheFirst(id);
+    if (doc != null) {
+      return _TrackRequestLookupResult(id: id, data: doc);
+    }
+
+    // 2) by batchId
+    final byBatch = await _fetchTrackRequestByFieldCacheFirst(
+      field: 'batchId',
+      value: id,
+    );
+    if (byBatch != null) return byBatch;
+
+    // 3) by refreshRequestId (used in some flows)
+    final byRefresh = await _fetchTrackRequestByFieldCacheFirst(
+      field: 'refreshRequestId',
+      value: id,
+    );
+    if (byRefresh != null) return byRefresh;
+
+    return null;
+  }
+
+  Future<_TrackRequestLookupResult?> _fetchTrackRequestByFieldCacheFirst({
+    required String field,
+    required String value,
+  }) async {
+    try {
+      final cached = await FirebaseFirestore.instance
+          .collection('trackRequests')
+          .where(field, isEqualTo: value)
+          .limit(1)
+          .get(const GetOptions(source: Source.cache));
+      if (cached.docs.isNotEmpty) {
+        final d = cached.docs.first;
+        return _TrackRequestLookupResult(id: d.id, data: d.data());
+      }
+    } catch (_) {}
+
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('trackRequests')
+          .where(field, isEqualTo: value)
+          .limit(1)
+          .get();
+      if (snap.docs.isNotEmpty) {
+        final d = snap.docs.first;
+        return _TrackRequestLookupResult(id: d.id, data: d.data());
+      }
+    } catch (_) {}
+
+    return null;
+  }
+
+  Future<List<String>> _fetchTrackRequestIdsFromNotificationDoc(
+    String notificationDocId,
+  ) async {
+    final ids = <String>[];
+    void addId(dynamic value) {
+      final id = value?.toString().trim() ?? '';
+      if (id.isNotEmpty && !ids.contains(id)) ids.add(id);
+    }
+
+    try {
+      final cached = await FirebaseFirestore.instance
+          .collection('notifications')
+          .doc(notificationDocId)
+          .get(const GetOptions(source: Source.cache));
+      final data = cached.data();
+      final inner = data?['data'] as Map<String, dynamic>?;
+      addId(inner?['trackRequestId']);
+      addId(inner?['requestId']);
+      addId(inner?['batchId']);
+      if (ids.isNotEmpty) return ids;
+    } catch (_) {}
+
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('notifications')
+          .doc(notificationDocId)
+          .get();
+      final data = doc.data();
+      final inner = data?['data'] as Map<String, dynamic>?;
+      addId(inner?['trackRequestId']);
+      addId(inner?['requestId']);
+      addId(inner?['batchId']);
+      if (ids.isNotEmpty) return ids;
+    } catch (_) {}
+
+    return ids;
   }
 
   Future<void> _markNotificationAsReadByRequestId(String requestId) async {
@@ -2507,6 +2728,8 @@ enum NotificationType {
 
 class NotificationItem {
   final String id;
+  final String? senderId;
+  final bool isSystem;
   String? notificationDocId; // ?? New
   final String? trackRequestId;
   final String? requestStatus;
@@ -2519,7 +2742,7 @@ class NotificationItem {
   final String message;
   final DateTime timestamp;
   bool isRead;
-  final bool isExpired;
+  bool isExpired;
   final String? senderName;
   final String? senderPhone;
   final String? venueName;
@@ -2531,6 +2754,8 @@ class NotificationItem {
 
   NotificationItem({
     required this.id,
+    this.senderId,
+    this.isSystem = false,
     this.notificationDocId,
     this.trackRequestId,
     this.requestStatus,
@@ -2553,5 +2778,15 @@ class NotificationItem {
     this.endTime,
     this.autoAcceptTime,
     this.actionLabel,
+  });
+}
+
+class _TrackRequestLookupResult {
+  final String id;
+  final Map<String, dynamic> data;
+
+  _TrackRequestLookupResult({
+    required this.id,
+    required this.data,
   });
 }

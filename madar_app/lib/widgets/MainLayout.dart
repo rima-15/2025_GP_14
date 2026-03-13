@@ -197,6 +197,8 @@ class _MainLayoutState extends State<MainLayout> {
                         final page = result['page'] as String?;
                         final expandId = result['expandRequestId'] as String?;
                         final filterIdx = result['filterIndex'] as int?;
+                        final historyFilterIdx =
+                            filterIdx == null ? null : 1 - filterIdx;
 
                         if (page == 'history' && expandId != null) {
                           // Navigate to History page
@@ -204,7 +206,7 @@ class _MainLayoutState extends State<MainLayout> {
                             context,
                             MaterialPageRoute(
                               builder: (_) => HistoryPage(
-                                initialFilterIndex: filterIdx,
+                                initialFilterIndex: historyFilterIdx,
                                 initialHighlightRequestId: expandId,
                               ),
                             ),

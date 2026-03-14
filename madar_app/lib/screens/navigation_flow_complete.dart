@@ -172,23 +172,29 @@ class NavigateToShopDialog extends StatelessWidget {
               text: 'Pin on Map',
               icon: Icons.location_on_outlined,
               onPressed: () {
-                Navigator.pop(context);
-                showModalBottomSheet(
-                  context: context,
-                  isScrollControlled: true,
-                  backgroundColor: Colors.transparent,
-                  builder: (context) => SetYourLocationDialog(
-                    shopName: shopName,
-                    shopId: shopId,
-                    destinationPoiMaterial: destinationPoiMaterial,
-                    floorSrc: floorSrc,
-                    destinationHitGltf: destinationHitGltf,
-                    destinationFloorLabel: destinationFloorLabel,
-                    returnResultOnly: returnResultOnly,
-                    venueId: venueId,
-                    trackingNotificationId: trackingNotificationId,
-                  ),
-                );
+                // Close the current dialog
+                Navigator.of(context).pop();
+
+                // Short delay before showing the next sheet
+                Future.delayed(const Duration(milliseconds: 50), () {
+                  if (!context.mounted) return;
+                  showModalBottomSheet(
+                    context: Navigator.of(context, rootNavigator: true).context,
+                    isScrollControlled: true,
+                    backgroundColor: Colors.transparent,
+                    builder: (context) => SetYourLocationDialog(
+                      shopName: shopName,
+                      shopId: shopId,
+                      destinationPoiMaterial: destinationPoiMaterial,
+                      floorSrc: floorSrc,
+                      destinationHitGltf: destinationHitGltf,
+                      destinationFloorLabel: destinationFloorLabel,
+                      returnResultOnly: returnResultOnly,
+                      venueId: venueId,
+                      trackingNotificationId: trackingNotificationId,
+                    ),
+                  );
+                });
               },
             ),
           ),
@@ -1603,17 +1609,13 @@ const timer = setInterval(function() {
                             'Failed to mark tracking location as saved: $e',
                           );
                         }
-                        if (mounted) {
+                        if (mounted)
                           SnackbarHelper.showSuccess(
                             context,
                             'Your location is saved',
                           );
-                        }
                       }
 
-                      // If we were opened from Path Overview to edit the start
-                      // location, return the new pin + floor so the caller can
-                      // update in-place.
                       if (widget.returnResultOnly) {
                         final res = <String, dynamic>{
                           'gltf': _pickedPosGltf,
@@ -1626,10 +1628,15 @@ const timer = setInterval(function() {
                         return;
                       }
 
-                      Navigator.pop(context); // closes the bottom sheet
-                      Navigator.push(
-                        // was pushReplacement
-                        context,
+                      // Close the current bottom sheet using the root navigator
+                      Navigator.of(context, rootNavigator: true).pop();
+
+                      // Small delay to allow the sheet to be removed
+                      await Future.delayed(const Duration(milliseconds: 150));
+                      if (!mounted) return;
+
+                      // Push the new screen on top of the underlying page (e.g., VenuePage, TrackPage)
+                      Navigator.of(context, rootNavigator: true).push(
                         MaterialPageRoute(
                           builder: (_) => PathOverviewScreen(
                             shopName: widget.shopName,
@@ -1641,9 +1648,7 @@ const timer = setInterval(function() {
                             destinationFloorLabel: widget.destinationFloorLabel,
                             floorSrc: _currentFloorURL.isNotEmpty
                                 ? _currentFloorURL
-                                : (widget.floorSrc.isNotEmpty
-                                      ? widget.floorSrc
-                                      : _currentFloorURL),
+                                : widget.floorSrc,
                             originFloorLabel: _floorLabelForUrl(
                               _currentFloorURL,
                             ),

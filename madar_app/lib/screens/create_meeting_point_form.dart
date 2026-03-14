@@ -111,9 +111,8 @@ class MeetingPointRecord {
     required this.hostLocation,
     required this.hostStep,
     required this.status,
-    required this.isActive,
     required this.participants,
-    required this.memberUserIds,
+    required this.participantUserIds,
     this.createdAt,
     this.updatedAt,
     this.waitDeadline,
@@ -130,13 +129,23 @@ class MeetingPointRecord {
   final Map<String, dynamic>? hostLocation;
   final int hostStep;
   final String status;
-  final bool isActive;
   final List<MeetingPointParticipant> participants;
-  final List<String> memberUserIds;
+  final List<String> participantUserIds;
   final DateTime? createdAt;
   final DateTime? updatedAt;
   final DateTime? waitDeadline;
   final DateTime? suggestDeadline;
+
+  /// Derived from status: the meeting is live (pending) when status == 'pending'.
+  bool get isActive => status.trim().toLowerCase() == 'pending';
+
+  /// Sub-state: host is waiting for invitees to respond.
+  bool get isWaitingParticipants =>
+      isActive && participants.any((p) => p.isPending);
+
+  /// Sub-state: all invitees responded, host must confirm.
+  bool get isWaitingHostConfirmation =>
+      isActive && participants.every((p) => !p.isPending);
 
   bool isHost(String uid) => uid == hostId;
 
@@ -179,7 +188,8 @@ class MeetingPointRecord {
               .toList()
         : <MeetingPointParticipant>[];
 
-    final membersRaw = data['memberUserIds'];
+    // Support both old field name (memberUserIds) and new (participantUserIds).
+    final membersRaw = data['participantUserIds'] ?? data['memberUserIds'];
     final members = (membersRaw is List)
         ? membersRaw
               .map((e) => e?.toString().trim() ?? '')
@@ -211,9 +221,8 @@ class MeetingPointRecord {
           : null,
       hostStep: hostStep.clamp(1, 5).toInt(),
       status: (data['status'] ?? '').toString(),
-      isActive: data['isActive'] == true,
       participants: participants,
-      memberUserIds: members,
+      participantUserIds: members,
       createdAt: _meetingPointAsDateTime(data['createdAt']),
       updatedAt: _meetingPointAsDateTime(data['updatedAt']),
       waitDeadline: _meetingPointAsDateTime(data['waitDeadline']),
@@ -242,25 +251,29 @@ class MeetingPointService {
     MeetingPointRecord meeting,
     String uid,
   ) {
-    final normalizedStatus = meeting.status.trim().toLowerCase();
-    if (normalizedStatus == 'cancelled' ||
-        normalizedStatus == 'confirmed' ||
-        normalizedStatus == 'completed') {
-      return false;
-    }
+    // isActive is derived: status == 'pending'.
     if (!meeting.isActive) return false;
     if (_isFullyDeclinedActive(meeting)) return false;
     if (meeting.hostId == uid) return true;
     final me = meeting.participantFor(uid);
     if (me == null) return false;
-    return !me.isDeclined;
+    if (me.isDeclined) return false;
+    // A pending invitee whose response window has closed should no longer
+    // see the invitation on the track page — it will appear as "Expired"
+    // in history once the meeting ends.
+    if (me.isPending &&
+        meeting.waitDeadline != null &&
+        !meeting.waitDeadline!.isAfter(DateTime.now())) {
+      return false;
+    }
+    return true;
   }
 
   static Stream<MeetingPointRecord?> watchActiveForCurrentUser() {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null || uid.trim().isEmpty) return Stream.value(null);
 
-    return _col.where('memberUserIds', arrayContains: uid).snapshots().map((
+    return _col.where('participantUserIds', arrayContains: uid).snapshots().map((
       snap,
     ) {
       final meetings = snap.docs
@@ -281,6 +294,31 @@ class MeetingPointService {
     });
   }
 
+  /// Like [watchActiveForCurrentUser] but returns ALL blocking meetings for the
+  /// current user, ordered newest-first. Used to show pending invitations as
+  /// expandable tiles alongside the active (host/accepted) card.
+  static Stream<List<MeetingPointRecord>> watchAllBlockingForCurrentUser() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || uid.trim().isEmpty) return Stream.value([]);
+
+    return _col.where('participantUserIds', arrayContains: uid).snapshots().map((
+      snap,
+    ) {
+      final meetings = snap.docs
+          .map(MeetingPointRecord.fromDoc)
+          .whereType<MeetingPointRecord>()
+          .toList();
+
+      meetings.sort((a, b) {
+        final at = a.updatedAt ?? a.createdAt ?? DateTime(1970);
+        final bt = b.updatedAt ?? b.createdAt ?? DateTime(1970);
+        return bt.compareTo(at);
+      });
+
+      return meetings.where((m) => _isMeetingBlockingForUser(m, uid)).toList();
+    });
+  }
+
   /// Keep the meeting point flow consistent even when the host closes the form.
   ///
   /// This runs client-side (from Track page) and performs only safe transitions:
@@ -293,13 +331,6 @@ class MeetingPointService {
     if (uid == null || uid.trim().isEmpty) return;
 
     final now = DateTime.now();
-    final normalizedStatus = meeting.status.trim().toLowerCase();
-    if (normalizedStatus == 'cancelled' ||
-        normalizedStatus == 'completed' ||
-        normalizedStatus == 'confirmed' ||
-        normalizedStatus == 'active') {
-      return;
-    }
 
     // If everyone declined, end it (prevents ghost active meetings).
     final allDeclined = meeting.participants.isNotEmpty &&
@@ -308,7 +339,6 @@ class MeetingPointService {
       try {
         await _col.doc(meeting.id).update({
           'status': 'cancelled',
-          'isActive': false,
           'updatedAt': FieldValue.serverTimestamp(),
         });
       } catch (_) {}
@@ -324,7 +354,6 @@ class MeetingPointService {
           try {
             await _col.doc(meeting.id).update({
               'status': 'cancelled',
-              'isActive': false,
               'updatedAt': FieldValue.serverTimestamp(),
             });
           } catch (_) {}
@@ -332,7 +361,7 @@ class MeetingPointService {
           try {
             await _col.doc(meeting.id).update({
               'hostStep': 5,
-              'status': 'waiting_host_confirmation',
+              // status stays 'pending'; sub-state derived from hostStep + participants
               'suggestDeadline': Timestamp.fromDate(now.add(_kSuggestDuration)),
               'updatedAt': FieldValue.serverTimestamp(),
             });
@@ -363,13 +392,11 @@ class MeetingPointService {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null || uid.trim().isEmpty) return null;
 
-    final snap = await _col
-        .where('hostId', isEqualTo: uid)
-        .where('isActive', isEqualTo: true)
-        .get();
+    final snap = await _col.where('hostId', isEqualTo: uid).get();
     final items = snap.docs
         .map(MeetingPointRecord.fromDoc)
         .whereType<MeetingPointRecord>()
+        .where((m) => m.isActive)
         .toList();
     if (items.isEmpty) return null;
     items.sort((a, b) {
@@ -382,7 +409,6 @@ class MeetingPointService {
         try {
           await _col.doc(meeting.id).update({
             'status': 'cancelled',
-            'isActive': false,
             'updatedAt': FieldValue.serverTimestamp(),
           });
         } catch (_) {}
@@ -397,7 +423,7 @@ class MeetingPointService {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null || uid.trim().isEmpty) return null;
 
-    final snap = await _col.where('memberUserIds', arrayContains: uid).get();
+    final snap = await _col.where('participantUserIds', arrayContains: uid).get();
     final meetings = snap.docs
         .map(MeetingPointRecord.fromDoc)
         .whereType<MeetingPointRecord>()
@@ -415,7 +441,6 @@ class MeetingPointService {
         try {
           await _col.doc(meeting.id).update({
             'status': 'cancelled',
-            'isActive': false,
             'updatedAt': FieldValue.serverTimestamp(),
           });
         } catch (_) {}
@@ -439,7 +464,7 @@ class MeetingPointService {
   }) async {
     final docRef = _col.doc();
     final invitedUserIds = participants.map((p) => p.userId).toSet().toList();
-    final memberUserIds = <String>{hostId, ...invitedUserIds}.toList();
+    final participantUserIds = <String>{hostId, ...invitedUserIds}.toList();
 
     final batch = FirebaseFirestore.instance.batch();
     batch.set(docRef, {
@@ -451,11 +476,10 @@ class MeetingPointService {
       'placeCategories': placeCategories,
       'hostLocation': hostLocation,
       'hostStep': 4,
-      'status': 'waiting_participants',
-      'isActive': true,
+      'status': 'pending',
       'participants': participants.map((p) => p.toMap()).toList(),
       'invitedUserIds': invitedUserIds,
-      'memberUserIds': memberUserIds,
+      'participantUserIds': participantUserIds,
       'waitDeadline': Timestamp.fromDate(waitDeadline),
       'suggestDeadline': null,
       'createdAt': FieldValue.serverTimestamp(),
@@ -473,7 +497,6 @@ class MeetingPointService {
     DateTime? waitDeadline,
     DateTime? suggestDeadline,
     String? status,
-    bool? isActive,
   }) async {
     final payload = <String, dynamic>{
       'hostStep': hostStep.clamp(1, 5),
@@ -489,7 +512,6 @@ class MeetingPointService {
       payload['suggestDeadline'] = Timestamp.fromDate(suggestDeadline);
     }
     if (status != null) payload['status'] = status;
-    if (isActive != null) payload['isActive'] = isActive;
 
     await _col.doc(meetingPointId).update(payload);
   }
@@ -500,7 +522,6 @@ class MeetingPointService {
   }) async {
     await _col.doc(meetingPointId).update({
       'status': accepted ? 'active' : 'cancelled',
-      'isActive': false,
       'updatedAt': FieldValue.serverTimestamp(),
       'hostStep': 5,
     });
@@ -542,7 +563,6 @@ class MeetingPointService {
         updatedParticipants.every((p) => p.isDeclined);
     if (allDeclined) {
       payload['status'] = 'cancelled';
-      payload['isActive'] = false;
     }
 
     try {
@@ -1432,10 +1452,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     await MeetingPointDraftStorage.clearForCurrentUser();
   }
 
-  Future<void> _syncMeetingPointProgress({
-    String? status,
-    bool? isActive,
-  }) async {
+  Future<void> _syncMeetingPointProgress({String? status}) async {
     final id = _meetingPointId;
     if (id == null || id.trim().isEmpty) return;
     try {
@@ -1446,7 +1463,6 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         waitDeadline: _step == 4 ? _waitDeadline : null,
         suggestDeadline: _step == 5 ? _suggestDeadline : null,
         status: status,
-        isActive: isActive,
       );
     } catch (e) {
       debugPrint('Failed to sync meeting point progress: $e');
@@ -1699,7 +1715,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
     // 10-minute countdown.
     _waitSecondsLeft = 60;
-    _waitDeadline = DateTime.now().add(const Duration(minutes: 1));
+    _waitDeadline = DateTime.now().add(const Duration(minutes: 10));
     _startStep4WaitCountdown();
 
     // Unlock "Proceed" after 5 seconds (UI demo).
@@ -1709,12 +1725,8 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
     if (_meetingPointId != null) {
       _startMeetingSubscription(_meetingPointId!);
-      unawaited(
-        _syncMeetingPointProgress(
-          status: 'waiting_participants',
-          isActive: true,
-        ),
-      );
+      // status stays 'pending' — sub-state derived from hostStep + participants
+      unawaited(_syncMeetingPointProgress(status: 'pending'));
     }
     unawaited(_persistDraftIfNeeded());
   }
@@ -1727,9 +1739,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     );
     if (!anyAccepted) {
       // No one accepted → cancel meeting point.
-      unawaited(
-        _syncMeetingPointProgress(status: 'cancelled', isActive: false),
-      );
+      unawaited(_syncMeetingPointProgress(status: 'cancelled'));
       if (mounted) {
         unawaited(
           _completeAndClose(
@@ -1744,12 +1754,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       if (mounted) {
         setState(() => _step = 5);
       }
-      unawaited(
-        _syncMeetingPointProgress(
-          status: 'waiting_host_confirmation',
-          isActive: true,
-        ),
-      );
+      // status stays 'pending'; hostStep=5 signals waiting_host_confirmation sub-state
       unawaited(_persistDraftIfNeeded());
     }
   }
@@ -1758,12 +1763,8 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     _suggestSecondsLeft = 300;
     _suggestDeadline = DateTime.now().add(const Duration(minutes: 5));
     _startStep5SuggestCountdown();
-    unawaited(
-      _syncMeetingPointProgress(
-        status: 'waiting_host_confirmation',
-        isActive: true,
-      ),
-    );
+    // status stays 'pending'; hostStep=5 signals waiting_host_confirmation sub-state
+    unawaited(_syncMeetingPointProgress());
     unawaited(_persistDraftIfNeeded());
   }
 
@@ -1885,7 +1886,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       placeCategories: _selectedPlaceCategories.toList(),
       hostLocation: _hostLocation?.toMap(),
       participants: participants,
-      waitDeadline: DateTime.now().add(const Duration(minutes: 1)),
+      waitDeadline: DateTime.now().add(const Duration(minutes: 10)),
     );
 
     _meetingPointId = meetingPointId;

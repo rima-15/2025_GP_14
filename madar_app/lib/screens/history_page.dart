@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -35,23 +36,41 @@ class HistoryTrackingRequest {
   });
 }
 
+class HistoryMeetingPointParticipant {
+  final String userId;
+  final String name;
+  final String phone;
+
+  HistoryMeetingPointParticipant({
+    required this.userId,
+    required this.name,
+    required this.phone,
+  });
+}
+
 class HistoryMeetingPoint {
   final String id;
   final String status;
   final String venueName;
+  final String hostId;
   final String hostName;
   final String hostPhone;
   final bool isHost;
+  final DateTime createdAt;
   final DateTime updatedAt;
+  final List<HistoryMeetingPointParticipant> participants;
 
   HistoryMeetingPoint({
     required this.id,
     required this.status,
     required this.venueName,
+    required this.hostId,
     required this.hostName,
     required this.hostPhone,
     required this.isHost,
+    required this.createdAt,
     required this.updatedAt,
+    required this.participants,
   });
 }
 
@@ -79,6 +98,7 @@ class _HistoryPageState extends State<HistoryPage> {
   final GlobalKey _highlightKey = GlobalKey();
   Timer? _highlightClearTimer;
   bool _highlightClearScheduled = false;
+  final Set<String> _expandedCards = {};
 
   static const List<String> _mainTabs = ['Tracking', 'Meeting point'];
   static const List<String> _trackingFilters = ['Sent', 'Received'];
@@ -95,7 +115,6 @@ class _HistoryPageState extends State<HistoryPage> {
     'cancelled',
     'completed',
     'active',
-    'confirmed',
   ];
 
   late final Stream<List<HistoryTrackingRequest>> _sentStream;
@@ -244,7 +263,7 @@ class _HistoryPageState extends State<HistoryPage> {
 
     return FirebaseFirestore.instance
         .collection('meetingPoints')
-        .where('memberUserIds', arrayContains: uid)
+        .where('participantUserIds', arrayContains: uid)
         .snapshots()
         .map((snap) {
           final list = snap.docs
@@ -259,33 +278,116 @@ class _HistoryPageState extends State<HistoryPage> {
         });
   }
 
+  List<HistoryMeetingPointParticipant> _parseParticipants(dynamic raw) {
+    if (raw is! List) return [];
+    return raw
+        .whereType<Map>()
+        .map((p) {
+          final userId = (p['userId'] ?? '').toString().trim();
+          if (userId.isEmpty) return null;
+          return HistoryMeetingPointParticipant(
+            userId: userId,
+            name: (p['name'] ?? '').toString(),
+            phone: (p['phone'] ?? '').toString(),
+          );
+        })
+        .whereType<HistoryMeetingPointParticipant>()
+        .toList();
+  }
+
   HistoryMeetingPoint? _docToHistoryMeetingPoint(
     QueryDocumentSnapshot<Map<String, dynamic>> d,
     String uid,
   ) {
     final data = d.data();
-    final isActive = data['isActive'] == true;
     final status = (data['status'] ?? '').toString().trim().toLowerCase();
-    if (isActive) return null;
-    if (!_meetingPointHistoryStatuses.contains(status)) return null;
-
     final hostId = (data['hostId'] ?? '').toString();
     final venueName = (data['venueName'] ?? '').toString();
     final hostName = (data['hostName'] ?? '').toString();
     final hostPhone = (data['hostPhone'] ?? '').toString();
-    final updatedAt =
-        _parseTimestamp(data['updatedAt']) ??
-        _parseTimestamp(data['createdAt']) ??
-        DateTime.now();
+    final createdAt = _parseTimestamp(data['createdAt']) ?? DateTime.now();
+    final updatedAt = _parseTimestamp(data['updatedAt']) ?? createdAt;
+    final participants = _parseParticipants(data['participants']);
+
+    // ── Still-pending meeting ─────────────────────────────────────────────
+    // Only show in history for a participant who has already declined.
+    if (status == 'pending') {
+      if (hostId == uid) return null; // host still has an active meeting
+      for (final p in participants) {
+        if (p.userId == uid) {
+          // participant found — only show if they declined
+          return null; // still pending for this user (non-declined)
+        }
+      }
+      // check raw for declined
+      final rawParticipants = data['participants'];
+      if (rawParticipants is List) {
+        for (final p in rawParticipants) {
+          if (p is Map) {
+            final pUid = (p['userId'] ?? '').toString();
+            if (pUid == uid) {
+              final pStatus = (p['status'] ?? 'pending')
+                  .toString()
+                  .trim()
+                  .toLowerCase();
+              if (pStatus == 'declined') {
+                return HistoryMeetingPoint(
+                  id: d.id,
+                  status: 'declined',
+                  venueName: venueName,
+                  hostId: hostId,
+                  hostName: hostName,
+                  hostPhone: hostPhone,
+                  isHost: false,
+                  createdAt: createdAt,
+                  updatedAt: updatedAt,
+                  participants: participants,
+                );
+              }
+              break;
+            }
+          }
+        }
+      }
+      return null; // still pending for this user
+    }
+
+    // ── Terminal meeting ──────────────────────────────────────────────────
+    if (!_meetingPointHistoryStatuses.contains(status)) return null;
+
+    // For non-host participants, derive a personal display status.
+    String displayStatus = status;
+    if (hostId != uid) {
+      final rawParticipants = data['participants'];
+      if (rawParticipants is List) {
+        for (final p in rawParticipants) {
+          if (p is Map) {
+            final pUid = (p['userId'] ?? '').toString();
+            if (pUid == uid) {
+              final pStatus = (p['status'] ?? 'pending')
+                  .toString()
+                  .trim()
+                  .toLowerCase();
+              if (pStatus == 'pending') displayStatus = 'expired';
+              if (pStatus == 'declined') displayStatus = 'declined';
+              break;
+            }
+          }
+        }
+      }
+    }
 
     return HistoryMeetingPoint(
       id: d.id,
-      status: status,
+      status: displayStatus,
       venueName: venueName,
+      hostId: hostId,
       hostName: hostName,
       hostPhone: hostPhone,
       isHost: hostId == uid,
+      createdAt: createdAt,
       updatedAt: updatedAt,
+      participants: participants,
     );
   }
 
@@ -308,7 +410,11 @@ class _HistoryPageState extends State<HistoryPage> {
       'Nov',
       'Dec',
     ];
-    return '${months[d.month - 1]} ${d.day}';
+    return '${months[d.month - 1]} ${d.day}, ${d.year}';
+  }
+
+  String _formatDateTime(DateTime d) {
+    return DateFormat('d MMM yyyy, h:mm a').format(d);
   }
 
   @override
@@ -480,9 +586,7 @@ class _HistoryPageState extends State<HistoryPage> {
         }
         // Scroll to highlighted request on first build
         if (_highlightRequestId != null) {
-          final targetIdx = list.indexWhere(
-            (r) => r.id == _highlightRequestId,
-          );
+          final targetIdx = list.indexWhere((r) => r.id == _highlightRequestId);
           if (targetIdx >= 0) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (!mounted) return;
@@ -499,16 +603,13 @@ class _HistoryPageState extends State<HistoryPage> {
             if (!_highlightClearScheduled) {
               _highlightClearScheduled = true;
               _highlightClearTimer?.cancel();
-              _highlightClearTimer = Timer(
-                const Duration(seconds: 3),
-                () {
-                  if (!mounted) return;
-                  setState(() {
-                    _highlightRequestId = null;
-                    _highlightClearScheduled = false;
-                  });
-                },
-              );
+              _highlightClearTimer = Timer(const Duration(seconds: 3), () {
+                if (!mounted) return;
+                setState(() {
+                  _highlightRequestId = null;
+                  _highlightClearScheduled = false;
+                });
+              });
             }
           }
         }
@@ -516,9 +617,7 @@ class _HistoryPageState extends State<HistoryPage> {
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
           itemCount: list.length,
           itemBuilder: (context, i) => Padding(
-            key: list[i].id == _highlightRequestId
-                ? _highlightKey
-                : null,
+            key: list[i].id == _highlightRequestId ? _highlightKey : null,
             padding: const EdgeInsets.only(bottom: 12),
             child: _buildHistoryTile(list[i]),
           ),
@@ -558,8 +657,8 @@ class _HistoryPageState extends State<HistoryPage> {
       final startMonth = _shortMonth(r.startAt.month);
       final endMonth = _shortMonth(r.endAt.month);
       dateStr = r.startAt.month == r.endAt.month
-          ? '$startDay - $endDay $endMonth'
-          : '$startDay $startMonth - $endDay $endMonth';
+          ? '$startDay - $endDay $endMonth ${r.endAt.year}'
+          : '$startDay $startMonth - $endDay $endMonth ${r.endAt.year}';
     } else {
       dateStr = _formatDate(
         DateTime(r.startAt.year, r.startAt.month, r.startAt.day),
@@ -787,84 +886,286 @@ class _HistoryPageState extends State<HistoryPage> {
             child: CircularProgressIndicator(color: AppColors.kGreen),
           );
         }
-        final list = snapshot.data ?? [];
-        if (list.isEmpty) {
-          return Center(
-            child: Text(
-              'No meeting points history',
-              style: TextStyle(
-                fontSize: 15,
-                color: Colors.grey[600],
-                fontWeight: FontWeight.w500,
-              ),
+        final dummy = HistoryMeetingPoint(
+          id: 'dummy_solitaire',
+          status: 'completed',
+          venueName: 'Solitaire',
+          hostId: 'dummy_host',
+          hostName: 'Sara Ahmed',
+          hostPhone: '+966 50 000 0001',
+          isHost: false,
+          createdAt: DateTime(2026, 3, 10, 14, 30),
+          updatedAt: DateTime(2026, 3, 10, 16, 0),
+          participants: [
+            HistoryMeetingPointParticipant(
+              userId: 'dummy_host',
+              name: 'Sara Ahmed',
+              phone: '+966 50 000 0001',
             ),
-          );
-        }
+            HistoryMeetingPointParticipant(
+              userId: 'dummy_p2',
+              name: 'Khalid Omar',
+              phone: '+966 55 000 0002',
+            ),
+          ],
+        );
+
+        final list = [dummy, ...snapshot.data ?? []];
 
         return ListView.separated(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
           itemCount: list.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 10),
-          itemBuilder: (context, index) {
-            final item = list[index];
-            return Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Colors.grey.shade200),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.03),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
+          separatorBuilder: (_, __) => const SizedBox(height: 12),
+          itemBuilder: (context, index) => _buildMeetingPointTile(list[index]),
+        );
+      },
+    );
+  }
+
+  Widget _buildMeetingPointTile(HistoryMeetingPoint item) {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    final isExpanded = _expandedCards.contains(item.id);
+
+    // Build ordered list: host first, then current user (if not host), then others
+    final allParticipants = <HistoryMeetingPointParticipant>[];
+
+    // Host entry (synthesised from top-level fields)
+    final hostEntry = HistoryMeetingPointParticipant(
+      userId: item.hostId,
+      name: item.hostName,
+      phone: item.hostPhone,
+    );
+    allParticipants.add(hostEntry);
+
+    // Current user (if not host)
+    HistoryMeetingPointParticipant? currentUserEntry;
+    for (final p in item.participants) {
+      if (p.userId == uid && p.userId != item.hostId) {
+        currentUserEntry = p;
+        break;
+      }
+    }
+    if (currentUserEntry != null) allParticipants.add(currentUserEntry);
+
+    // Remaining participants (not host, not current user)
+    for (final p in item.participants) {
+      if (p.userId != item.hostId && p.userId != uid) {
+        allParticipants.add(p);
+      }
+    }
+
+    const initialVisible = 3;
+    final total = allParticipants.length;
+    final shownCount = isExpanded ? total : min(initialVisible, total);
+    final othersCount = total - shownCount;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Dark header ──────────────────────────────────────────────────
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[200],
+                    shape: BoxShape.circle,
                   ),
-                ],
+                  child: const Icon(
+                    Icons.location_on,
+                    color: Color.fromRGBO(117, 117, 117, 1),
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        item.venueName.isEmpty ? 'Meeting Point' : item.venueName,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.black,
+                        ),
+                      ),
+                      Text(
+                        _formatDateTime(item.createdAt),
+                        style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _historyStatusBadge(item.status),
+              ],
+            ),
+          ),
+
+          // ── Participants section ─────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Participants:',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.grey[600],
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 3,
+                        decoration: BoxDecoration(
+                          color: AppColors.kGreen,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            ...allParticipants
+                                .take(shownCount)
+                                .map(
+                                  (p) => _buildParticipantRow(
+                                    p,
+                                    isHost: p.userId == item.hostId,
+                                  ),
+                                ),
+                            if (othersCount > 0 || isExpanded)
+                              GestureDetector(
+                                onTap: () => setState(() {
+                                  if (isExpanded) {
+                                    _expandedCards.remove(item.id);
+                                  } else {
+                                    _expandedCards.add(item.id);
+                                  }
+                                }),
+                                child: Padding(
+                                  padding: const EdgeInsets.only(top: 10),
+                                  child: Text(
+                                    isExpanded
+                                        ? 'Show less'
+                                        : '+ $othersCount others participants',
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      color: AppColors.kGreen,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildParticipantRow(
+    HistoryMeetingPointParticipant p, {
+    required bool isHost,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.grey[50],
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: Colors.grey[200],
+                shape: BoxShape.circle,
               ),
+              child: Icon(Icons.person, color: Colors.grey[500], size: 18),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          item.venueName.isEmpty ? 'Meeting Point' : item.venueName,
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.black87,
-                          ),
-                        ),
-                      ),
-                      _historyStatusBadge(item.status),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
                   Text(
-                    item.isHost
-                        ? 'Role: Host'
-                        : 'Host: ${item.hostName.isEmpty ? '-' : item.hostName}',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: Colors.grey[700],
-                      fontWeight: FontWeight.w500,
+                    p.name.isEmpty ? 'Unknown' : p.name,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black87,
                     ),
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    _formatDate(item.updatedAt),
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[600],
-                      fontWeight: FontWeight.w500,
+                  if (p.phone.isNotEmpty)
+                    Text(
+                      p.phone,
+                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                     ),
-                  ),
                 ],
               ),
-            );
-          },
-        );
-      },
+            ),
+            if (isHost)
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.grey[200],
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'Host',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey[700],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -1416,21 +1416,28 @@ const timer = setInterval(function() {
     setState(() => _mapsLoading = true);
 
     try {
-      // Use provided venueId or fallback to Solitaire (legacy default).
       const String solitaireId = 'ChIJcYTQDwDjLj4RZEiboV6gZzM';
-      final String effectiveVenueId = (widget.venueId ?? '').trim().isNotEmpty
-          ? widget.venueId!.trim()
-          : solitaireId;
+      final String providedId = (widget.venueId ?? '').trim();
 
-      final doc = await FirebaseFirestore.instance
-          .collection('venues')
-          .doc(effectiveVenueId)
-          .get(const GetOptions(source: Source.serverAndCache));
+      // Try the provided venueId first; if it has no map data, fall back to
+      // Solitaire so the 3D map always renders even when the meeting-point's
+      // venueId points to a venue document that hasn't been given a map yet.
+      final List<String> candidates = [
+        if (providedId.isNotEmpty) providedId,
+        solitaireId,
+      ];
 
-      final data = doc.data();
+      for (final venueId in candidates) {
+        final doc = await FirebaseFirestore.instance
+            .collection('venues')
+            .doc(venueId)
+            .get(const GetOptions(source: Source.serverAndCache));
 
-      if (data != null && data['map'] is List) {
+        final data = doc.data();
+        if (data == null || data['map'] is! List) continue;
+
         final maps = (data['map'] as List).cast<Map<String, dynamic>>();
+        if (maps.isEmpty) continue;
 
         final convertedMaps = maps.map((m) {
           return {
@@ -1446,7 +1453,6 @@ const timer = setInterval(function() {
             if (convertedMaps.isNotEmpty) {
               _currentFloorURL = convertedMaps.first['mapURL'] ?? '';
 
-              // If we already loaded a saved floor, prefer that.
               // If we already loaded a saved floor, prefer that.
               // IMPORTANT: _pickedFloorLabel might be "0"/"1" from Unity (F_number), not "GF"/"F1".
               if (_pickedFloorLabel.isNotEmpty) {
@@ -1477,6 +1483,7 @@ const timer = setInterval(function() {
             _pushUserPinToJs(_pickedPosGltf!);
           }
         }
+        break; // Maps loaded successfully — stop trying candidates.
       }
     } catch (e) {
       debugPrint("Error loading maps in dialog: $e");

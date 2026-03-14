@@ -9,7 +9,6 @@ import 'package:webview_flutter/webview_flutter.dart'
     show JavaScriptMessage, JavascriptChannel, WebViewController;
 import 'track_request_dialog.dart';
 import 'create_meeting_point_form.dart';
-import 'navigation_flow_complete.dart' show SetYourLocationDialog;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:async';
 
@@ -67,8 +66,17 @@ class _TrackPageState extends State<TrackPage> {
   Timer? _meetingPointCardTimer;
   Stream<MeetingPointRecord?>? _activeMeetingPointCardStream;
   Stream<MeetingPointRecord?>? _activeMeetingPointCountStream;
+  Stream<List<MeetingPointRecord>>? _activeMeetingPointListStream;
   MeetingPointRecord? _lastKnownActiveMeetingCard;
   MeetingPointRecord? _lastKnownActiveMeetingCount;
+  List<MeetingPointRecord> _lastKnownBlockingMeetings = [];
+  String? _expandedMeetingInviteId;
+  DateTime? _lastMeetingMaintainAttemptAt;
+
+  /// IDs of meeting invitations the user locally declined — hidden immediately
+  /// in the UI before Firestore confirms the write.
+  final Set<String> _locallyDeclinedMeetingIds = {};
+  static const Duration _kMeetingMaintainThrottle = Duration(seconds: 2);
 
   /// Key for the tile to scroll to when opening from notification (by request ID).
   final GlobalKey _scrollToTargetKey = GlobalKey();
@@ -82,32 +90,21 @@ class _TrackPageState extends State<TrackPage> {
       _activeMeetingPointCountStream ??=
           MeetingPointService.watchActiveForCurrentUser();
 
-  // How many consecutive null emissions we've seen from the active stream.
-  // Firestore often re-emits null briefly after a write (e.g. maybeMaintain
-  // writing updatedAt). We only trust null after several confirmed emissions
-  // so the card doesn't flicker away between writes.
-  int _nullEmissionCount = 0;
-  int _nullEmissionCountForCount = 0;
-  static const int _kNullEmissionsBeforeClear = 3;
+  Stream<List<MeetingPointRecord>> get _meetingPointListStream =>
+      _activeMeetingPointListStream ??=
+          MeetingPointService.watchAllBlockingForCurrentUser();
 
   MeetingPointRecord? _resolveActiveMeetingCardSnapshot(
     AsyncSnapshot<MeetingPointRecord?> snapshot,
   ) {
     if (snapshot.hasError) return _lastKnownActiveMeetingCard;
 
-    final incoming = snapshot.data;
-    if (incoming != null) {
-      _lastKnownActiveMeetingCard = incoming;
-      _nullEmissionCount = 0;
-    } else if (snapshot.connectionState == ConnectionState.active) {
-      // Only clear after several consecutive nulls — single nulls are Firestore
-      // transient re-emissions that happen between writes (not a real "gone").
-      _nullEmissionCount++;
-      if (_nullEmissionCount >= _kNullEmissionsBeforeClear) {
-        _lastKnownActiveMeetingCard = null;
-      }
+    // Only update the cache once the stream has settled (active). During the
+    // brief ConnectionState.waiting period that occurs when the stream is
+    // refreshed, keep the previous cached value so the card doesn't flicker.
+    if (snapshot.connectionState == ConnectionState.active) {
+      _lastKnownActiveMeetingCard = snapshot.data;
     }
-    // During ConnectionState.waiting always keep the last known value.
     return _lastKnownActiveMeetingCard;
   }
 
@@ -116,17 +113,20 @@ class _TrackPageState extends State<TrackPage> {
   ) {
     if (snapshot.hasError) return _lastKnownActiveMeetingCount;
 
-    final incoming = snapshot.data;
-    if (incoming != null) {
-      _lastKnownActiveMeetingCount = incoming;
-      _nullEmissionCountForCount = 0;
-    } else if (snapshot.connectionState == ConnectionState.active) {
-      _nullEmissionCountForCount++;
-      if (_nullEmissionCountForCount >= _kNullEmissionsBeforeClear) {
-        _lastKnownActiveMeetingCount = null;
-      }
+    if (snapshot.connectionState == ConnectionState.active) {
+      _lastKnownActiveMeetingCount = snapshot.data;
     }
     return _lastKnownActiveMeetingCount;
+  }
+
+  List<MeetingPointRecord> _resolveMeetingListSnapshot(
+    AsyncSnapshot<List<MeetingPointRecord>> snapshot,
+  ) {
+    if (snapshot.hasError) return _lastKnownBlockingMeetings;
+    if (snapshot.connectionState == ConnectionState.active) {
+      _lastKnownBlockingMeetings = snapshot.data ?? [];
+    }
+    return _lastKnownBlockingMeetings;
   }
 
   Stream<List<TrackingRequest>> _sentRequestsStream() {
@@ -525,9 +525,12 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       if (mounted) setState(() {});
     });
     _meetingPointCardTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted && !_isTrackingView) {
-        setState(() {});
-      }
+      if (!mounted) return;
+      // Keep meeting-point countdown badge ticking when visible.
+      if (!_isTrackingView) setState(() {});
+      // Ensure timed transitions (cancel / step advance) happen immediately
+      // when the displayed countdown reaches 00:00.
+      unawaited(_maybeMaintainActiveMeetingIfNeeded());
     });
     _listenToActiveTrackedUsers();
   }
@@ -926,7 +929,13 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   int _inviteeStep(MeetingPointRecord meeting, String currentUserId) {
     final me = meeting.participantFor(currentUserId);
     if (me == null || me.isPending) return 1;
-    if (me.isAccepted && meeting.hostStep >= 5) return 3;
+    // Step 3 = waiting for host to confirm the suggested point.
+    // This happens either when the host explicitly advanced (hostStep >= 5)
+    // OR when no participants are still pending (everyone responded, so
+    // the wait-timer expiry will advance to step 5 imminently).
+    if (me.isAccepted && (meeting.hostStep >= 5 || meeting.pendingCount == 0)) {
+      return 3;
+    }
     if (me.isAccepted) return 2;
     return 1;
   }
@@ -940,33 +949,71 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       case 3:
         return 'Accepted and waiting for host confirmation';
       default:
-        return 'Meeting point request';
+        return 'Meeting point in progress';
     }
   }
 
   bool _isBlockingMeetingForUser(MeetingPointRecord? meeting, String? uid) {
     if (meeting == null || uid == null || uid.trim().isEmpty) return false;
-    final status = meeting.status.trim().toLowerCase();
-    // Terminal (or legacy-terminal) statuses should never block the user.
-    // Note: in your flow "active" is a final outcome (and stored with isActive=false),
-    // but we still treat it as terminal if a doc is mis-written.
-    if (status == 'cancelled' ||
-        status == 'completed' ||
-        status == 'confirmed' ||
-        status == 'active') {
-      return false;
-    }
+    // isActive is derived: true only when status == 'pending'.
     if (!meeting.isActive) return false;
     if (meeting.isHost(uid)) return true;
     final me = meeting.participantFor(uid);
     if (me == null) return false;
-    // If everyone declined, this meeting should not block anyone (even if isActive
-    // was not flipped due to a denied status update).
     final fullyDeclined =
         meeting.participants.isNotEmpty &&
         meeting.participants.every((p) => p.isDeclined);
     if (fullyDeclined) return false;
     return !me.isDeclined;
+  }
+
+  Future<void> _maybeMaintainActiveMeetingIfNeeded() async {
+    // Check all blocking meetings for expired deadlines.
+    final candidates = _lastKnownBlockingMeetings.isNotEmpty
+        ? _lastKnownBlockingMeetings
+        : (_lastKnownActiveMeetingCard != null
+              ? [_lastKnownActiveMeetingCard!]
+              : <MeetingPointRecord>[]);
+
+    final now = DateTime.now();
+    final needsMaintain = candidates.any((m) {
+      if (!m.isActive) return false;
+      final deadline = m.activeDeadline;
+      return deadline != null && !deadline.isAfter(now);
+    });
+    if (!needsMaintain) return;
+
+    final last = _lastMeetingMaintainAttemptAt;
+    if (last != null && now.difference(last) < _kMeetingMaintainThrottle) {
+      return;
+    }
+    _lastMeetingMaintainAttemptAt = now;
+
+    // Run maybeMaintain on any expired meeting (host-only transitions are
+    // guarded inside maybeMaintain itself).
+    final meeting = candidates.firstWhere((m) {
+      if (!m.isActive) return false;
+      final deadline = m.activeDeadline;
+      return deadline != null && !deadline.isAfter(now);
+    }, orElse: () => candidates.first);
+    if (!meeting.isActive) return;
+
+    try {
+      await MeetingPointService.maybeMaintain(meeting);
+    } catch (_) {}
+
+    // Force a fresh Firestore subscription so the UI reflects the state
+    // change (cancel / step-5 advance) immediately without waiting for the
+    // stream to emit on its own — which can lag or be missed entirely.
+    if (mounted) {
+      _activeMeetingPointCardStream =
+          MeetingPointService.watchActiveForCurrentUser();
+      _activeMeetingPointCountStream =
+          MeetingPointService.watchActiveForCurrentUser();
+      _activeMeetingPointListStream =
+          MeetingPointService.watchAllBlockingForCurrentUser();
+      setState(() {});
+    }
   }
 
   String _firstName(String fullName) {
@@ -1002,6 +1049,20 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         meetingPointId: meetingPointId,
       ),
     );
+
+    // When the form closes (step 4 created or any step), the Firestore stream
+    // may not have delivered the update to the existing StreamBuilder yet.
+    // Reset the streams so the StreamBuilder re-subscribes and immediately
+    // receives the current Firestore state, making the host card appear.
+    if (mounted) {
+      _activeMeetingPointCardStream =
+          MeetingPointService.watchActiveForCurrentUser();
+      _activeMeetingPointCountStream =
+          MeetingPointService.watchActiveForCurrentUser();
+      _activeMeetingPointListStream =
+          MeetingPointService.watchAllBlockingForCurrentUser();
+      setState(() {});
+    }
   }
 
   @override
@@ -1069,67 +1130,74 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   }
 
   Widget _buildFullContent() {
-    return ListView(
-      controller: _scrollController,
-      key: const ValueKey<String>('track_requests_list'),
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+    return Column(
       children: [
-        _buildMainTabs(),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: _buildMainTabs(),
+        ),
         Container(height: 1, color: Colors.black12),
-        const SizedBox(height: 12),
+        Expanded(
+          child: ListView(
+            controller: _scrollController,
+            key: const ValueKey<String>('track_requests_list'),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            children: [
+              // Map visible for both Tracking and Meeting point
+              _buildMapPreview(),
+              const SizedBox(height: 16),
 
-        // Map visible for both Tracking and Meeting point
-        _buildMapPreview(),
-        const SizedBox(height: 16),
+              if (_isTrackingView) ...[
+                _buildTrackRequestButton(),
+                const SizedBox(height: 24),
+                const Text(
+                  'Tracking Requests',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _buildFilterPills(),
+                const SizedBox(height: 20),
 
-        if (_isTrackingView) ...[
-          _buildTrackRequestButton(),
-          const SizedBox(height: 24),
-          const Text(
-            'Tracking Requests',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
-              color: Colors.black87,
-            ),
+                if (_selectedFilterIndex == 0)
+                  StreamBuilder<List<TrackingRequest>>(
+                    stream: _sentRequestsStream(),
+                    builder: (context, snapshot) {
+                      if (widget.initialExpandRequestId != null &&
+                          snapshot.connectionState == ConnectionState.waiting &&
+                          !snapshot.hasData) {
+                        return _buildRequestsLoading();
+                      }
+                      final all = snapshot.data ?? [];
+                      final upcoming = _upcomingFrom(all);
+                      final active = _activeFrom(all);
+                      return _buildSentContent(upcoming, active);
+                    },
+                  )
+                else
+                  StreamBuilder<List<TrackingRequest>>(
+                    stream: _incomingRequestsStream(),
+                    builder: (context, snapshot) {
+                      if (widget.initialExpandRequestId != null &&
+                          snapshot.connectionState == ConnectionState.waiting &&
+                          !snapshot.hasData) {
+                        return _buildRequestsLoading();
+                      }
+                      final incoming = snapshot.data ?? [];
+                      final scheduled = _receivedScheduledFrom(incoming);
+                      final active = _receivedActiveFrom(incoming);
+                      return _buildReceivedContent(scheduled, active);
+                    },
+                  ),
+              ] else ...[
+                _buildMeetingPointContent(),
+              ],
+            ],
           ),
-          const SizedBox(height: 12),
-          _buildFilterPills(),
-          const SizedBox(height: 20),
-
-          if (_selectedFilterIndex == 0)
-            StreamBuilder<List<TrackingRequest>>(
-              stream: _sentRequestsStream(),
-              builder: (context, snapshot) {
-                if (widget.initialExpandRequestId != null &&
-                    snapshot.connectionState == ConnectionState.waiting &&
-                    !snapshot.hasData) {
-                  return _buildRequestsLoading();
-                }
-                final all = snapshot.data ?? [];
-                final upcoming = _upcomingFrom(all);
-                final active = _activeFrom(all);
-                return _buildSentContent(upcoming, active);
-              },
-            )
-          else
-            StreamBuilder<List<TrackingRequest>>(
-              stream: _incomingRequestsStream(),
-              builder: (context, snapshot) {
-                if (widget.initialExpandRequestId != null &&
-                    snapshot.connectionState == ConnectionState.waiting &&
-                    !snapshot.hasData) {
-                  return _buildRequestsLoading();
-                }
-                final incoming = snapshot.data ?? [];
-                final scheduled = _receivedScheduledFrom(incoming);
-                final active = _receivedActiveFrom(incoming);
-                return _buildReceivedContent(scheduled, active);
-              },
-            ),
-        ] else ...[
-          _buildMeetingPointContent(),
-        ],
+        ),
       ],
     );
   }
@@ -1141,38 +1209,42 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
   Widget _buildMeetingPointContent() {
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    return StreamBuilder<MeetingPointRecord?>(
-      stream: _meetingPointCardStream,
+    return StreamBuilder<List<MeetingPointRecord>>(
+      stream: _meetingPointListStream,
       builder: (context, snapshot) {
-        final meeting = _resolveActiveMeetingCardSnapshot(snapshot);
-
-        // Only trigger maybeMaintain once per unique meeting document.
-        if (meeting != null &&
-            meeting.isActive &&
-            meeting.id != _lastMaybeMaintainId) {
-          _lastMaybeMaintainId = meeting.id;
-          Future.microtask(() => MeetingPointService.maybeMaintain(meeting));
-        }
-
-        final blockingMeeting = _isBlockingMeetingForUser(meeting, uid)
-            ? meeting
-            : null;
+        final meetings = _resolveMeetingListSnapshot(snapshot);
 
         // Show spinner only on the very first load when nothing is cached yet.
         final isFirstLoad =
             snapshot.connectionState == ConnectionState.waiting &&
-            _lastKnownActiveMeetingCard == null;
+            _lastKnownBlockingMeetings.isEmpty;
 
-        // Only show "No active meeting point" when the stream has fully
-        // settled AND confirmed there is truly nothing — never while we still
-        // have a cached record (even if the stream briefly re-emits null
-        // between Firestore writes, which causes the millisecond disappear).
-        final confirmedEmpty =
-            snapshot.connectionState == ConnectionState.active &&
-            blockingMeeting == null &&
-            _lastKnownActiveMeetingCard == null;
+        // Split into: the active card meeting (host or accepted invitee)
+        // and pending invitation tiles (user is pending participant).
+        MeetingPointRecord? activeMeeting;
+        final List<MeetingPointRecord> pendingMeetings = [];
 
-        final canCreateMeetingPoint = !isFirstLoad && blockingMeeting == null;
+        if (uid != null) {
+          for (final m in meetings) {
+            // Skip meetings the user already locally declined (instant UI update).
+            if (_locallyDeclinedMeetingIds.contains(m.id)) continue;
+            if (m.isHost(uid)) {
+              activeMeeting ??= m;
+            } else {
+              final me = m.participantFor(uid);
+              if (me != null && me.isAccepted) {
+                activeMeeting ??= m;
+              } else if (me != null && me.isPending) {
+                pendingMeetings.add(m);
+              }
+            }
+          }
+        }
+
+        // Only disable create when the user is the host or has already
+        // accepted a meeting. Pending invitations they haven't responded
+        // to should not block them from starting their own meeting.
+        final canCreateMeetingPoint = !isFirstLoad && activeMeeting == null;
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1190,6 +1262,15 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 ),
               ],
             ),
+            const SizedBox(height: 20),
+            const Text(
+              'Meeting Point Requests',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: Colors.black87,
+              ),
+            ),
             const SizedBox(height: 10),
             if (isFirstLoad)
               const SizedBox(
@@ -1199,29 +1280,58 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                   backgroundColor: Colors.black12,
                 ),
               )
-            else if (blockingMeeting != null &&
-                uid != null &&
-                blockingMeeting.isHost(uid))
-              _buildHostMeetingPointStatusCard(blockingMeeting)
-            else if (blockingMeeting != null && uid != null)
-              _buildInviteeMeetingPointStatusCard(blockingMeeting, uid)
-            else if (confirmedEmpty)
+            else if (activeMeeting == null && pendingMeetings.isEmpty) ...[
+              // ── Nothing at all ──────────────────────────────────────────
               SizedBox(
                 height: 140,
                 child: Center(
                   child: Text(
-                    'No active meeting point',
-                    textAlign: TextAlign.center,
+                    'No meeting point requests',
                     style: TextStyle(
                       fontSize: 14,
-                      color: Colors.grey[600],
+                      color: Colors.grey[500],
                       fontWeight: FontWeight.w500,
                     ),
                   ),
                 ),
               ),
-            // If none match we are still resolving — show nothing so the
-            // cached card appears on the next emission without flickering.
+            ] else ...[
+              // ── Active meeting point ────────────────────────────────────
+              // Always shown when anything exists, so the user sees the
+              // section even when they have invitations but no active meeting.
+              _buildSubsectionLabel('Active Meeting Point'),
+              if (activeMeeting != null && uid != null) ...[
+                if (activeMeeting.isHost(uid))
+                  _buildHostMeetingPointStatusCard(activeMeeting)
+                else
+                  _buildInviteeMeetingPointStatusCard(activeMeeting, uid),
+              ] else ...[
+                // No active meeting — show a light placeholder.
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Text(
+                    'No active meeting point',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.grey[400],
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+              if (pendingMeetings.isNotEmpty) const SizedBox(height: 16),
+
+              // ── Pending invitations ─────────────────────────────────────
+              if (pendingMeetings.isNotEmpty && uid != null) ...[
+                _buildSubsectionLabel('Meeting Point Invitations'),
+                ...pendingMeetings.map(
+                  (m) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: _buildMeetingPointInvitationTile(m, uid),
+                  ),
+                ),
+              ],
+            ],
           ],
         );
       },
@@ -1373,7 +1483,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     final timerLabel = _currentStepTimerLabel(meeting);
     final title = me.isPending
         ? '${_firstName(meeting.hostName)} invited you to meet'
-        : 'Meeting point request';
+        : 'Meeting point in progress';
     final subtitle = me.isPending
         ? 'Respond to the invitation and set your location if you join'
         : _inviteeStepLabel(step);
@@ -1443,6 +1553,16 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               ),
             ],
           ),
+          const SizedBox(height: 14),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: LinearProgressIndicator(
+              value: (step - 1) / 3,
+              minHeight: 7,
+              backgroundColor: AppColors.kGreen.withValues(alpha: 0.2),
+              valueColor: const AlwaysStoppedAnimation(AppColors.kGreen),
+            ),
+          ),
           const SizedBox(height: 10),
           Row(
             children: [
@@ -1484,6 +1604,246 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           ),
         ],
       ),
+    );
+  }
+
+  // ── Meeting Point Invitation Tile ───────────────────────────────────────────
+
+  Widget _buildMeetingPointInvitationTile(
+    MeetingPointRecord meeting,
+    String uid,
+  ) {
+    final isExpanded = _expandedMeetingInviteId == meeting.id;
+    final timerLabel = _currentStepTimerLabel(meeting);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          InkWell(
+            onTap: () => setState(() {
+              _expandedMeetingInviteId = isExpanded ? null : meeting.id;
+            }),
+            borderRadius: BorderRadius.circular(16),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: Colors.grey[200],
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.person,
+                      color: Colors.grey[600],
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          meeting.hostName.isEmpty
+                              ? 'Unknown'
+                              : meeting.hostName,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        if (timerLabel != null)
+                          _meetingTimerBadge(timerLabel)
+                        else
+                          Text(
+                            'Meeting point invitation',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[500],
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  AnimatedRotation(
+                    turns: isExpanded ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 200),
+                    child: Icon(
+                      Icons.keyboard_arrow_down,
+                      color: Colors.grey[600],
+                      size: 24,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (isExpanded) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildMeetingPointInvitationDetails(meeting),
+                  const SizedBox(height: 16),
+                  _buildMeetingInviteActionButtons(meeting),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMeetingPointInvitationDetails(MeetingPointRecord meeting) {
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 3,
+            decoration: BoxDecoration(
+              color: AppColors.kGreen,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (meeting.venueName.isNotEmpty) ...[
+                  _labeledDetail('Venue: ', meeting.venueName),
+                  const SizedBox(height: 10),
+                ],
+                Text(
+                  'Participants:',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w400,
+                    color: Colors.grey[600],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                _buildMeetingInviteParticipantRow(
+                  name: meeting.hostName,
+                  phone: meeting.hostPhone,
+                  isHost: true,
+                ),
+                ...meeting.participants.map(
+                  (p) => _buildMeetingInviteParticipantRow(
+                    name: p.name,
+                    phone: p.phone,
+                    isHost: false,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMeetingInviteParticipantRow({
+    required String name,
+    required String phone,
+    required bool isHost,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: Colors.grey[200],
+              shape: BoxShape.circle,
+            ),
+            child: Icon(Icons.person, color: Colors.grey[600], size: 16),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name.isEmpty ? 'Unknown' : name,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                if (phone.isNotEmpty)
+                  Text(
+                    phone,
+                    style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                  ),
+              ],
+            ),
+          ),
+          if (isHost)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: Colors.grey[200],
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                'Host',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey[600],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMeetingInviteActionButtons(MeetingPointRecord meeting) {
+    return Row(
+      children: [
+        Expanded(
+          child: SecondaryButton(
+            text: 'Decline',
+            onPressed: () => _declineMeetingInvite(meeting),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: PrimaryButton(
+            text: 'Accept',
+            onPressed: () => _acceptMeetingInvite(meeting),
+          ),
+        ),
+      ],
     );
   }
 
@@ -1795,8 +2155,15 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.95),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -2021,6 +2388,119 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   }
 
   Future<void> _acceptMeetingInvite(MeetingPointRecord meeting) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+
+    // ── Conflict check ────────────────────────────────────────────────────────
+    // Warn if the user is already hosting or has accepted another meeting.
+    if (uid != null) {
+      MeetingPointRecord? conflicting;
+      for (final m in _lastKnownBlockingMeetings) {
+        if (m.id == meeting.id) continue;
+        if (m.isHost(uid) || m.participantFor(uid)?.isAccepted == true) {
+          conflicting = m;
+          break;
+        }
+      }
+
+      if (conflicting != null) {
+        if (!mounted) return;
+        final proceed = await showDialog<bool>(
+          context: context,
+          barrierColor: Colors.black54,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            title: const Text(
+              'Already in a Meeting Point',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
+            ),
+            content: const Text(
+              'You\'re already part of an active meeting point. '
+              'Would you like to leave it and accept this new invitation instead?',
+              style: TextStyle(fontSize: 15),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                style: TextButton.styleFrom(
+                  backgroundColor: Colors.grey[200],
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: const Text(
+                  'Undo',
+                  style: TextStyle(
+                    color: Colors.black87,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                style: TextButton.styleFrom(
+                  backgroundColor: AppColors.kGreen,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: const Text(
+                  'Proceed',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+            ],
+            actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          ),
+        );
+        if (!mounted || proceed != true) return;
+
+        // Leave / cancel the conflicting meeting before accepting the new one.
+        try {
+          if (conflicting.isHost(uid)) {
+            await MeetingPointService.markHostDecision(
+              meetingPointId: conflicting.id,
+              accepted: false,
+            );
+          } else {
+            await MeetingPointService.respondToInvitation(
+              meetingPointId: conflicting.id,
+              accepted: false,
+            );
+          }
+        } catch (_) {}
+      }
+    }
+
+    if (!mounted) return;
+
+    // ── Location choice ───────────────────────────────────────────────────────
+    // Show the navigation choice sheet (Pin on Map / Scan With Camera).
+    // The invitation is confirmed only after the user sets their location.
+    final navChoice = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _buildAcceptLocationChoiceSheet(ctx, meeting),
+    );
+    if (!mounted || navChoice == null) return; // user dismissed without picking
+
+    // ── Set location ──────────────────────────────────────────────────────────
     final locationResult = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
@@ -2033,12 +2513,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         returnResultOnly: true,
         venueId: meeting.venueId.isEmpty ? null : meeting.venueId,
         headerTitle: 'Set your location',
-        headerSubtitle:
-            'set your location to find suitable point for all participants',
       ),
     );
-    if (!mounted || locationResult == null) return;
+    if (!mounted || locationResult == null) return; // user cancelled location
 
+    // ── Accept invitation ─────────────────────────────────────────────────────
     try {
       await MeetingPointService.respondToInvitation(
         meetingPointId: meeting.id,
@@ -2055,6 +2534,80 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     }
   }
 
+  /// Bottom sheet that lets the user pick how to set their starting location
+  /// before accepting a meeting point invitation. Returns 'map' or 'camera'.
+  Widget _buildAcceptLocationChoiceSheet(
+    BuildContext ctx,
+    MeetingPointRecord meeting,
+  ) {
+    final venueName = meeting.venueName.isEmpty
+        ? 'Meeting Point'
+        : meeting.venueName;
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(24),
+          topRight: Radius.circular(24),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 12),
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.grey[300],
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Set your current location',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.kGreen,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'As step 1, set your location to find suitable meeting point for all participants',
+                  style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 28),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: SecondaryButton(
+              text: 'Pin on Map',
+              icon: Icons.location_on_outlined,
+              onPressed: () => Navigator.pop(ctx, 'map'),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: PrimaryButton(
+              text: 'Scan With Camera',
+              icon: Icons.camera_alt_outlined,
+              onPressed: () => Navigator.pop(ctx, 'camera'),
+            ),
+          ),
+          SizedBox(height: MediaQuery.of(ctx).padding.bottom + 35),
+        ],
+      ),
+    );
+  }
+
   Future<void> _declineMeetingInvite(MeetingPointRecord meeting) async {
     final confirmed = await ConfirmationDialog.showDeleteConfirmation(
       context,
@@ -2065,6 +2618,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     );
     if (confirmed != true) return;
 
+    // Immediately hide the tile in the UI — don't wait for Firestore round-trip.
+    if (mounted) setState(() => _locallyDeclinedMeetingIds.add(meeting.id));
+
     try {
       await MeetingPointService.respondToInvitation(
         meetingPointId: meeting.id,
@@ -2073,6 +2629,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       if (!mounted) return;
       SnackbarHelper.showSuccess(context, 'Invitation declined.');
     } catch (e) {
+      // Restore the tile if the write failed.
+      if (mounted)
+        setState(() => _locallyDeclinedMeetingIds.remove(meeting.id));
       if (!mounted) return;
       SnackbarHelper.showError(
         context,

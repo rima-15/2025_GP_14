@@ -509,12 +509,14 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     final startF = _toFNumber(startLabel);
     final currF = _currentFNumber();
 
+    // Handle user pin (start)
     if (_pendingUserPinGltf != null && currF == startF) {
       await _pushUserPinToJsPath(_pendingUserPinGltf!);
     } else {
       await _clearUserPinFromJs();
     }
 
+    // Handle destination: either POI highlight or destination pin
     final destLabel =
         _destFloorLabelFixed ??
         _destFloorLabel ??
@@ -523,13 +525,29 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     if (destLabel.isNotEmpty) {
       final destF = _toFNumber(destLabel);
       if (currF == destF && _destPosBlender != null) {
-        final destGltf = _blenderToGltf(_destPosBlender!);
-        await _pushDestPinToJs(destGltf);
+        // Determine if destination is a POI (has a material to highlight)
+        final bool isPoi =
+            _pendingPoiToHighlight != null &&
+            _pendingPoiToHighlight!.trim().isNotEmpty;
+
+        if (isPoi) {
+          // POI destination: clear any leftover destination pin,
+          // the highlight will be handled by _pushDestinationHighlightToJsPath
+          await _webCtrl?.runJavaScript('window.clearDestPinFromFlutter();');
+        } else {
+          // Custom pin: show the green destination pin and clear any POI highlight
+          final destGltf = _blenderToGltf(_destPosBlender!);
+          await _pushDestPinToJs(destGltf);
+          // _pendingPoiToHighlight is null, so _pushDestinationHighlightToJsPath will clear highlights
+        }
       } else {
+        // Not on the destination floor: clear both pin and highlight
         await _webCtrl?.runJavaScript('window.clearDestPinFromFlutter();');
+        // POI highlight will be cleared by _pushDestinationHighlightToJsPath because destF != currF
       }
     }
 
+    // This call handles POI highlighting (it will clear if no highlight needed)
     await _pushDestinationHighlightToJsPath();
   }
 
@@ -1520,7 +1538,7 @@ function buildDestPinUI(el) {
   var pin = document.createElement("div");
   pin.style.width = "24px";
   pin.style.height = "24px";
-  pin.style.background = "#34c759";
+  pin.style.background = "#C88D52";   // <-- changed to match destination field
   pin.style.borderRadius = "24px 24px 24px 0";
   pin.style.transform = "rotate(-45deg)";
   pin.style.position = "relative";
@@ -1588,8 +1606,22 @@ window.clearDestPinFromFlutter = function() {
   } catch(e) {}
 };
 
+window.__pendingDestPin = null;
+
 window.setDestPinFromFlutter = function(x, y, z) {
-  postToTest("🟢 setDestPinFromFlutter SIMPLE");
+  const viewer = getViewer();
+  const p = { x: Number(x), y: Number(y), z: Number(z) };
+
+  if (!viewer || !viewer.model) {
+    window.__pendingDestPin = p;
+    postToTest("⏳ setDestPinFromFlutter pending (viewer/model not ready)");
+    return false;
+  }
+
+  setDestPin(viewer, p);
+  window.__pendingDestPin = null;
+  postToTest("✅ setDestPinFromFlutter applied");
+  return true;
 };
 
 window.__poiOriginals = window.__poiOriginals || {};
@@ -1816,6 +1848,12 @@ function setupViewer() {
       window.setPathFromFlutter(pts);
       postToTest('✅ applied pending path on load');
     }
+
+    if (window.__pendingDestPin) {
+  setDestPin(viewer, window.__pendingDestPin);
+  postToTest("✅ applied pending dest pin on load");
+  window.__pendingDestPin = null;
+}
   });
 
   try {
@@ -1836,6 +1874,11 @@ function setupViewer() {
         window.__pendingPathPoints = null;
         window.setPathFromFlutter(pts);
         postToTest("✅ applied pending path (immediate)");
+      }
+      if (window.__pendingDestPin) {
+        setDestPin(viewer, window.__pendingDestPin);
+        postToTest("✅ applied pending dest pin (immediate)");
+        window.__pendingDestPin = null;
       }
     }
   } catch(e) {}
@@ -2382,6 +2425,7 @@ const timer = setInterval(function() {
           destinationHitGltf: widget.destinationHitGltf,
           destinationFloorLabel: widget.destinationFloorLabel,
           returnResultOnly: true,
+          flowType: 'start', // ← add this
         ),
       );
 
@@ -2460,38 +2504,90 @@ const timer = setInterval(function() {
       builder: (context) => _PoiPickerSheet(
         pois: allPois,
         title: 'Select destination',
-        showPinPlacement: false,
+        showPinPlacement: true, // <-- enable pin placement
       ),
     );
 
-    if (result != null) {
-      setState(() {
-        _selectedDestPoi = result;
-        _destFloorLabel = result['floor'];
-        _destPosBlender = {
-          'x': result['x'],
-          'y': result['y'],
-          'z': result['z'],
-        };
-        _pendingPoiToHighlight = result['material'];
-        _destFloorLabelFixed = null;
-        _destFNumberFixed = null;
-        _selectedPreference = 'any';
-      });
+    if (result == null) return;
 
-      final normName = _normPoiKey(result['material']);
-      if (_entrancesByPoi.containsKey(normName)) {
-        _destEntrances = _entrancesByPoi[normName]!;
-      } else {
-        _destEntrances = null;
-      }
+    // --- Handle pin placement ---
+    if (result['type'] == 'pin_placement') {
+      final pinResult = await showModalBottomSheet<Map<String, dynamic>>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (context) => SetYourLocationDialog(
+          shopName: widget.shopName,
+          shopId: widget.shopId,
+          destinationPoiMaterial: widget.destinationPoiMaterial,
+          floorSrc: _currentFloor,
+          destinationHitGltf: widget.destinationHitGltf,
+          destinationFloorLabel: widget.destinationFloorLabel,
+          returnResultOnly: true,
+          flowType: 'destination', // ← important
+        ),
+      );
 
-      _routeComputed = false;
-      _pathPointsByFloorGltf.clear();
-      _maybeComputeAndPushPath();
-      if (_originFloorLabelFixed == _destFloorLabel) {
-        _ensureFloorSelected(_destFloorLabel!);
+      if (pinResult != null) {
+        final rawFloor = pinResult['floorLabel'];
+        final displayFloor = _floorLabelFromToken(rawFloor) ?? rawFloor;
+
+        setState(() {
+          _selectedDestPoi = {
+            'name': 'Selected location', // or "Pin on map"
+            'type': 'poi',
+            'floor': displayFloor,
+            'x': pinResult['blender']['x'],
+            'y': pinResult['blender']['y'],
+            'z': pinResult['blender']['z'],
+            'material': null, // no POI material
+          };
+          _destFloorLabel = displayFloor;
+          _destPosBlender = {
+            'x': pinResult['blender']['x'],
+            'y': pinResult['blender']['y'],
+            'z': pinResult['blender']['z'],
+          };
+          _pendingPoiToHighlight = null; // clear any POI highlight
+          _destFloorLabelFixed = null;
+          _destFNumberFixed = null;
+          _selectedPreference = 'any';
+          _destEntrances = null; // pin has no entrances
+        });
+
+        _routeComputed = false;
+        _pathPointsByFloorGltf.clear();
+        _maybeComputeAndPushPath();
+        if (_originFloorLabelFixed == _destFloorLabel) {
+          _ensureFloorSelected(_destFloorLabel!);
+        }
       }
+      return;
+    }
+
+    // --- Normal POI selection ---
+    setState(() {
+      _selectedDestPoi = result;
+      _destFloorLabel = result['floor'];
+      _destPosBlender = {'x': result['x'], 'y': result['y'], 'z': result['z']};
+      _pendingPoiToHighlight = result['material'];
+      _destFloorLabelFixed = null;
+      _destFNumberFixed = null;
+      _selectedPreference = 'any';
+    });
+
+    final normName = _normPoiKey(result['material']);
+    if (_entrancesByPoi.containsKey(normName)) {
+      _destEntrances = _entrancesByPoi[normName]!;
+    } else {
+      _destEntrances = null;
+    }
+
+    _routeComputed = false;
+    _pathPointsByFloorGltf.clear();
+    _maybeComputeAndPushPath();
+    if (_originFloorLabelFixed == _destFloorLabel) {
+      _ensureFloorSelected(_destFloorLabel!);
     }
   }
 

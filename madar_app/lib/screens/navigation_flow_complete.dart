@@ -172,10 +172,7 @@ class NavigateToShopDialog extends StatelessWidget {
               text: 'Pin on Map',
               icon: Icons.location_on_outlined,
               onPressed: () {
-                // Close the current dialog
                 Navigator.of(context).pop();
-
-                // Short delay before showing the next sheet
                 Future.delayed(const Duration(milliseconds: 50), () {
                   if (!context.mounted) return;
                   showModalBottomSheet(
@@ -192,6 +189,7 @@ class NavigateToShopDialog extends StatelessWidget {
                       returnResultOnly: returnResultOnly,
                       venueId: venueId,
                       trackingNotificationId: trackingNotificationId,
+                      flowType: 'start',
                     ),
                   );
                 });
@@ -377,6 +375,7 @@ class NavigateToShopDialog extends StatelessWidget {
           returnResultOnly: returnResultOnly,
           venueId: venueId,
           trackingNotificationId: trackingNotificationId,
+          flowType: 'start',
         ),
       );
     });
@@ -436,6 +435,7 @@ class SetYourLocationDialog extends StatefulWidget {
   final String? trackingNotificationId;
   final String? headerTitle;
   final String? headerSubtitle;
+  final String flowType;
 
   /// If true, this screen will save to Firestore and then `pop(result)` instead
   /// of navigating to [PathOverviewScreen].
@@ -463,6 +463,7 @@ class SetYourLocationDialog extends StatefulWidget {
     this.returnResultOnly = false,
     this.embeddedMode = false,
     this.onLocationPicked,
+    this.flowType = 'start',
   });
 
   @override
@@ -513,6 +514,11 @@ class _SetYourLocationDialogState extends State<SetYourLocationDialog> {
       _pendingPoiToHighlight = null;
     }
 
+    // Destination pin picker should not highlight any POI
+    if (widget.flowType == 'destination') {
+      _pendingPoiToHighlight = null;
+    }
+
     if (widget.initialUserPinGltf != null) {
       final g = widget.initialUserPinGltf!;
       _pickedPosGltf = g;
@@ -524,7 +530,9 @@ class _SetYourLocationDialogState extends State<SetYourLocationDialog> {
     }
 
     _loadVenueMaps();
-    if (widget.initialUserPinGltf == null) {
+
+    // Only load saved location if this is a start‑point picker (not destination)
+    if (widget.flowType == 'start' && widget.initialUserPinGltf == null) {
       _loadUserBlenderPosition();
     }
 
@@ -1500,6 +1508,26 @@ const timer = setInterval(function() {
         _pickedPosGltf != null &&
         _pickedFloorLabel == _fNumberForUrl(_currentFloorURL);
 
+    // Inside build, after pinPlaced is defined
+    final bool isDestinationFlow = widget.flowType == 'destination';
+    final String effectiveTitle =
+        (widget.headerTitle != null && widget.headerTitle!.trim().isNotEmpty)
+        ? widget.headerTitle!.trim()
+        : (isDestinationFlow
+              ? 'Set Destination Location'
+              : 'Set Your Location');
+
+    final String effectiveSubtitle =
+        (widget.headerSubtitle != null &&
+            widget.headerSubtitle!.trim().isNotEmpty)
+        ? widget.headerSubtitle!.trim()
+        : (pinPlaced
+              ? (isDestinationFlow
+                    ? 'Destination set. Tap again to move it.'
+                    : 'Location selected. Tap again to move it.')
+              : (isDestinationFlow
+                    ? 'Tap on the 3D map to place your destination pin.'
+                    : 'Tap on the 3D map to place your pin.'));
     // Match venue_page ordering: higher floors first (F2, F1, ... , GF last)
     final sortedMaps = List<Map<String, String>>.from(_venueMaps);
 
@@ -1556,10 +1584,7 @@ const timer = setInterval(function() {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        (widget.headerTitle != null &&
-                                widget.headerTitle!.trim().isNotEmpty)
-                            ? widget.headerTitle!.trim()
-                            : 'Set Your Location',
+                        effectiveTitle, // ← use the computed title
                         style: TextStyle(
                           fontSize: screenHeight < 700 ? 20 : 22,
                           fontWeight: FontWeight.w600,
@@ -1568,12 +1593,7 @@ const timer = setInterval(function() {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        (widget.headerSubtitle != null &&
-                                widget.headerSubtitle!.trim().isNotEmpty)
-                            ? widget.headerSubtitle!.trim()
-                            : (pinPlaced
-                                  ? 'Location selected. Tap again to move it.'
-                                  : 'Tap on the 3D map to place your pin.'),
+                        effectiveSubtitle, // ← use the computed subtitle
                         style: TextStyle(fontSize: 14, color: Colors.grey[600]),
                       ),
                     ],
@@ -1600,8 +1620,12 @@ const timer = setInterval(function() {
               enabled: pinPlaced,
               onPressed: pinPlaced
                   ? () async {
-                      final ok = await _saveBlenderPosition();
-                      if (!ok) return;
+                      bool ok = true;
+                      if (widget.flowType == 'start') {
+                        ok = await _saveBlenderPosition();
+                        if (!ok) return;
+                      }
+                      // For destination, we don't save to Firestore.
                       if (!mounted) return;
 
                       if (widget.trackingNotificationId != null &&

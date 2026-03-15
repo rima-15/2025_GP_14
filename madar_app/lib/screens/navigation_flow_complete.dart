@@ -493,6 +493,8 @@ class _SetYourLocationDialogState extends State<SetYourLocationDialog> {
   Map<String, double>?
   _pickedPosBlender; // converted for navmesh + Firestore (Z-up)
   String _pickedFloorLabel = '';
+  String? _pinErrorMessage;
+  Timer? _pinErrorTimer;
 
   @override
   void initState() {
@@ -1297,7 +1299,31 @@ const timer = setInterval(function() {
 
       if (type == 'user_pin') {
         final ok = obj['ok'] == true;
-        if (!ok) return;
+        if (!ok) {
+          // ---- Show error message for invalid tap ----
+          final reason = (obj['reason'] ?? '').toString();
+          String message;
+          if (reason == 'not_allowed_floor') {
+            message = 'Please tap on a walkable floor area.';
+          } else if (reason == 'not_floor_normal') {
+            message = 'Cannot place pin here. Tap on the floor.';
+          } else {
+            message = 'Invalid location. Please tap on a walkable area.';
+          }
+
+          _pinErrorTimer?.cancel();
+          setState(() {
+            _pinErrorMessage = message;
+          });
+          _pinErrorTimer = Timer(const Duration(seconds: 2), () {
+            if (mounted) {
+              setState(() {
+                _pinErrorMessage = null;
+              });
+            }
+          });
+          return;
+        }
 
         final pos = obj['position'];
         if (pos is Map) {
@@ -1851,6 +1877,13 @@ const timer = setInterval(function() {
                     style: const TextStyle(fontSize: 12, height: 1.2),
                   ),
                 ),
+              ),
+            if (_pinErrorMessage != null)
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: 16,
+                child: ErrorMessageBox(message: _pinErrorMessage!),
               ),
           ],
         ),

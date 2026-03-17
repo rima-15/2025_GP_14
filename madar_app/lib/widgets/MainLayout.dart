@@ -12,26 +12,41 @@ import 'package:madar_app/screens/history_page.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
 import 'package:madar_app/theme/theme.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'dart:async';
+import 'package:madar_app/services/gps_tracking_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // ----------------------------------------------------------------------------
 // Main Layout
 // ----------------------------------------------------------------------------
 
 /// Main app layout with bottom navigation and drawer
-class MainLayout extends StatefulWidget {
+class MainLayout
+    extends StatefulWidget {
   const MainLayout({super.key});
 
   @override
-  State<MainLayout> createState() => _MainLayoutState();
+  State<MainLayout> createState() =>
+      _MainLayoutState();
 }
 
-class _MainLayoutState extends State<MainLayout> {
+class _MainLayoutState
+    extends State<MainLayout> {
   int _index = 0;
-  final _homeKey = GlobalKey<HomePageState>();
+  final _homeKey =
+      GlobalKey<HomePageState>();
 
   // Track page parameters from notification navigation
   String? _trackExpandRequestId;
   int? _trackFilterIndex;
+
+  // GPS tracking service subscription
+  StreamSubscription<QuerySnapshot>?
+  _activeTrackingSub;
+
+  Timer? _gpsPeriodicTimer;
+  bool _hasActiveTrackingRequest =
+      false;
 
   late final pages = <Widget>[
     HomePage(key: _homeKey),
@@ -41,96 +56,465 @@ class _MainLayoutState extends State<MainLayout> {
 
   Widget _buildTrackPage() {
     return TrackPage(
-      key: ValueKey('track_${_trackExpandRequestId ?? 'default'}'),
-      initialExpandRequestId: _trackExpandRequestId,
-      initialFilterIndex: _trackFilterIndex,
+      key: ValueKey(
+        'track_${_trackExpandRequestId ?? 'default'}',
+      ),
+      initialExpandRequestId:
+          _trackExpandRequestId,
+      initialFilterIndex:
+          _trackFilterIndex,
     );
   }
 
-  final _scaffoldKey = GlobalKey<ScaffoldState>();
+  final _scaffoldKey =
+      GlobalKey<ScaffoldState>();
   String _firstName = '';
 
   @override
   void initState() {
     super.initState();
     _loadUserData();
+    _listenForActiveTrackingRequests();
+  }
+
+  // ---------- GPS Tracking Service ──────────────────────────────────────────
+
+  /// Listens for active accepted tracking requests where the current user
+  /// is the RECEIVER (being tracked). Starts GPS service if any exist,
+  /// stops it otherwise.
+  /// We upload OUR GPS so the tracker can see if we left the venue.
+  ///
+  void _startGpsPeriodicUpdates() {
+    _gpsPeriodicTimer?.cancel();
+
+    _gpsPeriodicTimer = Timer.periodic(
+      const Duration(minutes: 5),
+      (_) async {
+        if (!_hasActiveTrackingRequest)
+          return;
+
+        debugPrint(
+          '[GPS-UI] periodic 5-min tick -> uploadGps()',
+        );
+        await GpsTrackingService.uploadGps();
+      },
+    );
+  }
+
+  void _stopGpsPeriodicUpdates() {
+    _gpsPeriodicTimer?.cancel();
+    _gpsPeriodicTimer = null;
+  }
+
+  void
+  _listenForActiveTrackingRequests() {
+    final uid = FirebaseAuth
+        .instance
+        .currentUser
+        ?.uid;
+    final email = FirebaseAuth
+        .instance
+        .currentUser
+        ?.email;
+
+    debugPrint(
+      '================ GPS DEBUG START ================',
+    );
+    debugPrint(
+      '[GPS-CHECK] MainLayout listener started',
+    );
+    debugPrint(
+      '[GPS-CHECK] auth uid   = $uid',
+    );
+    debugPrint(
+      '[GPS-CHECK] auth email = $email',
+    );
+
+    if (uid == null) {
+      debugPrint(
+        '[GPS-CHECK] currentUser.uid is NULL -> stop',
+      );
+      debugPrint(
+        '=================================================',
+      );
+      return;
+    }
+
+    _activeTrackingSub?.cancel();
+
+    _activeTrackingSub = FirebaseFirestore
+        .instance
+        .collection('trackRequests')
+        .where(
+          'receiverId',
+          isEqualTo: uid,
+        )
+        .where(
+          'status',
+          isEqualTo: 'accepted',
+        )
+        .snapshots()
+        .listen(
+          (snap) async {
+            debugPrint(
+              '---------------- GPS SNAPSHOT ----------------',
+            );
+            debugPrint(
+              '[GPS-CHECK] docs count = ${snap.docs.length}',
+            );
+            debugPrint(
+              '[GPS-CHECK] snapshot empty = ${snap.docs.isEmpty}',
+            );
+
+            final now = Timestamp.now();
+            debugPrint(
+              '[GPS-CHECK] now = ${now.toDate()}',
+            );
+
+            bool hasActive = false;
+
+            for (final doc
+                in snap.docs) {
+              final data = doc.data();
+
+              final receiverId =
+                  data['receiverId'];
+              final senderId =
+                  data['senderId'];
+              final status =
+                  data['status'];
+              final venueId =
+                  data['venueId'];
+              final endAtRaw =
+                  data['endAt'];
+
+              debugPrint(
+                '----------------------------------------------',
+              );
+              debugPrint(
+                '[GPS-CHECK] request doc id = ${doc.id}',
+              );
+              debugPrint(
+                '[GPS-CHECK] receiverId     = $receiverId',
+              );
+              debugPrint(
+                '[GPS-CHECK] senderId       = $senderId',
+              );
+              debugPrint(
+                '[GPS-CHECK] status         = $status',
+              );
+              debugPrint(
+                '[GPS-CHECK] venueId        = $venueId',
+              );
+              debugPrint(
+                '[GPS-CHECK] endAt raw type = ${endAtRaw.runtimeType}',
+              );
+              debugPrint(
+                '[GPS-CHECK] endAt raw      = $endAtRaw',
+              );
+
+              if (endAtRaw
+                  is Timestamp) {
+                final endAt = endAtRaw
+                    .toDate();
+                final isFuture =
+                    endAtRaw.compareTo(
+                      now,
+                    ) >
+                    0;
+
+                debugPrint(
+                  '[GPS-CHECK] endAt parsed  = $endAt',
+                );
+                debugPrint(
+                  '[GPS-CHECK] endAt > now   = $isFuture',
+                );
+
+                if (isFuture) {
+                  hasActive = true;
+                }
+              } else {
+                debugPrint(
+                  '[GPS-CHECK] endAt is NOT Timestamp',
+                );
+              }
+            }
+
+            debugPrint(
+              '[GPS-CHECK] FINAL hasActive = $hasActive',
+            );
+
+            if (hasActive) {
+              _hasActiveTrackingRequest =
+                  true;
+
+              debugPrint(
+                '[GPS-CHECK] Found active request -> saving user doc id',
+              );
+              await _saveUserDocIdForGpsDebug();
+
+              // ارفعي GPS مباشرة فور اكتشاف الطلب المقبول
+              debugPrint(
+                '[GPS-CHECK] Immediate uploadGps() from UI isolate',
+              );
+              await GpsTrackingService.uploadGps();
+
+              // شغلي الخدمة كنسخة احتياطية
+              debugPrint(
+                '[GPS-CHECK] Calling GpsTrackingService.start()',
+              );
+              await GpsTrackingService.start();
+
+              // وابدئي التحديث كل 5 دقائق طالما التطبيق مفتوح
+              _startGpsPeriodicUpdates();
+            } else {
+              _hasActiveTrackingRequest =
+                  false;
+
+              debugPrint(
+                '[GPS-CHECK] No active request -> calling stop()',
+              );
+
+              _stopGpsPeriodicUpdates();
+              await GpsTrackingService.stop();
+            }
+
+            debugPrint(
+              '----------------------------------------------',
+            );
+          },
+          onError: (e) {
+            debugPrint(
+              '[GPS-CHECK] STREAM ERROR: $e',
+            );
+          },
+        );
+  }
+
+  Future<void>
+  _saveUserDocIdForGpsDebug() async {
+    try {
+      final user = FirebaseAuth
+          .instance
+          .currentUser;
+
+      debugPrint(
+        '============= SAVE USER DOC ID DEBUG =============',
+      );
+      debugPrint(
+        '[GPS] current auth uid   = ${user?.uid}',
+      );
+      debugPrint(
+        '[GPS] current auth email = ${user?.email}',
+      );
+
+      if (user == null) {
+        debugPrint(
+          '[GPS] user is NULL -> stop',
+        );
+        debugPrint(
+          '==================================================',
+        );
+        return;
+      }
+
+      if (user.email == null) {
+        debugPrint(
+          '[GPS] user.email is NULL -> stop',
+        );
+        debugPrint(
+          '==================================================',
+        );
+        return;
+      }
+
+      final snap =
+          await FirebaseFirestore
+              .instance
+              .collection('users')
+              .where(
+                'email',
+                isEqualTo: user.email,
+              )
+              .limit(5)
+              .get();
+
+      debugPrint(
+        '[GPS] users query docs count = ${snap.docs.length}',
+      );
+
+      if (snap.docs.isEmpty) {
+        debugPrint(
+          '[GPS] No user doc found by email',
+        );
+        debugPrint(
+          '==================================================',
+        );
+        return;
+      }
+
+      for (final doc in snap.docs) {
+        debugPrint(
+          '[GPS] matched user doc id = ${doc.id}',
+        );
+        debugPrint(
+          '[GPS] matched user data   = ${doc.data()}',
+        );
+      }
+
+      final prefs =
+          await SharedPreferences.getInstance();
+      await prefs.setString(
+        'gps_user_doc_id',
+        snap.docs.first.id,
+      );
+
+      debugPrint(
+        '[GPS] Saved docId: ${snap.docs.first.id}',
+      );
+
+      final saved = prefs.getString(
+        'gps_user_doc_id',
+      );
+      debugPrint(
+        '[GPS] Read-back docId from prefs: $saved',
+      );
+      debugPrint(
+        '==================================================',
+      );
+    } catch (e) {
+      debugPrint(
+        '[GPS] Failed to save docId: $e',
+      );
+      debugPrint(
+        '==================================================',
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _activeTrackingSub?.cancel();
+    _gpsPeriodicTimer?.cancel();
+    super.dispose();
   }
 
   // ---------- Data Loading ----------
 
   Future<void> _loadUserData() async {
-    final user = FirebaseAuth.instance.currentUser;
+    final user = FirebaseAuth
+        .instance
+        .currentUser;
     if (user != null) {
       try {
-        final doc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .get();
+        final doc =
+            await FirebaseFirestore
+                .instance
+                .collection('users')
+                .doc(user.uid)
+                .get();
         if (doc.exists && mounted) {
           final data = doc.data()!;
           setState(() {
-            _firstName = data['firstName'] ?? '';
+            _firstName =
+                data['firstName'] ?? '';
           });
         }
       } catch (e) {
-        debugPrint('Error loading user data: $e');
+        debugPrint(
+          'Error loading user data: $e',
+        );
       }
     }
   }
 
-  Future<void> _removeFcmTokenOnLogout() async {
-    final user = FirebaseAuth.instance.currentUser;
+  Future<void>
+  _removeFcmTokenOnLogout() async {
+    final user = FirebaseAuth
+        .instance
+        .currentUser;
     if (user == null) return;
 
-    final token = await FirebaseMessaging.instance.getToken();
+    final token =
+        await FirebaseMessaging.instance
+            .getToken();
     if (token == null) return;
 
-    await FirebaseFirestore.instance.collection('users').doc(user.uid).update({
-      'fcmTokens': FieldValue.arrayRemove([token]),
-    });
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .update({
+          'fcmTokens':
+              FieldValue.arrayRemove([
+                token,
+              ]),
+        });
 
     // زيادة أمان
-    await FirebaseMessaging.instance.deleteToken();
+    await FirebaseMessaging.instance
+        .deleteToken();
   }
 
   // ---------- Actions ----------
 
-  Future<void> _logout(BuildContext context) async {
-    final confirmed = await ConfirmationDialog.showPositiveConfirmation(
-      context,
-      title: 'Log out',
-      message: 'Are you sure you want to log out?',
-      confirmText: 'Log out',
-    );
+  Future<void> _logout(
+    BuildContext context,
+  ) async {
+    final confirmed =
+        await ConfirmationDialog.showPositiveConfirmation(
+          context,
+          title: 'Log out',
+          message:
+              'Are you sure you want to log out?',
+          confirmText: 'Log out',
+        );
 
     if (!confirmed) return;
 
     await _removeFcmTokenOnLogout(); // <<< أول شيء
-    await FirebaseAuth.instance.signOut();
+    await FirebaseAuth.instance
+        .signOut();
     if (context.mounted) {
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(builder: (_) => const SignInScreen()),
+        MaterialPageRoute(
+          builder: (_) =>
+              const SignInScreen(),
+        ),
         (route) => false,
       );
     }
   }
 
   //Notification read or not
-  void _openMenu() => _scaffoldKey.currentState?.openDrawer();
+  void _openMenu() => _scaffoldKey
+      .currentState
+      ?.openDrawer();
   //count unread notifications
-  Stream<int> _unreadNotificationsCount() {
-    final user = FirebaseAuth.instance.currentUser;
+  Stream<int>
+  _unreadNotificationsCount() {
+    final user = FirebaseAuth
+        .instance
+        .currentUser;
     if (user == null) {
       return Stream.value(0);
     }
 
     return FirebaseFirestore.instance
         .collection('notifications')
-        .where('userId', isEqualTo: user.uid)
-        .where('isRead', isEqualTo: false)
+        .where(
+          'userId',
+          isEqualTo: user.uid,
+        )
+        .where(
+          'isRead',
+          isEqualTo: false,
+        )
         .snapshots()
-        .map((snapshot) => snapshot.docs.length);
+        .map(
+          (snapshot) =>
+              snapshot.docs.length,
+        );
   }
 
   // ---------- Build ----------
@@ -142,15 +526,22 @@ class _MainLayoutState extends State<MainLayout> {
       appBar: _buildAppBar(_index),
       body: pages[_index],
       drawer: _buildDrawer(context),
-      bottomNavigationBar: _buildBottomNavBar(),
+      bottomNavigationBar:
+          _buildBottomNavBar(),
       backgroundColor: Colors.white,
     );
   }
 
   // ---------- App Bar ----------
 
-  PreferredSizeWidget _buildAppBar(int index) {
-    final titles = ['Home', 'Explore', 'Social'];
+  PreferredSizeWidget _buildAppBar(
+    int index,
+  ) {
+    final titles = [
+      'Home',
+      'Explore',
+      'Social',
+    ];
 
     return AppBar(
       backgroundColor: Colors.white,
@@ -158,9 +549,14 @@ class _MainLayoutState extends State<MainLayout> {
       centerTitle: true,
       automaticallyImplyLeading: false,
       leading: IconButton(
-        icon: const Icon(Icons.menu, color: AppColors.kGreen),
+        icon: const Icon(
+          Icons.menu,
+          color: AppColors.kGreen,
+        ),
         onPressed: _openMenu,
-        padding: const EdgeInsets.only(left: 16),
+        padding: const EdgeInsets.only(
+          left: 16,
+        ),
       ),
       title: index == 0
           ? SizedBox(
@@ -174,60 +570,100 @@ class _MainLayoutState extends State<MainLayout> {
               titles[index],
               style: const TextStyle(
                 color: AppColors.kGreen,
-                fontWeight: FontWeight.w600,
+                fontWeight:
+                    FontWeight.w600,
               ),
             ),
       actions: index == 0
           ? [
               StreamBuilder<int>(
-                stream: _unreadNotificationsCount(),
+                stream:
+                    _unreadNotificationsCount(),
                 builder: (context, snapshot) {
-                  final count = snapshot.data ?? 0;
+                  final count =
+                      snapshot.data ??
+                      0;
 
                   return IconButton(
-                    padding: const EdgeInsets.only(right: 16),
-                    onPressed: () async {
-                      final result = await Navigator.push<Map<String, dynamic>>(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const NotificationsPage(),
+                    padding:
+                        const EdgeInsets.only(
+                          right: 16,
                         ),
-                      );
-                      if (result != null && mounted) {
-                        final page = result['page'] as String?;
-                        final expandId = result['expandRequestId'] as String?;
-                        final filterIdx = result['filterIndex'] as int?;
+                    onPressed: () async {
+                      final result =
+                          await Navigator.push<
+                            Map<
+                              String,
+                              dynamic
+                            >
+                          >(
+                            context,
+                            MaterialPageRoute(
+                              builder:
+                                  (_) =>
+                                      const NotificationsPage(),
+                            ),
+                          );
+                      if (result !=
+                              null &&
+                          mounted) {
+                        final page =
+                            result['page']
+                                as String?;
+                        final expandId =
+                            result['expandRequestId']
+                                as String?;
+                        final filterIdx =
+                            result['filterIndex']
+                                as int?;
                         final historyFilterIdx =
-                            filterIdx == null ? null : 1 - filterIdx;
+                            filterIdx ==
+                                null
+                            ? null
+                            : 1 - filterIdx;
 
-                        if (page == 'history' && expandId != null) {
+                        if (page ==
+                                'history' &&
+                            expandId !=
+                                null) {
                           // Navigate to History page
                           Navigator.push(
                             context,
                             MaterialPageRoute(
                               builder: (_) => HistoryPage(
-                                initialFilterIndex: historyFilterIdx,
-                                initialHighlightRequestId: expandId,
+                                initialFilterIndex:
+                                    historyFilterIdx,
+                                initialHighlightRequestId:
+                                    expandId,
                               ),
                             ),
                           );
-                        } else if (page == 'track' && expandId != null) {
+                        } else if (page ==
+                                'track' &&
+                            expandId !=
+                                null) {
                           // Navigate to Track page tab with expanded request
                           setState(() {
-                            _trackExpandRequestId = expandId;
-                            _trackFilterIndex = filterIdx;
-                            pages[2] = _buildTrackPage();
+                            _trackExpandRequestId =
+                                expandId;
+                            _trackFilterIndex =
+                                filterIdx;
+                            pages[2] =
+                                _buildTrackPage();
                             _index = 2;
                           });
                         }
                       }
                     },
                     icon: Stack(
-                      clipBehavior: Clip.none,
+                      clipBehavior:
+                          Clip.none,
                       children: [
                         const Icon(
-                          Icons.notifications_outlined,
-                          color: AppColors.kGreen,
+                          Icons
+                              .notifications_outlined,
+                          color: AppColors
+                              .kGreen,
                         ),
 
                         // 🔴
@@ -237,24 +673,38 @@ class _MainLayoutState extends State<MainLayout> {
                             top: -6,
                             child: Container(
                               padding: const EdgeInsets.symmetric(
-                                horizontal: 3,
-                                vertical: 0.5,
+                                horizontal:
+                                    3,
+                                vertical:
+                                    0.5,
                               ),
                               constraints: const BoxConstraints(
-                                minWidth: 16,
-                                minHeight: 16,
+                                minWidth:
+                                    16,
+                                minHeight:
+                                    16,
                               ),
                               decoration: BoxDecoration(
-                                color: Colors.red,
-                                borderRadius: BorderRadius.circular(10),
+                                color: Colors
+                                    .red,
+                                borderRadius:
+                                    BorderRadius.circular(
+                                      10,
+                                    ),
                               ),
                               child: Center(
                                 child: Text(
-                                  count > 9 ? '+9' : count.toString(),
+                                  count >
+                                          9
+                                      ? '+9'
+                                      : count.toString(),
                                   style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
+                                    color:
+                                        Colors.white,
+                                    fontSize:
+                                        10,
+                                    fontWeight:
+                                        FontWeight.bold,
                                   ),
                                 ),
                               ),
@@ -272,19 +722,37 @@ class _MainLayoutState extends State<MainLayout> {
                 onPressed: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (_) => const HistoryPage()),
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          const HistoryPage(),
+                    ),
                   );
                 },
-                tooltip: 'Requests History',
-                icon: Icon(Icons.history, size: 22, color: Colors.grey[600]),
-                padding: const EdgeInsets.only(right: 16),
+                tooltip:
+                    'Requests History',
+                icon: Icon(
+                  Icons.history,
+                  size: 22,
+                  color:
+                      Colors.grey[600],
+                ),
+                padding:
+                    const EdgeInsets.only(
+                      right: 16,
+                    ),
               ),
             ]
           : null,
       bottom: index == 1
           ? PreferredSize(
-              preferredSize: const Size.fromHeight(1),
-              child: Container(height: 1, color: Colors.black12),
+              preferredSize:
+                  const Size.fromHeight(
+                    1,
+                  ),
+              child: Container(
+                height: 1,
+                color: Colors.black12,
+              ),
             )
           : null,
     );
@@ -292,7 +760,9 @@ class _MainLayoutState extends State<MainLayout> {
 
   // ---------- Navigation Drawer ----------
 
-  Widget _buildDrawer(BuildContext context) {
+  Widget _buildDrawer(
+    BuildContext context,
+  ) {
     return Drawer(
       child: Container(
         color: Colors.white,
@@ -301,32 +771,50 @@ class _MainLayoutState extends State<MainLayout> {
             // Header
             Container(
               width: double.infinity,
-              padding: EdgeInsets.fromLTRB(
-                24,
-                MediaQuery.of(context).padding.top + 24,
-                24,
-                28,
-              ),
-              decoration: const BoxDecoration(color: AppColors.kGreen),
+              padding:
+                  EdgeInsets.fromLTRB(
+                    24,
+                    MediaQuery.of(
+                          context,
+                        ).padding.top +
+                        24,
+                    24,
+                    28,
+                  ),
+              decoration:
+                  const BoxDecoration(
+                    color: AppColors
+                        .kGreen,
+                  ),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment:
+                    CrossAxisAlignment
+                        .start,
                 children: [
                   Image.asset(
                     'images/MadarLogoVersion2.png',
                     height: 45,
                     fit: BoxFit.contain,
                   ),
-                  const SizedBox(height: 20),
+                  const SizedBox(
+                    height: 20,
+                  ),
                   Text(
                     'Hello, ${_firstName.isEmpty ? 'User' : _firstName}',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      height: 1.2,
-                    ),
+                    style:
+                        const TextStyle(
+                          color: Colors
+                              .white,
+                          fontSize: 22,
+                          fontWeight:
+                              FontWeight
+                                  .bold,
+                          height: 1.2,
+                        ),
                     maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    overflow:
+                        TextOverflow
+                            .ellipsis,
                   ),
                 ],
               ),
@@ -338,63 +826,97 @@ class _MainLayoutState extends State<MainLayout> {
                 children: [
                   ListView(
                     shrinkWrap: true,
-                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(
+                          vertical: 8,
+                        ),
                     children: [
                       _buildMenuItem(
-                        icon: Icons.person_outline,
-                        title: 'Profile',
+                        icon: Icons
+                            .person_outline,
+                        title:
+                            'Profile',
                         onTap: () {
-                          Navigator.pop(context);
+                          Navigator.pop(
+                            context,
+                          );
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (_) => const ProfilePage(),
+                              builder:
+                                  (_) =>
+                                      const ProfilePage(),
                             ),
-                          ).then((_) => _loadUserData());
+                          ).then(
+                            (_) =>
+                                _loadUserData(),
+                          );
                         },
                       ),
                       _buildMenuItem(
-                        icon: Icons.settings_outlined,
-                        title: 'Settings',
+                        icon: Icons
+                            .settings_outlined,
+                        title:
+                            'Settings',
                         onTap: () {
-                          Navigator.pop(context);
+                          Navigator.pop(
+                            context,
+                          );
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (_) => const SettingsPage(),
+                              builder:
+                                  (_) =>
+                                      const SettingsPage(),
                             ),
                           );
                         },
                       ),
                       _buildMenuItem(
-                        icon: Icons.history,
-                        title: 'Requests History',
+                        icon: Icons
+                            .history,
+                        title:
+                            'Requests History',
                         onTap: () {
-                          Navigator.pop(context);
+                          Navigator.pop(
+                            context,
+                          );
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (_) => const HistoryPage(),
+                              builder:
+                                  (_) =>
+                                      const HistoryPage(),
                             ),
                           );
                         },
                       ),
                       _buildMenuItem(
-                        icon: Icons.help_outline,
-                        title: 'Help & Support',
+                        icon: Icons
+                            .help_outline,
+                        title:
+                            'Help & Support',
                         onTap: () {},
                       ),
                     ],
                   ),
                   const Spacer(),
-                  const Divider(height: 1, thickness: 1),
+                  const Divider(
+                    height: 1,
+                    thickness: 1,
+                  ),
                   _buildMenuItem(
                     icon: Icons.logout,
                     title: 'Log out',
-                    onTap: () => _logout(context),
+                    onTap: () =>
+                        _logout(
+                          context,
+                        ),
                     isDestructive: true,
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(
+                    height: 16,
+                  ),
                 ],
               ),
             ),
@@ -413,19 +935,27 @@ class _MainLayoutState extends State<MainLayout> {
     return ListTile(
       leading: Icon(
         icon,
-        color: isDestructive ? AppColors.kError : AppColors.kGreen,
+        color: isDestructive
+            ? AppColors.kError
+            : AppColors.kGreen,
         size: 24,
       ),
       title: Text(
         title,
         style: TextStyle(
-          color: isDestructive ? AppColors.kError : Colors.black87,
+          color: isDestructive
+              ? AppColors.kError
+              : Colors.black87,
           fontSize: 16,
           fontWeight: FontWeight.w500,
         ),
       ),
       onTap: onTap,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
+      contentPadding:
+          const EdgeInsets.symmetric(
+            horizontal: 24,
+            vertical: 4,
+          ),
     );
   }
 
@@ -440,25 +970,41 @@ class _MainLayoutState extends State<MainLayout> {
           color: Colors.white,
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.08),
+              color: Colors.black
+                  .withOpacity(0.08),
               blurRadius: 10,
-              offset: const Offset(0, -3),
+              offset: const Offset(
+                0,
+                -3,
+              ),
             ),
           ],
         ),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
+          padding:
+              const EdgeInsets.symmetric(
+                horizontal: 24,
+                vertical: 6,
+              ),
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            mainAxisAlignment:
+                MainAxisAlignment
+                    .spaceAround,
             children: [
-              _buildNavItem(icon: Icons.home, label: 'Home', index: 0),
               _buildNavItem(
-                icon: Icons.explore_outlined,
+                icon: Icons.home,
+                label: 'Home',
+                index: 0,
+              ),
+              _buildNavItem(
+                icon: Icons
+                    .explore_outlined,
                 label: 'Explore',
                 index: 1,
               ),
               _buildNavItem(
-                icon: Icons.group_outlined,
+                icon: Icons
+                    .group_outlined,
                 label: 'Social',
                 index: 2,
               ),
@@ -477,31 +1023,54 @@ class _MainLayoutState extends State<MainLayout> {
     final isSelected = _index == index;
 
     return InkWell(
-      onTap: () => setState(() => _index = index),
-      borderRadius: BorderRadius.circular(30),
+      onTap: () => setState(
+        () => _index = index,
+      ),
+      borderRadius:
+          BorderRadius.circular(30),
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
+        duration: const Duration(
+          milliseconds: 200,
+        ),
+        padding:
+            const EdgeInsets.symmetric(
+              horizontal: 18,
+              vertical: 4,
+            ),
         decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFFE8E9E0) : Colors.transparent,
-          borderRadius: BorderRadius.circular(30),
+          color: isSelected
+              ? const Color(0xFFE8E9E0)
+              : Colors.transparent,
+          borderRadius:
+              BorderRadius.circular(30),
         ),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisSize:
+              MainAxisSize.min,
           children: [
             Icon(
               icon,
-              color: isSelected ? AppColors.kGreen : Colors.grey.shade500,
+              color: isSelected
+                  ? AppColors.kGreen
+                  : Colors
+                        .grey
+                        .shade500,
               size: 22,
             ),
             const SizedBox(height: 2),
             Text(
               label,
               style: TextStyle(
-                color: isSelected ? AppColors.kGreen : Colors.grey.shade500,
+                color: isSelected
+                    ? AppColors.kGreen
+                    : Colors
+                          .grey
+                          .shade500,
                 fontSize: 11,
                 height: 1.0,
-                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                fontWeight: isSelected
+                    ? FontWeight.w600
+                    : FontWeight.w500,
               ),
               maxLines: 1,
             ),

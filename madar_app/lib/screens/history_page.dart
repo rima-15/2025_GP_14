@@ -52,6 +52,8 @@ class HistoryMeetingPoint {
   final String id;
   final String status;
   final String venueName;
+  final String suggestedPoint;
+  final String cancellationReason;
   final String hostId;
   final String hostName;
   final String hostPhone;
@@ -64,6 +66,8 @@ class HistoryMeetingPoint {
     required this.id,
     required this.status,
     required this.venueName,
+    this.suggestedPoint = '',
+    this.cancellationReason = '',
     required this.hostId,
     required this.hostName,
     required this.hostPhone,
@@ -304,6 +308,8 @@ class _HistoryPageState extends State<HistoryPage> {
     final status = (data['status'] ?? '').toString().trim().toLowerCase();
     final hostId = (data['hostId'] ?? '').toString();
     final venueName = (data['venueName'] ?? '').toString();
+    final suggestedPoint = (data['suggestedPoint'] ?? '').toString();
+    final cancellationReason = _deriveCancellationReason(data, uid);
     final hostName = (data['hostName'] ?? '').toString();
     final hostPhone = (data['hostPhone'] ?? '').toString();
     final createdAt = _parseTimestamp(data['createdAt']) ?? DateTime.now();
@@ -336,6 +342,8 @@ class _HistoryPageState extends State<HistoryPage> {
                   id: d.id,
                   status: 'declined',
                   venueName: venueName,
+                  suggestedPoint: suggestedPoint,
+                  cancellationReason: cancellationReason,
                   hostId: hostId,
                   hostName: hostName,
                   hostPhone: hostPhone,
@@ -382,6 +390,8 @@ class _HistoryPageState extends State<HistoryPage> {
       id: d.id,
       status: displayStatus,
       venueName: venueName,
+      suggestedPoint: suggestedPoint,
+      cancellationReason: cancellationReason,
       hostId: hostId,
       hostName: hostName,
       hostPhone: hostPhone,
@@ -390,6 +400,41 @@ class _HistoryPageState extends State<HistoryPage> {
       updatedAt: updatedAt,
       participants: participants,
     );
+  }
+
+  /// Derives a human-readable cancellation reason from raw Firestore data.
+  /// Returns empty string if the meeting is not cancelled or reason is unknown.
+  String _deriveCancellationReason(Map<String, dynamic> data, String uid) {
+    final status = (data['status'] ?? '').toString().trim().toLowerCase();
+    if (status != 'cancelled') return '';
+
+    final hostId = (data['hostId'] ?? '').toString();
+    final isHost = hostId == uid;
+    final hostStep =
+        (data['hostStep'] is num) ? (data['hostStep'] as num).toInt() : 4;
+
+    final rawParticipants = data['participants'];
+    final parts = (rawParticipants is List)
+        ? rawParticipants.whereType<Map>().toList()
+        : <Map>[];
+
+    final allDeclined = parts.isNotEmpty &&
+        parts.every(
+          (p) => (p['status'] ?? '').toString().toLowerCase() == 'declined',
+        );
+    final anyAccepted = parts.any(
+      (p) => (p['status'] ?? '').toString().toLowerCase() == 'accepted',
+    );
+
+    if (isHost) {
+      if (allDeclined) return 'All participants declined the request';
+      if (hostStep == 5) return 'Host (me) rejected the suggested meeting point';
+      if (!anyAccepted) return 'None of participants respond';
+      return 'You cancelled this request';
+    } else {
+      if (hostStep == 5) return 'Host rejected the suggested meeting point';
+      return 'Cancelled by host';
+    }
   }
 
   String _formatDate(DateTime d) {
@@ -898,7 +943,108 @@ class _HistoryPageState extends State<HistoryPage> {
                 );
               }
 
-              final allList = snapshot.data ?? [];
+              // ── Static demo entries ────────────────────────────────────
+              final dummyParticipants = [
+                HistoryMeetingPointParticipant(
+                  userId: 'dp1',
+                  name: 'Razan Saeedf',
+                  phone: '+966503349694',
+                ),
+                HistoryMeetingPointParticipant(
+                  userId: 'dp2',
+                  name: 'Mona Saleh',
+                  phone: '+966557225235',
+                ),
+              ];
+              final dummySent = [
+                HistoryMeetingPoint(
+                  id: 'demo_sent_1',
+                  status: 'cancelled',
+                  cancellationReason: 'All participants declined the request',
+                  venueName: 'King Khalid International Airport',
+                  hostId: 'demo_me',
+                  hostName: 'ar saeed',
+                  hostPhone: '+966334333333',
+                  isHost: true,
+                  createdAt: DateTime(2026, 3, 15, 10, 0),
+                  updatedAt: DateTime(2026, 3, 15, 10, 0),
+                  participants: dummyParticipants,
+                ),
+                HistoryMeetingPoint(
+                  id: 'demo_sent_2',
+                  status: 'cancelled',
+                  cancellationReason: 'None of participants respond',
+                  venueName: 'King Khalid International Airport',
+                  hostId: 'demo_me',
+                  hostName: 'ar saeed',
+                  hostPhone: '+966334333333',
+                  isHost: true,
+                  createdAt: DateTime(2026, 3, 14, 9, 0),
+                  updatedAt: DateTime(2026, 3, 14, 9, 0),
+                  participants: dummyParticipants,
+                ),
+                HistoryMeetingPoint(
+                  id: 'demo_sent_3',
+                  status: 'cancelled',
+                  cancellationReason:
+                      'Host (me) rejected the suggested meeting point',
+                  venueName: 'King Khalid International Airport',
+                  hostId: 'demo_me',
+                  hostName: 'ar saeed',
+                  hostPhone: '+966334333333',
+                  isHost: true,
+                  createdAt: DateTime(2026, 3, 13, 8, 0),
+                  updatedAt: DateTime(2026, 3, 13, 8, 0),
+                  participants: dummyParticipants,
+                ),
+                HistoryMeetingPoint(
+                  id: 'demo_sent_4',
+                  status: 'cancelled',
+                  cancellationReason: 'You cancelled this request',
+                  venueName: 'King Khalid International Airport',
+                  hostId: 'demo_me',
+                  hostName: 'ar saeed',
+                  hostPhone: '+966334333333',
+                  isHost: true,
+                  createdAt: DateTime(2026, 3, 12, 7, 0),
+                  updatedAt: DateTime(2026, 3, 12, 7, 0),
+                  participants: dummyParticipants,
+                ),
+              ];
+              final dummyReceived = [
+                HistoryMeetingPoint(
+                  id: 'demo_rcv_1',
+                  status: 'cancelled',
+                  cancellationReason:
+                      'Host rejected the suggested meeting point',
+                  venueName: 'King Khalid International Airport',
+                  hostId: 'demo_host',
+                  hostName: 'Sara Ahmed',
+                  hostPhone: '+966500000001',
+                  isHost: false,
+                  createdAt: DateTime(2026, 3, 11, 14, 0),
+                  updatedAt: DateTime(2026, 3, 11, 14, 0),
+                  participants: dummyParticipants,
+                ),
+                HistoryMeetingPoint(
+                  id: 'demo_rcv_2',
+                  status: 'cancelled',
+                  cancellationReason: 'Cancelled by host',
+                  venueName: 'King Khalid International Airport',
+                  hostId: 'demo_host',
+                  hostName: 'Sara Ahmed',
+                  hostPhone: '+966500000001',
+                  isHost: false,
+                  createdAt: DateTime(2026, 3, 10, 13, 0),
+                  updatedAt: DateTime(2026, 3, 10, 13, 0),
+                  participants: dummyParticipants,
+                ),
+              ];
+
+              final allList = [
+                ...(_meetingFilterIndex == 0 ? dummySent : dummyReceived),
+                ...(snapshot.data ?? []),
+              ];
               final list = _meetingFilterIndex == 0
                   ? allList.where((m) => m.isHost).toList()
                   : allList.where((m) => !m.isHost).toList();
@@ -1079,6 +1225,41 @@ class _HistoryPageState extends State<HistoryPage> {
                 _historyStatusBadge(item.status),
               ],
             ),
+            // ── Cancellation reason banner ────────────────────────────────
+            if (item.cancellationReason.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFAEEDA),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.info_outline,
+                      size: 16,
+                      color: Color(0xFF854F0A),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        item.cancellationReason,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: Color(0xFF854F0A),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
 
             // ── Venue, date, participants ────────────────────────────────
@@ -1101,6 +1282,13 @@ class _HistoryPageState extends State<HistoryPage> {
                         _labeledDetail(
                           'Venue: ',
                           item.venueName.isEmpty ? '—' : item.venueName,
+                        ),
+                        const SizedBox(height: 4),
+                        _labeledDetail(
+                          'Suggested point: ',
+                          item.suggestedPoint.isEmpty
+                              ? 'JOE & THE JUICE'
+                              : item.suggestedPoint,
                         ),
                         const SizedBox(height: 4),
                         _labeledDetail(

@@ -673,6 +673,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   bool _shouldManageDraft = false;
   bool _allowDisposeDraftSave = true;
   bool _isInitializing = false;
+  bool _isSendingInvites = false;
   String? _meetingPointId;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _meetingPointSub;
 
@@ -2712,27 +2713,12 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
             ),
           ),
 
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            Text(
-              'Prefer another way? ',
-              style: TextStyle(fontSize: 13, color: Colors.grey[600]),
-            ),
-            GestureDetector(
-              onTap: _scanWithCamera,
-              child: const Text(
-                'Scan with camera',
-                style: TextStyle(
-                  fontSize: 13.5,
-                  color: AppColors.kGreen,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
+        const SizedBox(height: 12),
+        PrimaryButton(
+          text: 'Scan With Camera',
+          icon: Icons.camera_alt_outlined,
+          onPressed: _scanWithCamera,
         ),
-
         const SizedBox(height: 12),
       ],
     );
@@ -3176,14 +3162,20 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   }
 
   Future<void> _sendInvitesAndAdvance() async {
+    if (_isSendingInvites) return;
+    setState(() => _isSendingInvites = true);
     try {
       await _sendInvites();
       if (!mounted) return;
       _initStep4();
-      setState(() => _step = 4);
+      setState(() {
+        _step = 4;
+        _isSendingInvites = false;
+      });
       unawaited(_persistDraftIfNeeded());
     } catch (e) {
       if (!mounted) return;
+      setState(() => _isSendingInvites = false);
       SnackbarHelper.showError(
         context,
         e.toString().replaceFirst('Exception: ', ''),
@@ -3522,27 +3514,10 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
     // Step 3: "Send Invites"
     if (_step == 3) {
-      return SizedBox(
-        width: double.infinity,
-        height: 52,
-        child: ElevatedButton(
-          onPressed: _sendInvitesAndAdvance,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.kGreen,
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-          child: const Text(
-            'Send Invites',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
+      return PrimaryButton(
+        text: 'Send Invites',
+        isLoading: _isSendingInvites,
+        onPressed: _sendInvitesAndAdvance,
       );
     }
 

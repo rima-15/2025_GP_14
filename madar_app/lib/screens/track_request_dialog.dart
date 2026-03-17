@@ -86,9 +86,69 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
   // GlobalKey for the overlap message container
   final GlobalKey _overlapMsgKey = GlobalKey();
 
+  bool _requestSentSuccessfully = false;
+
+  // ─── In-session state persistence ─────────────────────────────────────────
+  static bool _hasSavedState = false;
+  static List<Friend> _memFriends = [];
+  static DateTime? _memDate;
+  static TimeOfDay? _memStartTime;
+  static TimeOfDay? _memEndTime;
+  static DateTime? _memEndDate;
+  static String? _memVenue;
+  static String? _memVenueId;
+
+  void _saveStateToMemory() {
+    _hasSavedState = true;
+    _memFriends = List.from(_selectedFriends);
+    _memDate = _selectedDate;
+    _memStartTime = _startTime;
+    _memEndTime = _endTime;
+    _memEndDate = _selectedEndDate;
+    _memVenue = _selectedVenue;
+    _memVenueId = _selectedVenueId;
+  }
+
+  void _restoreStateFromMemory() {
+    if (!_hasSavedState) return;
+    _selectedFriends.addAll(_memFriends);
+    // Smart reset: only restore time if start hasn't passed yet
+    if (_memDate != null && _memStartTime != null) {
+      final savedStart = DateTime(
+        _memDate!.year,
+        _memDate!.month,
+        _memDate!.day,
+        _memStartTime!.hour,
+        _memStartTime!.minute,
+      );
+      if (savedStart.isAfter(DateTime.now())) {
+        _selectedDate = _memDate;
+        _startTime = _memStartTime;
+        _endTime = _memEndTime;
+        _selectedEndDate = _memEndDate;
+      }
+    }
+    // Restore venue (auto-detect will skip if already set)
+    _selectedVenue = _memVenue;
+    _selectedVenueId = _memVenueId;
+  }
+
+  static void _clearMemory() {
+    _hasSavedState = false;
+    _memFriends = [];
+    _memDate = null;
+    _memStartTime = null;
+    _memEndTime = null;
+    _memEndDate = null;
+    _memVenue = null;
+    _memVenueId = null;
+  }
+  // ──────────────────────────────────────────────────────────────────────────
+
   @override
   void initState() {
     super.initState();
+    _restoreStateFromMemory();
     _loadVenues();
     _getCurrentLocation();
     _preloadContacts(); // Pre-load contacts and DB status
@@ -196,6 +256,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
 
   @override
   void dispose() {
+    if (!_requestSentSuccessfully) _saveStateToMemory();
     _phoneController.dispose();
     _phoneFocusNode.dispose();
     _mainScrollController.dispose();
@@ -303,7 +364,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
       }
     }
 
-    if (nearestVenue != null) {
+    if (nearestVenue != null && _selectedVenueId == null) {
       setState(() {
         _selectedVenue = nearestVenue!.name;
         _selectedVenueId = nearestVenue.id;
@@ -1712,7 +1773,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'Press Proceed to replace the previous request (it will be canceled), or Reject to keep it.',
+                  'Press Proceed to replace the previous request (it will be cancelled), or Discard to keep it.',
                   style: TextStyle(
                     fontSize: 13,
                     color: Colors.grey[600],
@@ -1739,7 +1800,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                         ),
                       ),
                       child: const Text(
-                        'Reject',
+                        'Discard',
                         style: TextStyle(
                           color: Colors.black87,
                           fontWeight: FontWeight.w600,
@@ -2085,6 +2146,8 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
       }
 
       await writeBatch.commit();
+      _requestSentSuccessfully = true;
+      _clearMemory();
 
       if (!mounted) return;
       Navigator.pop(context);
@@ -2261,19 +2324,25 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                                 });
                               },
                               decoration: InputDecoration(
-                                hintText: 'Phone number',
+                                hintText: _isPhoneFocused
+                                    ? 'Enter 9 digits'
+                                    : 'Phone number',
                                 hintStyle: TextStyle(
                                   color: Colors.grey[400],
                                   fontWeight: FontWeight.w400,
                                 ),
-                                prefixText: _phoneController.text.isEmpty
-                                    ? null
-                                    : '+966 ',
-                                prefixStyle: TextStyle(
-                                  color: Colors.grey[600],
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w500,
-                                ),
+                                prefix:
+                                    (_isPhoneFocused ||
+                                        _phoneController.text.isNotEmpty)
+                                    ? Text(
+                                        '+966 ',
+                                        style: TextStyle(
+                                          color: Colors.grey[400],
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w400,
+                                        ),
+                                      )
+                                    : null,
                                 suffixIcon: _isPhoneFocused
                                     ? IconButton(
                                         icon: const Icon(

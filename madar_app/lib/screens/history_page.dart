@@ -94,6 +94,7 @@ class HistoryPage extends StatefulWidget {
 class _HistoryPageState extends State<HistoryPage> {
   int _mainTabIndex = 0;
   int _trackingFilterIndex = 0;
+  int _meetingFilterIndex = 0; // 0 = Sent (host), 1 = Received (participant)
   String? _highlightRequestId;
   final GlobalKey _highlightKey = GlobalKey();
   Timer? _highlightClearTimer;
@@ -865,60 +866,104 @@ class _HistoryPageState extends State<HistoryPage> {
   }
 
   Widget _buildMeetingPointTab() {
-    return StreamBuilder<List<HistoryMeetingPoint>>(
-      stream: _meetingPointHistoryStream,
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return Center(
-            child: Text(
-              'Couldn\'t load meeting points history.',
-              style: TextStyle(
-                fontSize: 15,
-                color: Colors.grey[600],
-                fontWeight: FontWeight.w500,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 16),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _buildMeetingFilterPills(),
+        ),
+        const SizedBox(height: 16),
+        Expanded(
+          child: StreamBuilder<List<HistoryMeetingPoint>>(
+            stream: _meetingPointHistoryStream,
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return Center(
+                  child: Text(
+                    'Couldn\'t load meeting points history.',
+                    style: TextStyle(
+                      fontSize: 15,
+                      color: Colors.grey[600],
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                );
+              }
+              if (snapshot.connectionState == ConnectionState.waiting &&
+                  !snapshot.hasData) {
+                return const Center(
+                  child: CircularProgressIndicator(color: AppColors.kGreen),
+                );
+              }
+
+              final allList = snapshot.data ?? [];
+              final list = _meetingFilterIndex == 0
+                  ? allList.where((m) => m.isHost).toList()
+                  : allList.where((m) => !m.isHost).toList();
+
+              if (list.isEmpty) {
+                return Center(
+                  child: Text(
+                    'No past meeting points',
+                    style: TextStyle(
+                      fontSize: 15,
+                      color: Colors.grey[600],
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                );
+              }
+
+              return ListView.separated(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                itemCount: list.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 12),
+                itemBuilder: (context, index) =>
+                    _buildMeetingPointTile(list[index]),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMeetingFilterPills() {
+    const filters = ['Sent', 'Received'];
+    return Container(
+      height: 40,
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        borderRadius: BorderRadius.circular(20),
+      ),
+      padding: const EdgeInsets.all(4),
+      child: Row(
+        children: List.generate(filters.length, (i) {
+          final isSelected = _meetingFilterIndex == i;
+          return Expanded(
+            child: GestureDetector(
+              onTap: () => setState(() => _meetingFilterIndex = i),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: isSelected ? AppColors.kGreen : Colors.transparent,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  filters[i],
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: isSelected ? Colors.white : Colors.grey[600],
+                  ),
+                ),
               ),
             ),
           );
-        }
-        if (snapshot.connectionState == ConnectionState.waiting &&
-            !snapshot.hasData) {
-          return const Center(
-            child: CircularProgressIndicator(color: AppColors.kGreen),
-          );
-        }
-        final dummy = HistoryMeetingPoint(
-          id: 'dummy_solitaire',
-          status: 'completed',
-          venueName: 'Solitaire',
-          hostId: 'dummy_host',
-          hostName: 'Sara Ahmed',
-          hostPhone: '+966 50 000 0001',
-          isHost: false,
-          createdAt: DateTime(2026, 3, 10, 14, 30),
-          updatedAt: DateTime(2026, 3, 10, 16, 0),
-          participants: [
-            HistoryMeetingPointParticipant(
-              userId: 'dummy_host',
-              name: 'Sara Ahmed',
-              phone: '+966 50 000 0001',
-            ),
-            HistoryMeetingPointParticipant(
-              userId: 'dummy_p2',
-              name: 'Khalid Omar',
-              phone: '+966 55 000 0002',
-            ),
-          ],
-        );
-
-        final list = [dummy, ...snapshot.data ?? []];
-
-        return ListView.separated(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-          itemCount: list.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 12),
-          itemBuilder: (context, index) => _buildMeetingPointTile(list[index]),
-        );
-      },
+        }),
+      ),
     );
   }
 
@@ -926,18 +971,10 @@ class _HistoryPageState extends State<HistoryPage> {
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
     final isExpanded = _expandedCards.contains(item.id);
 
-    // Build ordered list: host first, then current user (if not host), then others
-    final allParticipants = <HistoryMeetingPointParticipant>[];
+    // Participants list: exclude host (already shown in header)
+    // Current user first, then others
+    final nonHostParticipants = <HistoryMeetingPointParticipant>[];
 
-    // Host entry (synthesised from top-level fields)
-    final hostEntry = HistoryMeetingPointParticipant(
-      userId: item.hostId,
-      name: item.hostName,
-      phone: item.hostPhone,
-    );
-    allParticipants.add(hostEntry);
-
-    // Current user (if not host)
     HistoryMeetingPointParticipant? currentUserEntry;
     for (final p in item.participants) {
       if (p.userId == uid && p.userId != item.hostId) {
@@ -945,17 +982,16 @@ class _HistoryPageState extends State<HistoryPage> {
         break;
       }
     }
-    if (currentUserEntry != null) allParticipants.add(currentUserEntry);
+    if (currentUserEntry != null) nonHostParticipants.add(currentUserEntry);
 
-    // Remaining participants (not host, not current user)
     for (final p in item.participants) {
       if (p.userId != item.hostId && p.userId != uid) {
-        allParticipants.add(p);
+        nonHostParticipants.add(p);
       }
     }
 
     const initialVisible = 3;
-    final total = allParticipants.length;
+    final total = nonHostParticipants.length;
     final shownCount = isExpanded ? total : min(initialVisible, total);
     final othersCount = total - shownCount;
 
@@ -966,23 +1002,19 @@ class _HistoryPageState extends State<HistoryPage> {
         border: Border.all(color: Colors.grey.shade200),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 10,
             offset: const Offset(0, 3),
           ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ── Dark header ──────────────────────────────────────────────────
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-            ),
-            child: Row(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Header: host person icon + name + Host(me)/Host + status ──
+            Row(
               children: [
                 Container(
                   width: 44,
@@ -991,29 +1023,55 @@ class _HistoryPageState extends State<HistoryPage> {
                     color: Colors.grey[200],
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(
-                    Icons.location_on,
-                    color: Color.fromRGBO(117, 117, 117, 1),
-                    size: 22,
-                  ),
+                  child: Icon(Icons.person, color: Colors.grey[600], size: 22),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        item.venueName.isEmpty ? 'Meeting Point' : item.venueName,
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.black,
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              item.hostName.isEmpty ? 'Unknown' : item.hostName,
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.black87,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.grey[200],
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              item.isHost ? 'Host (me)' : 'Host',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.grey[700],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (item.hostPhone.isNotEmpty)
+                        Text(
+                          item.hostPhone,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey[600],
+                          ),
                         ),
-                      ),
-                      Text(
-                        _formatDateTime(item.createdAt),
-                        style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                      ),
                     ],
                   ),
                 ),
@@ -1021,87 +1079,90 @@ class _HistoryPageState extends State<HistoryPage> {
                 _historyStatusBadge(item.status),
               ],
             ),
-          ),
+            const SizedBox(height: 12),
 
-          // ── Participants section ─────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Participants:',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: Colors.grey[600],
-                    fontWeight: FontWeight.w500,
+            // ── Venue, date, participants ────────────────────────────────
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 3,
+                    decoration: BoxDecoration(
+                      color: AppColors.kGreen,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 8),
-                IntrinsicHeight(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        width: 3,
-                        decoration: BoxDecoration(
-                          color: AppColors.kGreen,
-                          borderRadius: BorderRadius.circular(2),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _labeledDetail(
+                          'Venue: ',
+                          item.venueName.isEmpty ? '—' : item.venueName,
                         ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            ...allParticipants
-                                .take(shownCount)
-                                .map(
-                                  (p) => _buildParticipantRow(
-                                    p,
-                                    isHost: p.userId == item.hostId,
-                                  ),
-                                ),
-                            if (othersCount > 0 || isExpanded)
-                              GestureDetector(
-                                onTap: () => setState(() {
-                                  if (isExpanded) {
-                                    _expandedCards.remove(item.id);
-                                  } else {
-                                    _expandedCards.add(item.id);
-                                  }
-                                }),
-                                child: Padding(
-                                  padding: const EdgeInsets.only(top: 10),
-                                  child: Text(
-                                    isExpanded
-                                        ? 'Show less'
-                                        : '+ $othersCount others participants',
-                                    style: const TextStyle(
-                                      fontSize: 13,
-                                      color: AppColors.kGreen,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
+                        const SizedBox(height: 4),
+                        _labeledDetail(
+                          'Date: ',
+                          _formatDateTime(item.createdAt),
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          'Participants:',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey[600],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        ...nonHostParticipants
+                            .take(shownCount)
+                            .map(
+                              (p) => _buildParticipantRow(
+                                p,
+                                isCurrentUser: p.userId == uid,
+                              ),
+                            ),
+                        if (othersCount > 0 || isExpanded)
+                          GestureDetector(
+                            onTap: () => setState(() {
+                              if (isExpanded) {
+                                _expandedCards.remove(item.id);
+                              } else {
+                                _expandedCards.add(item.id);
+                              }
+                            }),
+                            child: Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Text(
+                                isExpanded
+                                    ? 'Show less'
+                                    : '+ $othersCount others participants',
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  color: AppColors.kGreen,
+                                  fontWeight: FontWeight.w500,
                                 ),
                               ),
-                          ],
-                        ),
-                      ),
-                    ],
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildParticipantRow(
     HistoryMeetingPointParticipant p, {
-    required bool isHost,
+    bool isCurrentUser = false,
   }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -1144,7 +1205,7 @@ class _HistoryPageState extends State<HistoryPage> {
                 ],
               ),
             ),
-            if (isHost)
+            if (isCurrentUser)
               Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 10,
@@ -1155,7 +1216,7 @@ class _HistoryPageState extends State<HistoryPage> {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  'Host',
+                  'Me',
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,

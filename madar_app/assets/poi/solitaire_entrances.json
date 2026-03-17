@@ -66,6 +66,62 @@
     "id": "1"
   },
   {
+    "poiMaterial": "POIMAT_Bathroom_Female_GF_1.001",
+    "name": "Female",
+    "category": "bathrooms",
+    "type": "bathroom_female",
+    "gender": "female",
+    "floor": "GF",
+    "pos": {
+      "x": 0.1352396011352539,
+      "y": -0.04238945245742798,
+      "z": -0.0011959988623857498
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Bathroom_Male_GF_1.001",
+    "name": "Male",
+    "category": "bathrooms",
+    "type": "bathroom_male",
+    "gender": "male",
+    "floor": "GF",
+    "pos": {
+      "x": 0.1352396011352539,
+      "y": 0.895154595375061,
+      "z": -0.0011959988623857498
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Bathroom_Shared_GF_1.003",
+    "name": "Bathroom",
+    "category": "bathrooms",
+    "type": "bathroom_shared",
+    "gender": "shared",
+    "floor": "GF",
+    "pos": {
+      "x": 1.2388864755630493,
+      "y": -0.7121130228042603,
+      "z": 0.0012776274234056473
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Bathroom_Shared_GF_2.001",
+    "name": "Bathroom",
+    "category": "bathrooms",
+    "type": "bathroom_shared",
+    "gender": "shared",
+    "floor": "GF",
+    "pos": {
+      "x": -1.0144563913345337,
+      "y": 0.9037410020828247,
+      "z": -0.0011959988623857498
+    },
+    "id": "1"
+  },
+  {
     "poiMaterial": "POIMAT_Bottega Veneta.003",
     "floor": "GF",
     "category": "shops",
@@ -638,6 +694,20 @@
     "id": "1"
   },
   {
+    "poiMaterial": "POIMAT_Prayer Room_Shared_GF_1.002",
+    "name": "Prayer Room",
+    "category": "prayer_rooms",
+    "type": "prayer_shared",
+    "gender": "shared",
+    "floor": "GF",
+    "pos": {
+      "x": 1.2338753938674927,
+      "y": -1.130873680114746,
+      "z": 0.0012776274234056473
+    },
+    "id": "1"
+  },
+  {
     "poiMaterial": "POIMAT_PRADA.001",
     "floor": "GF",
     "category": "shops",
@@ -1084,6 +1154,48 @@
     "pos": {
       "x": -0.8530569672584534,
       "y": -0.6635606288909912,
+      "z": 0.002722490346059203
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Bathroom_Female_F1_1.001",
+    "name": "Female",
+    "category": "bathrooms",
+    "type": "bathroom_female",
+    "gender": "female",
+    "floor": "F1",
+    "pos": {
+      "x": 0.07538086175918579,
+      "y": -0.5608121752738953,
+      "z": 0.0009530449751764536
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Bathroom_Male_F1_1.001",
+    "name": "Male",
+    "category": "bathrooms",
+    "type": "bathroom_male",
+    "gender": "male",
+    "floor": "F1",
+    "pos": {
+      "x": 0.07538086175918579,
+      "y": 0.3171692490577698,
+      "z": 0.0009530449751764536
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Bathroom_Shared_F1_1.001",
+    "name": "Bathroom",
+    "category": "bathrooms",
+    "type": "bathroom_shared",
+    "gender": "shared",
+    "floor": "F1",
+    "pos": {
+      "x": -1.0727587938308716,
+      "y": 0.31129196286201477,
       "z": 0.002722490346059203
     },
     "id": "1"

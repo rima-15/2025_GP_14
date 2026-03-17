@@ -17,6 +17,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:madar_app/nav/navmesh.dart';
 import 'navigation_flow_complete.dart';
 import 'package:madar_app/screens/AR_page.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 class PathOverviewScreen
     extends StatefulWidget {
@@ -96,6 +97,8 @@ class _PathOverviewScreenState
   Map<String, dynamic>? _customStartPoi;
   Map<String, dynamic>?
   _selectedDestPoi;
+  List<Map<String, dynamic>>
+  _activeRequests = [];
 
   String _toFNumber(String? raw) {
     if (raw == null) return '';
@@ -277,6 +280,60 @@ class _PathOverviewScreenState
     );
     name = name.replaceAll('_', ' ');
     return name.trim();
+  }
+
+  String _displayNameFromEntrance(
+    Map<String, dynamic> entry,
+    String fallbackKey,
+  ) {
+    final material =
+        (entry['material'] ?? '')
+            .toString()
+            .trim();
+    final category =
+        (entry['category'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
+    final type = (entry['type'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    final rawName =
+        (entry['name'] ?? '')
+            .toString()
+            .trim();
+
+    // Bathrooms
+    if (category == 'bathrooms' ||
+        type.startsWith('bathroom_')) {
+      if (type == 'bathroom_female')
+        return 'Female Bathroom';
+      if (type == 'bathroom_male')
+        return 'Male Bathroom';
+      if (type == 'bathroom_shared')
+        return 'Bathroom';
+    }
+
+    // Prayer rooms
+    if (category == 'prayer_rooms' ||
+        type.startsWith('prayer_')) {
+      if (type == 'prayer_shared')
+        return 'Prayer Room';
+      if (type == 'prayer_female')
+        return 'Female Prayer Room';
+      if (type == 'prayer_male')
+        return 'Male Prayer Room';
+    }
+
+    if (rawName.isNotEmpty)
+      return rawName;
+
+    return _cleanPoiName(
+      material.isNotEmpty
+          ? material
+          : fallbackKey,
+    );
   }
 
   bool
@@ -1076,6 +1133,16 @@ class _PathOverviewScreenState
                   'id': item['id']
                       ?.toString(),
                   'material': material,
+                  'name': item['name']
+                      ?.toString(),
+                  'category':
+                      item['category']
+                          ?.toString(),
+                  'type': item['type']
+                      ?.toString(),
+                  'gender':
+                      item['gender']
+                          ?.toString(),
                 });
           }
         }
@@ -1093,25 +1160,308 @@ class _PathOverviewScreenState
     }
   }
 
+  Map<String, dynamic>?
+  _findServiceDestinationOption(
+    String shopId,
+  ) {
+    final all =
+        _getAllPoisFromEntrances();
+
+    if (shopId ==
+        'service_bathroom_female') {
+      return all
+          .cast<Map<String, dynamic>?>()
+          .firstWhere(
+            (e) =>
+                e?['name'] ==
+                'Female Bathroom',
+            orElse: () => null,
+          );
+    }
+
+    if (shopId ==
+        'service_bathroom_male') {
+      return all
+          .cast<Map<String, dynamic>?>()
+          .firstWhere(
+            (e) =>
+                e?['name'] ==
+                'Male Bathroom',
+            orElse: () => null,
+          );
+    }
+
+    if (shopId ==
+        'service_prayer_room') {
+      return all
+          .cast<Map<String, dynamic>?>()
+          .firstWhere(
+            (e) =>
+                e?['name'] ==
+                'Prayer Room',
+            orElse: () => null,
+          );
+    }
+
+    return null;
+  }
+
+  Future<void>
+  _loadActiveRequests() async {
+    final uid = FirebaseAuth
+        .instance
+        .currentUser
+        ?.uid;
+    if (uid == null) return;
+
+    try {
+      final now = DateTime.now();
+      final querySnapshot =
+          await FirebaseFirestore
+              .instance
+              .collection(
+                'trackRequests',
+              )
+              .where(
+                'senderId',
+                isEqualTo: uid,
+              )
+              .where(
+                'status',
+                isEqualTo: 'accepted',
+              )
+              .get();
+
+      final List<Map<String, dynamic>>
+      active = [];
+
+      for (final doc
+          in querySnapshot.docs) {
+        final data = doc.data();
+        final startAt =
+            (data['startAt']
+                    as Timestamp?)
+                ?.toDate();
+        final endAt =
+            (data['endAt']
+                    as Timestamp?)
+                ?.toDate();
+
+        // Skip if time window is missing or not currently active
+        if (startAt == null ||
+            endAt == null)
+          continue;
+        if (now.isBefore(startAt) ||
+            now.isAfter(endAt))
+          continue;
+
+        final receiverId =
+            data['receiverId']
+                as String?;
+        if (receiverId == null ||
+            receiverId.isEmpty)
+          continue;
+
+        // Fetch receiver's user document to get name and location
+        final userDoc =
+            await FirebaseFirestore
+                .instance
+                .collection('users')
+                .doc(receiverId)
+                .get();
+
+        if (!userDoc.exists) continue;
+        final userData = userDoc.data();
+        if (userData == null) continue;
+
+        // Compose name
+        final firstName =
+            userData['firstName']
+                ?.toString()
+                .trim() ??
+            '';
+        final lastName =
+            userData['lastName']
+                ?.toString()
+                .trim() ??
+            '';
+        final fullName =
+            (firstName.isNotEmpty ||
+                lastName.isNotEmpty)
+            ? '$firstName $lastName'
+                  .trim()
+            : (userData['name']
+                      ?.toString() ??
+                  userData['fullName']
+                      ?.toString() ??
+                  userData['email']
+                      ?.toString() ??
+                  'Unknown');
+
+        // Get blenderPosition
+        final location =
+            userData['location']
+                as Map?;
+        if (location == null) continue;
+        final blender =
+            location['blenderPosition']
+                as Map?;
+        if (blender == null) continue;
+
+        final x = (blender['x'] as num?)
+            ?.toDouble();
+        final y = (blender['y'] as num?)
+            ?.toDouble();
+        final z = (blender['z'] as num?)
+            ?.toDouble();
+        final floor =
+            (blender['floor'] ?? '')
+                .toString()
+                .trim();
+
+        if (x == null ||
+            y == null ||
+            z == null ||
+            floor.isEmpty)
+          continue;
+
+        active.add({
+          'name': fullName,
+          'floor': floor,
+          'x': x,
+          'y': y,
+          'z': z,
+        });
+      }
+
+      if (mounted) {
+        setState(() {
+          _activeRequests = active;
+        });
+        debugPrint(
+          '✅ Active requests loaded: ${active.length}',
+        );
+      }
+    } catch (e) {
+      debugPrint(
+        'Error loading active requests: $e',
+      );
+    }
+  }
+
   List<Map<String, dynamic>>
   _getAllPoisFromEntrances() {
     final result =
         <Map<String, dynamic>>[];
+
+    final femaleBathrooms =
+        <Map<String, dynamic>>[];
+    final maleBathrooms =
+        <Map<String, dynamic>>[];
+
+    final prayerRooms =
+        <Map<String, dynamic>>[];
+
     _entrancesByPoi.forEach((
       normKey,
       entrances,
     ) {
       if (entrances.isEmpty) return;
+
       final first = entrances.first;
       final material =
-          first['material']
-              as String? ??
-          '';
-      final displayName = _cleanPoiName(
-        material.isNotEmpty
-            ? material
-            : normKey,
-      );
+          (first['material'] ?? '')
+              .toString();
+      final category =
+          (first['category'] ?? '')
+              .toString()
+              .toLowerCase();
+      final serviceType =
+          (first['type'] ?? '')
+              .toString()
+              .toLowerCase();
+
+      final isBathroom =
+          category == 'bathrooms' ||
+          serviceType.startsWith(
+            'bathroom_',
+          );
+      final isPrayer =
+          category == 'prayer_rooms' ||
+          serviceType.startsWith(
+            'prayer_',
+          );
+
+      if (isBathroom) {
+        if (serviceType ==
+            'bathroom_female') {
+          femaleBathrooms.addAll(
+            entrances.map(
+              (e) => {
+                ...Map<
+                  String,
+                  dynamic
+                >.from(e),
+                'material': material,
+              },
+            ),
+          );
+        } else if (serviceType ==
+            'bathroom_male') {
+          maleBathrooms.addAll(
+            entrances.map(
+              (e) => {
+                ...Map<
+                  String,
+                  dynamic
+                >.from(e),
+                'material': material,
+              },
+            ),
+          );
+        } else if (serviceType ==
+            'bathroom_shared') {
+          final sharedEntries =
+              entrances.map(
+                (e) => {
+                  ...Map<
+                    String,
+                    dynamic
+                  >.from(e),
+                  'material': material,
+                },
+              );
+          femaleBathrooms.addAll(
+            sharedEntries,
+          );
+          maleBathrooms.addAll(
+            sharedEntries,
+          );
+        }
+        return;
+      }
+
+      if (isPrayer) {
+        prayerRooms.addAll(
+          entrances.map(
+            (e) => {
+              ...Map<
+                String,
+                dynamic
+              >.from(e),
+              'material': material,
+            },
+          ),
+        );
+        return;
+      }
+
+      final displayName =
+          _displayNameFromEntrance(
+            first,
+            normKey,
+          );
+
       result.add({
         'name': displayName,
         'type': 'poi',
@@ -1120,14 +1470,163 @@ class _PathOverviewScreenState
         'y': first['y'],
         'z': first['z'],
         'material': material,
+        'category': first['category'],
+        'serviceType': first['type'],
+        'gender': first['gender'],
       });
     });
+
+    if (femaleBathrooms.isNotEmpty) {
+      final best =
+          _pickClosestEntryToCurrentStart(
+            femaleBathrooms,
+          );
+      result.add({
+        'name': 'Female Bathroom',
+        'type': 'poi',
+        'floor': best['floor'] ?? '',
+        'x': best['x'],
+        'y': best['y'],
+        'z': best['z'],
+        'material': best['material'],
+        'category': 'bathrooms',
+        'serviceType':
+            'bathroom_female_or_shared',
+        'gender': 'female',
+      });
+    }
+
+    if (maleBathrooms.isNotEmpty) {
+      final best =
+          _pickClosestEntryToCurrentStart(
+            maleBathrooms,
+          );
+      result.add({
+        'name': 'Male Bathroom',
+        'type': 'poi',
+        'floor': best['floor'] ?? '',
+        'x': best['x'],
+        'y': best['y'],
+        'z': best['z'],
+        'material': best['material'],
+        'category': 'bathrooms',
+        'serviceType':
+            'bathroom_male_or_shared',
+        'gender': 'male',
+      });
+    }
+
+    if (prayerRooms.isNotEmpty) {
+      final best =
+          _pickClosestEntryToCurrentStart(
+            prayerRooms,
+          );
+      result.add({
+        'name': 'Prayer Room',
+        'type': 'poi',
+        'floor': best['floor'] ?? '',
+        'x': best['x'],
+        'y': best['y'],
+        'z': best['z'],
+        'material': best['material'],
+        'category': 'prayer_rooms',
+        'serviceType': 'prayer_shared',
+        'gender': 'shared',
+      });
+    }
+
     result.sort(
-      (a, b) => a['name'].compareTo(
-        b['name'],
-      ),
+      (a, b) => a['name']
+          .toString()
+          .compareTo(
+            b['name'].toString(),
+          ),
     );
     return result;
+  }
+
+  Map<String, dynamic>
+  _pickClosestEntryToCurrentStart(
+    List<Map<String, dynamic>> entries,
+  ) {
+    if (entries.isEmpty) return {};
+
+    final start =
+        _customStartPoi ??
+        {
+          'x': _userPosBlender?['x'],
+          'y': _userPosBlender?['y'],
+          'z': _userPosBlender?['z'],
+          'floor':
+              _desiredStartFloorLabel,
+        };
+
+    final startFloor = _toFNumber(
+      (start['floor'] ?? '').toString(),
+    );
+
+    List<Map<String, dynamic>>
+    candidates = entries;
+    if (startFloor != null) {
+      final sameFloor = entries.where((
+        e,
+      ) {
+        return _toFNumber(
+              (e['floor'] ?? '')
+                  .toString(),
+            ) ==
+            startFloor;
+      }).toList();
+
+      if (sameFloor.isNotEmpty) {
+        candidates = sameFloor;
+      }
+    }
+
+    Map<String, dynamic> best =
+        candidates.first;
+    double bestDistSq = double.infinity;
+
+    final sx =
+        (start['x'] as num?)
+            ?.toDouble() ??
+        0.0;
+    final sy =
+        (start['y'] as num?)
+            ?.toDouble() ??
+        0.0;
+    final sz =
+        (start['z'] as num?)
+            ?.toDouble() ??
+        0.0;
+
+    for (final e in candidates) {
+      final ex =
+          (e['x'] as num?)
+              ?.toDouble() ??
+          0.0;
+      final ey =
+          (e['y'] as num?)
+              ?.toDouble() ??
+          0.0;
+      final ez =
+          (e['z'] as num?)
+              ?.toDouble() ??
+          0.0;
+
+      final dx = ex - sx;
+      final dy = ey - sy;
+      final dz = ez - sz;
+      final distSq =
+          dx * dx + dy * dy + dz * dz;
+
+      if (distSq < bestDistSq) {
+        bestDistSq = distSq;
+        best = e;
+      }
+    }
+
+    return best;
   }
 
   // --- Resolve destination using entrances only ---
@@ -2672,6 +3171,7 @@ const timer = setInterval(function() {
     try {
       await _loadVenueMaps();
       await _loadEntrances();
+      await _loadActiveRequests();
       await _resolveDestinationFromEntrances();
 
       await _loadUserBlenderPosition();
@@ -2689,6 +3189,17 @@ const timer = setInterval(function() {
               _pendingPoiToHighlight ??
               '',
         };
+      }
+
+      final serviceDest =
+          _findServiceDestinationOption(
+            widget.shopId,
+          );
+      if (serviceDest != null) {
+        _selectedDestPoi = serviceDest;
+        _pendingPoiToHighlight =
+            serviceDest['material']
+                ?.toString();
       }
 
       final target =
@@ -3441,6 +3952,23 @@ const timer = setInterval(function() {
     final allPois =
         _getAllPoisFromEntrances();
 
+    // Determine the currently selected start point (if any)
+    Map<String, dynamic>?
+    currentStartPoi;
+    if (_usePinAsStart &&
+        _userPosBlender != null) {
+      currentStartPoi = {
+        'name': 'Your location',
+        'floor': _originFloorLabel,
+        'x': _userPosBlender!['x'],
+        'y': _userPosBlender!['y'],
+        'z': _userPosBlender!['z'],
+      };
+    } else if (_customStartPoi !=
+        null) {
+      currentStartPoi = _customStartPoi;
+    }
+
     final result =
         await showModalBottomSheet<
           Map<String, dynamic>
@@ -3455,6 +3983,8 @@ const timer = setInterval(function() {
                 title:
                     'Select start point',
                 showPinPlacement: true,
+                selectedPoi:
+                    currentStartPoi, // ← pass current selection
               ),
         );
 
@@ -3481,8 +4011,7 @@ const timer = setInterval(function() {
               destinationFloorLabel: widget
                   .destinationFloorLabel,
               returnResultOnly: true,
-              flowType:
-                  'start', // ← add this
+              flowType: 'start',
             ),
           );
 
@@ -3532,6 +4061,7 @@ const timer = setInterval(function() {
       return;
     }
 
+    // Normal POI selection
     setState(() {
       _usePinAsStart = false;
       _customStartPoi = result;
@@ -3592,8 +4122,11 @@ const timer = setInterval(function() {
                 pois: allPois,
                 title:
                     'Select destination',
-                showPinPlacement:
-                    true, // <-- enable pin placement
+                showPinPlacement: true,
+                activeRequests:
+                    _activeRequests,
+                selectedPoi:
+                    _selectedDestPoi,
               ),
         );
 
@@ -3621,8 +4154,7 @@ const timer = setInterval(function() {
               destinationFloorLabel: widget
                   .destinationFloorLabel,
               returnResultOnly: true,
-              flowType:
-                  'destination', // ← important
+              flowType: 'destination',
             ),
           );
 
@@ -3637,8 +4169,7 @@ const timer = setInterval(function() {
 
         setState(() {
           _selectedDestPoi = {
-            'name':
-                'Selected location', // or "Pin on map"
+            'name': 'Selected location',
             'type': 'poi',
             'floor': displayFloor,
             'x':
@@ -3647,8 +4178,7 @@ const timer = setInterval(function() {
                 pinResult['blender']['y'],
             'z':
                 pinResult['blender']['z'],
-            'material':
-                null, // no POI material
+            'material': null,
           };
           _destFloorLabel =
               displayFloor;
@@ -3660,13 +4190,11 @@ const timer = setInterval(function() {
             'z':
                 pinResult['blender']['z'],
           };
-          _pendingPoiToHighlight =
-              null; // clear any POI highlight
+          _pendingPoiToHighlight = null;
           _destFloorLabelFixed = null;
           _destFNumberFixed = null;
           _selectedPreference = 'any';
-          _destEntrances =
-              null; // pin has no entrances
+          _destEntrances = null;
         });
 
         _routeComputed = false;
@@ -3681,43 +4209,83 @@ const timer = setInterval(function() {
       }
       return;
     }
+    // --- Handle active request ---
+    else if (result['type'] ==
+        'active_request') {
+      setState(() {
+        _selectedDestPoi = {
+          'name': result['name'],
+          'type': 'poi',
+          'floor': result['floor'],
+          'x': result['x'],
+          'y': result['y'],
+          'z': result['z'],
+          'material': null,
+        };
+        _destFloorLabel =
+            result['floor'];
+        _destPosBlender = {
+          'x': result['x'],
+          'y': result['y'],
+          'z': result['z'],
+        };
+        _pendingPoiToHighlight = null;
+        _destFloorLabelFixed = null;
+        _destFNumberFixed = null;
+        _selectedPreference = 'any';
+        _destEntrances = null;
+      });
 
-    // --- Normal POI selection ---
-    setState(() {
-      _selectedDestPoi = result;
-      _destFloorLabel = result['floor'];
-      _destPosBlender = {
-        'x': result['x'],
-        'y': result['y'],
-        'z': result['z'],
-      };
-      _pendingPoiToHighlight =
-          result['material'];
-      _destFloorLabelFixed = null;
-      _destFNumberFixed = null;
-      _selectedPreference = 'any';
-    });
-
-    final normName = _normPoiKey(
-      result['material'],
-    );
-    if (_entrancesByPoi.containsKey(
-      normName,
-    )) {
-      _destEntrances =
-          _entrancesByPoi[normName]!;
-    } else {
-      _destEntrances = null;
+      _routeComputed = false;
+      _pathPointsByFloorGltf.clear();
+      _maybeComputeAndPushPath();
+      if (_originFloorLabelFixed ==
+          _destFloorLabel) {
+        _ensureFloorSelected(
+          _destFloorLabel!,
+        );
+      }
+      return;
     }
+    // --- Normal POI selection ---
+    else {
+      setState(() {
+        _selectedDestPoi = result;
+        _destFloorLabel =
+            result['floor'];
+        _destPosBlender = {
+          'x': result['x'],
+          'y': result['y'],
+          'z': result['z'],
+        };
+        _pendingPoiToHighlight =
+            result['material'];
+        _destFloorLabelFixed = null;
+        _destFNumberFixed = null;
+        _selectedPreference = 'any';
+      });
 
-    _routeComputed = false;
-    _pathPointsByFloorGltf.clear();
-    _maybeComputeAndPushPath();
-    if (_originFloorLabelFixed ==
-        _destFloorLabel) {
-      _ensureFloorSelected(
-        _destFloorLabel!,
+      final normName = _normPoiKey(
+        result['material'],
       );
+      if (_entrancesByPoi.containsKey(
+        normName,
+      )) {
+        _destEntrances =
+            _entrancesByPoi[normName]!;
+      } else {
+        _destEntrances = null;
+      }
+
+      _routeComputed = false;
+      _pathPointsByFloorGltf.clear();
+      _maybeComputeAndPushPath();
+      if (_originFloorLabelFixed ==
+          _destFloorLabel) {
+        _ensureFloorSelected(
+          _destFloorLabel!,
+        );
+      }
     }
   }
 
@@ -4434,10 +5002,17 @@ class _PoiPickerSheet
   final List<Map<String, dynamic>> pois;
   final String title;
   final bool showPinPlacement;
+  final List<Map<String, dynamic>>
+  activeRequests;
+  final Map<String, dynamic>?
+  selectedPoi;
+
   const _PoiPickerSheet({
     required this.pois,
     required this.title,
     this.showPinPlacement = true,
+    this.activeRequests = const [],
+    this.selectedPoi,
   });
 
   @override
@@ -4482,6 +5057,27 @@ class __PoiPickerSheetState
     super.dispose();
   }
 
+  bool _isSelected(
+    Map<String, dynamic> item,
+  ) {
+    final selected = widget.selectedPoi;
+    if (selected == null) return false;
+
+    final itemName =
+        (item['name'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
+    final selectedName =
+        (selected['name'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
+
+    return itemName.isNotEmpty &&
+        itemName == selectedName;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -4497,201 +5093,333 @@ class __PoiPickerSheetState
           topRight: Radius.circular(24),
         ),
       ),
-      child: Column(
-        children: [
-          Container(
-            padding:
-                const EdgeInsets.all(
-                  20,
+      child: CustomScrollView(
+        slivers: [
+          // Fixed header section
+          SliverToBoxAdapter(
+            child: Column(
+              children: [
+                const SizedBox(
+                  height: 20,
                 ),
-            child: Text(
-              widget.title,
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight:
-                    FontWeight.w600,
-                color: Colors.black87,
-              ),
-            ),
-          ),
-          Padding(
-            padding:
-                const EdgeInsets.symmetric(
-                  horizontal: 20,
-                ),
-            child: TextField(
-              controller:
-                  _searchController,
-              decoration: InputDecoration(
-                hintText: 'Search',
-                hintStyle: TextStyle(
-                  color:
-                      Colors.grey[400],
-                ),
-                prefixIcon: Icon(
-                  Icons.search,
-                  color: Colors
-                      .grey
-                      .shade600,
-                ),
-                filled: true,
-                fillColor: Colors.white,
-                border: OutlineInputBorder(
-                  borderRadius:
-                      BorderRadius.circular(
-                        12,
+                Text(
+                  widget.title,
+                  style:
+                      const TextStyle(
+                        fontSize: 18,
+                        fontWeight:
+                            FontWeight
+                                .w600,
+                        color: Colors
+                            .black87,
                       ),
-                  borderSide:
-                      BorderSide(
+                ),
+                const SizedBox(
+                  height: 16,
+                ),
+                Padding(
+                  padding:
+                      const EdgeInsets.symmetric(
+                        horizontal: 20,
+                      ),
+                  child: TextField(
+                    controller:
+                        _searchController,
+                    decoration: InputDecoration(
+                      hintText:
+                          'Search',
+                      hintStyle: TextStyle(
+                        color: Colors
+                            .grey[400],
+                      ),
+                      prefixIcon: Icon(
+                        Icons.search,
                         color: Colors
                             .grey
-                            .shade300,
+                            .shade600,
                       ),
-                ),
-                enabledBorder:
-                    OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.circular(
-                            12,
-                          ),
-                      borderSide:
-                          BorderSide(
-                            color: Colors
-                                .grey
-                                .shade300,
+                      filled: true,
+                      fillColor:
+                          Colors.white,
+                      border: OutlineInputBorder(
+                        borderRadius:
+                            BorderRadius.circular(
+                              12,
+                            ),
+                        borderSide: BorderSide(
+                          color: Colors
+                              .grey
+                              .shade300,
+                        ),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius:
+                            BorderRadius.circular(
+                              12,
+                            ),
+                        borderSide: BorderSide(
+                          color: Colors
+                              .grey
+                              .shade300,
+                        ),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius:
+                            BorderRadius.circular(
+                              12,
+                            ),
+                        borderSide: BorderSide(
+                          color: Colors
+                              .grey
+                              .shade300,
+                        ),
+                      ),
+                      contentPadding:
+                          const EdgeInsets.symmetric(
+                            horizontal:
+                                16,
+                            vertical:
+                                12,
                           ),
                     ),
-                focusedBorder:
-                    OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.circular(
-                            12,
-                          ),
-                      borderSide:
-                          BorderSide(
-                            color: Colors
-                                .grey
-                                .shade300,
-                          ),
-                    ),
-                contentPadding:
-                    const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-              ),
-              cursorColor:
-                  AppColors.kGreen,
-            ),
-          ),
-          if (widget
-              .showPinPlacement) ...[
-            const SizedBox(height: 8),
-            Padding(
-              padding:
-                  const EdgeInsets.symmetric(
-                    horizontal: 20,
+                    cursorColor:
+                        AppColors
+                            .kGreen,
                   ),
-              child: Material(
-                color:
-                    Colors.transparent,
-                child: InkWell(
-                  onTap: () =>
-                      Navigator.pop(
-                        context,
-                        {
-                          'type':
-                              'pin_placement',
-                        },
-                      ),
-                  borderRadius:
-                      BorderRadius.circular(
-                        12,
-                      ),
-                  child: Container(
+                ),
+                if (widget
+                    .showPinPlacement) ...[
+                  const SizedBox(
+                    height: 8,
+                  ),
+                  Padding(
                     padding:
                         const EdgeInsets.symmetric(
-                          vertical: 12,
                           horizontal:
-                              16,
+                              20,
                         ),
-                    decoration: BoxDecoration(
-                      color: AppColors
-                          .kGreen
-                          .withOpacity(
-                            0.1,
-                          ),
-                      borderRadius:
-                          BorderRadius.circular(
-                            12,
-                          ),
-                      border: Border.all(
-                        color: AppColors
-                            .kGreen
-                            .withOpacity(
-                              0.3,
+                    child: Material(
+                      color: Colors
+                          .transparent,
+                      child: InkWell(
+                        onTap: () =>
+                            Navigator.pop(
+                              context,
+                              {
+                                'type':
+                                    'pin_placement',
+                              },
                             ),
+                        borderRadius:
+                            BorderRadius.circular(
+                              12,
+                            ),
+                        child: Container(
+                          padding:
+                              const EdgeInsets.symmetric(
+                                vertical:
+                                    12,
+                                horizontal:
+                                    16,
+                              ),
+                          decoration: BoxDecoration(
+                            color: AppColors
+                                .kGreen
+                                .withOpacity(
+                                  0.1,
+                                ),
+                            borderRadius:
+                                BorderRadius.circular(
+                                  12,
+                                ),
+                            border: Border.all(
+                              color: AppColors
+                                  .kGreen
+                                  .withOpacity(
+                                    0.3,
+                                  ),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisAlignment:
+                                MainAxisAlignment
+                                    .center,
+                            children: [
+                              Icon(
+                                Icons
+                                    .location_on_outlined,
+                                color: AppColors
+                                    .kGreen,
+                                size:
+                                    24,
+                              ),
+                              const SizedBox(
+                                width:
+                                    12,
+                              ),
+                              const Text(
+                                'Pin on Map',
+                                style: TextStyle(
+                                  fontSize:
+                                      16,
+                                  fontWeight:
+                                      FontWeight.w500,
+                                  color:
+                                      AppColors.kGreen,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
-                    child: Row(
-                      mainAxisAlignment:
-                          MainAxisAlignment
-                              .center,
-                      children: [
-                        Icon(
-                          Icons
-                              .location_on_outlined,
-                          color: AppColors
-                              .kGreen,
-                          size: 24,
-                        ),
-                        const SizedBox(
-                          width: 12,
-                        ),
-                        const Text(
-                          'Pin on Map',
-                          style: TextStyle(
-                            fontSize:
-                                16,
-                            fontWeight:
-                                FontWeight
-                                    .w500,
-                            color: AppColors
-                                .kGreen,
-                          ),
-                        ),
-                      ],
-                    ),
+                  ),
+                ],
+                const SizedBox(
+                  height: 8,
+                ),
+                Padding(
+                  padding:
+                      const EdgeInsets.symmetric(
+                        horizontal: 20,
+                      ),
+                  child: Divider(
+                    color: Colors
+                        .grey[300],
+                    thickness: 1,
                   ),
                 ),
+                const SizedBox(
+                  height: 8,
+                ),
+              ],
+            ),
+          ),
+
+          // Active requests section (if any)
+          if (widget
+              .activeRequests
+              .isNotEmpty) ...[
+            SliverToBoxAdapter(
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(
+                      horizontal: 20,
+                    ),
+                child: Text(
+                  'Active Tracked Users',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight:
+                        FontWeight.w600,
+                    color: Colors
+                        .grey[700],
+                  ),
+                ),
+              ),
+            ),
+            SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  final req = widget
+                      .activeRequests[index];
+                  final isSelected =
+                      _isSelected(req);
+                  return ListTile(
+                    contentPadding:
+                        const EdgeInsets.symmetric(
+                          horizontal:
+                              20,
+                          vertical: 4,
+                        ),
+                    leading: Icon(
+                      Icons
+                          .person_outline,
+                      color: Colors
+                          .grey[600],
+                      size: 24,
+                    ),
+                    title: Text(
+                      req['name'],
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight:
+                            FontWeight
+                                .w500,
+                        color: Colors
+                            .black87,
+                      ),
+                    ),
+                    subtitle: Text(
+                      'Floor: ${req['floor']}',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors
+                            .grey[600],
+                      ),
+                    ),
+                    onTap: () => Navigator.pop(
+                      context,
+                      {
+                        'type':
+                            'active_request',
+                        'name':
+                            req['name'],
+                        'floor':
+                            req['floor'],
+                        'x': req['x'],
+                        'y': req['y'],
+                        'z': req['z'],
+                      },
+                    ),
+                    trailing: isSelected
+                        ? Icon(
+                            Icons
+                                .check_circle,
+                            color: AppColors
+                                .kGreen,
+                          )
+                        : null,
+                  );
+                },
+                childCount: widget
+                    .activeRequests
+                    .length,
+              ),
+            ),
+            // Add a separator after active requests
+            SliverToBoxAdapter(
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(
+                      horizontal: 20,
+                    ),
+                child: Divider(
+                  color:
+                      Colors.grey[300],
+                  thickness: 1,
+                ),
+              ),
+            ),
+            const SliverToBoxAdapter(
+              child: SizedBox(
+                height: 8,
               ),
             ),
           ],
-          const SizedBox(height: 8),
-          Padding(
-            padding:
-                const EdgeInsets.symmetric(
-                  horizontal: 20,
-                ),
-            child: Divider(
-              color: Colors.grey[300],
-              thickness: 1,
-            ),
-          ),
-          Expanded(
-            child: ListView.builder(
-              padding:
-                  const EdgeInsets.symmetric(
-                    horizontal: 20,
-                  ),
-              itemCount:
-                  _filtered.length,
-              itemBuilder: (context, index) {
+
+          // POI list
+          SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (context, index) {
                 final poi =
                     _filtered[index];
+                final isSelected =
+                    _isSelected(poi);
                 return ListTile(
                   contentPadding:
                       const EdgeInsets.symmetric(
+                        horizontal: 20,
                         vertical: 4,
                       ),
                   leading: Icon(
@@ -4713,7 +5441,12 @@ class __PoiPickerSheetState
                         ),
                   ),
                   subtitle: Text(
-                    'Floor: ${poi['floor']}',
+                    (poi['category'] ==
+                                'bathrooms' ||
+                            poi['category'] ==
+                                'prayer_rooms')
+                        ? 'Closest to you'
+                        : 'Floor: ${poi['floor']}',
                     style: TextStyle(
                       fontSize: 14,
                       color: Colors
@@ -4725,9 +5458,22 @@ class __PoiPickerSheetState
                         context,
                         poi,
                       ),
+                  trailing: isSelected
+                      ? Icon(
+                          Icons
+                              .check_circle,
+                          color: AppColors
+                              .kGreen,
+                        )
+                      : null,
                 );
               },
+              childCount:
+                  _filtered.length,
             ),
+          ),
+          const SliverToBoxAdapter(
+            child: SizedBox(height: 20),
           ),
         ],
       ),

@@ -31,17 +31,18 @@ class CategoryPage extends StatefulWidget {
 
 class _CategoryPageState extends State<CategoryPage>
     with AutomaticKeepAliveClientMixin {
-String _floorLabelFromSrc(String src) {
-  final s = (src).trim();
-  if (s.isEmpty) return '';
-  final file = s.split('/').last; // e.g. GF_map.glb, F1_map.glb
-  final m = RegExp(r'^(GF|F\d+)', caseSensitive: false).firstMatch(file);
-  if (m != null) return (m.group(1) ?? '').toUpperCase();
-  if (file.toLowerCase().contains('gf')) return 'GF';
-  final m2 = RegExp(r'f(\d+)', caseSensitive: false).firstMatch(file);
-  if (m2 != null) return 'F${m2.group(1)}';
-  return '';
-}
+  String _floorLabelFromSrc(String src) {
+    final s = (src).trim();
+    if (s.isEmpty) return '';
+    final file = s.split('/').last; // e.g. GF_map.glb, F1_map.glb
+    final m = RegExp(r'^(GF|F\d+)', caseSensitive: false).firstMatch(file);
+    if (m != null) return (m.group(1) ?? '').toUpperCase();
+    if (file.toLowerCase().contains('gf')) return 'GF';
+    final m2 = RegExp(r'f(\d+)', caseSensitive: false).firstMatch(file);
+    if (m2 != null) return 'F${m2.group(1)}';
+    return '';
+  }
+
   @override
   bool get wantKeepAlive => true;
 
@@ -251,11 +252,55 @@ String _floorLabelFromSrc(String src) {
   }
 
   Future<void> _openNavigationFlow(
-  String placeId,
-  String placeName,
-  String? poiMaterial,
-  String floorSrc,
-) async {
+    String placeId,
+    String placeName,
+    String? poiMaterial,
+    String floorSrc,
+  ) async {
+    final normalizedName = placeName.trim().toLowerCase();
+    final isServicesCategory =
+        widget.categoryName.trim().toLowerCase() == 'services';
+
+    // Services use logical routing from entrances JSON,
+    // so they should NOT require Firestore worldPosition on the tapped doc.
+    if (isServicesCategory) {
+      if (normalizedName == 'female bathroom') {
+        showNavigationDialog(
+          context,
+          'Female Bathroom',
+          'service_bathroom_female',
+          destinationPoiMaterial: '',
+          floorSrc: floorSrc,
+          destinationFloorLabel: _floorLabelFromSrc(floorSrc),
+        );
+        return;
+      }
+
+      if (normalizedName == 'male bathroom') {
+        showNavigationDialog(
+          context,
+          'Male Bathroom',
+          'service_bathroom_male',
+          destinationPoiMaterial: '',
+          floorSrc: floorSrc,
+          destinationFloorLabel: _floorLabelFromSrc(floorSrc),
+        );
+        return;
+      }
+
+      if (normalizedName == 'prayer room') {
+        showNavigationDialog(
+          context,
+          'Prayer Room',
+          'service_prayer_room',
+          destinationPoiMaterial: '',
+          floorSrc: floorSrc,
+          destinationFloorLabel: _floorLabelFromSrc(floorSrc),
+        );
+        return;
+      }
+    }
+
     final hasPosition = await _hasWorldPosition(placeId);
     if (!hasPosition) {
       if (!mounted) return;
@@ -265,38 +310,32 @@ String _floorLabelFromSrc(String src) {
     if (!mounted) return;
 
     var material = (poiMaterial ?? '').trim();
-if (material.isEmpty) {
-  material = 'POIMAT_${placeName.trim()}';
-}
+    if (material.isEmpty) {
+      material = 'POIMAT_${placeName.trim()}';
+    }
 
-// If your DB stores mesh names like "POI_StoreName", convert to POIMAT_
-if (material.toUpperCase().startsWith('POI_')) {
-  material = 'POIMAT_${material.substring(4)}';
-}
-
+    if (material.toUpperCase().startsWith('POI_')) {
+      material = 'POIMAT_${material.substring(4)}';
+    }
 
     debugPrint(
       '🧾 Category selected: name="$placeName" -> material="$material"',
     );
 
-    if (material == null || material.isEmpty) {
+    if (material.isEmpty) {
       debugPrint('❌ No material field found in Firestore for "$placeName"');
       return;
     }
 
-	showNavigationDialog(
-	context,
-	placeName,
-	placeId,
-	destinationPoiMaterial: material,
-	floorSrc: floorSrc,
-	// Pass destination floor label for multi-floor routing.
-	// Use the resolved `floorSrc` (already extracted from Firestore / place data).
-		destinationFloorLabel: _floorLabelFromSrc(floorSrc),
-	);
-
-
-}
+    showNavigationDialog(
+      context,
+      placeName,
+      placeId,
+      destinationPoiMaterial: material,
+      floorSrc: floorSrc,
+      destinationFloorLabel: _floorLabelFromSrc(floorSrc),
+    );
+  }
 
   // ---------- Build ----------
 
@@ -480,7 +519,8 @@ if (material.toUpperCase().startsWith('POI_')) {
     final floorSrc = floorToken == null ? '' : floorToken.toString().trim();
 
     return InkWell(
-      onTap: () => _openNavigationFlow(placeId, placeName, poiMaterial, floorSrc),
+      onTap: () =>
+          _openNavigationFlow(placeId, placeName, poiMaterial, floorSrc),
 
       borderRadius: BorderRadius.circular(12),
       child: Container(

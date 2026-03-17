@@ -159,14 +159,6 @@ export const onTrackRequestCreated = onDocumentCreated(
 
       const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
 
-      if (tokens.length === 0) {
-
-        console.log("No FCM tokens for receiver");
-
-        return;
-
-      }
-
 
 
       const message = {
@@ -193,15 +185,14 @@ export const onTrackRequestCreated = onDocumentCreated(
 
 
 
-      const response = await admin.messaging().sendEachForMulticast(message);
-
-
-
-      console.log(
-
-        `Notification sent | success: ${response.successCount}, failure: ${response.failureCount}`
-
-      );
+      if (tokens.length > 0) {
+        const response = await admin.messaging().sendEachForMulticast(message);
+        console.log(
+          `Notification sent | success: ${response.successCount}, failure: ${response.failureCount}`
+        );
+      } else {
+        console.log("No FCM tokens for receiver (saved to Firestore only)");
+      }
 
 
 
@@ -321,15 +312,39 @@ export const onAutoLocationRefresh = onSchedule(
             : null;
 
         const isStale = !lastUpdate || lastUpdate <= cutoff;
-        const alreadyNotified =
-          lastAuto != null && (lastUpdate == null || lastAuto >= lastUpdate);
+        const cooldownPassed = !lastAuto || lastAuto <= cutoff;
 
-        if (!isStale || alreadyNotified) continue;
+        // Send every hour while stale
+        if (!isStale || !cooldownPassed) continue;
 
         const title = "Refresh Location Request";
         const body = "You are in an active session, Please refresh your location for better accuracy";
 
-        const notifRef = db.collection("notifications").doc();
+        // Replace previous pending system refresh notification (same session)
+        const lastNotifId = (data.lastAutoRefreshNotifId ?? "").toString();
+        let notifRef = lastNotifId
+          ? db.collection("notifications").doc(lastNotifId)
+          : db.collection("notifications").doc();
+        let reuseExisting = false;
+
+        if (lastNotifId) {
+          const lastSnap = await notifRef.get();
+          if (lastSnap.exists) {
+            const lastData: any = lastSnap.data() ?? {};
+            const lastPayload: any = lastData.data ?? {};
+            const matchesSession =
+              lastData.userId === receiverId &&
+              lastData.type === "locationRefresh" &&
+              lastPayload.trackRequestId === doc.id &&
+              lastPayload.system === true;
+            const pending = lastData.actionTaken !== true;
+            if (matchesSession && pending) reuseExisting = true;
+          }
+        }
+
+        if (!reuseExisting) {
+          notifRef = db.collection("notifications").doc();
+        }
         const notifId = notifRef.id;
 
         if (userInfo.tokens.length > 0) {
@@ -371,6 +386,7 @@ export const onAutoLocationRefresh = onSchedule(
 
         batch.update(doc.ref, {
           lastAutoRefreshAt: admin.firestore.FieldValue.serverTimestamp(),
+          lastAutoRefreshNotifId: notifId,
         });
       }
 
@@ -380,6 +396,48 @@ export const onAutoLocationRefresh = onSchedule(
     }
   }
 );
+
+/* ------------------------------------------------------------------
+
+   Purge Old Notifications (Scheduled)
+
+   - Deletes notifications older than 30 days.
+
+-------------------------------------------------------------------*/
+
+export const purgeOldNotifications = onSchedule("every 24 hours", async () => {
+  try {
+    const cutoff = admin.firestore.Timestamp.fromDate(
+      new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+    );
+
+    let totalDeleted = 0;
+
+    while (true) {
+      const snap = await db
+        .collection("notifications")
+        .where("createdAt", "<", cutoff)
+        .limit(450)
+        .get();
+
+      if (snap.empty) break;
+
+      const batch = db.batch();
+      for (const doc of snap.docs) {
+        batch.delete(doc.ref);
+      }
+
+      await batch.commit();
+      totalDeleted += snap.size;
+
+      if (snap.size < 450) break;
+    }
+
+    console.log(`purgeOldNotifications deleted ${totalDeleted} docs`);
+  } catch (error) {
+    console.error("Error purging old notifications:", error);
+  }
+});
 
 
 
@@ -432,7 +490,6 @@ export const onTrackRequestStatusChanged = onDocumentUpdated(
         if (!receiverDoc.exists) return;
 
         const receiverTokens: string[] = receiverDoc.data()?.fcmTokens ?? [];
-        if (receiverTokens.length === 0) return;
 
         const senderName =
           (after.senderName ?? "Someone").toString().trim() || "Someone";
@@ -440,18 +497,20 @@ export const onTrackRequestStatusChanged = onDocumentUpdated(
         const notifRef = db.collection("notifications").doc();
         const notifId = notifRef.id;
 
-        await admin.messaging().sendEachForMulticast({
-          notification: {
-            title: "Tracking Request Cancelled",
-            body: `${senderName} cancelled the tracking request`,
-          },
-          data: {
-            type: "trackCancelled",
-            requestId: notifId,
-            trackRequestId: event.params.requestId,
-          },
-          tokens: receiverTokens,
-        });
+        if (receiverTokens.length > 0) {
+          await admin.messaging().sendEachForMulticast({
+            notification: {
+              title: "Tracking Request Cancelled",
+              body: `${senderName} cancelled the tracking request`,
+            },
+            data: {
+              type: "trackCancelled",
+              requestId: notifId,
+              trackRequestId: event.params.requestId,
+            },
+            tokens: receiverTokens,
+          });
+        }
 
         await notifRef.set({
           userId: receiverId,
@@ -485,8 +544,6 @@ export const onTrackRequestStatusChanged = onDocumentUpdated(
 
 
       const tokens: string[] = senderDoc.data()?.fcmTokens ?? [];
-
-      if (tokens.length === 0) return;
 
 
 
@@ -529,7 +586,9 @@ export const onTrackRequestStatusChanged = onDocumentUpdated(
 
 
 
-      await admin.messaging().sendEachForMulticast(message);
+      if (tokens.length > 0) {
+        await admin.messaging().sendEachForMulticast(message);
+      }
 
 
 

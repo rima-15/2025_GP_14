@@ -1606,6 +1606,30 @@ Size _viewerSize = Size.zero;
 bool _showPopup = false;
 final TransformationController _tc = TransformationController();
 
+String _displayNameFromMaterial(String material) {
+  final m = material.trim().toUpperCase();
+
+  if (m.contains('BATHROOM')) {
+    if (m.contains('SHARED')) return 'Bathroom';
+    if (m.contains('FEMALE')) return 'Female Bathroom';
+    if (m.contains('MALE')) return 'Male Bathroom';
+    return 'Bathroom';
+  }
+
+  if (m.contains('PRAYER')) {
+    if (m.contains('SHARED')) return 'Prayer Room';
+    if (m.contains('FEMALE')) return 'Female Prayer Room';
+    if (m.contains('MALE')) return 'Male Prayer Room';
+    return 'Prayer Room';
+  }
+
+  return material
+      .replaceFirst(RegExp(r'^POIMAT_', caseSensitive: false), '')
+      .replaceAll(RegExp(r'\.\d+$'), '')
+      .replaceAll('_', ' ')
+      .trim();
+}
+
 Future<void> _handlePoiMessage(String raw) async {
   Map<String, dynamic>? data;
   try {
@@ -1619,10 +1643,8 @@ Future<void> _handlePoiMessage(String raw) async {
     final dest = (data["destinationPoi"] as String?)?.trim();
     if (dest == null || dest.isEmpty) return;
 
-    final displayName = dest
-        .replaceFirst('POIMAT_', '')
-        .replaceAll(RegExp(r'\.\d+$'), '')
-        .trim();
+    final displayName = _displayNameFromMaterial(dest);
+
     showNavigationDialog(
       context,
       displayName.isEmpty ? dest : displayName,
@@ -1657,9 +1679,7 @@ return;
     context: context,
     showDragHandle: true,
     builder: (sheetContext) {
-      final shopName = destinationPoi.replaceFirst('POIMAT_', '').trim().isEmpty
-          ? destinationPoi
-          : destinationPoi.replaceFirst('POIMAT_', '').trim();
+      final shopName = _displayNameFromMaterial(destinationPoi);
 
       return Padding(
         padding: const EdgeInsets.all(16),
@@ -1908,9 +1928,31 @@ function showNavHotspot(viewer, position, normal, destBase) {
   var el = ensureNavHotspot(viewer);
   el.setAttribute("data-dest", destBase || "");
 
-  // label (optional)
-  var t = destBase ? destBase.replace("POIMAT_", "").trim() : "Selected";
-  el.querySelector(".poiTitle").textContent = t || "Selected";
+  // label
+function friendlyPoiName(name) {
+  if (!name) return "Selected";
+
+  var t = name.replace(/^POIMAT_/i, "").replace(/\.\d+$/, "").trim();
+  var u = t.toUpperCase();
+
+  if (u.indexOf("BATHROOM") !== -1) {
+    if (u.indexOf("SHARED") !== -1) return "Bathroom";
+    if (u.indexOf("FEMALE") !== -1) return "Female Bathroom";
+    if (u.indexOf("MALE") !== -1) return "Male Bathroom";
+    return "Bathroom";
+  }
+
+  if (u.indexOf("PRAYER") !== -1) {
+    if (u.indexOf("SHARED") !== -1) return "Prayer Room";
+    if (u.indexOf("FEMALE") !== -1) return "Female Prayer Room";
+    if (u.indexOf("MALE") !== -1) return "Male Prayer Room";
+    return "Prayer Room";
+  }
+
+  return t.replace(/_/g, " ").trim();
+}
+
+el.querySelector(".poiTitle").textContent = friendlyPoiName(destBase);
 
   // Force a full re-anchor every time:
   // 1) hide

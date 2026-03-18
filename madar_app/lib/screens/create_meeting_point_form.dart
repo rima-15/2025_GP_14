@@ -273,25 +273,25 @@ class MeetingPointService {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null || uid.trim().isEmpty) return Stream.value(null);
 
-    return _col.where('participantUserIds', arrayContains: uid).snapshots().map((
-      snap,
-    ) {
-      final meetings = snap.docs
-          .map(MeetingPointRecord.fromDoc)
-          .whereType<MeetingPointRecord>()
-          .toList();
+    return _col.where('participantUserIds', arrayContains: uid).snapshots().map(
+      (snap) {
+        final meetings = snap.docs
+            .map(MeetingPointRecord.fromDoc)
+            .whereType<MeetingPointRecord>()
+            .toList();
 
-      meetings.sort((a, b) {
-        final at = a.updatedAt ?? a.createdAt ?? DateTime(1970);
-        final bt = b.updatedAt ?? b.createdAt ?? DateTime(1970);
-        return bt.compareTo(at);
-      });
+        meetings.sort((a, b) {
+          final at = a.updatedAt ?? a.createdAt ?? DateTime(1970);
+          final bt = b.updatedAt ?? b.createdAt ?? DateTime(1970);
+          return bt.compareTo(at);
+        });
 
-      final active = meetings
-          .where((m) => _isMeetingBlockingForUser(m, uid))
-          .toList();
-      return active.isEmpty ? null : active.first;
-    });
+        final active = meetings
+            .where((m) => _isMeetingBlockingForUser(m, uid))
+            .toList();
+        return active.isEmpty ? null : active.first;
+      },
+    );
   }
 
   /// Like [watchActiveForCurrentUser] but returns ALL blocking meetings for the
@@ -301,22 +301,24 @@ class MeetingPointService {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null || uid.trim().isEmpty) return Stream.value([]);
 
-    return _col.where('participantUserIds', arrayContains: uid).snapshots().map((
-      snap,
-    ) {
-      final meetings = snap.docs
-          .map(MeetingPointRecord.fromDoc)
-          .whereType<MeetingPointRecord>()
-          .toList();
+    return _col.where('participantUserIds', arrayContains: uid).snapshots().map(
+      (snap) {
+        final meetings = snap.docs
+            .map(MeetingPointRecord.fromDoc)
+            .whereType<MeetingPointRecord>()
+            .toList();
 
-      meetings.sort((a, b) {
-        final at = a.updatedAt ?? a.createdAt ?? DateTime(1970);
-        final bt = b.updatedAt ?? b.createdAt ?? DateTime(1970);
-        return bt.compareTo(at);
-      });
+        meetings.sort((a, b) {
+          final at = a.updatedAt ?? a.createdAt ?? DateTime(1970);
+          final bt = b.updatedAt ?? b.createdAt ?? DateTime(1970);
+          return bt.compareTo(at);
+        });
 
-      return meetings.where((m) => _isMeetingBlockingForUser(m, uid)).toList();
-    });
+        return meetings
+            .where((m) => _isMeetingBlockingForUser(m, uid))
+            .toList();
+      },
+    );
   }
 
   /// Keep the meeting point flow consistent even when the host closes the form.
@@ -333,7 +335,8 @@ class MeetingPointService {
     final now = DateTime.now();
 
     // If everyone declined, end it (prevents ghost active meetings).
-    final allDeclined = meeting.participants.isNotEmpty &&
+    final allDeclined =
+        meeting.participants.isNotEmpty &&
         meeting.participants.every((p) => p.isDeclined);
     if (allDeclined) {
       try {
@@ -423,7 +426,9 @@ class MeetingPointService {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null || uid.trim().isEmpty) return null;
 
-    final snap = await _col.where('participantUserIds', arrayContains: uid).get();
+    final snap = await _col
+        .where('participantUserIds', arrayContains: uid)
+        .get();
     final meetings = snap.docs
         .map(MeetingPointRecord.fromDoc)
         .whereType<MeetingPointRecord>()
@@ -631,7 +636,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     'Café',
     'Restaurant',
     'Shop',
-    'Entrance',
+    'Gates',
   ];
   final Set<String> _selectedPlaceCategories = {'Any'};
 
@@ -667,9 +672,58 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   String? _myName;
   bool _shouldManageDraft = false;
   bool _allowDisposeDraftSave = true;
+  bool _isInitializing = false;
+  bool _isSendingInvites = false;
   String? _meetingPointId;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _meetingPointSub;
 
+  // ─── In-session state persistence (steps 1–3) ────────────────────────────
+  static bool _hasSavedEarlyState = false;
+  static List<_Friend> _memEarlyFriends = [];
+  static Set<String> _memEarlyCategories = {'Any'};
+  static _HostLocation? _memEarlyHostLocation;
+  static String? _memEarlyVenueId;
+  static int _memEarlyStep = 1;
+
+  void _saveEarlyStepsToMemory() {
+    if (_step >= 4) return;
+    _hasSavedEarlyState = true;
+    _memEarlyFriends = List.from(_selectedFriends);
+    _memEarlyCategories = Set.from(_selectedPlaceCategories);
+    _memEarlyHostLocation = _hostLocation;
+    _memEarlyVenueId = _venueId;
+    _memEarlyStep = _step;
+  }
+
+  /// Called after venue detection completes. Restores friends/categories always;
+  /// restores location and step only if the detected venue matches the saved one.
+  void _tryRestoreEarlyState() {
+    if (!_hasSavedEarlyState || _shouldManageDraft || _step >= 4) return;
+    if (_memEarlyFriends.isNotEmpty) {
+      _selectedFriends
+        ..clear()
+        ..addAll(_memEarlyFriends);
+    }
+    if (_memEarlyCategories.isNotEmpty) {
+      _selectedPlaceCategories
+        ..clear()
+        ..addAll(_memEarlyCategories);
+    }
+    // Only restore location and step if user is still in same venue
+    if (_venueId != null && _venueId == _memEarlyVenueId) {
+      if (_memEarlyHostLocation != null) _hostLocation = _memEarlyHostLocation;
+      if (_memEarlyStep > 1) _step = _memEarlyStep;
+    }
+  }
+
+  static void _clearEarlyMemory() {
+    _hasSavedEarlyState = false;
+    _memEarlyFriends = [];
+    _memEarlyCategories = {'Any'};
+    _memEarlyHostLocation = null;
+    _memEarlyVenueId = null;
+    _memEarlyStep = 1;
+  }
   // ─────────────────────────────────────────────────────────────────────────
 
   @override
@@ -684,16 +738,23 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     _loadAndResolveVenue();
     _meetingPointId = widget.meetingPointId?.trim();
     if (_meetingPointId != null && _meetingPointId!.isNotEmpty) {
+      _isInitializing = true;
       _shouldManageDraft = true;
-      unawaited(_restoreFromMeetingPoint(_meetingPointId!));
+      _restoreFromMeetingPoint(_meetingPointId!).whenComplete(() {
+        if (mounted) setState(() => _isInitializing = false);
+      });
     } else if (widget.resumeDraft) {
+      _isInitializing = true;
       _shouldManageDraft = true;
-      unawaited(_restoreMeetingProgress());
+      _restoreMeetingProgress().whenComplete(() {
+        if (mounted) setState(() => _isInitializing = false);
+      });
     }
   }
 
   @override
   void dispose() {
+    _saveEarlyStepsToMemory();
     if (_allowDisposeDraftSave && _shouldManageDraft) {
       unawaited(_persistDraftIfNeeded());
     }
@@ -755,7 +816,10 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       }
 
       if (!mounted) return;
-      setState(() => _loadingVenue = false);
+      setState(() {
+        _loadingVenue = false;
+        _tryRestoreEarlyState();
+      });
       _prepareStep2MapVenueId();
 
       // Load active venue friends after venue is known.
@@ -765,6 +829,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       setState(() {
         _loadingVenue = false;
         _venueError = 'Could not detect venue. Please try again.';
+        _tryRestoreEarlyState();
       });
       _prepareStep2MapVenueId();
     }
@@ -1475,6 +1540,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   }) async {
     _allowDisposeDraftSave = false;
     await _clearManagedDraft();
+    if (success) _clearEarlyMemory();
     if (!mounted) return;
     Navigator.pop(context);
     if (success) {
@@ -1956,19 +2022,21 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
             topRight: Radius.circular(24),
           ),
         ),
-        child: Column(
-          children: [
-            _buildHeader(),
-            _buildProgressBar(),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
-                child: _buildStepBody(),
+        child: _isInitializing
+            ? const Center(child: CircularProgressIndicator())
+            : Column(
+                children: [
+                  _buildHeader(),
+                  _buildProgressBar(),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+                      child: _buildStepBody(),
+                    ),
+                  ),
+                  _buildFooter(),
+                ],
               ),
-            ),
-            _buildFooter(),
-          ],
-        ),
       ),
     );
   }
@@ -2238,17 +2306,21 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
               _phoneError = null;
             }),
             decoration: InputDecoration(
-              hintText: 'Phone number',
+              hintText: _isPhoneFocused ? 'Enter 9 digits' : 'Phone number',
               hintStyle: TextStyle(
                 color: Colors.grey[400],
                 fontWeight: FontWeight.w400,
               ),
-              prefixText: _phoneCtrl.text.isEmpty ? null : '+966 ',
-              prefixStyle: TextStyle(
-                color: Colors.grey[600],
-                fontSize: 15,
-                fontWeight: FontWeight.w500,
-              ),
+              prefix: (_isPhoneFocused || _phoneCtrl.text.isNotEmpty)
+                  ? Text(
+                      '+966 ',
+                      style: TextStyle(
+                        color: Colors.grey[400],
+                        fontSize: 15,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    )
+                  : null,
               suffixIcon: _isPhoneFocused
                   ? IconButton(
                       icon: const Icon(Icons.contacts, color: AppColors.kGreen),
@@ -2641,27 +2713,12 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
             ),
           ),
 
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            Text(
-              'Prefer another way? ',
-              style: TextStyle(fontSize: 13, color: Colors.grey[600]),
-            ),
-            GestureDetector(
-              onTap: _scanWithCamera,
-              child: const Text(
-                'Scan with camera',
-                style: TextStyle(
-                  fontSize: 13.5,
-                  color: AppColors.kGreen,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
+        const SizedBox(height: 12),
+        PrimaryButton(
+          text: 'Scan With Camera',
+          icon: Icons.camera_alt_outlined,
+          onPressed: _scanWithCamera,
         ),
-
         const SizedBox(height: 12),
       ],
     );
@@ -3105,14 +3162,20 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   }
 
   Future<void> _sendInvitesAndAdvance() async {
+    if (_isSendingInvites) return;
+    setState(() => _isSendingInvites = true);
     try {
       await _sendInvites();
       if (!mounted) return;
       _initStep4();
-      setState(() => _step = 4);
+      setState(() {
+        _step = 4;
+        _isSendingInvites = false;
+      });
       unawaited(_persistDraftIfNeeded());
     } catch (e) {
       if (!mounted) return;
+      setState(() => _isSendingInvites = false);
       SnackbarHelper.showError(
         context,
         e.toString().replaceFirst('Exception: ', ''),
@@ -3451,27 +3514,10 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
     // Step 3: "Send Invites"
     if (_step == 3) {
-      return SizedBox(
-        width: double.infinity,
-        height: 52,
-        child: ElevatedButton(
-          onPressed: _sendInvitesAndAdvance,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.kGreen,
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-          child: const Text(
-            'Send Invites',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
+      return PrimaryButton(
+        text: 'Send Invites',
+        isLoading: _isSendingInvites,
+        onPressed: _sendInvitesAndAdvance,
       );
     }
 

@@ -52,6 +52,8 @@ class HistoryMeetingPoint {
   final String id;
   final String status;
   final String venueName;
+  final String suggestedPoint;
+  final String cancellationReason;
   final String hostId;
   final String hostName;
   final String hostPhone;
@@ -64,6 +66,8 @@ class HistoryMeetingPoint {
     required this.id,
     required this.status,
     required this.venueName,
+    this.suggestedPoint = '',
+    this.cancellationReason = '',
     required this.hostId,
     required this.hostName,
     required this.hostPhone,
@@ -94,6 +98,7 @@ class HistoryPage extends StatefulWidget {
 class _HistoryPageState extends State<HistoryPage> {
   int _mainTabIndex = 0;
   int _trackingFilterIndex = 0;
+  int _meetingFilterIndex = 0; // 0 = Sent (host), 1 = Received (participant)
   String? _highlightRequestId;
   final GlobalKey _highlightKey = GlobalKey();
   Timer? _highlightClearTimer;
@@ -303,6 +308,8 @@ class _HistoryPageState extends State<HistoryPage> {
     final status = (data['status'] ?? '').toString().trim().toLowerCase();
     final hostId = (data['hostId'] ?? '').toString();
     final venueName = (data['venueName'] ?? '').toString();
+    final suggestedPoint = (data['suggestedPoint'] ?? '').toString();
+    final cancellationReason = _deriveCancellationReason(data, uid);
     final hostName = (data['hostName'] ?? '').toString();
     final hostPhone = (data['hostPhone'] ?? '').toString();
     final createdAt = _parseTimestamp(data['createdAt']) ?? DateTime.now();
@@ -335,6 +342,8 @@ class _HistoryPageState extends State<HistoryPage> {
                   id: d.id,
                   status: 'declined',
                   venueName: venueName,
+                  suggestedPoint: suggestedPoint,
+                  cancellationReason: cancellationReason,
                   hostId: hostId,
                   hostName: hostName,
                   hostPhone: hostPhone,
@@ -381,6 +390,8 @@ class _HistoryPageState extends State<HistoryPage> {
       id: d.id,
       status: displayStatus,
       venueName: venueName,
+      suggestedPoint: suggestedPoint,
+      cancellationReason: cancellationReason,
       hostId: hostId,
       hostName: hostName,
       hostPhone: hostPhone,
@@ -389,6 +400,41 @@ class _HistoryPageState extends State<HistoryPage> {
       updatedAt: updatedAt,
       participants: participants,
     );
+  }
+
+  /// Derives a human-readable cancellation reason from raw Firestore data.
+  /// Returns empty string if the meeting is not cancelled or reason is unknown.
+  String _deriveCancellationReason(Map<String, dynamic> data, String uid) {
+    final status = (data['status'] ?? '').toString().trim().toLowerCase();
+    if (status != 'cancelled') return '';
+
+    final hostId = (data['hostId'] ?? '').toString();
+    final isHost = hostId == uid;
+    final hostStep =
+        (data['hostStep'] is num) ? (data['hostStep'] as num).toInt() : 4;
+
+    final rawParticipants = data['participants'];
+    final parts = (rawParticipants is List)
+        ? rawParticipants.whereType<Map>().toList()
+        : <Map>[];
+
+    final allDeclined = parts.isNotEmpty &&
+        parts.every(
+          (p) => (p['status'] ?? '').toString().toLowerCase() == 'declined',
+        );
+    final anyAccepted = parts.any(
+      (p) => (p['status'] ?? '').toString().toLowerCase() == 'accepted',
+    );
+
+    if (isHost) {
+      if (allDeclined) return 'All participants declined the request';
+      if (hostStep == 5) return 'Host (me) rejected the suggested meeting point';
+      if (!anyAccepted) return 'None of participants respond';
+      return 'You cancelled this request';
+    } else {
+      if (hostStep == 5) return 'Host rejected the suggested meeting point';
+      return 'Cancelled by host';
+    }
   }
 
   String _formatDate(DateTime d) {
@@ -865,60 +911,205 @@ class _HistoryPageState extends State<HistoryPage> {
   }
 
   Widget _buildMeetingPointTab() {
-    return StreamBuilder<List<HistoryMeetingPoint>>(
-      stream: _meetingPointHistoryStream,
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return Center(
-            child: Text(
-              'Couldn\'t load meeting points history.',
-              style: TextStyle(
-                fontSize: 15,
-                color: Colors.grey[600],
-                fontWeight: FontWeight.w500,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 16),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _buildMeetingFilterPills(),
+        ),
+        const SizedBox(height: 16),
+        Expanded(
+          child: StreamBuilder<List<HistoryMeetingPoint>>(
+            stream: _meetingPointHistoryStream,
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return Center(
+                  child: Text(
+                    'Couldn\'t load meeting points history.',
+                    style: TextStyle(
+                      fontSize: 15,
+                      color: Colors.grey[600],
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                );
+              }
+              if (snapshot.connectionState == ConnectionState.waiting &&
+                  !snapshot.hasData) {
+                return const Center(
+                  child: CircularProgressIndicator(color: AppColors.kGreen),
+                );
+              }
+
+              // ── Static demo entries ────────────────────────────────────
+              final dummyParticipants = [
+                HistoryMeetingPointParticipant(
+                  userId: 'dp1',
+                  name: 'Razan Saeedf',
+                  phone: '+966503349694',
+                ),
+                HistoryMeetingPointParticipant(
+                  userId: 'dp2',
+                  name: 'Mona Saleh',
+                  phone: '+966557225235',
+                ),
+              ];
+              final dummySent = [
+                HistoryMeetingPoint(
+                  id: 'demo_sent_1',
+                  status: 'cancelled',
+                  cancellationReason: 'All participants declined the request',
+                  venueName: 'King Khalid International Airport',
+                  hostId: 'demo_me',
+                  hostName: 'ar saeed',
+                  hostPhone: '+966334333333',
+                  isHost: true,
+                  createdAt: DateTime(2026, 3, 15, 10, 0),
+                  updatedAt: DateTime(2026, 3, 15, 10, 0),
+                  participants: dummyParticipants,
+                ),
+                HistoryMeetingPoint(
+                  id: 'demo_sent_2',
+                  status: 'cancelled',
+                  cancellationReason: 'None of participants respond',
+                  venueName: 'King Khalid International Airport',
+                  hostId: 'demo_me',
+                  hostName: 'ar saeed',
+                  hostPhone: '+966334333333',
+                  isHost: true,
+                  createdAt: DateTime(2026, 3, 14, 9, 0),
+                  updatedAt: DateTime(2026, 3, 14, 9, 0),
+                  participants: dummyParticipants,
+                ),
+                HistoryMeetingPoint(
+                  id: 'demo_sent_3',
+                  status: 'cancelled',
+                  cancellationReason:
+                      'Host (me) rejected the suggested meeting point',
+                  venueName: 'King Khalid International Airport',
+                  hostId: 'demo_me',
+                  hostName: 'ar saeed',
+                  hostPhone: '+966334333333',
+                  isHost: true,
+                  createdAt: DateTime(2026, 3, 13, 8, 0),
+                  updatedAt: DateTime(2026, 3, 13, 8, 0),
+                  participants: dummyParticipants,
+                ),
+                HistoryMeetingPoint(
+                  id: 'demo_sent_4',
+                  status: 'cancelled',
+                  cancellationReason: 'You cancelled this request',
+                  venueName: 'King Khalid International Airport',
+                  hostId: 'demo_me',
+                  hostName: 'ar saeed',
+                  hostPhone: '+966334333333',
+                  isHost: true,
+                  createdAt: DateTime(2026, 3, 12, 7, 0),
+                  updatedAt: DateTime(2026, 3, 12, 7, 0),
+                  participants: dummyParticipants,
+                ),
+              ];
+              final dummyReceived = [
+                HistoryMeetingPoint(
+                  id: 'demo_rcv_1',
+                  status: 'cancelled',
+                  cancellationReason:
+                      'Host rejected the suggested meeting point',
+                  venueName: 'King Khalid International Airport',
+                  hostId: 'demo_host',
+                  hostName: 'Sara Ahmed',
+                  hostPhone: '+966500000001',
+                  isHost: false,
+                  createdAt: DateTime(2026, 3, 11, 14, 0),
+                  updatedAt: DateTime(2026, 3, 11, 14, 0),
+                  participants: dummyParticipants,
+                ),
+                HistoryMeetingPoint(
+                  id: 'demo_rcv_2',
+                  status: 'cancelled',
+                  cancellationReason: 'Cancelled by host',
+                  venueName: 'King Khalid International Airport',
+                  hostId: 'demo_host',
+                  hostName: 'Sara Ahmed',
+                  hostPhone: '+966500000001',
+                  isHost: false,
+                  createdAt: DateTime(2026, 3, 10, 13, 0),
+                  updatedAt: DateTime(2026, 3, 10, 13, 0),
+                  participants: dummyParticipants,
+                ),
+              ];
+
+              final allList = [
+                ...(_meetingFilterIndex == 0 ? dummySent : dummyReceived),
+                ...(snapshot.data ?? []),
+              ];
+              final list = _meetingFilterIndex == 0
+                  ? allList.where((m) => m.isHost).toList()
+                  : allList.where((m) => !m.isHost).toList();
+
+              if (list.isEmpty) {
+                return Center(
+                  child: Text(
+                    'No past meeting points',
+                    style: TextStyle(
+                      fontSize: 15,
+                      color: Colors.grey[600],
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                );
+              }
+
+              return ListView.separated(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                itemCount: list.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 12),
+                itemBuilder: (context, index) =>
+                    _buildMeetingPointTile(list[index]),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMeetingFilterPills() {
+    const filters = ['Sent', 'Received'];
+    return Container(
+      height: 40,
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        borderRadius: BorderRadius.circular(20),
+      ),
+      padding: const EdgeInsets.all(4),
+      child: Row(
+        children: List.generate(filters.length, (i) {
+          final isSelected = _meetingFilterIndex == i;
+          return Expanded(
+            child: GestureDetector(
+              onTap: () => setState(() => _meetingFilterIndex = i),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: isSelected ? AppColors.kGreen : Colors.transparent,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  filters[i],
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: isSelected ? Colors.white : Colors.grey[600],
+                  ),
+                ),
               ),
             ),
           );
-        }
-        if (snapshot.connectionState == ConnectionState.waiting &&
-            !snapshot.hasData) {
-          return const Center(
-            child: CircularProgressIndicator(color: AppColors.kGreen),
-          );
-        }
-        final dummy = HistoryMeetingPoint(
-          id: 'dummy_solitaire',
-          status: 'completed',
-          venueName: 'Solitaire',
-          hostId: 'dummy_host',
-          hostName: 'Sara Ahmed',
-          hostPhone: '+966 50 000 0001',
-          isHost: false,
-          createdAt: DateTime(2026, 3, 10, 14, 30),
-          updatedAt: DateTime(2026, 3, 10, 16, 0),
-          participants: [
-            HistoryMeetingPointParticipant(
-              userId: 'dummy_host',
-              name: 'Sara Ahmed',
-              phone: '+966 50 000 0001',
-            ),
-            HistoryMeetingPointParticipant(
-              userId: 'dummy_p2',
-              name: 'Khalid Omar',
-              phone: '+966 55 000 0002',
-            ),
-          ],
-        );
-
-        final list = [dummy, ...snapshot.data ?? []];
-
-        return ListView.separated(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-          itemCount: list.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 12),
-          itemBuilder: (context, index) => _buildMeetingPointTile(list[index]),
-        );
-      },
+        }),
+      ),
     );
   }
 
@@ -926,18 +1117,10 @@ class _HistoryPageState extends State<HistoryPage> {
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
     final isExpanded = _expandedCards.contains(item.id);
 
-    // Build ordered list: host first, then current user (if not host), then others
-    final allParticipants = <HistoryMeetingPointParticipant>[];
+    // Participants list: exclude host (already shown in header)
+    // Current user first, then others
+    final nonHostParticipants = <HistoryMeetingPointParticipant>[];
 
-    // Host entry (synthesised from top-level fields)
-    final hostEntry = HistoryMeetingPointParticipant(
-      userId: item.hostId,
-      name: item.hostName,
-      phone: item.hostPhone,
-    );
-    allParticipants.add(hostEntry);
-
-    // Current user (if not host)
     HistoryMeetingPointParticipant? currentUserEntry;
     for (final p in item.participants) {
       if (p.userId == uid && p.userId != item.hostId) {
@@ -945,17 +1128,16 @@ class _HistoryPageState extends State<HistoryPage> {
         break;
       }
     }
-    if (currentUserEntry != null) allParticipants.add(currentUserEntry);
+    if (currentUserEntry != null) nonHostParticipants.add(currentUserEntry);
 
-    // Remaining participants (not host, not current user)
     for (final p in item.participants) {
       if (p.userId != item.hostId && p.userId != uid) {
-        allParticipants.add(p);
+        nonHostParticipants.add(p);
       }
     }
 
     const initialVisible = 3;
-    final total = allParticipants.length;
+    final total = nonHostParticipants.length;
     final shownCount = isExpanded ? total : min(initialVisible, total);
     final othersCount = total - shownCount;
 
@@ -966,23 +1148,19 @@ class _HistoryPageState extends State<HistoryPage> {
         border: Border.all(color: Colors.grey.shade200),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 10,
             offset: const Offset(0, 3),
           ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ── Dark header ──────────────────────────────────────────────────
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-            ),
-            child: Row(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Header: host person icon + name + Host(me)/Host + status ──
+            Row(
               children: [
                 Container(
                   width: 44,
@@ -991,29 +1169,55 @@ class _HistoryPageState extends State<HistoryPage> {
                     color: Colors.grey[200],
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(
-                    Icons.location_on,
-                    color: Color.fromRGBO(117, 117, 117, 1),
-                    size: 22,
-                  ),
+                  child: Icon(Icons.person, color: Colors.grey[600], size: 22),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        item.venueName.isEmpty ? 'Meeting Point' : item.venueName,
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.black,
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              item.hostName.isEmpty ? 'Unknown' : item.hostName,
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.black87,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.grey[200],
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              item.isHost ? 'Host (me)' : 'Host',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.grey[700],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (item.hostPhone.isNotEmpty)
+                        Text(
+                          item.hostPhone,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey[600],
+                          ),
                         ),
-                      ),
-                      Text(
-                        _formatDateTime(item.createdAt),
-                        style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                      ),
                     ],
                   ),
                 ),
@@ -1021,87 +1225,132 @@ class _HistoryPageState extends State<HistoryPage> {
                 _historyStatusBadge(item.status),
               ],
             ),
-          ),
-
-          // ── Participants section ─────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Participants:',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: Colors.grey[600],
-                    fontWeight: FontWeight.w500,
-                  ),
+            // ── Cancellation reason banner ────────────────────────────────
+            if (item.cancellationReason.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
                 ),
-                const SizedBox(height: 8),
-                IntrinsicHeight(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        width: 3,
-                        decoration: BoxDecoration(
-                          color: AppColors.kGreen,
-                          borderRadius: BorderRadius.circular(2),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFAEEDA),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.info_outline,
+                      size: 16,
+                      color: Color(0xFF854F0A),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        item.cancellationReason,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: Color(0xFF854F0A),
                         ),
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            ...allParticipants
-                                .take(shownCount)
-                                .map(
-                                  (p) => _buildParticipantRow(
-                                    p,
-                                    isHost: p.userId == item.hostId,
-                                  ),
-                                ),
-                            if (othersCount > 0 || isExpanded)
-                              GestureDetector(
-                                onTap: () => setState(() {
-                                  if (isExpanded) {
-                                    _expandedCards.remove(item.id);
-                                  } else {
-                                    _expandedCards.add(item.id);
-                                  }
-                                }),
-                                child: Padding(
-                                  padding: const EdgeInsets.only(top: 10),
-                                  child: Text(
-                                    isExpanded
-                                        ? 'Show less'
-                                        : '+ $othersCount others participants',
-                                    style: const TextStyle(
-                                      fontSize: 13,
-                                      color: AppColors.kGreen,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
+
+            // ── Venue, date, participants ────────────────────────────────
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 3,
+                    decoration: BoxDecoration(
+                      color: AppColors.kGreen,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _labeledDetail(
+                          'Venue: ',
+                          item.venueName.isEmpty ? '—' : item.venueName,
+                        ),
+                        const SizedBox(height: 4),
+                        _labeledDetail(
+                          'Suggested point: ',
+                          item.suggestedPoint.isEmpty
+                              ? 'JOE & THE JUICE'
+                              : item.suggestedPoint,
+                        ),
+                        const SizedBox(height: 4),
+                        _labeledDetail(
+                          'Date: ',
+                          _formatDateTime(item.createdAt),
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          'Participants:',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey[600],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        ...nonHostParticipants
+                            .take(shownCount)
+                            .map(
+                              (p) => _buildParticipantRow(
+                                p,
+                                isCurrentUser: p.userId == uid,
+                              ),
+                            ),
+                        if (othersCount > 0 || isExpanded)
+                          GestureDetector(
+                            onTap: () => setState(() {
+                              if (isExpanded) {
+                                _expandedCards.remove(item.id);
+                              } else {
+                                _expandedCards.add(item.id);
+                              }
+                            }),
+                            child: Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Text(
+                                isExpanded
+                                    ? 'Show less'
+                                    : '+ $othersCount others participants',
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  color: AppColors.kGreen,
+                                  fontWeight: FontWeight.w500,
                                 ),
                               ),
-                          ],
-                        ),
-                      ),
-                    ],
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildParticipantRow(
     HistoryMeetingPointParticipant p, {
-    required bool isHost,
+    bool isCurrentUser = false,
   }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -1144,7 +1393,7 @@ class _HistoryPageState extends State<HistoryPage> {
                 ],
               ),
             ),
-            if (isHost)
+            if (isCurrentUser)
               Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 10,
@@ -1155,7 +1404,7 @@ class _HistoryPageState extends State<HistoryPage> {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  'Host',
+                  'Me',
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,

@@ -386,6 +386,72 @@
     "id": "1"
   },
   {
+    "poiMaterial": "POIMAT_Gate 1",
+    "floor": "GF",
+    "category": "gates",
+    "pos": {
+      "x": 0.2316902130842209,
+      "y": 2.541403293609619,
+      "z": -0.011052553541958332
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Gate 2",
+    "floor": "GF",
+    "category": "gates",
+    "pos": {
+      "x": -0.6977934241294861,
+      "y": 1.6449592113494873,
+      "z": -0.011052553541958332
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Gate 3",
+    "floor": "GF",
+    "category": "gates",
+    "pos": {
+      "x": -1.233175277709961,
+      "y": 0.4287787079811096,
+      "z": -0.011052553541958332
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Gate 4",
+    "floor": "GF",
+    "category": "gates",
+    "pos": {
+      "x": -1.3037972450256348,
+      "y": -0.9912593364715576,
+      "z": -0.011052553541958332
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Gate 5",
+    "floor": "GF",
+    "category": "gates",
+    "pos": {
+      "x": -0.9098823070526123,
+      "y": -1.5241694450378418,
+      "z": -0.011052553541958332
+    },
+    "id": "1"
+  },
+  {
+    "poiMaterial": "POIMAT_Gate 6",
+    "floor": "GF",
+    "category": "gates",
+    "pos": {
+      "x": -0.15665562450885773,
+      "y": -1.8490849733352661,
+      "z": -0.011052553541958332
+    },
+    "id": "1"
+  },
+  {
     "poiMaterial": "POIMAT_Gina.003",
     "floor": "GF",
     "category": "shops",

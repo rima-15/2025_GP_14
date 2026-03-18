@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -6,6 +7,8 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:flutter_background_service_android/flutter_background_service_android.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -40,6 +43,13 @@ Future<void> gpsServiceOnStart(
 
   if (service
       is AndroidServiceInstance) {
+    // Ensure a valid notification is attached before elevating to foreground.
+    await service
+        .setForegroundNotificationInfo(
+          title: 'Madar',
+          content:
+              'Tracking venue presence...',
+        );
     service.setAsForegroundService();
   }
 
@@ -171,6 +181,33 @@ class GpsTrackingService {
           '[GPS-SERVICE] location service disabled -> cannot start',
         );
         return;
+      }
+
+      if (Platform.isAndroid) {
+        final notifStatus =
+            await Permission
+                .notification
+                .status;
+        debugPrint(
+          '[GPS-SERVICE] notification permission = $notifStatus',
+        );
+
+        if (!notifStatus.isGranted) {
+          final requested =
+              await Permission
+                  .notification
+                  .request();
+          debugPrint(
+            '[GPS-SERVICE] notification permission after request = $requested',
+          );
+
+          if (!requested.isGranted) {
+            debugPrint(
+              '[GPS-SERVICE] notifications not granted -> cannot start foreground service',
+            );
+            return;
+          }
+        }
       }
 
       debugPrint(

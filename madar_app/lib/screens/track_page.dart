@@ -109,6 +109,8 @@ class _TrackPageState extends State<TrackPage> {
   Timer? _scrollToMeetingInviteTimer;
   String? _meetingInviteScrollTargetId;
 
+  //Stream<MeetingPointRecord?>
+  // get _meetingPointCardStream =>
   Stream<MeetingPointRecord?> get _meetingPointCardStream =>
       _activeMeetingPointCardStream ??=
           MeetingPointService.watchActiveForCurrentUser();
@@ -772,32 +774,34 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     int attempts = 0;
     const maxAttempts = 25; // ~2.5 seconds
     _scrollToMeetingInviteTimer?.cancel();
-    _scrollToMeetingInviteTimer =
-        Timer.periodic(const Duration(milliseconds: 100), (_) {
-      if (!mounted || attempts >= maxAttempts) {
-        _scrollToMeetingInviteTimer?.cancel();
-        _scrollToMeetingInviteTimer = null;
-        return;
-      }
-      attempts++;
-      final ctx = _scrollToMeetingInviteKey.currentContext;
-      if (ctx != null) {
-        _scrollToMeetingInviteTimer?.cancel();
-        _scrollToMeetingInviteTimer = null;
-        _startHighlightClearTimer();
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
-          try {
-            Scrollable.ensureVisible(
-              ctx,
-              alignment: 0.15,
-              duration: const Duration(milliseconds: 450),
-              curve: Curves.easeInOutCubic,
-            );
-          } catch (_) {}
-        });
-      }
-    });
+    _scrollToMeetingInviteTimer = Timer.periodic(
+      const Duration(milliseconds: 100),
+      (_) {
+        if (!mounted || attempts >= maxAttempts) {
+          _scrollToMeetingInviteTimer?.cancel();
+          _scrollToMeetingInviteTimer = null;
+          return;
+        }
+        attempts++;
+        final ctx = _scrollToMeetingInviteKey.currentContext;
+        if (ctx != null) {
+          _scrollToMeetingInviteTimer?.cancel();
+          _scrollToMeetingInviteTimer = null;
+          _startHighlightClearTimer();
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            try {
+              Scrollable.ensureVisible(
+                ctx,
+                alignment: 0.15,
+                duration: const Duration(milliseconds: 450),
+                curve: Curves.easeInOutCubic,
+              );
+            } catch (_) {}
+          });
+        }
+      },
+    );
   }
 
   // by remas start
@@ -1649,7 +1653,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 _buildSubsectionLabel('Meeting Point Invitations'),
                 ...pendingMeetings.map(
                   (m) => Padding(
-                    key: _meetingInviteScrollTargetId != null &&
+                    key:
+                        _meetingInviteScrollTargetId != null &&
                             m.id == _meetingInviteScrollTargetId
                         ? _scrollToMeetingInviteKey
                         : null,
@@ -2301,7 +2306,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           arrivalStatus: 'cancelled',
         );
       } catch (e) {
-        if (mounted) SnackbarHelper.showError(context, 'Failed to cancel. Please try again.');
+        if (mounted)
+          SnackbarHelper.showError(
+            context,
+            'Failed to cancel. Please try again.',
+          );
       }
       return;
     }
@@ -2392,7 +2401,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     try {
       if (choice == 'all') {
         await MeetingPointService.cancelMeetingForAll(meeting.id);
-        if (mounted) SnackbarHelper.showSuccess(context, 'Meeting point cancelled for all.');
+        if (mounted)
+          SnackbarHelper.showSuccess(
+            context,
+            'Meeting point cancelled for all.',
+          );
       } else {
         await MeetingPointService.updateArrivalStatus(
           meetingPointId: meeting.id,
@@ -2402,7 +2415,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         );
       }
     } catch (e) {
-      if (mounted) SnackbarHelper.showError(context, 'Failed to cancel. Please try again.');
+      if (mounted)
+        SnackbarHelper.showError(
+          context,
+          'Failed to cancel. Please try again.',
+        );
     }
   }
 
@@ -2725,7 +2742,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
     return Container(
       decoration: BoxDecoration(
-        color: isHighlighted ? AppColors.kGreen.withOpacity(0.05) : Colors.white,
+        color: isHighlighted
+            ? AppColors.kGreen.withOpacity(0.05)
+            : Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isHighlighted ? AppColors.kGreen : Colors.grey.shade200,

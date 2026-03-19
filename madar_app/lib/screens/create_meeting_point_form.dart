@@ -1943,6 +1943,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         ? _myName!.trim()
         : (host.displayName ?? '').trim();
 
+    final waitDeadline =
+        DateTime.now().add(const Duration(minutes: 10));
+
     final meetingPointId = await MeetingPointService.createMeetingPoint(
       hostId: host.uid,
       hostName: hostName.isNotEmpty ? hostName : 'Host',
@@ -1952,10 +1955,11 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       placeCategories: _selectedPlaceCategories.toList(),
       hostLocation: _hostLocation?.toMap(),
       participants: participants,
-      waitDeadline: DateTime.now().add(const Duration(minutes: 10)),
+      waitDeadline: waitDeadline,
     );
 
     _meetingPointId = meetingPointId;
+
     _selectedFriends
       ..clear()
       ..addAll(

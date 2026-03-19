@@ -49,6 +49,7 @@ class TrackPage extends StatefulWidget {
     super.key,
     this.initialExpandRequestId,
     this.initialFilterIndex,
+    this.initialMeetingPointId,
   });
 
   /// When set (e.g. from notification tap), open with this request expanded.
@@ -56,6 +57,9 @@ class TrackPage extends StatefulWidget {
 
   /// 0 = Received, 1 = Sent. When opening from notification, which filter tab to show.
   final int? initialFilterIndex;
+
+  /// When set (e.g. from notification tap), open Meeting Point tab and expand this invite.
+  final String? initialMeetingPointId;
 
   @override
   State<TrackPage> createState() =>
@@ -72,6 +76,7 @@ class _TrackPageState
   bool _mapsLoading = false;
   String? _expandedRequestId;
   String? _highlightRequestId;
+  String? _highlightMeetingInviteId;
   Timer? _highlightClearTimer;
   // by remas start
   final Map<String, double>
@@ -152,6 +157,12 @@ class _TrackPageState
   final GlobalKey _scrollToTargetKey =
       GlobalKey();
   Timer? _scrollToTargetTimer;
+
+  /// Key for the meeting invitation tile to scroll to when opening from notification.
+  final GlobalKey _scrollToMeetingInviteKey =
+      GlobalKey();
+  Timer? _scrollToMeetingInviteTimer;
+  String? _meetingInviteScrollTargetId;
 
   Stream<MeetingPointRecord?>
   get _meetingPointCardStream =>
@@ -787,7 +798,16 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     _activeMeetingPointCountStream =
         MeetingPointService.watchActiveForCurrentUser();
     _loadVenueMaps();
-    if (widget.initialExpandRequestId !=
+    if (widget.initialMeetingPointId != null) {
+      _isTrackingView = false;
+      _expandedMeetingInviteId =
+          widget.initialMeetingPointId;
+      _highlightMeetingInviteId =
+          widget.initialMeetingPointId;
+      _meetingInviteScrollTargetId =
+          widget.initialMeetingPointId;
+      _startScrollToMeetingInviteWhenReady();
+    } else if (widget.initialExpandRequestId !=
         null) {
       _expandedRequestId =
           widget.initialExpandRequestId;
@@ -1087,6 +1107,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
         setState(() {
           _highlightRequestId = null;
+          _highlightMeetingInviteId = null;
           _highlightedDisconnectedIds
               .clear();
           _highlightClearScheduled =
@@ -1142,6 +1163,38 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         }
       },
     );
+  }
+
+  void _startScrollToMeetingInviteWhenReady() {
+    int attempts = 0;
+    const maxAttempts = 25; // ~2.5 seconds
+    _scrollToMeetingInviteTimer?.cancel();
+    _scrollToMeetingInviteTimer =
+        Timer.periodic(const Duration(milliseconds: 100), (_) {
+      if (!mounted || attempts >= maxAttempts) {
+        _scrollToMeetingInviteTimer?.cancel();
+        _scrollToMeetingInviteTimer = null;
+        return;
+      }
+      attempts++;
+      final ctx = _scrollToMeetingInviteKey.currentContext;
+      if (ctx != null) {
+        _scrollToMeetingInviteTimer?.cancel();
+        _scrollToMeetingInviteTimer = null;
+        _startHighlightClearTimer();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          try {
+            Scrollable.ensureVisible(
+              ctx,
+              alignment: 0.15,
+              duration: const Duration(milliseconds: 450),
+              curve: Curves.easeInOutCubic,
+            );
+          } catch (_) {}
+        });
+      }
+    });
   }
 
   // by remas start
@@ -1207,6 +1260,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     _clockTimer?.cancel();
     _meetingPointCardTimer?.cancel();
     _scrollToTargetTimer?.cancel();
+    _scrollToMeetingInviteTimer?.cancel();
     _highlightClearTimer?.cancel();
     _activeReqSub?.cancel();
 
@@ -2348,6 +2402,10 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 ),
                 ...pendingMeetings.map(
                   (m) => Padding(
+                    key: _meetingInviteScrollTargetId != null &&
+                            m.id == _meetingInviteScrollTargetId
+                        ? _scrollToMeetingInviteKey
+                        : null,
                     padding:
                         const EdgeInsets.only(
                           bottom: 8,
@@ -2810,16 +2868,25 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     final isExpanded =
         _expandedMeetingInviteId ==
         meeting.id;
+    final isHighlighted =
+        _highlightMeetingInviteId ==
+        meeting.id;
     final timerLabel =
         _currentStepTimerLabel(meeting);
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isHighlighted
+            ? AppColors.kGreen
+                  .withOpacity(0.05)
+            : Colors.white,
         borderRadius:
             BorderRadius.circular(16),
         border: Border.all(
-          color: Colors.grey.shade200,
+          color: isHighlighted
+              ? AppColors.kGreen
+              : Colors.grey.shade200,
+          width: isHighlighted ? 2 : 1,
         ),
         boxShadow: [
           BoxShadow(

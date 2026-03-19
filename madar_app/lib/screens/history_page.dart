@@ -83,6 +83,9 @@ class HistoryPage extends StatefulWidget {
     super.key,
     this.initialFilterIndex,
     this.initialHighlightRequestId,
+    this.initialMainTabIndex,
+    this.initialMeetingFilterIndex,
+    this.initialMeetingPointId,
   });
 
   /// 0 = Sent, 1 = Received
@@ -90,6 +93,9 @@ class HistoryPage extends StatefulWidget {
 
   /// When set, scroll to and briefly highlight this request.
   final String? initialHighlightRequestId;
+  final int? initialMainTabIndex;
+  final int? initialMeetingFilterIndex;
+  final String? initialMeetingPointId;
 
   @override
   State<HistoryPage> createState() => _HistoryPageState();
@@ -103,6 +109,12 @@ class _HistoryPageState extends State<HistoryPage> {
   final GlobalKey _highlightKey = GlobalKey();
   Timer? _highlightClearTimer;
   bool _highlightClearScheduled = false;
+  String? _highlightMeetingPointId;
+  final GlobalKey _meetingHighlightKey = GlobalKey();
+  Timer? _meetingHighlightClearTimer;
+  bool _meetingHighlightClearScheduled = false;
+  final ScrollController _meetingScrollController = ScrollController();
+  Timer? _meetingScrollTimer;
   final Set<String> _expandedCards = {};
 
   static const List<String> _mainTabs = ['Tracking', 'Meeting point'];
@@ -129,10 +141,21 @@ class _HistoryPageState extends State<HistoryPage> {
   @override
   void initState() {
     super.initState();
+    if (widget.initialMainTabIndex != null) {
+      _mainTabIndex = widget.initialMainTabIndex!;
+    }
     if (widget.initialFilterIndex != null) {
       _trackingFilterIndex = widget.initialFilterIndex!;
     }
+    if (widget.initialMeetingFilterIndex != null) {
+      _meetingFilterIndex = widget.initialMeetingFilterIndex!;
+    }
     _highlightRequestId = widget.initialHighlightRequestId;
+    _highlightMeetingPointId = widget.initialMeetingPointId;
+    if (_highlightMeetingPointId != null &&
+        _highlightMeetingPointId!.trim().isNotEmpty) {
+      _expandedCards.add(_highlightMeetingPointId!);
+    }
     _sentStream = _createSentHistoryStream();
     _receivedStream = _createReceivedHistoryStream();
     _meetingPointHistoryStream = _createMeetingPointHistoryStream();
@@ -142,6 +165,9 @@ class _HistoryPageState extends State<HistoryPage> {
   @override
   void dispose() {
     _highlightClearTimer?.cancel();
+    _meetingHighlightClearTimer?.cancel();
+    _meetingScrollTimer?.cancel();
+    _meetingScrollController.dispose();
     super.dispose();
   }
 
@@ -1062,12 +1088,52 @@ class _HistoryPageState extends State<HistoryPage> {
                 );
               }
 
+              if (_highlightMeetingPointId != null) {
+                final targetIdx =
+                    list.indexWhere((m) => m.id == _highlightMeetingPointId);
+                if (targetIdx >= 0) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (!mounted) return;
+                    final ctx = _meetingHighlightKey.currentContext;
+                    if (ctx != null) {
+                      Scrollable.ensureVisible(
+                        ctx,
+                        alignment: 0.15,
+                        duration: const Duration(milliseconds: 450),
+                        curve: Curves.easeInOutCubic,
+                      );
+                    }
+                  });
+                  if (!_meetingHighlightClearScheduled) {
+                    _meetingHighlightClearScheduled = true;
+                    _meetingHighlightClearTimer?.cancel();
+                    _meetingHighlightClearTimer =
+                        Timer(const Duration(seconds: 3), () {
+                      if (!mounted) return;
+                      setState(() {
+                        _highlightMeetingPointId = null;
+                        _meetingHighlightClearScheduled = false;
+                      });
+                      _meetingScrollTimer?.cancel();
+                      _meetingScrollTimer = null;
+                    });
+                  }
+                } else if (_meetingScrollTimer == null) {
+                  _startScrollToMeetingPointWhenReady(targetIdx);
+                }
+              }
+
               return ListView.separated(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                controller: _meetingScrollController,
                 itemCount: list.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 12),
-                itemBuilder: (context, index) =>
-                    _buildMeetingPointTile(list[index]),
+                itemBuilder: (context, index) => KeyedSubtree(
+                  key: list[index].id == _highlightMeetingPointId
+                      ? _meetingHighlightKey
+                      : null,
+                  child: _buildMeetingPointTile(list[index]),
+                ),
               );
             },
           ),
@@ -1116,6 +1182,7 @@ class _HistoryPageState extends State<HistoryPage> {
   Widget _buildMeetingPointTile(HistoryMeetingPoint item) {
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
     final isExpanded = _expandedCards.contains(item.id);
+    final isHighlighted = _highlightMeetingPointId == item.id;
 
     // Participants list: exclude host (already shown in header)
     // Current user first, then others
@@ -1143,9 +1210,14 @@ class _HistoryPageState extends State<HistoryPage> {
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isHighlighted
+            ? AppColors.kGreen.withOpacity(0.05)
+            : Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(
+          color: isHighlighted ? AppColors.kGreen : Colors.grey.shade200,
+          width: isHighlighted ? 2 : 1,
+        ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.05),
@@ -1346,6 +1418,52 @@ class _HistoryPageState extends State<HistoryPage> {
         ),
       ),
     );
+  }
+
+  void _startScrollToMeetingPointWhenReady(int targetIdx) {
+    int attempts = 0;
+    const maxAttempts = 25; // ~2.5 seconds
+    _meetingScrollTimer?.cancel();
+    _meetingScrollTimer =
+        Timer.periodic(const Duration(milliseconds: 120), (_) {
+      if (!mounted || attempts >= maxAttempts) {
+        _meetingScrollTimer?.cancel();
+        _meetingScrollTimer = null;
+        return;
+      }
+      attempts++;
+      final ctx = _meetingHighlightKey.currentContext;
+      if (ctx != null) {
+        _meetingScrollTimer?.cancel();
+        _meetingScrollTimer = null;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          try {
+            Scrollable.ensureVisible(
+              ctx,
+              alignment: 0.15,
+              duration: const Duration(milliseconds: 450),
+              curve: Curves.easeInOutCubic,
+            );
+          } catch (_) {}
+        });
+        return;
+      }
+
+      if (_meetingScrollController.hasClients) {
+        const estimatedItemExtent = 240.0;
+        const separator = 12.0;
+        final targetOffset =
+            (estimatedItemExtent + separator) * targetIdx;
+        final max = _meetingScrollController.position.maxScrollExtent;
+        final clamped = targetOffset.clamp(0.0, max);
+        _meetingScrollController.animateTo(
+          clamped,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeInOutCubic,
+        );
+      }
+    });
   }
 
   Widget _buildParticipantRow(

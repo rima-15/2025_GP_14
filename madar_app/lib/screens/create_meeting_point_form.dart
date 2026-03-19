@@ -1940,6 +1940,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       _step = 5;
       _initStep5();
       setState(() {});
+    } else {
+      // Steps 1 → 2 and 2 → 3: simple increment.
+      setState(() => _step++);
     }
     unawaited(_persistDraftIfNeeded());
   }

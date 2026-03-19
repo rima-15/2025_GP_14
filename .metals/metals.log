@@ -5,3 +5,12 @@
 2026.03.17 04:22:40 WARN  Build server is not auto-connectable.
 Mar 17, 2026 11:32:09 AM org.eclipse.lsp4j.jsonrpc.services.GenericEndpoint notify
 INFO: Unsupported notification method: $/setTrace
+2026.03.18 03:33:12 INFO  Started: Metals version 1.6.6 in folders 'C:\Users\anaja\Desktop\GPCode\2025_GP_14' for client Visual Studio Code 1.111.0.
+2026.03.18 03:33:12 INFO  Memory monitor started
+2026.03.18 03:33:19 WARN  Using H2 2.4.240 which is newer than the version Flyway has been verified with. The latest verified version of H2 is 2.3.232.
+2026.03.18 03:33:35 WARN  no build tool detected in workspace 'C:\Users\anaja\Desktop\GPCode\2025_GP_14'. The most common cause for this problem is that the editor was opened in the wrong working directory, for example if you use sbt then the workspace directory should contain build.sbt. 
+2026.03.18 03:33:35 WARN  Build server is not auto-connectable.
+2026.03.18 03:43:16 INFO  Shutting down server
+2026.03.18 03:43:16 INFO  Memory monitor stopped
+2026.03.18 03:43:16 INFO  shutting down Metals
+2026.03.18 03:43:16 INFO  Exiting server

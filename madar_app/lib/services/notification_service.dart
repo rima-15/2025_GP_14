@@ -12,20 +12,28 @@ class NotificationService {
     // Permission
     await _fcm.requestPermission(alert: true, badge: true, sound: true);
 
-    // ANDROID CHANNEL (THIS IS THE FIX)
+    // ANDROID CHANNELS
     const AndroidNotificationChannel channel = AndroidNotificationChannel(
-      'madar_channel', //AndroidManifest
+      'madar_channel', // AndroidManifest
       'Madar Notifications',
       description: 'All Madar notifications',
       importance: Importance.max,
       playSound: true,
     );
 
-    await _local
-        .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin
-        >()
-        ?.createNotificationChannel(channel);
+    const AndroidNotificationChannel gpsChannel = AndroidNotificationChannel(
+      'madar_gps_channel', // Foreground GPS service
+      'Madar Location Tracking',
+      description: 'Background location tracking',
+      importance: Importance.low,
+      playSound: false,
+    );
+
+    final androidPlugin =
+        _local.resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
+    await androidPlugin?.createNotificationChannel(channel);
+    await androidPlugin?.createNotificationChannel(gpsChannel);
 
     // Local notification init
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');

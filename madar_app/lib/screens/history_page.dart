@@ -410,15 +410,17 @@ class _HistoryPageState extends State<HistoryPage> {
 
     final hostId = (data['hostId'] ?? '').toString();
     final isHost = hostId == uid;
-    final hostStep =
-        (data['hostStep'] is num) ? (data['hostStep'] as num).toInt() : 4;
+    final hostStep = (data['hostStep'] is num)
+        ? (data['hostStep'] as num).toInt()
+        : 4;
 
     final rawParticipants = data['participants'];
     final parts = (rawParticipants is List)
         ? rawParticipants.whereType<Map>().toList()
         : <Map>[];
 
-    final allDeclined = parts.isNotEmpty &&
+    final allDeclined =
+        parts.isNotEmpty &&
         parts.every(
           (p) => (p['status'] ?? '').toString().toLowerCase() == 'declined',
         );
@@ -428,9 +430,10 @@ class _HistoryPageState extends State<HistoryPage> {
 
     if (isHost) {
       if (allDeclined) return 'All participants declined the request';
-      if (hostStep == 5) return 'Host (me) rejected the suggested meeting point';
+      if (hostStep == 5)
+        return 'Host (you) rejected the suggested meeting point';
       if (!anyAccepted) return 'None of participants respond';
-      return 'You cancelled this request';
+      return 'You cancelled this request for all participants';
     } else {
       if (hostStep == 5) return 'Host rejected the suggested meeting point';
       return 'Cancelled by host';

@@ -95,8 +95,7 @@ class MeetingPointParticipant {
           : Timestamp.fromDate(respondedAt!),
       'updatedAt': updatedAt == null ? null : Timestamp.fromDate(updatedAt!),
       'arrivalStatus': arrivalStatus,
-      'arrivedAt':
-          arrivedAt == null ? null : Timestamp.fromDate(arrivedAt!),
+      'arrivedAt': arrivedAt == null ? null : Timestamp.fromDate(arrivedAt!),
       'estimatedArrivalMinutes': estimatedArrivalMinutes,
       'locationUpdatedAt': locationUpdatedAt == null
           ? null
@@ -119,10 +118,11 @@ class MeetingPointParticipant {
       default:
         status = 'pending';
     }
-    final arrivalStatusRaw =
-        (raw['arrivalStatus'] ?? 'on_the_way').toString().trim();
-    final arrivalStatus = const {'on_the_way', 'arrived', 'cancelled'}
-            .contains(arrivalStatusRaw)
+    final arrivalStatusRaw = (raw['arrivalStatus'] ?? 'on_the_way')
+        .toString()
+        .trim();
+    final arrivalStatus =
+        const {'on_the_way', 'arrived', 'cancelled'}.contains(arrivalStatusRaw)
         ? arrivalStatusRaw
         : 'on_the_way';
     final estMins = raw['estimatedArrivalMinutes'];
@@ -135,8 +135,9 @@ class MeetingPointParticipant {
       updatedAt: _meetingPointAsDateTime(raw['updatedAt']),
       arrivalStatus: arrivalStatus,
       arrivedAt: _meetingPointAsDateTime(raw['arrivedAt']),
-      estimatedArrivalMinutes:
-          (estMins is num) ? estMins.toInt().clamp(1, 5) : 3,
+      estimatedArrivalMinutes: (estMins is num)
+          ? estMins.toInt().clamp(1, 5)
+          : 3,
       locationUpdatedAt: _meetingPointAsDateTime(raw['locationUpdatedAt']),
     );
   }
@@ -286,14 +287,14 @@ class MeetingPointRecord {
       waitDeadline: _meetingPointAsDateTime(data['waitDeadline']),
       suggestDeadline: _meetingPointAsDateTime(data['suggestDeadline']),
       confirmedAt: _meetingPointAsDateTime(data['confirmedAt']),
-      hostArrivalStatus:
-          (data['hostArrivalStatus'] ?? 'on_the_way').toString(),
+      hostArrivalStatus: (data['hostArrivalStatus'] ?? 'on_the_way').toString(),
       hostArrivedAt: _meetingPointAsDateTime(data['hostArrivedAt']),
       hostEstimatedMinutes: (data['hostEstimatedMinutes'] is num)
           ? (data['hostEstimatedMinutes'] as num).toInt().clamp(1, 5)
           : 3,
-      hostLocationUpdatedAt:
-          _meetingPointAsDateTime(data['hostLocationUpdatedAt']),
+      hostLocationUpdatedAt: _meetingPointAsDateTime(
+        data['hostLocationUpdatedAt'],
+      ),
     );
   }
 }
@@ -324,9 +325,7 @@ class MeetingPointService {
         return meeting.hostArrivalStatus != 'cancelled';
       }
       final me = meeting.participantFor(uid);
-      return me != null &&
-          me.isAccepted &&
-          me.arrivalStatus != 'cancelled';
+      return me != null && me.isAccepted && me.arrivalStatus != 'cancelled';
     }
 
     // ── Setup phase (status == 'pending') ─────────────────────────────────
@@ -425,9 +424,8 @@ class MeetingPointService {
       return;
     }
 
-    // Host-only timed transitions.
-    if (meeting.hostId != uid) return;
-
+    // Timed transitions: any signed-in user can trigger them so the flow
+    // continues even when the host has the app closed / logged out.
     if (meeting.hostStep == 4 && meeting.waitDeadline != null) {
       if (!meeting.waitDeadline!.isAfter(now)) {
         if (meeting.acceptedCount <= 0) {
@@ -663,8 +661,9 @@ class MeetingPointService {
     if (isHost) {
       await _col.doc(meetingPointId).update({
         'hostArrivalStatus': arrivalStatus,
-        'hostArrivedAt':
-            arrivedAt == null ? null : Timestamp.fromDate(arrivedAt),
+        'hostArrivedAt': arrivedAt == null
+            ? null
+            : Timestamp.fromDate(arrivedAt),
         'updatedAt': FieldValue.serverTimestamp(),
       });
     } else {
@@ -723,6 +722,18 @@ class MeetingPointService {
       payload['status'] = 'cancelled';
     }
 
+    // Auto-advance to step 5 when every invitee has responded and at least
+    // one accepted — host no longer needs to manually tap "Proceed", and the
+    // transition works even if the host is offline.
+    final noneLeft = updatedParticipants.every((p) => !p.isPending);
+    final anyAccepted = updatedParticipants.any((p) => p.isAccepted);
+    if (!allDeclined && noneLeft && anyAccepted && meeting.hostStep == 4) {
+      payload['hostStep'] = 5;
+      payload['suggestDeadline'] = Timestamp.fromDate(
+        now.add(_kSuggestDuration),
+      );
+    }
+
     try {
       await ref.update(payload);
     } catch (_) {
@@ -750,10 +761,15 @@ class CreateMeetingPointForm extends StatefulWidget {
     super.key,
     this.resumeDraft = false,
     this.meetingPointId,
+    this.autoAdvanceToStep5 = false,
   });
 
   final bool resumeDraft;
   final String? meetingPointId;
+
+  /// When true and the restored meeting is at step 4, automatically advance
+  /// to step 5 (skipping the manual Proceed tap inside the form).
+  final bool autoAdvanceToStep5;
 
   @override
   State<CreateMeetingPointForm> createState() => _CreateMeetingPointFormState();
@@ -901,9 +917,15 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     if (_meetingPointId != null && _meetingPointId!.isNotEmpty) {
       _isInitializing = true;
       _shouldManageDraft = true;
-      _restoreFromMeetingPoint(_meetingPointId!).whenComplete(() {
-        if (mounted) setState(() => _isInitializing = false);
-      });
+      _restoreFromMeetingPoint(_meetingPointId!)
+          .then((_) {
+            if (mounted && widget.autoAdvanceToStep5 && _step == 4) {
+              _goNext(); // cancels step-4 timers, inits step-5, sets _step = 5
+            }
+          })
+          .whenComplete(() {
+            if (mounted) setState(() => _isInitializing = false);
+          });
     } else if (widget.resumeDraft) {
       _isInitializing = true;
       _shouldManageDraft = true;
@@ -1633,13 +1655,16 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
                     .inSeconds
                     .clamp(0, 300);
 
+          // Never let a stale cached snapshot downgrade a step we've already
+          // advanced past locally (e.g. auto-advance race with Firestore cache).
+          final effectiveStep = nextStep >= _step ? nextStep : _step;
           setState(() {
             _participants = participants;
             _waitDeadline = meeting.waitDeadline;
             _suggestDeadline = meeting.suggestDeadline;
             _waitSecondsLeft = waitLeft.toInt();
             _suggestSecondsLeft = suggestLeft.toInt();
-            _step = nextStep;
+            _step = effectiveStep;
           });
 
           if (_step == 4) {
@@ -1906,13 +1931,16 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     if (_step == 3) {
       // Step 3 → 4: build participant list and start timers.
       _initStep4();
+      setState(() => _step++);
     } else if (_step == 4) {
       // Step 4 → 5: cancel wait timer, start suggestion timer.
+      // Increment _step FIRST so _syncMeetingPointProgress writes hostStep:5.
       _waitTimer?.cancel();
       _proceedTimer?.cancel();
+      _step = 5;
       _initStep5();
+      setState(() {});
     }
-    setState(() => _step++);
     unawaited(_persistDraftIfNeeded());
   }
 
@@ -1977,10 +2005,10 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       }
     } else {
       // At least one accepted → advance to step 5.
+      // Set _step FIRST so _syncMeetingPointProgress writes hostStep:5.
+      _step = 5;
       _initStep5();
-      if (mounted) {
-        setState(() => _step = 5);
-      }
+      if (mounted) setState(() {});
       // status stays 'pending'; hostStep=5 signals waiting_host_confirmation sub-state
       unawaited(_persistDraftIfNeeded());
     }
@@ -2211,7 +2239,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       'Set your location',
       'Review & send',
       'Waiting for participants',
-      'Suggested meeting point',
+      'Confirm Suggested meeting point',
     ];
     return Container(
       padding: const EdgeInsets.all(20),
@@ -3582,7 +3610,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
               ),
             ),
             child: const Text(
-              'Accept',
+              'Confirm',
               style: TextStyle(
                 color: Colors.white,
                 fontSize: 16,
@@ -3647,6 +3675,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       title: 'Cancel Meeting Point',
       message:
           'Are you sure you want to cancel this meeting point for all participants?',
+      cancelText: 'Keep',
       confirmText: 'Cancel Meeting',
     );
     if (confirmed != true) return;

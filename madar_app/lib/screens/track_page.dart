@@ -88,6 +88,7 @@ class _TrackPageState extends State<TrackPage> {
   // ── Arrival section state ──────────────────────────────────────────────────
   Timer? _arrivalTimer;
   String? _expandedArrivalParticipantId; // userId of expanded participant card
+  final Set<String> _favoriteParticipantIds = {};
   DateTime? _lastMeetingMaintainAttemptAt;
 
   /// IDs of meeting invitations the user locally declined — hidden immediately
@@ -553,8 +554,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     });
     _meetingPointCardTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
-      // Keep meeting-point countdown badge ticking when visible.
-      if (!_isTrackingView) setState(() {});
+      // Tick every second so pending-meeting countdown timers stay accurate
+      // both on the tracking view (full card) and other tabs (badge).
+      setState(() {});
       // Ensure timed transitions (cancel / step advance) happen immediately
       // when the displayed countdown reaches 00:00.
       unawaited(_maybeMaintainActiveMeetingIfNeeded());
@@ -855,6 +857,16 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   void _toggleExpand(String requestId) {
     setState(() {
       _expandedRequestId = _expandedRequestId == requestId ? null : requestId;
+    });
+  }
+
+  void _toggleParticipantFavorite(String userId) {
+    setState(() {
+      if (_favoriteParticipantIds.contains(userId)) {
+        _favoriteParticipantIds.remove(userId);
+      } else {
+        _favoriteParticipantIds.add(userId);
+      }
     });
   }
 
@@ -1179,7 +1191,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       case 4:
         return 'Waiting for participants';
       case 5:
-        return 'Suggested meeting point';
+        return 'Confirm Suggested meeting point';
       default:
         return 'Create meeting point';
     }
@@ -1285,6 +1297,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   Future<void> _showCreateMeetingPointForm({
     bool resumeDraft = false,
     String? meetingPointId,
+    bool autoAdvanceToStep5 = false,
   }) async {
     final id = meetingPointId?.trim() ?? '';
     if (resumeDraft && id.isNotEmpty) {
@@ -1306,6 +1319,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       builder: (context) => CreateMeetingPointForm(
         resumeDraft: resumeDraft,
         meetingPointId: meetingPointId,
+        autoAdvanceToStep5: autoAdvanceToStep5,
       ),
     );
 
@@ -1776,7 +1790,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 children: [
                   Text(
                     'Estimated arrive by: ',
-                    style: TextStyle(fontSize: 13, color: Colors.grey[700]),
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.grey[700],
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                   Icon(Icons.timer_outlined, size: 14, color: Colors.grey[600]),
                   const SizedBox(width: 4),
@@ -1920,6 +1938,18 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                   ),
                   if (!isCancelled) ...[
                     const SizedBox(width: 8),
+                    IconButton(
+                      onPressed: () => _toggleParticipantFavorite(p.userId),
+                      icon: Icon(
+                        _favoriteParticipantIds.contains(p.userId)
+                            ? Icons.favorite
+                            : Icons.favorite_border,
+                        color: _favoriteParticipantIds.contains(p.userId)
+                            ? Colors.red
+                            : Colors.grey[400],
+                        size: 24,
+                      ),
+                    ),
                     AnimatedRotation(
                       turns: isExpanded ? 0.5 : 0,
                       duration: const Duration(milliseconds: 200),
@@ -1964,6 +1994,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                                 text: TextSpan(
                                   style: TextStyle(
                                     fontSize: 13,
+                                    fontWeight: FontWeight.w400,
                                     color: Colors.grey[600],
                                   ),
                                   children: [
@@ -2187,16 +2218,24 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             isHostParticipant: true,
           ),
 
-        // Other participants (excluding me).
-        ...arrivalParticipants
-            .where((p) => p.userId != uid)
-            .map(
-              (p) => _buildParticipantArrivalCard(
-                p: p,
-                meeting: meeting,
-                isHostParticipant: p.userId == meeting.hostId,
+        // Other participants (excluding me), cancelled ones last.
+        ...(() {
+          final others = arrivalParticipants
+              .where((p) => p.userId != uid)
+              .toList()
+            ..sort(
+              (a, b) => (a.arrivalStatus == 'cancelled' ? 1 : 0).compareTo(
+                b.arrivalStatus == 'cancelled' ? 1 : 0,
               ),
+            );
+          return others.map(
+            (p) => _buildParticipantArrivalCard(
+              p: p,
+              meeting: meeting,
+              isHostParticipant: p.userId == meeting.hostId,
             ),
+          );
+        })(),
       ],
     );
   }
@@ -2233,7 +2272,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     if (!isHost) {
       final confirmed = await ConfirmationDialog.showDeleteConfirmation(
         context,
-        title: 'Cancel Participation?',
+        title: 'Cancel Participation',
         message: 'You will be removed from this active meeting point.',
         cancelText: 'Keep',
         confirmText: 'Cancel',
@@ -2247,7 +2286,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           arrivalStatus: 'cancelled',
         );
       } catch (e) {
-        if (mounted) SnackbarHelper.showError(context, 'Failed to cancel. Please try again.');
+        if (mounted)
+          SnackbarHelper.showError(
+            context,
+            'Failed to cancel. Please try again.',
+          );
       }
       return;
     }
@@ -2338,7 +2381,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     try {
       if (choice == 'all') {
         await MeetingPointService.cancelMeetingForAll(meeting.id);
-        if (mounted) SnackbarHelper.showSuccess(context, 'Meeting point cancelled for all.');
+        if (mounted)
+          SnackbarHelper.showSuccess(
+            context,
+            'Meeting point cancelled for all.',
+          );
       } else {
         await MeetingPointService.updateArrivalStatus(
           meetingPointId: meeting.id,
@@ -2348,7 +2395,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         );
       }
     } catch (e) {
-      if (mounted) SnackbarHelper.showError(context, 'Failed to cancel. Please try again.');
+      if (mounted)
+        SnackbarHelper.showError(
+          context,
+          'Failed to cancel. Please try again.',
+        );
     }
   }
 
@@ -2502,7 +2553,75 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                         onPressed: () => _showCreateMeetingPointForm(
                           resumeDraft: true,
                           meetingPointId: meeting.id,
+                          autoAdvanceToStep5: true,
                         ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              if (meeting.hostStep == 5) ...[
+                const SizedBox(height: 10),
+                if (meeting.venueName.isNotEmpty)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.kGreen.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.location_on,
+                          color: AppColors.kGreen,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const SizedBox(height: 2),
+                              Text(
+                                'JOE & THE JUICE',
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.black87,
+                                ),
+                              ),
+                              Text(
+                                meeting.venueName,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey[500],
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: SecondaryButton(
+                        text: 'Reject',
+                        onPressed: () => _rejectSuggestedPoint(meeting),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: PrimaryButton(
+                        text: 'Confirm',
+                        onPressed: () => _confirmSuggestedPoint(meeting),
                       ),
                     ),
                   ],
@@ -2649,8 +2768,15 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             SizedBox(
               width: double.infinity,
               child: SecondaryButton(
-                text: 'Cancel',
-                onPressed: () => _declineMeetingInvite(meeting),
+                text: 'Cancel Participation',
+                onPressed: () => _declineMeetingInvite(
+                  meeting,
+                  title: 'Cancel Participation',
+                  message:
+                      'Are you sure you want to cancel your participation in this meeting point?',
+                  confirmText: 'Cancel Participation',
+                  successMessage: 'Participation cancelled.',
+                ),
               ),
             ),
           ],
@@ -2752,7 +2878,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildMeetingPointInvitationDetails(meeting),
+                  _buildMeetingPointInvitationDetails(meeting, uid),
                   const SizedBox(height: 16),
                   _buildMeetingInviteActionButtons(meeting),
                 ],
@@ -2764,7 +2890,10 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     );
   }
 
-  Widget _buildMeetingPointInvitationDetails(MeetingPointRecord meeting) {
+  Widget _buildMeetingPointInvitationDetails(
+    MeetingPointRecord meeting,
+    String uid,
+  ) {
     return IntrinsicHeight(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2781,10 +2910,17 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                _labeledDetail(
+                  'Host: ',
+                  meeting.hostPhone.isEmpty
+                      ? meeting.hostName
+                      : '${meeting.hostName} (${meeting.hostPhone})',
+                ),
                 if (meeting.venueName.isNotEmpty) ...[
-                  _labeledDetail('Venue: ', meeting.venueName),
                   const SizedBox(height: 10),
+                  _labeledDetail('Venue: ', meeting.venueName),
                 ],
+                const SizedBox(height: 10),
                 Text(
                   'Participants:',
                   style: TextStyle(
@@ -2794,17 +2930,13 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                   ),
                 ),
                 const SizedBox(height: 8),
-                _buildMeetingInviteParticipantRow(
-                  name: meeting.hostName,
-                  phone: meeting.hostPhone,
-                  isHost: true,
-                ),
                 ...meeting.participants.map(
                   (p) => _buildMeetingInviteParticipantRow(
                     name: p.name,
                     phone: p.phone,
                     isHost: false,
-                    status: p.status,
+                    status: p.userId == uid ? null : p.status,
+                    isMe: p.userId == uid,
                   ),
                 ),
               ],
@@ -2820,6 +2952,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     required String phone,
     required bool isHost,
     String? status, // 'pending' | 'accepted' | 'declined' — null for host
+    bool isMe = false,
   }) {
     Color? statusColor;
     String? statusLabel;
@@ -2894,7 +3027,23 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 ),
               ),
             ),
-          if (!isHost && statusLabel != null)
+          if (isMe)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: Colors.grey[200],
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                'Me',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey[600],
+                ),
+              ),
+            )
+          else if (!isHost && statusLabel != null)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
@@ -3529,10 +3678,20 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                   child: SizedBox(
                     width: double.infinity,
                     child: SecondaryButton(
-                      text: 'Cancel',
-                      onPressed: () {
-                        Navigator.pop(ctx);
-                        _declineMeetingInvite(meeting);
+                      text: 'Cancel Participation',
+                      onPressed: () async {
+                        final dialogCtx = ctx;
+                        final confirmed = await _declineMeetingInvite(
+                          meeting,
+                          title: 'Cancel Participation',
+                          message:
+                              'Are you sure you want to cancel your participation in this meeting point?',
+                          confirmText: 'Cancel Participation',
+                          successMessage: 'Participation cancelled.',
+                        );
+                        if (confirmed && mounted && dialogCtx.mounted) {
+                          Navigator.pop(dialogCtx);
+                        }
                       },
                     ),
                   ),
@@ -3640,20 +3799,12 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   }
 
   Future<void> _acceptMeetingInvite(MeetingPointRecord meeting) async {
-    final confirmed = await ConfirmationDialog.showPositiveConfirmation(
-      context,
-      title: 'Accept Invitation',
-      message: 'Are you sure you want to accept this meeting point invitation?',
-      confirmText: 'Accept',
-    );
-    if (confirmed != true) return;
-
     final uid = FirebaseAuth.instance.currentUser?.uid;
 
     // ── Conflict check ────────────────────────────────────────────────────────
-    // Warn if the user is already hosting or has accepted another meeting.
+    // Check if the user is already hosting or has accepted another meeting.
+    MeetingPointRecord? conflicting;
     if (uid != null) {
-      MeetingPointRecord? conflicting;
       for (final m in _lastKnownBlockingMeetings) {
         if (m.id == meeting.id) continue;
         if (m.isHost(uid) || m.participantFor(uid)?.isAccepted == true) {
@@ -3661,9 +3812,40 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           break;
         }
       }
+    }
 
-      if (conflicting != null) {
-        if (!mounted) return;
+    if (conflicting != null) {
+      // ── Conflict exists: show conflict dialog directly (skip normal accept) ──
+      if (!mounted) return;
+      final isHostOfConflicting = uid != null && conflicting.isHost(uid);
+
+      if (isHostOfConflicting) {
+        if (conflicting.isActive) {
+          // Case 1: host in setup phase — accepting cancels the meeting for all.
+          final proceed = await _showHostActiveConflictDialog();
+          if (!mounted || proceed != true) return;
+          try {
+            await MeetingPointService.cancelMeetingForAll(conflicting.id);
+          } catch (_) {}
+        } else if (conflicting.isConfirmed) {
+          // Case 2: host in confirmed/arrival phase — let host choose scope.
+          final choice = await _showHostConfirmedConflictDialog();
+          if (!mounted || choice == null) return;
+          try {
+            if (choice == 'all') {
+              await MeetingPointService.cancelMeetingForAll(conflicting.id);
+            } else {
+              await MeetingPointService.updateArrivalStatus(
+                meetingPointId: conflicting.id,
+                isHost: true,
+                userId: uid,
+                arrivalStatus: 'cancelled',
+              );
+            }
+          } catch (_) {}
+        }
+      } else {
+        // Participant in a conflicting meeting.
         final proceed = await showDialog<bool>(
           context: context,
           barrierColor: Colors.black54,
@@ -3678,7 +3860,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             ),
             content: const Text(
               'You\'re already part of an active meeting point. '
-              'Would you like to leave it and accept this new invitation instead?',
+              'Would you like to leave it and proceed to accept this new invitation?',
               style: TextStyle(fontSize: 15),
             ),
             actions: [
@@ -3695,7 +3877,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                   ),
                 ),
                 child: const Text(
-                  'Undo',
+                  'Discard',
                   style: TextStyle(
                     color: Colors.black87,
                     fontWeight: FontWeight.w600,
@@ -3729,22 +3911,23 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           ),
         );
         if (!mounted || proceed != true) return;
-
-        // Leave / cancel the conflicting meeting before accepting the new one.
         try {
-          if (conflicting.isHost(uid)) {
-            await MeetingPointService.markHostDecision(
-              meetingPointId: conflicting.id,
-              accepted: false,
-            );
-          } else {
-            await MeetingPointService.respondToInvitation(
-              meetingPointId: conflicting.id,
-              accepted: false,
-            );
-          }
+          await MeetingPointService.respondToInvitation(
+            meetingPointId: conflicting.id,
+            accepted: false,
+          );
         } catch (_) {}
       }
+    } else {
+      // ── No conflict: show the normal accept confirmation ───────────────────
+      final confirmed = await ConfirmationDialog.showPositiveConfirmation(
+        context,
+        title: 'Accept Invitation',
+        message:
+            'Are you sure you want to accept this meeting point invitation?',
+        confirmText: 'Accept',
+      );
+      if (confirmed != true) return;
     }
 
     if (!mounted) return;
@@ -3792,6 +3975,221 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         'Failed to accept invitation. Please try again.',
       );
     }
+  }
+
+  /// Dialog shown when the user (as host in setup phase) tries to accept a new
+  /// invitation — warns that the current meeting point will be cancelled for all.
+  Future<bool?> _showHostActiveConflictDialog() {
+    return showDialog<bool>(
+      context: context,
+      barrierColor: Colors.black54,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Active Meeting Point',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
+        ),
+        content: const Text(
+          'You are currently the host of an in-progress meeting point. '
+          'Proceeding to accept this new invitation will cancel the current '
+          'meeting point for all participants. '
+          'Would you like to proceed?',
+          style: TextStyle(fontSize: 15),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            style: TextButton.styleFrom(
+              backgroundColor: Colors.grey[200],
+              padding: const EdgeInsets.symmetric(
+                horizontal: 24,
+                vertical: 12,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: const Text(
+              'Discard',
+              style: TextStyle(
+                color: Colors.black87,
+                fontWeight: FontWeight.w600,
+                fontSize: 15,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(
+              backgroundColor: AppColors.kGreen,
+              padding: const EdgeInsets.symmetric(
+                horizontal: 24,
+                vertical: 12,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: const Text(
+              'Proceed',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 15,
+              ),
+            ),
+          ),
+        ],
+        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      ),
+    );
+  }
+
+  /// Dialog shown when the user (as host in confirmed/arrival phase) tries to
+  /// accept a new invitation — lets them choose to cancel for all or just
+  /// themselves. Returns 'all', 'me', or null (dismissed).
+  Future<String?> _showHostConfirmedConflictDialog() {
+    String selected = 'all';
+    return showDialog<String>(
+      context: context,
+      barrierColor: Colors.black54,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: const Text(
+            'Active Meeting Point',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'You are the host of an active meeting point where participants '
+                'are already heading to the venue. Would you like to proceed with '
+                'cancelling the meeting point?',
+                style: TextStyle(fontSize: 15),
+              ),
+              const SizedBox(height: 16),
+              _buildRadioRow(
+                value: 'all',
+                selected: selected,
+                label: 'Cancel for all participants',
+                onTap: () => setState(() => selected = 'all'),
+              ),
+              _buildRadioRow(
+                value: 'me',
+                selected: selected,
+                label: 'Cancel for me',
+                onTap: () => setState(() => selected = 'me'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, null),
+              style: TextButton.styleFrom(
+                backgroundColor: Colors.grey[200],
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: const Text(
+                'Discard',
+                style: TextStyle(
+                  color: Colors.black87,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15,
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, selected),
+              style: TextButton.styleFrom(
+                backgroundColor: AppColors.kGreen,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: const Text(
+                'Proceed',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                ),
+              ),
+            ),
+          ],
+          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRadioRow({
+    required String value,
+    required String selected,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    final isSelected = value == selected;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            Container(
+              width: 20,
+              height: 20,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: isSelected ? AppColors.kGreen : Colors.grey,
+                  width: 2,
+                ),
+              ),
+              child: isSelected
+                  ? Center(
+                      child: Container(
+                        width: 10,
+                        height: 10,
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: AppColors.kGreen,
+                        ),
+                      ),
+                    )
+                  : null,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   /// Bottom sheet that lets the user pick how to set their starting location
@@ -3868,15 +4266,21 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     );
   }
 
-  Future<void> _declineMeetingInvite(MeetingPointRecord meeting) async {
+  Future<bool> _declineMeetingInvite(
+    MeetingPointRecord meeting, {
+    String title = 'Decline Invitation',
+    String message =
+        'Are you sure you want to decline this meeting point invitation?',
+    String confirmText = 'Decline',
+    String successMessage = 'Invitation declined.',
+  }) async {
     final confirmed = await ConfirmationDialog.showDeleteConfirmation(
       context,
-      title: 'Decline Invitation',
-      message:
-          'Are you sure you want to decline this meeting point invitation?',
-      confirmText: 'Decline',
+      title: title,
+      message: message,
+      confirmText: confirmText,
     );
-    if (confirmed != true) return;
+    if (confirmed != true) return false;
 
     // Immediately hide the tile in the UI — don't wait for Firestore round-trip.
     if (mounted) setState(() => _locallyDeclinedMeetingIds.add(meeting.id));
@@ -3886,17 +4290,56 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         meetingPointId: meeting.id,
         accepted: false,
       );
-      if (!mounted) return;
-      SnackbarHelper.showSuccess(context, 'Invitation declined.');
+      if (!mounted) return true;
+      SnackbarHelper.showSuccess(context, successMessage);
+      return true;
     } catch (e) {
       // Restore the tile if the write failed.
       if (mounted)
         setState(() => _locallyDeclinedMeetingIds.remove(meeting.id));
-      if (!mounted) return;
+      if (!mounted) return false;
       SnackbarHelper.showError(
         context,
         'Failed to decline invitation. Please try again.',
       );
+      return false;
+    }
+  }
+
+  Future<void> _confirmSuggestedPoint(MeetingPointRecord meeting) async {
+    try {
+      await MeetingPointService.markHostDecision(
+        meetingPointId: meeting.id,
+        accepted: true,
+      );
+      if (!mounted) return;
+      SnackbarHelper.showSuccess(context, 'Meeting point confirmed!');
+    } catch (e) {
+      if (!mounted) return;
+      SnackbarHelper.showError(context, 'Failed to confirm. Please try again.');
+    }
+  }
+
+  Future<void> _rejectSuggestedPoint(MeetingPointRecord meeting) async {
+    final confirmed = await ConfirmationDialog.showDeleteConfirmation(
+      context,
+      title: 'Reject Meeting Point',
+      message:
+          'Are you sure you want to reject this meeting point? The meeting will be cancelled for all participants.',
+      cancelText: 'Keep',
+      confirmText: 'Reject',
+    );
+    if (confirmed != true) return;
+    try {
+      await MeetingPointService.markHostDecision(
+        meetingPointId: meeting.id,
+        accepted: false,
+      );
+      if (!mounted) return;
+      SnackbarHelper.showSuccess(context, 'Meeting point rejected.');
+    } catch (e) {
+      if (!mounted) return;
+      SnackbarHelper.showError(context, 'Failed to reject. Please try again.');
     }
   }
 
@@ -3906,6 +4349,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       title: 'Cancel Meeting Point',
       message:
           'Are you sure you want to cancel this meeting point for all participants?',
+      cancelText: 'Keep',
       confirmText: 'Cancel Meeting',
     );
     if (confirmed != true) return;

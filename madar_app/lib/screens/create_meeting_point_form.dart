@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -32,6 +33,10 @@ class MeetingPointParticipant {
     required this.status,
     this.respondedAt,
     this.updatedAt,
+    this.arrivalStatus = 'on_the_way',
+    this.arrivedAt,
+    this.estimatedArrivalMinutes = 3,
+    this.locationUpdatedAt,
   });
 
   final String userId;
@@ -41,14 +46,28 @@ class MeetingPointParticipant {
   final DateTime? respondedAt;
   final DateTime? updatedAt;
 
+  // ── Arrival tracking (populated when meeting status becomes 'active') ──────
+  final String arrivalStatus; // on_the_way | arrived | cancelled
+  final DateTime? arrivedAt;
+  final int estimatedArrivalMinutes; // 1-5 (random)
+  final DateTime? locationUpdatedAt;
+
   bool get isPending => status == 'pending';
   bool get isAccepted => status == 'accepted';
   bool get isDeclined => status == 'declined';
+
+  bool get isOnTheWay => arrivalStatus == 'on_the_way';
+  bool get isArrived => arrivalStatus == 'arrived';
+  bool get isCancelledArrival => arrivalStatus == 'cancelled';
 
   MeetingPointParticipant copyWith({
     String? status,
     DateTime? respondedAt,
     DateTime? updatedAt,
+    String? arrivalStatus,
+    DateTime? arrivedAt,
+    int? estimatedArrivalMinutes,
+    DateTime? locationUpdatedAt,
   }) {
     return MeetingPointParticipant(
       userId: userId,
@@ -57,6 +76,11 @@ class MeetingPointParticipant {
       status: status ?? this.status,
       respondedAt: respondedAt ?? this.respondedAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      arrivalStatus: arrivalStatus ?? this.arrivalStatus,
+      arrivedAt: arrivedAt ?? this.arrivedAt,
+      estimatedArrivalMinutes:
+          estimatedArrivalMinutes ?? this.estimatedArrivalMinutes,
+      locationUpdatedAt: locationUpdatedAt ?? this.locationUpdatedAt,
     );
   }
 
@@ -70,6 +94,12 @@ class MeetingPointParticipant {
           ? null
           : Timestamp.fromDate(respondedAt!),
       'updatedAt': updatedAt == null ? null : Timestamp.fromDate(updatedAt!),
+      'arrivalStatus': arrivalStatus,
+      'arrivedAt': arrivedAt == null ? null : Timestamp.fromDate(arrivedAt!),
+      'estimatedArrivalMinutes': estimatedArrivalMinutes,
+      'locationUpdatedAt': locationUpdatedAt == null
+          ? null
+          : Timestamp.fromDate(locationUpdatedAt!),
     };
   }
 
@@ -88,6 +118,14 @@ class MeetingPointParticipant {
       default:
         status = 'pending';
     }
+    final arrivalStatusRaw = (raw['arrivalStatus'] ?? 'on_the_way')
+        .toString()
+        .trim();
+    final arrivalStatus =
+        const {'on_the_way', 'arrived', 'cancelled'}.contains(arrivalStatusRaw)
+        ? arrivalStatusRaw
+        : 'on_the_way';
+    final estMins = raw['estimatedArrivalMinutes'];
     return MeetingPointParticipant(
       userId: userId,
       name: (raw['name'] ?? '').toString(),
@@ -95,6 +133,12 @@ class MeetingPointParticipant {
       status: status,
       respondedAt: _meetingPointAsDateTime(raw['respondedAt']),
       updatedAt: _meetingPointAsDateTime(raw['updatedAt']),
+      arrivalStatus: arrivalStatus,
+      arrivedAt: _meetingPointAsDateTime(raw['arrivedAt']),
+      estimatedArrivalMinutes: (estMins is num)
+          ? estMins.toInt().clamp(1, 5)
+          : 3,
+      locationUpdatedAt: _meetingPointAsDateTime(raw['locationUpdatedAt']),
     );
   }
 }
@@ -117,6 +161,11 @@ class MeetingPointRecord {
     this.updatedAt,
     this.waitDeadline,
     this.suggestDeadline,
+    this.confirmedAt,
+    this.hostArrivalStatus = 'on_the_way',
+    this.hostArrivedAt,
+    this.hostEstimatedMinutes = 3,
+    this.hostLocationUpdatedAt,
   });
 
   final String id;
@@ -136,8 +185,18 @@ class MeetingPointRecord {
   final DateTime? waitDeadline;
   final DateTime? suggestDeadline;
 
-  /// Derived from status: the meeting is live (pending) when status == 'pending'.
+  // ── Arrival tracking (populated when status becomes 'active') ─────────────
+  final DateTime? confirmedAt;
+  final String hostArrivalStatus; // on_the_way | arrived | cancelled
+  final DateTime? hostArrivedAt;
+  final int hostEstimatedMinutes; // 1-5 (random)
+  final DateTime? hostLocationUpdatedAt;
+
+  /// Derived from status: the meeting is in setup phase when status == 'pending'.
   bool get isActive => status.trim().toLowerCase() == 'pending';
+
+  /// Meeting confirmed — everyone heading to venue.
+  bool get isConfirmed => status.trim().toLowerCase() == 'active';
 
   /// Sub-state: host is waiting for invitees to respond.
   bool get isWaitingParticipants =>
@@ -227,6 +286,15 @@ class MeetingPointRecord {
       updatedAt: _meetingPointAsDateTime(data['updatedAt']),
       waitDeadline: _meetingPointAsDateTime(data['waitDeadline']),
       suggestDeadline: _meetingPointAsDateTime(data['suggestDeadline']),
+      confirmedAt: _meetingPointAsDateTime(data['confirmedAt']),
+      hostArrivalStatus: (data['hostArrivalStatus'] ?? 'on_the_way').toString(),
+      hostArrivedAt: _meetingPointAsDateTime(data['hostArrivedAt']),
+      hostEstimatedMinutes: (data['hostEstimatedMinutes'] is num)
+          ? (data['hostEstimatedMinutes'] as num).toInt().clamp(1, 5)
+          : 3,
+      hostLocationUpdatedAt: _meetingPointAsDateTime(
+        data['hostLocationUpdatedAt'],
+      ),
     );
   }
 }
@@ -251,7 +319,16 @@ class MeetingPointService {
     MeetingPointRecord meeting,
     String uid,
   ) {
-    // isActive is derived: status == 'pending'.
+    // ── Arrival phase (status == 'active') ────────────────────────────────
+    if (meeting.isConfirmed) {
+      if (meeting.hostId == uid) {
+        return meeting.hostArrivalStatus != 'cancelled';
+      }
+      final me = meeting.participantFor(uid);
+      return me != null && me.isAccepted && me.arrivalStatus != 'cancelled';
+    }
+
+    // ── Setup phase (status == 'pending') ─────────────────────────────────
     if (!meeting.isActive) return false;
     if (_isFullyDeclinedActive(meeting)) return false;
     if (meeting.hostId == uid) return true;
@@ -259,8 +336,7 @@ class MeetingPointService {
     if (me == null) return false;
     if (me.isDeclined) return false;
     // A pending invitee whose response window has closed should no longer
-    // see the invitation on the track page — it will appear as "Expired"
-    // in history once the meeting ends.
+    // see the invitation on the track page.
     if (me.isPending &&
         meeting.waitDeadline != null &&
         !meeting.waitDeadline!.isAfter(DateTime.now())) {
@@ -525,11 +601,88 @@ class MeetingPointService {
     required String meetingPointId,
     required bool accepted,
   }) async {
+    if (!accepted) {
+      await _col.doc(meetingPointId).update({
+        'status': 'cancelled',
+        'updatedAt': FieldValue.serverTimestamp(),
+        'hostStep': 5,
+      });
+      return;
+    }
+
+    // Fetch current meeting to initialize per-participant arrival data.
+    final doc = await _col.doc(meetingPointId).get();
+    final meeting = MeetingPointRecord.fromDoc(doc);
+    if (meeting == null) return;
+
+    final rng = math.Random();
+    final hostMins = rng.nextInt(5) + 1;
+    final now = DateTime.now();
+
+    // Initialize arrivalStatus + random estimatedArrivalMinutes for all
+    // participants who accepted the invitation.
+    final updatedParticipants = meeting.participants.map((p) {
+      if (!p.isAccepted) return p;
+      return p.copyWith(
+        arrivalStatus: 'on_the_way',
+        estimatedArrivalMinutes: rng.nextInt(5) + 1,
+        locationUpdatedAt: now,
+      );
+    }).toList();
+
     await _col.doc(meetingPointId).update({
-      'status': accepted ? 'active' : 'cancelled',
-      'updatedAt': FieldValue.serverTimestamp(),
+      'status': 'active',
       'hostStep': 5,
+      'updatedAt': FieldValue.serverTimestamp(),
+      'confirmedAt': FieldValue.serverTimestamp(),
+      'hostArrivalStatus': 'on_the_way',
+      'hostEstimatedMinutes': hostMins,
+      'hostArrivedAt': null,
+      'hostLocationUpdatedAt': Timestamp.fromDate(now),
+      'participants': updatedParticipants.map((p) => p.toMap()).toList(),
     });
+  }
+
+  /// Cancel the entire meeting for all participants (host only action).
+  static Future<void> cancelMeetingForAll(String meetingPointId) async {
+    await _col.doc(meetingPointId).update({
+      'status': 'cancelled',
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Update a participant's (or host's) arrival status during the confirmed phase.
+  static Future<void> updateArrivalStatus({
+    required String meetingPointId,
+    required bool isHost,
+    required String userId,
+    required String arrivalStatus, // 'on_the_way' | 'arrived' | 'cancelled'
+    DateTime? arrivedAt,
+  }) async {
+    if (isHost) {
+      await _col.doc(meetingPointId).update({
+        'hostArrivalStatus': arrivalStatus,
+        'hostArrivedAt': arrivedAt == null
+            ? null
+            : Timestamp.fromDate(arrivedAt),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } else {
+      final doc = await _col.doc(meetingPointId).get();
+      final meeting = MeetingPointRecord.fromDoc(doc);
+      if (meeting == null) return;
+      final idx = meeting.participants.indexWhere((p) => p.userId == userId);
+      if (idx < 0) return;
+      final updated = List<MeetingPointParticipant>.from(meeting.participants);
+      updated[idx] = updated[idx].copyWith(
+        arrivalStatus: arrivalStatus,
+        arrivedAt: arrivedAt,
+      );
+      await _col.doc(meetingPointId).update({
+        'participants': updated.map((p) => p.toMap()).toList(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    }
   }
 
   static Future<void> respondToInvitation({
@@ -679,6 +832,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
   // ─── In-session state persistence (steps 1–3) ────────────────────────────
   static bool _hasSavedEarlyState = false;
+  static String? _memEarlyUserId;
   static List<_Friend> _memEarlyFriends = [];
   static Set<String> _memEarlyCategories = {'Any'};
   static _HostLocation? _memEarlyHostLocation;
@@ -688,6 +842,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   void _saveEarlyStepsToMemory() {
     if (_step >= 4) return;
     _hasSavedEarlyState = true;
+    _memEarlyUserId = FirebaseAuth.instance.currentUser?.uid;
     _memEarlyFriends = List.from(_selectedFriends);
     _memEarlyCategories = Set.from(_selectedPlaceCategories);
     _memEarlyHostLocation = _hostLocation;
@@ -699,6 +854,11 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   /// restores location and step only if the detected venue matches the saved one.
   void _tryRestoreEarlyState() {
     if (!_hasSavedEarlyState || _shouldManageDraft || _step >= 4) return;
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
+    if (currentUid == null || currentUid != _memEarlyUserId) {
+      _clearEarlyMemory();
+      return;
+    }
     if (_memEarlyFriends.isNotEmpty) {
       _selectedFriends
         ..clear()
@@ -718,6 +878,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
   static void _clearEarlyMemory() {
     _hasSavedEarlyState = false;
+    _memEarlyUserId = null;
     _memEarlyFriends = [];
     _memEarlyCategories = {'Any'};
     _memEarlyHostLocation = null;
@@ -1355,7 +1516,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
                 .toList()
           : restoredParticipants;
 
-      _waitSecondsLeft = restoredWaitLeft.clamp(0, 600).toInt();
+      _waitSecondsLeft = restoredWaitLeft.clamp(0, 120).toInt();
       _suggestSecondsLeft = restoredSuggestLeft.clamp(0, 300).toInt();
       _proceedUnlocked = _boolFromDynamic(snap.data['proceedUnlocked'], true);
       _waitDeadline = _dateFromEpoch(snap.data['waitDeadlineMs']);
@@ -1464,7 +1625,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
               : meeting.waitDeadline!
                     .difference(DateTime.now())
                     .inSeconds
-                    .clamp(0, 600);
+                    .clamp(0, 120);
           final suggestLeft = meeting.suggestDeadline == null
               ? _suggestSecondsLeft
               : meeting.suggestDeadline!
@@ -1779,9 +1940,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           .toList();
     }
 
-    // 10-minute countdown.
-    _waitSecondsLeft = 60;
-    _waitDeadline = DateTime.now().add(const Duration(minutes: 10));
+    // 2-minute countdown (testing).
+    _waitSecondsLeft = 120;
+    _waitDeadline = DateTime.now().add(const Duration(minutes: 2));
     _startStep4WaitCountdown();
 
     // Unlock "Proceed" after 5 seconds (UI demo).
@@ -1895,9 +2056,10 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         if (blockingMeeting.hostId == host.uid) {
           throw Exception('You already have an active meeting point.');
         }
-        throw Exception(
-          'Respond to your current meeting invitation before creating a new meeting point.',
-        );
+        final me = blockingMeeting.participantFor(host.uid);
+        if (me != null && me.isAccepted) {
+          throw Exception('You already have an active meeting point.');
+        }
       }
     } on FirebaseException catch (e) {
       // Some rule setups reject the pre-check query. Do not block invite sending
@@ -1943,8 +2105,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         ? _myName!.trim()
         : (host.displayName ?? '').trim();
 
-    final waitDeadline =
-        DateTime.now().add(const Duration(minutes: 10));
+    final waitDeadline = DateTime.now().add(const Duration(minutes: 10));
 
     final meetingPointId = await MeetingPointService.createMeetingPoint(
       hostId: host.uid,
@@ -1955,7 +2116,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       placeCategories: _selectedPlaceCategories.toList(),
       hostLocation: _hostLocation?.toMap(),
       participants: participants,
-      waitDeadline: waitDeadline,
+      waitDeadline: DateTime.now().add(const Duration(minutes: 2)),
     );
 
     _meetingPointId = meetingPointId;
@@ -3239,7 +3400,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         Align(
           alignment: Alignment.centerLeft,
           child: Text(
-            'Note: you can proceed with accepted participants',
+            'Note: you can proceed with accepted participants or cancel the meeting point for all participants.',
             textAlign: TextAlign.left,
             style: TextStyle(fontSize: 12, color: Colors.grey[400]),
           ),
@@ -3483,8 +3644,25 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     );
   }
 
+  Future<void> _cancelMeetingPointFromForm() async {
+    final confirmed = await ConfirmationDialog.showDeleteConfirmation(
+      context,
+      title: 'Cancel Meeting Point',
+      message:
+          'Are you sure you want to cancel this meeting point for all participants?',
+      confirmText: 'Cancel Meeting',
+    );
+    if (confirmed != true) return;
+    _waitTimer?.cancel();
+    unawaited(_syncMeetingPointProgress(status: 'cancelled'));
+    await _completeAndClose(
+      success: false,
+      message: 'Meeting point cancelled.',
+    );
+  }
+
   Widget _buildPrimaryFooterButton() {
-    // Step 4: "Proceed"
+    // Step 4: "Proceed" above, "Cancel" below
     if (_step == 4) {
       final enabled = _step4CanProceed;
       return Column(
@@ -3510,6 +3688,15 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
                   fontWeight: FontWeight.w600,
                 ),
               ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: SecondaryButton(
+              text: 'Cancel',
+              onPressed: _cancelMeetingPointFromForm,
             ),
           ),
         ],

@@ -90,6 +90,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
 
   // ─── In-session state persistence ─────────────────────────────────────────
   static bool _hasSavedState = false;
+  static String? _memUserId;
   static List<Friend> _memFriends = [];
   static DateTime? _memDate;
   static TimeOfDay? _memStartTime;
@@ -100,6 +101,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
 
   void _saveStateToMemory() {
     _hasSavedState = true;
+    _memUserId = FirebaseAuth.instance.currentUser?.uid;
     _memFriends = List.from(_selectedFriends);
     _memDate = _selectedDate;
     _memStartTime = _startTime;
@@ -111,6 +113,11 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
 
   void _restoreStateFromMemory() {
     if (!_hasSavedState) return;
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
+    if (currentUid == null || currentUid != _memUserId) {
+      _clearMemory();
+      return;
+    }
     _selectedFriends.addAll(_memFriends);
     // Smart reset: only restore time if start hasn't passed yet
     if (_memDate != null && _memStartTime != null) {
@@ -135,6 +142,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
 
   static void _clearMemory() {
     _hasSavedState = false;
+    _memUserId = null;
     _memFriends = [];
     _memDate = null;
     _memStartTime = null;

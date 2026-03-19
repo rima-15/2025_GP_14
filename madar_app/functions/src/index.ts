@@ -242,6 +242,216 @@ export const onTrackRequestCreated = onDocumentCreated(
 
 /* ------------------------------------------------------------------
 
+   Meeting Point Request Notification (Created)
+
+-------------------------------------------------------------------*/
+
+export const onMeetingPointCreated = onDocumentCreated(
+  "meetingPoints/{meetingPointId}",
+  async (event) => {
+    try {
+      const data = event.data?.data();
+      if (!data) return;
+
+      const meetingPointId = event.params.meetingPointId;
+      const hostId = (data.hostId ?? "").toString().trim();
+      const hostName =
+        (data.hostName ?? "Someone").toString().trim() || "Someone";
+      const hostPhone = (data.hostPhone ?? "").toString().trim();
+      const venueId = (data.venueId ?? "").toString().trim();
+      const venueName = (data.venueName ?? "").toString().trim();
+      const waitDeadline = data.waitDeadline ?? null;
+
+      const invitedIds: string[] = Array.isArray(data.invitedUserIds)
+        ? data.invitedUserIds.map((v: any) => (v ?? "").toString().trim())
+        : [];
+      const participantIds: string[] = Array.isArray(data.participants)
+        ? data.participants
+            .map((p: any) => (p?.userId ?? "").toString().trim())
+            .filter((v: string) => v.length > 0)
+        : [];
+
+      const targetIds = Array.from(
+        new Set([...invitedIds, ...participantIds])
+      ).filter((id) => id && id !== hostId);
+
+      if (targetIds.length === 0) {
+        console.log("No invited users for meeting point");
+        return;
+      }
+
+      const title = "Meeting Point Request";
+      const body = `${hostName} invites you to a shared meeting point`;
+
+      const batch = db.batch();
+
+      for (const uid of targetIds) {
+        const userDoc = await db.collection("users").doc(uid).get();
+        if (!userDoc.exists) continue;
+
+        const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
+
+        if (tokens.length > 0) {
+          try {
+            await admin.messaging().sendEachForMulticast({
+              notification: {
+                title,
+                body,
+              },
+              data: {
+                type: "meetingPointRequest",
+                requestId: meetingPointId,
+                meetingPointId: meetingPointId,
+              },
+              tokens,
+            });
+          } catch (err) {
+            console.error(`Failed to send meeting point push to ${uid}`, err);
+          }
+        } else {
+          console.log(`No FCM tokens for user ${uid}`);
+        }
+
+        const notifRef = db.collection("notifications").doc();
+        batch.set(notifRef, {
+          userId: uid,
+          type: "meetingPointRequest",
+          requiresAction: true,
+          actionTaken: false,
+          isRead: false,
+          requestStatus: "pending",
+          title,
+          body,
+          data: {
+            requestId: meetingPointId,
+            meetingPointId: meetingPointId,
+            senderId: hostId || null,
+            senderName: hostName || null,
+            senderPhone: hostPhone || null,
+            venueId: venueId || null,
+            venueName: venueName || null,
+            waitDeadline: waitDeadline || null,
+          },
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+
+      await batch.commit();
+    } catch (error) {
+      console.error("Error sending meeting point notifications:", error);
+    }
+  }
+);
+
+/* ------------------------------------------------------------------
+
+   Meeting Point Request Notification (Status Update)
+
+   - When a participant accepts/declines, update their notification
+     to reflect the new status.
+
+-------------------------------------------------------------------*/
+
+export const onMeetingPointParticipantStatusChanged = onDocumentUpdated(
+  "meetingPoints/{meetingPointId}",
+  async (event) => {
+    try {
+      const before = event.data?.before.data();
+      const after = event.data?.after.data();
+      if (!before || !after) return;
+
+      const meetingPointId = event.params.meetingPointId;
+      if (!meetingPointId) return;
+
+      const hostId = (after.hostId ?? "").toString().trim();
+
+      const normalizeStatus = (raw: any) => {
+        const s = (raw ?? "pending").toString().trim().toLowerCase();
+        return s === "accepted" || s === "declined" || s === "pending"
+          ? s
+          : "pending";
+      };
+
+      const buildMap = (list: any[]) => {
+        const map = new Map<string, string>();
+        for (const p of list) {
+          const uid = (p?.userId ?? "").toString().trim();
+          if (!uid) continue;
+          map.set(uid, normalizeStatus(p?.status));
+        }
+        return map;
+      };
+
+      const beforeParticipants: any[] = Array.isArray(before.participants)
+        ? before.participants
+        : [];
+      const afterParticipants: any[] = Array.isArray(after.participants)
+        ? after.participants
+        : [];
+
+      const beforeMap = buildMap(beforeParticipants);
+      const afterMap = buildMap(afterParticipants);
+
+      const changed: Array<{ uid: string; status: string }> = [];
+      for (const [uid, status] of afterMap.entries()) {
+        if (!uid || uid === hostId) continue;
+        const prev = beforeMap.get(uid) ?? "pending";
+        if (status === prev) continue;
+        if (status !== "accepted" && status !== "declined") continue;
+        changed.push({ uid, status });
+      }
+
+      if (changed.length === 0) return;
+
+      let batch = db.batch();
+      let ops = 0;
+      const commits: Promise<any>[] = [];
+
+      for (const item of changed) {
+        const snap = await db
+          .collection("notifications")
+          .where("userId", "==", item.uid)
+          .where("type", "==", "meetingPointRequest")
+          .get();
+
+        for (const doc of snap.docs) {
+          const data: any = doc.data() ?? {};
+          const payload: any = data.data ?? {};
+          const requestId = (payload.meetingPointId ??
+            payload.requestId ??
+            "").toString();
+          if (requestId !== meetingPointId) continue;
+
+          batch.update(doc.ref, {
+            requestStatus: item.status,
+            "data.requestStatus": item.status,
+            actionTaken: true,
+            requiresAction: false,
+            actionTakenAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          ops++;
+          if (ops >= 450) {
+            commits.push(batch.commit());
+            batch = db.batch();
+            ops = 0;
+          }
+        }
+      }
+
+      if (ops > 0) commits.push(batch.commit());
+      if (commits.length > 0) await Promise.all(commits);
+    } catch (error) {
+      console.error(
+        "Error updating meeting point notification status:",
+        error
+      );
+    }
+  }
+);
+
+/* ------------------------------------------------------------------
+
    Auto Refresh Location (Scheduled)
 
    - If tracking is active and receiver hasn't updated location for 1 hour,

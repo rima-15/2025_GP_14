@@ -39,6 +39,7 @@ class _MainLayoutState
   // Track page parameters from notification navigation
   String? _trackExpandRequestId;
   int? _trackFilterIndex;
+  String? _meetingPointExpandId;
 
   // GPS tracking service subscription
   StreamSubscription<QuerySnapshot>?
@@ -57,12 +58,14 @@ class _MainLayoutState
   Widget _buildTrackPage() {
     return TrackPage(
       key: ValueKey(
-        'track_${_trackExpandRequestId ?? 'default'}',
+        'track_${_trackExpandRequestId ?? 'default'}_${_meetingPointExpandId ?? 'meeting'}',
       ),
       initialExpandRequestId:
           _trackExpandRequestId,
       initialFilterIndex:
           _trackFilterIndex,
+      initialMeetingPointId:
+          _meetingPointExpandId,
     );
   }
 
@@ -616,13 +619,57 @@ class _MainLayoutState
                         final filterIdx =
                             result['filterIndex']
                                 as int?;
+                        final meetingPointId =
+                            result['meetingPointId']
+                                as String?;
+                        final historyMainTabIndex =
+                            result['historyMainTabIndex']
+                                as int?;
+                        final meetingFilterIndex =
+                            result['meetingFilterIndex']
+                                as int?;
                         final historyFilterIdx =
                             filterIdx ==
                                 null
                             ? null
                             : 1 - filterIdx;
 
-                        if (page ==
+                        if (page == 'track' &&
+                            meetingPointId != null &&
+                            meetingPointId
+                                .trim()
+                                .isNotEmpty) {
+                          setState(() {
+                            _meetingPointExpandId =
+                                meetingPointId;
+                            _trackExpandRequestId =
+                                null;
+                            _trackFilterIndex =
+                                null;
+                            pages[2] =
+                                _buildTrackPage();
+                            _index = 2;
+                          });
+                          return;
+                        }
+
+                        if (page == 'history' &&
+                            meetingPointId != null &&
+                            meetingPointId.trim().isNotEmpty) {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => HistoryPage(
+                                initialMainTabIndex:
+                                    historyMainTabIndex ?? 1,
+                                initialMeetingFilterIndex:
+                                    meetingFilterIndex,
+                                initialMeetingPointId:
+                                    meetingPointId,
+                              ),
+                            ),
+                          );
+                        } else if (page ==
                                 'history' &&
                             expandId !=
                                 null) {
@@ -648,6 +695,8 @@ class _MainLayoutState
                                 expandId;
                             _trackFilterIndex =
                                 filterIdx;
+                            _meetingPointExpandId =
+                                null;
                             pages[2] =
                                 _buildTrackPage();
                             _index = 2;

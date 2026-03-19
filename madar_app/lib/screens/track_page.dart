@@ -99,6 +99,10 @@ class _TrackPageState extends State<TrackPage> {
   /// IDs of meeting invitations the user locally declined — hidden immediately
   /// in the UI before Firestore confirms the write.
   final Set<String> _locallyDeclinedMeetingIds = {};
+
+  /// Tracks confirmed meetings that have been reconciled (arrival-phase check)
+  /// so we don't fire the reconciliation on every stream emission.
+  final Set<String> _reconciledArrivalMeetingIds = {};
   static const Duration _kMeetingMaintainThrottle = Duration(seconds: 2);
 
   /// Key for the tile to scroll to when opening from notification (by request ID).
@@ -156,7 +160,11 @@ class _TrackPageState extends State<TrackPage> {
     if (snapshot.connectionState == ConnectionState.active) {
       _lastKnownBlockingMeetings = snapshot.data ?? [];
     }
-    return _lastKnownBlockingMeetings;
+    // Filter out any stale cancelled/inactive meetings so their timers
+    // stop immediately even before the next stream emit arrives.
+    return _lastKnownBlockingMeetings
+        .where((m) => m.isActive || m.isConfirmed)
+        .toList();
   }
 
   Stream<List<TrackingRequest>> _sentRequestsStream() {
@@ -1232,7 +1240,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     final deadline = meeting.activeDeadline;
     if (deadline == null) return null;
     final seconds = deadline
-        .difference(DateTime.now())
+        .difference(MeetingPointService.serverNow)
         .inSeconds
         .clamp(0, 3600);
     final mm = (seconds ~/ 60).toString().padLeft(2, '0');
@@ -1570,6 +1578,24 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           }
         }
 
+        // Reconcile confirmed meetings that may be stuck due to old app code
+        // not writing meeting-level status transitions (completion/cancellation).
+        // Runs at most once per meeting ID so it doesn't loop on every rebuild.
+        // After writing, force a stream reset so the UI updates immediately
+        // without waiting for the next Firestore push notification.
+        if (confirmedMeeting != null &&
+            !_reconciledArrivalMeetingIds.contains(confirmedMeeting.id)) {
+          _reconciledArrivalMeetingIds.add(confirmedMeeting.id);
+          MeetingPointService.reconcileArrivalPhase(confirmedMeeting).then((_) {
+            if (mounted) {
+              setState(() {
+                _activeMeetingPointListStream =
+                    MeetingPointService.watchAllBlockingForCurrentUser();
+              });
+            }
+          });
+        }
+
         // Start/stop the arrival countdown timer.
         if (confirmedMeeting != null) {
           _arrivalTimer ??= Timer.periodic(const Duration(seconds: 1), (_) {
@@ -1701,7 +1727,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   int _arrivalSecondsLeft(DateTime? confirmedAt, int estMins) {
     if (confirmedAt == null) return estMins * 60;
     final deadline = confirmedAt.add(Duration(minutes: estMins));
-    return deadline.difference(DateTime.now()).inSeconds;
+    return deadline.difference(MeetingPointService.serverNow).inSeconds;
   }
 
   /// Formats a DateTime as "HH:mm" (24-h).
@@ -2313,6 +2339,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         arrivalStatus: 'arrived',
         arrivedAt: now,
       );
+      _forceStreamRefresh();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -2344,6 +2371,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           userId: uid,
           arrivalStatus: 'cancelled',
         );
+        _forceStreamRefresh();
       } catch (e) {
         if (mounted)
           SnackbarHelper.showError(
@@ -2453,6 +2481,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           arrivalStatus: 'cancelled',
         );
       }
+      _forceStreamRefresh();
     } catch (e) {
       if (mounted)
         SnackbarHelper.showError(
@@ -2460,6 +2489,21 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           'Failed to cancel. Please try again.',
         );
     }
+  }
+
+  /// Force the meeting point streams to resubscribe so the UI reflects any
+  /// Firestore status change (completed / cancelled) immediately without
+  /// waiting for the next push notification from the server.
+  void _forceStreamRefresh() {
+    if (!mounted) return;
+    setState(() {
+      _activeMeetingPointListStream =
+          MeetingPointService.watchAllBlockingForCurrentUser();
+      _activeMeetingPointCardStream =
+          MeetingPointService.watchActiveForCurrentUser();
+      _activeMeetingPointCountStream =
+          MeetingPointService.watchActiveForCurrentUser();
+    });
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -2800,28 +2844,79 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               ],
             ],
           ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _meetingStatusChip(
-                '${meeting.acceptedCount} Accepted',
-                backgroundColor: AppColors.kGreen.withOpacity(0.11),
-                textColor: AppColors.kGreen,
+          if (step != 3) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _meetingStatusChip(
+                  '${meeting.acceptedCount} Accepted',
+                  backgroundColor: AppColors.kGreen.withValues(alpha: 0.11),
+                  textColor: AppColors.kGreen,
+                ),
+                _meetingStatusChip(
+                  '${meeting.pendingCount} Pending',
+                  backgroundColor: Colors.orange.withValues(alpha: 0.1),
+                  textColor: Colors.orange.shade700,
+                ),
+                _meetingStatusChip(
+                  '${meeting.declinedCount} Declined',
+                  backgroundColor: AppColors.kError.withValues(alpha: 0.1),
+                  textColor: AppColors.kError,
+                ),
+              ],
+            ),
+          ],
+          if (step == 3) ...[
+            const SizedBox(height: 10),
+            if (meeting.venueName.isNotEmpty)
+              Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                decoration: BoxDecoration(
+                  color: AppColors.kGreen.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.location_on,
+                      color: AppColors.kGreen,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const SizedBox(height: 2),
+                          const Text(
+                            'JOE & THE JUICE',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.black87,
+                            ),
+                          ),
+                          Text(
+                            meeting.venueName,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[500],
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              _meetingStatusChip(
-                '${meeting.pendingCount} Pending',
-                backgroundColor: Colors.orange.withOpacity(0.1),
-                textColor: Colors.orange.shade700,
-              ),
-              _meetingStatusChip(
-                '${meeting.declinedCount} Declined',
-                backgroundColor: AppColors.kError.withOpacity(0.1),
-                textColor: AppColors.kError,
-              ),
-            ],
-          ),
+          ],
           if (step == 2) ...[
             const SizedBox(height: 12),
             SizedBox(
@@ -3690,6 +3785,13 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                                   ),
                                   const SizedBox(height: 8),
                                   _labeledDetail('Venue: ', meeting.venueName),
+                                  if (step == 3) ...[
+                                    const SizedBox(height: 8),
+                                    _labeledDetail(
+                                      'Suggested point: ',
+                                      'JOE & THE JUICE',
+                                    ),
+                                  ],
                                 ],
                               ),
                             ),
@@ -3724,7 +3826,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                       const SizedBox(height: 12),
                       // Note
                       Text(
-                        'Note: You can cancel your participation in this meeting point.',
+                        step == 3
+                            ? 'Note: You cannot cancel your participation now as we are using your location to find the most suitable meeting point for all.'
+                            : 'Note: You can cancel your participation in this meeting point.',
                         style: TextStyle(fontSize: 12, color: Colors.grey[500]),
                       ),
                     ],
@@ -3732,7 +3836,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 ),
               ),
               // ── Cancel button ────────────────────────────────────────────
-              if (me.isAccepted)
+              if (me.isAccepted && step != 3)
                 Padding(
                   padding: EdgeInsets.fromLTRB(
                     20,

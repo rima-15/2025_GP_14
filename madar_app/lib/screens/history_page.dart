@@ -412,6 +412,34 @@ class _HistoryPageState extends State<HistoryPage> {
       }
     }
 
+    // ── Arrival-phase personal status override ────────────────────────────
+    // A participant who cancelled their own arrival is shown as "Terminated"
+    // regardless of the overall meeting outcome.
+    if (status == 'cancelled' || status == 'completed') {
+      if (hostId == uid) {
+        final hostArrival =
+            (data['hostArrivalStatus'] ?? '').toString().trim().toLowerCase();
+        if (hostArrival == 'cancelled') displayStatus = 'terminated';
+      } else {
+        final rawParts = data['participants'];
+        if (rawParts is List) {
+          for (final p in rawParts) {
+            if (p is Map) {
+              final pUid = (p['userId'] ?? '').toString();
+              if (pUid == uid) {
+                final pArrival = (p['arrivalStatus'] ?? '')
+                    .toString()
+                    .trim()
+                    .toLowerCase();
+                if (pArrival == 'cancelled') displayStatus = 'terminated';
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+
     return HistoryMeetingPoint(
       id: d.id,
       status: displayStatus,
@@ -434,11 +462,21 @@ class _HistoryPageState extends State<HistoryPage> {
     final status = (data['status'] ?? '').toString().trim().toLowerCase();
     if (status != 'cancelled') return '';
 
+    // Explicit reason stored by the arrival-phase auto-cancel logic.
+    final storedReason = (data['cancellationReason'] ?? '').toString().trim();
+    if (storedReason == 'all_participants_left') {
+      return 'All participants left the meeting';
+    }
+
     final hostId = (data['hostId'] ?? '').toString();
     final isHost = hostId == uid;
     final hostStep = (data['hostStep'] is num)
         ? (data['hostStep'] as num).toInt()
         : 4;
+
+    // If the meeting reached the arrival phase, the host-step-5 condition no
+    // longer means "rejected suggestion" — distinguish via confirmedAt.
+    final wasInArrivalPhase = data['confirmedAt'] != null;
 
     final rawParticipants = data['participants'];
     final parts = (rawParticipants is List)
@@ -456,12 +494,13 @@ class _HistoryPageState extends State<HistoryPage> {
 
     if (isHost) {
       if (allDeclined) return 'All participants declined the request';
-      if (hostStep == 5)
+      if (hostStep == 5 && !wasInArrivalPhase)
         return 'Host (you) rejected the suggested meeting point';
       if (!anyAccepted) return 'None of participants respond';
       return 'You cancelled this request for all participants';
     } else {
-      if (hostStep == 5) return 'Host rejected the suggested meeting point';
+      if (hostStep == 5 && !wasInArrivalPhase)
+        return 'Host rejected the suggested meeting point';
       return 'Cancelled by host';
     }
   }

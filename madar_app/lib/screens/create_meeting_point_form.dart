@@ -315,8 +315,7 @@ class MeetingPointService {
   /// Estimated current server time. Use this instead of [DateTime.now()]
   /// for every deadline computation and display so devices with skewed
   /// local clocks (e.g. emulators) still show consistent countdowns.
-  static DateTime get serverNow =>
-      DateTime.now().add(_serverClockOffset);
+  static DateTime get serverNow => DateTime.now().add(_serverClockOffset);
 
   /// Call with the `updatedAt` server timestamp from any live Firestore
   /// snapshot to keep the estimated offset accurate.
@@ -392,8 +391,10 @@ class MeetingPointService {
               .where((m) => m.isActive || m.isConfirmed)
               .map((m) => m.updatedAt ?? m.createdAt)
               .whereType<DateTime>()
-              .fold<DateTime?>(null, (best, t) =>
-                  best == null || t.isAfter(best) ? t : best);
+              .fold<DateTime?>(
+                null,
+                (best, t) => best == null || t.isAfter(best) ? t : best,
+              );
           if (anchor != null) calibrateFromServerTime(anchor);
         }
 
@@ -418,36 +419,36 @@ class MeetingPointService {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null || uid.trim().isEmpty) return Stream.value([]);
 
-    return _col.where('participantUserIds', arrayContains: uid).snapshots().map(
-      (snap) {
-        final meetings = snap.docs
-            .map(MeetingPointRecord.fromDoc)
-            .whereType<MeetingPointRecord>()
-            .toList();
+    return _col.where('participantUserIds', arrayContains: uid).snapshots().map((
+      snap,
+    ) {
+      final meetings = snap.docs
+          .map(MeetingPointRecord.fromDoc)
+          .whereType<MeetingPointRecord>()
+          .toList();
 
-        // Same calibration as watchActiveForCurrentUser: only use fresh
-        // ACTIVE/CONFIRMED meetings to avoid stale cancelled-meeting timestamps.
-        if (!snap.metadata.isFromCache) {
-          final anchor = meetings
-              .where((m) => m.isActive || m.isConfirmed)
-              .map((m) => m.updatedAt ?? m.createdAt)
-              .whereType<DateTime>()
-              .fold<DateTime?>(null, (best, t) =>
-                  best == null || t.isAfter(best) ? t : best);
-          if (anchor != null) calibrateFromServerTime(anchor);
-        }
+      // Same calibration as watchActiveForCurrentUser: only use fresh
+      // ACTIVE/CONFIRMED meetings to avoid stale cancelled-meeting timestamps.
+      if (!snap.metadata.isFromCache) {
+        final anchor = meetings
+            .where((m) => m.isActive || m.isConfirmed)
+            .map((m) => m.updatedAt ?? m.createdAt)
+            .whereType<DateTime>()
+            .fold<DateTime?>(
+              null,
+              (best, t) => best == null || t.isAfter(best) ? t : best,
+            );
+        if (anchor != null) calibrateFromServerTime(anchor);
+      }
 
-        meetings.sort((a, b) {
-          final at = a.updatedAt ?? a.createdAt ?? DateTime(1970);
-          final bt = b.updatedAt ?? b.createdAt ?? DateTime(1970);
-          return bt.compareTo(at);
-        });
+      meetings.sort((a, b) {
+        final at = a.updatedAt ?? a.createdAt ?? DateTime(1970);
+        final bt = b.updatedAt ?? b.createdAt ?? DateTime(1970);
+        return bt.compareTo(at);
+      });
 
-        return meetings
-            .where((m) => _isMeetingBlockingForUser(m, uid))
-            .toList();
-      },
-    );
+      return meetings.where((m) => _isMeetingBlockingForUser(m, uid)).toList();
+    });
   }
 
   /// Keep the meeting point flow consistent even when the host closes the form.
@@ -473,6 +474,7 @@ class MeetingPointService {
           'status': 'cancelled',
           'updatedAt': FieldValue.serverTimestamp(),
         });
+        await _markPendingNotificationsCancelled(meeting);
       } catch (_) {}
       return;
     }
@@ -506,6 +508,7 @@ class MeetingPointService {
               'status': 'cancelled',
               'updatedAt': FieldValue.serverTimestamp(),
             });
+            await _markPendingNotificationsCancelled(meeting);
           } catch (_) {}
         } else {
           try {
@@ -529,6 +532,46 @@ class MeetingPointService {
       }
       return;
     }
+  }
+
+  static Future<void> _markPendingNotificationsCancelled(
+    MeetingPointRecord meeting,
+  ) async {
+    final pendingIds = meeting.participants
+        .where((p) => p.isPending)
+        .map((p) => p.userId)
+        .toSet();
+    if (pendingIds.isEmpty) return;
+
+    try {
+      final batch = FirebaseFirestore.instance.batch();
+      bool hasUpdates = false;
+
+      for (final uid in pendingIds) {
+        final snap = await FirebaseFirestore.instance
+            .collection('notifications')
+            .where('userId', isEqualTo: uid)
+            .where('type', isEqualTo: 'meetingPointRequest')
+            .get();
+        for (final doc in snap.docs) {
+          final payload = doc.data()['data'] as Map<String, dynamic>? ?? {};
+          final docRequestId =
+              (payload['meetingPointId'] ?? payload['requestId'] ?? '')
+                  .toString();
+          if (docRequestId != meeting.id) continue;
+          batch.update(doc.reference, {
+            'requestStatus': 'cancelled',
+            'requiresAction': false,
+            'actionTaken': true,
+          });
+          hasUpdates = true;
+        }
+      }
+
+      if (hasUpdates) {
+        await batch.commit();
+      }
+    } catch (_) {}
   }
 
   static Future<MeetingPointRecord?> getById(String meetingPointId) async {
@@ -649,8 +692,7 @@ class MeetingPointService {
     // final waitDeadline = createdAt + waitDuration.  This ensures every
     // client sees a deadline anchored to Firestore server time.
     final snap = await docRef.get();
-    final serverCreatedAt =
-        (snap.data()?['createdAt'] as Timestamp?)?.toDate();
+    final serverCreatedAt = (snap.data()?['createdAt'] as Timestamp?)?.toDate();
     if (serverCreatedAt != null) {
       final deadline = serverCreatedAt.add(waitDuration);
       await docRef.update({
@@ -784,6 +826,13 @@ class MeetingPointService {
       'status': 'cancelled',
       'updatedAt': FieldValue.serverTimestamp(),
     });
+    try {
+      final doc = await _col.doc(meetingPointId).get();
+      final meeting = MeetingPointRecord.fromDoc(doc);
+      if (meeting != null) {
+        await _markPendingNotificationsCancelled(meeting);
+      }
+    } catch (_) {}
   }
 
   /// Update a participant's (or host's) arrival status during the confirmed phase.
@@ -814,8 +863,9 @@ class MeetingPointService {
     if (isHost) {
       newHostArrivalStatus = arrivalStatus;
       payload['hostArrivalStatus'] = arrivalStatus;
-      payload['hostArrivedAt'] =
-          arrivedAt == null ? null : Timestamp.fromDate(arrivedAt);
+      payload['hostArrivedAt'] = arrivedAt == null
+          ? null
+          : Timestamp.fromDate(arrivedAt);
     } else {
       final idx = newParticipants.indexWhere((p) => p.userId == userId);
       if (idx < 0) return;
@@ -994,7 +1044,8 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   /// Step-4 2-minute countdown.
   Timer? _waitTimer;
   int _waitSecondsLeft = 120; // 2 min
-  DateTime? _pendingWaitDeadline; // deadline computed once before the Firestore commit
+  DateTime?
+  _pendingWaitDeadline; // deadline computed once before the Firestore commit
 
   /// Proceed button unlock delay (5 s) before checking real acceptance.
   bool _proceedUnlocked = false;
@@ -1974,11 +2025,15 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
   void _startStep4WaitCountdown() {
     _waitTimer?.cancel();
-    _waitDeadline ??= MeetingPointService.serverNow.add(Duration(seconds: _waitSecondsLeft));
+    _waitDeadline ??= MeetingPointService.serverNow.add(
+      Duration(seconds: _waitSecondsLeft),
+    );
 
     void onTick() {
       if (!mounted) return;
-      final left = _waitDeadline!.difference(MeetingPointService.serverNow).inSeconds;
+      final left = _waitDeadline!
+          .difference(MeetingPointService.serverNow)
+          .inSeconds;
       if (left <= 0) {
         _waitTimer?.cancel();
         setState(() => _waitSecondsLeft = 0);
@@ -2000,7 +2055,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
     void onTick() {
       if (!mounted) return;
-      final left = _suggestDeadline!.difference(MeetingPointService.serverNow).inSeconds;
+      final left = _suggestDeadline!
+          .difference(MeetingPointService.serverNow)
+          .inSeconds;
       if (left <= 0) {
         _suggestTimer?.cancel();
         setState(() => _suggestSecondsLeft = 0);
@@ -2195,7 +2252,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
     // Unlock "Proceed" after 5 seconds (UI demo).
     _proceedUnlocked = false;
-    _proceedUnlockAt = MeetingPointService.serverNow.add(const Duration(seconds: 5));
+    _proceedUnlockAt = MeetingPointService.serverNow.add(
+      const Duration(seconds: 5),
+    );
     _startProceedUnlockTimer();
 
     if (_meetingPointId != null) {
@@ -2236,7 +2295,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
   void _initStep5() {
     _suggestSecondsLeft = 300;
-    _suggestDeadline = MeetingPointService.serverNow.add(const Duration(minutes: 5));
+    _suggestDeadline = MeetingPointService.serverNow.add(
+      const Duration(minutes: 5),
+    );
     _startStep5SuggestCountdown();
     // status stays 'pending'; hostStep=5 signals waiting_host_confirmation sub-state
     unawaited(_syncMeetingPointProgress());
@@ -2366,18 +2427,20 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     // the document ID.  We use it as _pendingWaitDeadline so the local timer
     // is anchored to the same Firestore server timestamp that every participant
     // also reads — eliminating host/participant clock disagreements.
-    final (meetingPointId, serverDeadline) =
-        await MeetingPointService.createMeetingPoint(
-          hostId: host.uid,
-          hostName: hostName.isNotEmpty ? hostName : 'Host',
-          hostPhone: (_myPhone ?? '').trim(),
-          venueId: _venueId!,
-          venueName: _venueName!,
-          placeCategories: _selectedPlaceCategories.toList(),
-          hostLocation: _hostLocation?.toMap(),
-          participants: participants,
-          waitDuration: const Duration(minutes: 2),
-        );
+    final (
+      meetingPointId,
+      serverDeadline,
+    ) = await MeetingPointService.createMeetingPoint(
+      hostId: host.uid,
+      hostName: hostName.isNotEmpty ? hostName : 'Host',
+      hostPhone: (_myPhone ?? '').trim(),
+      venueId: _venueId!,
+      venueName: _venueName!,
+      placeCategories: _selectedPlaceCategories.toList(),
+      hostLocation: _hostLocation?.toMap(),
+      participants: participants,
+      waitDuration: const Duration(minutes: 2),
+    );
     _pendingWaitDeadline = serverDeadline;
 
     _meetingPointId = meetingPointId;

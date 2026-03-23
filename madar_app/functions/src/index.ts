@@ -452,6 +452,99 @@ export const onMeetingPointParticipantStatusChanged = onDocumentUpdated(
 
 /* ------------------------------------------------------------------
 
+   Meeting Point Request Notification (Cancelled)
+
+   - When the meeting is cancelled, mark PENDING invitees as cancelled
+     so their notifications show "Cancelled" and buttons are hidden.
+
+-------------------------------------------------------------------*/
+
+export const onMeetingPointCancelled = onDocumentUpdated(
+  "meetingPoints/{meetingPointId}",
+  async (event) => {
+    try {
+      const before = event.data?.before.data();
+      const after = event.data?.after.data();
+      if (!before || !after) return;
+
+      const normalizeStatus = (raw: any) => {
+        const s = (raw ?? "pending").toString().trim().toLowerCase();
+        return s === "cancelled" || s === "completed" || s === "active"
+          ? s
+          : "pending";
+      };
+
+      const beforeStatus = normalizeStatus(before.status);
+      const afterStatus = normalizeStatus(after.status);
+
+      if (beforeStatus === afterStatus) return;
+      if (afterStatus !== "cancelled") return;
+
+      const meetingPointId = event.params.meetingPointId;
+      if (!meetingPointId) return;
+
+      const hostId = (after.hostId ?? "").toString().trim();
+
+      const participants: any[] = Array.isArray(after.participants)
+        ? after.participants
+        : [];
+
+      const pendingIds = participants
+        .filter((p: any) => {
+          const status = (p?.status ?? "pending").toString().trim().toLowerCase();
+          return status === "pending";
+        })
+        .map((p: any) => (p?.userId ?? "").toString().trim())
+        .filter((uid: string) => uid && uid !== hostId);
+
+      if (pendingIds.length === 0) return;
+
+      let batch = db.batch();
+      let ops = 0;
+      const commits: Promise<any>[] = [];
+
+      for (const uid of pendingIds) {
+        const snap = await db
+          .collection("notifications")
+          .where("userId", "==", uid)
+          .where("type", "==", "meetingPointRequest")
+          .get();
+
+        for (const doc of snap.docs) {
+          const data: any = doc.data() ?? {};
+          const payload: any = data.data ?? {};
+          const requestId = (payload.meetingPointId ??
+            payload.requestId ??
+            "").toString();
+          if (requestId !== meetingPointId) continue;
+
+          batch.update(doc.ref, {
+            requestStatus: "cancelled",
+            "data.requestStatus": "cancelled",
+            actionTaken: true,
+            requiresAction: false,
+            actionTakenAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          ops++;
+          if (ops >= 450) {
+            commits.push(batch.commit());
+            batch = db.batch();
+            ops = 0;
+          }
+        }
+      }
+
+      if (ops > 0) commits.push(batch.commit());
+      if (commits.length > 0) await Promise.all(commits);
+    } catch (error) {
+      console.error("Error updating cancelled meeting notifications:", error);
+    }
+  }
+);
+
+/* ------------------------------------------------------------------
+
    Auto Refresh Location (Scheduled)
 
    - If tracking is active and receiver hasn't updated location for 1 hour,

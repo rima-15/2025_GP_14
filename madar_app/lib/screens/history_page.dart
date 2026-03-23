@@ -109,6 +109,8 @@ class _HistoryPageState extends State<HistoryPage> {
   final GlobalKey _highlightKey = GlobalKey();
   Timer? _highlightClearTimer;
   bool _highlightClearScheduled = false;
+  final ScrollController _historyScrollController = ScrollController();
+  Timer? _historyScrollTimer;
   String? _highlightMeetingPointId;
   final GlobalKey _meetingHighlightKey = GlobalKey();
   Timer? _meetingHighlightClearTimer;
@@ -165,6 +167,8 @@ class _HistoryPageState extends State<HistoryPage> {
   @override
   void dispose() {
     _highlightClearTimer?.cancel();
+    _historyScrollTimer?.cancel();
+    _historyScrollController.dispose();
     _meetingHighlightClearTimer?.cancel();
     _meetingScrollTimer?.cancel();
     _meetingScrollController.dispose();
@@ -417,8 +421,10 @@ class _HistoryPageState extends State<HistoryPage> {
     // regardless of the overall meeting outcome.
     if (status == 'cancelled' || status == 'completed') {
       if (hostId == uid) {
-        final hostArrival =
-            (data['hostArrivalStatus'] ?? '').toString().trim().toLowerCase();
+        final hostArrival = (data['hostArrivalStatus'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
         if (hostArrival == 'cancelled') displayStatus = 'terminated';
       } else {
         final rawParts = data['participants'];
@@ -706,29 +712,28 @@ class _HistoryPageState extends State<HistoryPage> {
               if (!mounted) return;
               final ctx = _highlightKey.currentContext;
               if (ctx != null) {
-                Scrollable.ensureVisible(
-                  ctx,
-                  alignment: 0.15,
-                  duration: const Duration(milliseconds: 450),
-                  curve: Curves.easeInOutCubic,
-                );
+                try {
+                  Scrollable.ensureVisible(
+                    ctx,
+                    alignment: 0.15,
+                    duration: const Duration(milliseconds: 450),
+                    curve: Curves.easeInOutCubic,
+                  ).whenComplete(() {
+                    if (!mounted) return;
+                    _scheduleHistoryHighlightClear();
+                  });
+                } catch (_) {}
               }
             });
-            if (!_highlightClearScheduled) {
-              _highlightClearScheduled = true;
-              _highlightClearTimer?.cancel();
-              _highlightClearTimer = Timer(const Duration(seconds: 3), () {
-                if (!mounted) return;
-                setState(() {
-                  _highlightRequestId = null;
-                  _highlightClearScheduled = false;
-                });
-              });
+            if (_historyScrollTimer == null &&
+                _highlightKey.currentContext == null) {
+              _startScrollToHistoryWhenReady(targetIdx, list.length);
             }
           }
         }
         return ListView.builder(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+          controller: _historyScrollController,
           itemCount: list.length,
           itemBuilder: (context, i) => Padding(
             key: list[i].id == _highlightRequestId ? _highlightKey : null,
@@ -781,6 +786,12 @@ class _HistoryPageState extends State<HistoryPage> {
     final timeStr = '${r.startTime} - ${r.endTime}';
     final userLabel = r.isSent ? 'Tracked User' : 'Sender';
     final isHighlighted = _highlightRequestId == r.id;
+    if (isHighlighted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _scheduleHistoryHighlightClear();
+      });
+    }
 
     return Container(
       decoration: BoxDecoration(
@@ -1131,37 +1142,33 @@ class _HistoryPageState extends State<HistoryPage> {
               }
 
               if (_highlightMeetingPointId != null) {
-                final targetIdx =
-                    list.indexWhere((m) => m.id == _highlightMeetingPointId);
+                final targetIdx = list.indexWhere(
+                  (m) => m.id == _highlightMeetingPointId,
+                );
                 if (targetIdx >= 0) {
                   WidgetsBinding.instance.addPostFrameCallback((_) {
                     if (!mounted) return;
                     final ctx = _meetingHighlightKey.currentContext;
                     if (ctx != null) {
-                      Scrollable.ensureVisible(
-                        ctx,
-                        alignment: 0.15,
-                        duration: const Duration(milliseconds: 450),
-                        curve: Curves.easeInOutCubic,
-                      );
+                      try {
+                        Scrollable.ensureVisible(
+                          ctx,
+                          alignment: 0.15,
+                          duration: const Duration(milliseconds: 450),
+                          curve: Curves.easeInOutCubic,
+                        ).whenComplete(() {
+                          if (!mounted) return;
+                          _scheduleMeetingHighlightClear();
+                        });
+                      } catch (_) {}
                     }
                   });
-                  if (!_meetingHighlightClearScheduled) {
-                    _meetingHighlightClearScheduled = true;
-                    _meetingHighlightClearTimer?.cancel();
-                    _meetingHighlightClearTimer =
-                        Timer(const Duration(seconds: 3), () {
-                      if (!mounted) return;
-                      setState(() {
-                        _highlightMeetingPointId = null;
-                        _meetingHighlightClearScheduled = false;
-                      });
-                      _meetingScrollTimer?.cancel();
-                      _meetingScrollTimer = null;
-                    });
+                  if (_meetingScrollTimer == null &&
+                      _meetingHighlightKey.currentContext == null) {
+                    _startScrollToMeetingPointWhenReady(targetIdx, list.length);
                   }
                 } else if (_meetingScrollTimer == null) {
-                  _startScrollToMeetingPointWhenReady(targetIdx);
+                  _startScrollToMeetingPointWhenReady(targetIdx, list.length);
                 }
               }
 
@@ -1225,6 +1232,12 @@ class _HistoryPageState extends State<HistoryPage> {
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
     final isExpanded = _expandedCards.contains(item.id);
     final isHighlighted = _highlightMeetingPointId == item.id;
+    if (isHighlighted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _scheduleMeetingHighlightClear();
+      });
+    }
 
     // Participants list: exclude host (already shown in header)
     // Current user first, then others
@@ -1462,12 +1475,13 @@ class _HistoryPageState extends State<HistoryPage> {
     );
   }
 
-  void _startScrollToMeetingPointWhenReady(int targetIdx) {
+  void _startScrollToMeetingPointWhenReady(int targetIdx, int itemCount) {
     int attempts = 0;
-    const maxAttempts = 25; // ~2.5 seconds
+    const maxAttempts = 60; // ~7 seconds
     _meetingScrollTimer?.cancel();
-    _meetingScrollTimer =
-        Timer.periodic(const Duration(milliseconds: 120), (_) {
+    _meetingScrollTimer = Timer.periodic(const Duration(milliseconds: 120), (
+      _,
+    ) {
       if (!mounted || attempts >= maxAttempts) {
         _meetingScrollTimer?.cancel();
         _meetingScrollTimer = null;
@@ -1486,18 +1500,26 @@ class _HistoryPageState extends State<HistoryPage> {
               alignment: 0.15,
               duration: const Duration(milliseconds: 450),
               curve: Curves.easeInOutCubic,
-            );
+            ).whenComplete(() {
+              if (!mounted) return;
+              _scheduleMeetingHighlightClear();
+            });
           } catch (_) {}
         });
         return;
       }
 
       if (_meetingScrollController.hasClients) {
-        const estimatedItemExtent = 240.0;
-        const separator = 12.0;
-        final targetOffset =
-            (estimatedItemExtent + separator) * targetIdx;
-        final max = _meetingScrollController.position.maxScrollExtent;
+        final position = _meetingScrollController.position;
+        final max = position.maxScrollExtent;
+        final viewport = position.viewportDimension;
+        final totalItems = itemCount <= 0 ? 1 : itemCount;
+        final contentExtent = max + viewport;
+        final avgExtent = contentExtent > 0
+            ? (contentExtent / totalItems)
+            : 0.0;
+        final estimatedItemExtent = avgExtent > 0 ? avgExtent : 240.0;
+        final targetOffset = estimatedItemExtent * targetIdx;
         final clamped = targetOffset.clamp(0.0, max);
         _meetingScrollController.animateTo(
           clamped,
@@ -1505,6 +1527,91 @@ class _HistoryPageState extends State<HistoryPage> {
           curve: Curves.easeInOutCubic,
         );
       }
+    });
+  }
+
+  void _startScrollToHistoryWhenReady(int targetIdx, int itemCount) {
+    int attempts = 0;
+    const maxAttempts = 60; // ~7 seconds
+    _historyScrollTimer?.cancel();
+    _historyScrollTimer = Timer.periodic(const Duration(milliseconds: 120), (
+      _,
+    ) {
+      if (!mounted || attempts >= maxAttempts) {
+        _historyScrollTimer?.cancel();
+        _historyScrollTimer = null;
+        return;
+      }
+      attempts++;
+      final ctx = _highlightKey.currentContext;
+      if (ctx != null) {
+        _historyScrollTimer?.cancel();
+        _historyScrollTimer = null;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          try {
+            Scrollable.ensureVisible(
+              ctx,
+              alignment: 0.15,
+              duration: const Duration(milliseconds: 450),
+              curve: Curves.easeInOutCubic,
+            ).whenComplete(() {
+              if (!mounted) return;
+              _scheduleHistoryHighlightClear();
+            });
+          } catch (_) {}
+        });
+        return;
+      }
+
+      if (_historyScrollController.hasClients) {
+        final position = _historyScrollController.position;
+        final max = position.maxScrollExtent;
+        final viewport = position.viewportDimension;
+        final totalItems = itemCount <= 0 ? 1 : itemCount;
+        final contentExtent = max + viewport;
+        final avgExtent = contentExtent > 0
+            ? (contentExtent / totalItems)
+            : 0.0;
+        final estimatedItemExtent = avgExtent > 0 ? avgExtent : 210.0;
+        final targetOffset = estimatedItemExtent * targetIdx;
+        final clamped = targetOffset.clamp(0.0, max);
+        _historyScrollController.animateTo(
+          clamped,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeInOutCubic,
+        );
+      }
+    });
+  }
+
+  void _scheduleHistoryHighlightClear() {
+    if (_highlightClearScheduled) return;
+    _highlightClearScheduled = true;
+    _highlightClearTimer?.cancel();
+    _highlightClearTimer = Timer(const Duration(seconds: 3), () {
+      if (!mounted) return;
+      setState(() {
+        _highlightRequestId = null;
+        _highlightClearScheduled = false;
+      });
+      _historyScrollTimer?.cancel();
+      _historyScrollTimer = null;
+    });
+  }
+
+  void _scheduleMeetingHighlightClear() {
+    if (_meetingHighlightClearScheduled) return;
+    _meetingHighlightClearScheduled = true;
+    _meetingHighlightClearTimer?.cancel();
+    _meetingHighlightClearTimer = Timer(const Duration(seconds: 3), () {
+      if (!mounted) return;
+      setState(() {
+        _highlightMeetingPointId = null;
+        _meetingHighlightClearScheduled = false;
+      });
+      _meetingScrollTimer?.cancel();
+      _meetingScrollTimer = null;
     });
   }
 

@@ -464,9 +464,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
                 (d['requestStatus'] ?? data['requestStatus'] ?? 'pending')
                     .toString()
                     .toLowerCase();
-            final waitDeadline =
-                (data['waitDeadline'] as Timestamp?)?.toDate();
-            final isExpired = waitDeadline != null &&
+            final waitDeadline = (data['waitDeadline'] as Timestamp?)?.toDate();
+            final isExpired =
+                waitDeadline != null &&
                 DateTime.now().isAfter(waitDeadline) &&
                 requestStatus == 'pending';
             final requiresActionRaw =
@@ -485,7 +485,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
               timestamp: ts,
               isRead: d['isRead'] ?? false,
               actionTaken: d['actionTaken'] == true,
-              requiresAction: requiresActionRaw == true &&
+              requiresAction:
+                  requiresActionRaw == true &&
                   !isExpired &&
                   actionLabel == null &&
                   requestStatus == 'pending',
@@ -789,7 +790,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
                             return StreamBuilder<List<NotificationItem>>(
                               stream: _trackStartedStream(),
                               builder: (context, trackStartedSnap) {
-                                final trackStarted = trackStartedSnap.data ?? [];
+                                final trackStarted =
+                                    trackStartedSnap.data ?? [];
 
                                 return StreamBuilder<List<NotificationItem>>(
                                   stream: _trackTerminatedStream(),
@@ -797,7 +799,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                     final trackTerminated =
                                         trackTerminatedSnap.data ?? [];
 
-                                    return StreamBuilder<List<NotificationItem>>(
+                                    return StreamBuilder<
+                                      List<NotificationItem>
+                                    >(
                                       stream: _trackCompletedStream(),
                                       builder: (context, trackCompletedSnap) {
                                         final trackCompleted =
@@ -817,7 +821,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                               stream: _locationRefreshStream(),
                                               builder: (context, locationRefreshSnap) {
                                                 final locationRefresh =
-                                                    locationRefreshSnap.data ?? [];
+                                                    locationRefreshSnap.data ??
+                                                    [];
 
                                                 final hasAllData =
                                                     docMapSnap.hasData &&
@@ -826,9 +831,12 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                                     meetingSnap.hasData &&
                                                     senderSnap.hasData &&
                                                     trackStartedSnap.hasData &&
-                                                    trackTerminatedSnap.hasData &&
-                                                    trackCompletedSnap.hasData &&
-                                                    trackCancelledSnap.hasData &&
+                                                    trackTerminatedSnap
+                                                        .hasData &&
+                                                    trackCompletedSnap
+                                                        .hasData &&
+                                                    trackCancelledSnap
+                                                        .hasData &&
                                                     locationRefreshSnap.hasData;
 
                                                 if (!hasAllData) {
@@ -845,18 +853,26 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                                   return _buildInitialLoader();
                                                 }
 
-                                                final merged = _mergeNotifications(
-                                                  incomingTrack: incomingTrack,
-                                                  meetingPointRequests:
-                                                      meetingPointRequests,
-                                                  senderResponses: senderResponses,
-                                                  trackStarted: trackStarted,
-                                                  trackTerminated: trackTerminated,
-                                                  trackCompleted: trackCompleted,
-                                                  trackCancelled: trackCancelled,
-                                                  locationRefresh: locationRefresh,
-                                                  notifDocMap: notifDocMap,
-                                                );
+                                                final merged =
+                                                    _mergeNotifications(
+                                                      incomingTrack:
+                                                          incomingTrack,
+                                                      meetingPointRequests:
+                                                          meetingPointRequests,
+                                                      senderResponses:
+                                                          senderResponses,
+                                                      trackStarted:
+                                                          trackStarted,
+                                                      trackTerminated:
+                                                          trackTerminated,
+                                                      trackCompleted:
+                                                          trackCompleted,
+                                                      trackCancelled:
+                                                          trackCancelled,
+                                                      locationRefresh:
+                                                          locationRefresh,
+                                                      notifDocMap: notifDocMap,
+                                                    );
 
                                                 _cachedMerged = merged;
                                                 _cacheReady = true;
@@ -995,8 +1011,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
       final overrideStatus = _localStatusOverride[n.id];
       if (overrideStatus != null &&
           (n.actionLabel == null || n.actionLabel!.isEmpty)) {
-        n.actionLabel =
-            overrideStatus == 'accepted' ? 'Accepted' : 'Declined';
+        n.actionLabel = overrideStatus == 'accepted' ? 'Accepted' : 'Declined';
       }
     }
 
@@ -1391,7 +1406,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                 ),
                                 children: [
                                   TextSpan(
-                                    text: (notification.senderName ?? '')
+                                    text:
+                                        (notification.senderName ?? '')
                                             .trim()
                                             .isNotEmpty
                                         ? notification.senderName!.trim()
@@ -2159,10 +2175,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
   bool _isSystemLocationRefresh(NotificationItem notification) {
     if (notification.isSystem) return true;
     final senderId = notification.senderId?.trim() ?? '';
-    final hasSenderName =
-        notification.senderName?.trim().isNotEmpty == true;
-    final hasSenderPhone =
-        notification.senderPhone?.trim().isNotEmpty == true;
+    final hasSenderName = notification.senderName?.trim().isNotEmpty == true;
+    final hasSenderPhone = notification.senderPhone?.trim().isNotEmpty == true;
     if (senderId.toLowerCase() == 'system') return true;
     if (senderId.isEmpty) {
       return !hasSenderName && !hasSenderPhone;
@@ -2189,12 +2203,28 @@ class _NotificationsPageState extends State<NotificationsPage> {
     if (notification.type == NotificationType.meetingPointRequest) {
       final meeting = await _fetchMeetingPointForNotification(notification);
       final uid = FirebaseAuth.instance.currentUser?.uid;
-      final status = meeting?.status.toLowerCase() ?? 'pending';
+      final status = (meeting?.status ?? '').toString().trim().toLowerCase();
+      final isExpired =
+          notification.isExpired ||
+          (notification.endAt != null &&
+              DateTime.now().isAfter(notification.endAt!));
       final isHost = uid != null && meeting?.isHost(uid) == true;
-      final shouldOpenHistory = status != 'pending';
+      // Pending (setup) and Active (confirmed) should open Track page.
+      final isTrackStatus =
+          status.isEmpty || status == 'pending' || status == 'active';
+      // Use meeting status as the source of truth when available.
+      final shouldOpenHistory = isExpired || !isTrackStatus;
 
       if (!mounted) return;
-      if (shouldOpenHistory && meeting != null) {
+      if (meeting == null) {
+        // Fallback: if meeting doc is missing, send to history.
+        Navigator.pop(context, {
+          'page': 'history',
+          'meetingPointId': notification.id,
+          'historyMainTabIndex': 1,
+          'meetingFilterIndex': isHost ? 0 : 1,
+        });
+      } else if (shouldOpenHistory) {
         Navigator.pop(context, {
           'page': 'history',
           'meetingPointId': meeting.id,
@@ -2211,7 +2241,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
       return;
     }
 
-    final hasTrackRequestId = notification.trackRequestId != null &&
+    final hasTrackRequestId =
+        notification.trackRequestId != null &&
         notification.trackRequestId!.trim().isNotEmpty;
     String requestId = notification.id;
 
@@ -2248,7 +2279,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
           .toString()
           .toLowerCase()
           .trim();
-      final endedByTime = notification.endAt != null &&
+      final endedByTime =
+          notification.endAt != null &&
           DateTime.now().isAfter(notification.endAt!);
       final isHistory =
           historyStatuses.contains(rawStatus) ||
@@ -2310,11 +2342,13 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
     if (filterIndex == null) return;
 
-    final rawStatus = (requestData?['status'] ?? notification.requestStatus ?? '')
-        .toString()
-        .toLowerCase()
-        .trim();
-    final endedByTime = notification.endAt != null &&
+    final rawStatus =
+        (requestData?['status'] ?? notification.requestStatus ?? '')
+            .toString()
+            .toLowerCase()
+            .trim();
+    final endedByTime =
+        notification.endAt != null &&
         DateTime.now().isAfter(notification.endAt!);
 
     bool isHistory =
@@ -2692,9 +2726,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
     final meeting = await _fetchMeetingPointForNotification(notification);
     if (meeting == null) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Meeting point not found.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Meeting point not found.')));
       return;
     }
 
@@ -2749,14 +2783,14 @@ class _NotificationsPageState extends State<NotificationsPage> {
     );
     if (!mounted || navChoice == null) return;
 
-    final locationResult =
-        await showModalBottomSheet<Map<String, dynamic>>(
+    final locationResult = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => SetYourLocationDialog(
-        shopName:
-            meeting.venueName.isEmpty ? 'Meeting Point' : meeting.venueName,
+        shopName: meeting.venueName.isEmpty
+            ? 'Meeting Point'
+            : meeting.venueName,
         shopId: meeting.id,
         returnResultOnly: true,
         venueId: meeting.venueId.isEmpty ? null : meeting.venueId,
@@ -2803,9 +2837,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
     final meeting = await _fetchMeetingPointForNotification(notification);
     if (meeting == null) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Meeting point not found.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Meeting point not found.')));
       return;
     }
 
@@ -2913,9 +2947,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
     );
   }
 
-  Widget _buildMeetingAcceptLocationChoiceSheet(
-    BuildContext ctx,
-  ) {
+  Widget _buildMeetingAcceptLocationChoiceSheet(BuildContext ctx) {
     return Container(
       decoration: const BoxDecoration(
         color: Colors.white,
@@ -2975,9 +3007,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
               onPressed: () => Navigator.pop(ctx, 'camera'),
             ),
           ),
-          SizedBox(
-            height: MediaQuery.of(ctx).padding.bottom + 35,
-          ),
+          SizedBox(height: MediaQuery.of(ctx).padding.bottom + 35),
         ],
       ),
     );
@@ -2993,10 +3023,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
     final requestId = notification.id.trim();
     if (requestId.isEmpty) return;
 
-    final updates = {
-      'isRead': true,
-      'actionTaken': true,
-    };
+    final updates = {'isRead': true, 'actionTaken': true};
 
     try {
       final batch = FirebaseFirestore.instance.batch();
@@ -3323,8 +3350,5 @@ class _TrackRequestLookupResult {
   final String id;
   final Map<String, dynamic> data;
 
-  _TrackRequestLookupResult({
-    required this.id,
-    required this.data,
-  });
+  _TrackRequestLookupResult({required this.id, required this.data});
 }

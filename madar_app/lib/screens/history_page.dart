@@ -394,6 +394,53 @@ class _HistoryPageState extends State<HistoryPage> {
     // ── Terminal meeting ──────────────────────────────────────────────────
     if (!_meetingPointHistoryStatuses.contains(status)) return null;
 
+    // ── Active meeting: only appear in history if the user personally left ─
+    // If the overall meeting is still active but this user cancelled their
+    // arrival (clicked Cancel in the track page), show it as "Terminated".
+    // If the user is still an active participant, exclude from history.
+    if (status == 'active') {
+      bool userCancelledArrival = false;
+      if (hostId == uid) {
+        final hostArrival = (data['hostArrivalStatus'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
+        userCancelledArrival = hostArrival == 'cancelled';
+      } else {
+        final rawParts = data['participants'];
+        if (rawParts is List) {
+          for (final p in rawParts) {
+            if (p is Map) {
+              final pUid = (p['userId'] ?? '').toString();
+              if (pUid == uid) {
+                final pArrival = (p['arrivalStatus'] ?? '')
+                    .toString()
+                    .trim()
+                    .toLowerCase();
+                userCancelledArrival = pArrival == 'cancelled';
+                break;
+              }
+            }
+          }
+        }
+      }
+      if (!userCancelledArrival) return null; // still active for this user
+      return HistoryMeetingPoint(
+        id: d.id,
+        status: 'terminated',
+        venueName: venueName,
+        suggestedPoint: suggestedPoint,
+        cancellationReason: cancellationReason,
+        hostId: hostId,
+        hostName: hostName,
+        hostPhone: hostPhone,
+        isHost: hostId == uid,
+        createdAt: createdAt,
+        updatedAt: updatedAt,
+        participants: participants,
+      );
+    }
+
     // For non-host participants, derive a personal display status.
     String displayStatus = status;
     if (hostId != uid) {

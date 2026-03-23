@@ -384,13 +384,18 @@ class MeetingPointService {
             .whereType<MeetingPointRecord>()
             .toList();
 
-        // NOTE: do NOT calibrate the server clock here.  These broad queries
-        // return ALL meetings for this user including old/cancelled ones whose
-        // `updatedAt` is from hours or days ago.  Using that timestamp as a
-        // clock reference would corrupt _serverClockOffset and make every new
-        // deadline appear to be in the past.  Clock calibration is done in the
-        // form's own single-document listener which only fires for freshly
-        // written documents.
+        // Calibrate server clock only from ACTIVE/CONFIRMED meetings whose
+        // timestamps are fresh. Old cancelled meetings have stale updatedAt
+        // values that would corrupt _serverClockOffset.
+        if (!snap.metadata.isFromCache) {
+          final anchor = meetings
+              .where((m) => m.isActive || m.isConfirmed)
+              .map((m) => m.updatedAt ?? m.createdAt)
+              .whereType<DateTime>()
+              .fold<DateTime?>(null, (best, t) =>
+                  best == null || t.isAfter(best) ? t : best);
+          if (anchor != null) calibrateFromServerTime(anchor);
+        }
 
         meetings.sort((a, b) {
           final at = a.updatedAt ?? a.createdAt ?? DateTime(1970);
@@ -420,7 +425,17 @@ class MeetingPointService {
             .whereType<MeetingPointRecord>()
             .toList();
 
-        // NOTE: no clock calibration here — see watchActiveForCurrentUser.
+        // Same calibration as watchActiveForCurrentUser: only use fresh
+        // ACTIVE/CONFIRMED meetings to avoid stale cancelled-meeting timestamps.
+        if (!snap.metadata.isFromCache) {
+          final anchor = meetings
+              .where((m) => m.isActive || m.isConfirmed)
+              .map((m) => m.updatedAt ?? m.createdAt)
+              .whereType<DateTime>()
+              .fold<DateTime?>(null, (best, t) =>
+                  best == null || t.isAfter(best) ? t : best);
+          if (anchor != null) calibrateFromServerTime(anchor);
+        }
 
         meetings.sort((a, b) {
           final at = a.updatedAt ?? a.createdAt ?? DateTime(1970);
@@ -588,7 +603,7 @@ class MeetingPointService {
     return null;
   }
 
-  static Future<String> createMeetingPoint({
+  static Future<(String, DateTime)> createMeetingPoint({
     required String hostId,
     required String hostName,
     required String hostPhone,
@@ -597,7 +612,7 @@ class MeetingPointService {
     required List<String> placeCategories,
     required Map<String, dynamic>? hostLocation,
     required List<MeetingPointParticipant> participants,
-    required DateTime waitDeadline,
+    required Duration waitDuration,
   }) async {
     final docRef = _col.doc();
     final invitedUserIds = participants.map((p) => p.userId).toSet().toList();
@@ -617,14 +632,41 @@ class MeetingPointService {
       'participants': participants.map((p) => p.toMap()).toList(),
       'invitedUserIds': invitedUserIds,
       'participantUserIds': participantUserIds,
-      'waitDeadline': Timestamp.fromDate(waitDeadline),
+      // waitDeadline is NOT set here — it is computed from the confirmed
+      // server-side createdAt after the commit so that all devices (host and
+      // participants) share the exact same Firestore-server-time-based deadline
+      // regardless of their local clock.
+      'waitDurationSeconds': waitDuration.inSeconds,
+      'waitDeadline': null,
       'suggestDeadline': null,
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     });
 
     await batch.commit();
-    return docRef.id;
+
+    // Read back the confirmed server timestamp for createdAt, then write the
+    // final waitDeadline = createdAt + waitDuration.  This ensures every
+    // client sees a deadline anchored to Firestore server time.
+    final snap = await docRef.get();
+    final serverCreatedAt =
+        (snap.data()?['createdAt'] as Timestamp?)?.toDate();
+    if (serverCreatedAt != null) {
+      final deadline = serverCreatedAt.add(waitDuration);
+      await docRef.update({
+        'waitDeadline': Timestamp.fromDate(deadline),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      return (docRef.id, deadline);
+    }
+
+    // Fallback: server timestamp not yet available in cache, use local time.
+    final fallback = DateTime.now().add(waitDuration);
+    await docRef.update({
+      'waitDeadline': Timestamp.fromDate(fallback),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    return (docRef.id, fallback);
   }
 
   static Future<void> updateHostProgress({
@@ -2320,25 +2362,23 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         ? _myName!.trim()
         : (host.displayName ?? '').trim();
 
-    // Compute the deadline once here so _initStep4 uses the identical value
-    // that is stored in Firestore.  If we call serverNow again later (after
-    // the async commit) we get a later instant, which makes the local timer
-    // disagree with Firestore and causes the listener to restart the countdown
-    // at a shorter remaining time.
-    _pendingWaitDeadline =
-        MeetingPointService.serverNow.add(const Duration(minutes: 2));
-
-    final meetingPointId = await MeetingPointService.createMeetingPoint(
-      hostId: host.uid,
-      hostName: hostName.isNotEmpty ? hostName : 'Host',
-      hostPhone: (_myPhone ?? '').trim(),
-      venueId: _venueId!,
-      venueName: _venueName!,
-      placeCategories: _selectedPlaceCategories.toList(),
-      hostLocation: _hostLocation?.toMap(),
-      participants: participants,
-      waitDeadline: _pendingWaitDeadline!,
-    );
+    // createMeetingPoint now returns the server-time-based deadline alongside
+    // the document ID.  We use it as _pendingWaitDeadline so the local timer
+    // is anchored to the same Firestore server timestamp that every participant
+    // also reads — eliminating host/participant clock disagreements.
+    final (meetingPointId, serverDeadline) =
+        await MeetingPointService.createMeetingPoint(
+          hostId: host.uid,
+          hostName: hostName.isNotEmpty ? hostName : 'Host',
+          hostPhone: (_myPhone ?? '').trim(),
+          venueId: _venueId!,
+          venueName: _venueName!,
+          placeCategories: _selectedPlaceCategories.toList(),
+          hostLocation: _hostLocation?.toMap(),
+          participants: participants,
+          waitDuration: const Duration(minutes: 2),
+        );
+    _pendingWaitDeadline = serverDeadline;
 
     _meetingPointId = meetingPointId;
 

@@ -2204,38 +2204,34 @@ class _NotificationsPageState extends State<NotificationsPage> {
       final meeting = await _fetchMeetingPointForNotification(notification);
       final uid = FirebaseAuth.instance.currentUser?.uid;
       final status = (meeting?.status ?? '').toString().trim().toLowerCase();
-      final isExpired =
-          notification.isExpired ||
-          (notification.endAt != null &&
-              DateTime.now().isAfter(notification.endAt!));
       final isHost = uid != null && meeting?.isHost(uid) == true;
       // Pending (setup) and Active (confirmed) should open Track page.
       final isTrackStatus =
           status.isEmpty || status == 'pending' || status == 'active';
-      // Use meeting status as the source of truth when available.
-      final shouldOpenHistory = isExpired || !isTrackStatus;
 
       if (!mounted) return;
-      if (meeting == null) {
+      if (meeting != null) {
+        if (isTrackStatus) {
+          Navigator.pop(context, {
+            'page': 'track',
+            'meetingPointId': meeting.id,
+            'openMeetingTab': true,
+          });
+        } else {
+          Navigator.pop(context, {
+            'page': 'history',
+            'meetingPointId': meeting.id,
+            'historyMainTabIndex': 1,
+            'meetingFilterIndex': isHost ? 0 : 1,
+          });
+        }
+      } else {
         // Fallback: if meeting doc is missing, send to history.
         Navigator.pop(context, {
           'page': 'history',
           'meetingPointId': notification.id,
           'historyMainTabIndex': 1,
           'meetingFilterIndex': isHost ? 0 : 1,
-        });
-      } else if (shouldOpenHistory) {
-        Navigator.pop(context, {
-          'page': 'history',
-          'meetingPointId': meeting.id,
-          'historyMainTabIndex': 1,
-          'meetingFilterIndex': isHost ? 0 : 1,
-        });
-      } else {
-        Navigator.pop(context, {
-          'page': 'track',
-          'meetingPointId': notification.id,
-          'openMeetingTab': true,
         });
       }
       return;

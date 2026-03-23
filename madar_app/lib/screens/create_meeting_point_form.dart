@@ -320,8 +320,19 @@ class MeetingPointService {
 
   /// Call with the `updatedAt` server timestamp from any live Firestore
   /// snapshot to keep the estimated offset accurate.
+  ///
+  /// Only accepts timestamps that are close to the current local time.
+  /// A large difference (> 5 min) means the snapshot came from an old/stale
+  /// document, not from a live write — using such a timestamp would corrupt
+  /// the offset and make every deadline appear to be in the past or future.
   static void calibrateFromServerTime(DateTime serverTimestamp) {
-    _serverClockOffset = serverTimestamp.difference(DateTime.now());
+    final candidate = serverTimestamp.difference(DateTime.now());
+    // Real server–client clock skew is typically < 30 s.  If the candidate
+    // offset is larger than 30 seconds the timestamp is from an old document
+    // (e.g. a meeting updated a few minutes ago), not a live write.
+    if (candidate.abs() <= const Duration(seconds: 30)) {
+      _serverClockOffset = candidate;
+    }
   }
 
   static bool _isFullyDeclinedActive(MeetingPointRecord meeting) {
@@ -373,15 +384,13 @@ class MeetingPointService {
             .whereType<MeetingPointRecord>()
             .toList();
 
-        // Calibrate server clock from a live (non-cached) snapshot.
-        if (!snap.metadata.isFromCache) {
-          final anchor = meetings
-              .map((m) => m.updatedAt ?? m.createdAt)
-              .whereType<DateTime>()
-              .fold<DateTime?>(null, (best, t) =>
-                  best == null || t.isAfter(best) ? t : best);
-          if (anchor != null) calibrateFromServerTime(anchor);
-        }
+        // NOTE: do NOT calibrate the server clock here.  These broad queries
+        // return ALL meetings for this user including old/cancelled ones whose
+        // `updatedAt` is from hours or days ago.  Using that timestamp as a
+        // clock reference would corrupt _serverClockOffset and make every new
+        // deadline appear to be in the past.  Clock calibration is done in the
+        // form's own single-document listener which only fires for freshly
+        // written documents.
 
         meetings.sort((a, b) {
           final at = a.updatedAt ?? a.createdAt ?? DateTime(1970);
@@ -411,15 +420,7 @@ class MeetingPointService {
             .whereType<MeetingPointRecord>()
             .toList();
 
-        // Calibrate server clock from a live (non-cached) snapshot.
-        if (!snap.metadata.isFromCache) {
-          final anchor = meetings
-              .map((m) => m.updatedAt ?? m.createdAt)
-              .whereType<DateTime>()
-              .fold<DateTime?>(null, (best, t) =>
-                  best == null || t.isAfter(best) ? t : best);
-          if (anchor != null) calibrateFromServerTime(anchor);
-        }
+        // NOTE: no clock calibration here — see watchActiveForCurrentUser.
 
         meetings.sort((a, b) {
           final at = a.updatedAt ?? a.createdAt ?? DateTime(1970);
@@ -948,9 +949,10 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   /// Simulated participant list built from _selectedFriends at step 4 entry.
   List<_Participant> _participants = [];
 
-  /// Step-4 10-minute countdown.
+  /// Step-4 2-minute countdown.
   Timer? _waitTimer;
-  int _waitSecondsLeft = 10; // 10 min
+  int _waitSecondsLeft = 120; // 2 min
+  DateTime? _pendingWaitDeadline; // deadline computed once before the Firestore commit
 
   /// Proceed button unlock delay (5 s) before checking real acceptance.
   bool _proceedUnlocked = false;
@@ -2140,9 +2142,13 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           .toList();
     }
 
-    // 2-minute countdown (testing).
+    // 2-minute countdown.  Use the deadline that was already committed to
+    // Firestore so the local timer and the Firestore field are identical.
     _waitSecondsLeft = 120;
-    _waitDeadline = MeetingPointService.serverNow.add(const Duration(minutes: 2));
+    _waitDeadline =
+        _pendingWaitDeadline ??
+        MeetingPointService.serverNow.add(const Duration(minutes: 2));
+    _pendingWaitDeadline = null; // consumed
     _startStep4WaitCountdown();
 
     // Unlock "Proceed" after 5 seconds (UI demo).
@@ -2314,6 +2320,14 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         ? _myName!.trim()
         : (host.displayName ?? '').trim();
 
+    // Compute the deadline once here so _initStep4 uses the identical value
+    // that is stored in Firestore.  If we call serverNow again later (after
+    // the async commit) we get a later instant, which makes the local timer
+    // disagree with Firestore and causes the listener to restart the countdown
+    // at a shorter remaining time.
+    _pendingWaitDeadline =
+        MeetingPointService.serverNow.add(const Duration(minutes: 2));
+
     final meetingPointId = await MeetingPointService.createMeetingPoint(
       hostId: host.uid,
       hostName: hostName.isNotEmpty ? hostName : 'Host',
@@ -2323,7 +2337,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       placeCategories: _selectedPlaceCategories.toList(),
       hostLocation: _hostLocation?.toMap(),
       participants: participants,
-      waitDeadline: MeetingPointService.serverNow.add(const Duration(minutes: 2)),
+      waitDeadline: _pendingWaitDeadline!,
     );
 
     _meetingPointId = meetingPointId;

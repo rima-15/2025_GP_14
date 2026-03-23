@@ -518,6 +518,16 @@ export const onMeetingPointCancelled = onDocumentUpdated(
             "").toString();
           if (requestId !== meetingPointId) continue;
 
+          const currentStatus = (data.requestStatus ??
+            payload.requestStatus ??
+            "pending")
+            .toString()
+            .trim()
+            .toLowerCase();
+          if (currentStatus !== "pending") {
+            continue;
+          }
+
           batch.update(doc.ref, {
             requestStatus: "cancelled",
             "data.requestStatus": "cancelled",
@@ -539,6 +549,93 @@ export const onMeetingPointCancelled = onDocumentUpdated(
       if (commits.length > 0) await Promise.all(commits);
     } catch (error) {
       console.error("Error updating cancelled meeting notifications:", error);
+    }
+  }
+);
+
+/* ------------------------------------------------------------------
+
+   Meeting Point Request Notification (Expired)
+
+   - When host moves from step 4 → 5, any PENDING invitees should
+     be marked as expired (no more accept/decline).
+
+-------------------------------------------------------------------*/
+
+export const onMeetingPointInviteWindowClosed = onDocumentUpdated(
+  "meetingPoints/{meetingPointId}",
+  async (event) => {
+    try {
+      const before = event.data?.before.data();
+      const after = event.data?.after.data();
+      if (!before || !after) return;
+
+      const beforeStep = Number(before.hostStep ?? 0);
+      const afterStep = Number(after.hostStep ?? 0);
+      if (!(beforeStep === 4 && afterStep === 5)) return;
+
+      const status = (after.status ?? "").toString().trim().toLowerCase();
+      if (status && status !== "pending") return;
+
+      const meetingPointId = event.params.meetingPointId;
+      if (!meetingPointId) return;
+
+      const hostId = (after.hostId ?? "").toString().trim();
+
+      const participants: any[] = Array.isArray(after.participants)
+        ? after.participants
+        : [];
+
+      const pendingIds = participants
+        .filter((p: any) => {
+          const s = (p?.status ?? "pending").toString().trim().toLowerCase();
+          return s === "pending";
+        })
+        .map((p: any) => (p?.userId ?? "").toString().trim())
+        .filter((uid: string) => uid && uid !== hostId);
+
+      if (pendingIds.length === 0) return;
+
+      let batch = db.batch();
+      let ops = 0;
+      const commits: Promise<any>[] = [];
+
+      for (const uid of pendingIds) {
+        const snap = await db
+          .collection("notifications")
+          .where("userId", "==", uid)
+          .where("type", "==", "meetingPointRequest")
+          .get();
+
+        for (const doc of snap.docs) {
+          const data: any = doc.data() ?? {};
+          const payload: any = data.data ?? {};
+          const requestId = (payload.meetingPointId ??
+            payload.requestId ??
+            "").toString();
+          if (requestId !== meetingPointId) continue;
+
+          batch.update(doc.ref, {
+            requestStatus: "expired",
+            "data.requestStatus": "expired",
+            actionTaken: true,
+            requiresAction: false,
+            actionTakenAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          ops++;
+          if (ops >= 450) {
+            commits.push(batch.commit());
+            batch = db.batch();
+            ops = 0;
+          }
+        }
+      }
+
+      if (ops > 0) commits.push(batch.commit());
+      if (commits.length > 0) await Promise.all(commits);
+    } catch (error) {
+      console.error("Error marking meeting invites as expired:", error);
     }
   }
 );

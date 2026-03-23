@@ -475,6 +475,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
               if (requestStatus == 'declined') actionLabel = 'Declined';
               if (requestStatus == 'cancelled') actionLabel = 'Cancelled';
 
+              var isExpired = requestStatus == 'expired';
+
               if (requestStatus == 'pending') {
                 final meetingStatus = await _getMeetingStatusCached(
                   meetingPointId,
@@ -490,10 +492,12 @@ class _NotificationsPageState extends State<NotificationsPage> {
                 }
               }
 
-              final isExpired =
-                  waitDeadline != null &&
-                  DateTime.now().isAfter(waitDeadline) &&
-                  requestStatus == 'pending';
+              if (!isExpired) {
+                isExpired =
+                    waitDeadline != null &&
+                    DateTime.now().isAfter(waitDeadline) &&
+                    requestStatus == 'pending';
+              }
               final requiresActionRaw =
                   d['requiresAction'] ?? (requestStatus == 'pending');
 

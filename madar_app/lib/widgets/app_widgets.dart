@@ -60,6 +60,50 @@ class InlineLoadingIndicator extends StatelessWidget {
 }
 
 // ----------------------------------------------------------------------------
+// Badges
+// ----------------------------------------------------------------------------
+
+/// Green timer badge used across meeting point countdowns.
+class MeetingTimerBadge extends StatelessWidget {
+  final String label;
+
+  const MeetingTimerBadge({super.key, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.timer_outlined, size: 14, color: AppColors.kGreen),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              color: AppColors.kGreen,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ----------------------------------------------------------------------------
 // Message Boxes
 // ----------------------------------------------------------------------------
 

@@ -331,6 +331,7 @@ export const onMeetingPointCreated = onDocumentCreated(
             venueId: venueId || null,
             venueName: venueName || null,
             waitDeadline: waitDeadline || null,
+            waitDurationSeconds: data.waitDurationSeconds ?? null,
           },
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
@@ -339,6 +340,81 @@ export const onMeetingPointCreated = onDocumentCreated(
       await batch.commit();
     } catch (error) {
       console.error("Error sending meeting point notifications:", error);
+    }
+  }
+);
+
+/* ------------------------------------------------------------------
+
+   Meeting Point Request Notification (Wait Deadline Set)
+
+   - When waitDeadline becomes available (or changes), push it into the
+     pending invite notifications so the countdown appears immediately
+     without extra client reads.
+
+-------------------------------------------------------------------*/
+
+export const onMeetingPointWaitDeadlineSet = onDocumentUpdated(
+  "meetingPoints/{meetingPointId}",
+  async (event) => {
+    try {
+      const before = event.data?.before.data();
+      const after = event.data?.after.data();
+      if (!before || !after) return;
+
+      const beforeMs = before.waitDeadline?.toMillis?.() ?? null;
+      const afterMs = after.waitDeadline?.toMillis?.() ?? null;
+      if (afterMs == null || afterMs === beforeMs) return;
+
+      const meetingPointId = event.params.meetingPointId;
+      if (!meetingPointId) return;
+
+      const hostId = (after.hostId ?? "").toString().trim();
+      const participants: any[] = Array.isArray(after.participants)
+        ? after.participants
+        : [];
+      const targetIds = participants
+        .map((p: any) => (p?.userId ?? "").toString().trim())
+        .filter((uid: string) => uid && uid !== hostId);
+
+      if (targetIds.length === 0) return;
+
+      let batch = db.batch();
+      let ops = 0;
+      const commits: Promise<any>[] = [];
+
+      for (const uid of targetIds) {
+        const snap = await db
+          .collection("notifications")
+          .where("userId", "==", uid)
+          .where("type", "==", "meetingPointRequest")
+          .get();
+
+        for (const doc of snap.docs) {
+          const data: any = doc.data() ?? {};
+          const payload: any = data.data ?? {};
+          const requestId = (payload.meetingPointId ??
+            payload.requestId ??
+            "").toString();
+          if (requestId !== meetingPointId) continue;
+
+          batch.update(doc.ref, {
+            "data.waitDeadline": after.waitDeadline,
+          });
+
+          ops++;
+          if (ops >= 450) {
+            commits.push(batch.commit());
+            batch = db.batch();
+            ops = 0;
+          }
+        }
+      }
+
+      if (ops > 0) commits.push(batch.commit());
+      if (commits.length > 0) await Promise.all(commits);
+    } catch (error) {
+      console.error("Error updating waitDeadline in notifications:", error);
     }
   }
 );

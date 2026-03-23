@@ -457,8 +457,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
           final items = await Future.wait(
             snap.docs.map((doc) async {
               final d = doc.data();
-              final ts =
-                  (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+              final createdAtTs = d['createdAt'] as Timestamp?;
+              final ts = createdAtTs?.toDate() ?? DateTime.now();
               final data = d['data'] as Map<String, dynamic>? ?? {};
               final meetingPointId =
                   (data['meetingPointId'] ?? data['requestId'] ?? doc.id)
@@ -467,8 +467,18 @@ class _NotificationsPageState extends State<NotificationsPage> {
                   (d['requestStatus'] ?? data['requestStatus'] ?? 'pending')
                       .toString()
                       .toLowerCase();
-              final waitDeadline = (data['waitDeadline'] as Timestamp?)
-                  ?.toDate();
+              DateTime? waitDeadline =
+                  (data['waitDeadline'] as Timestamp?)?.toDate();
+              if (waitDeadline == null &&
+                  createdAtTs != null &&
+                  data['waitDurationSeconds'] is num) {
+                final secs = (data['waitDurationSeconds'] as num).toInt();
+                if (secs > 0) {
+                  waitDeadline = createdAtTs.toDate().add(
+                        Duration(seconds: secs),
+                      );
+                }
+              }
 
               String? actionLabel;
               if (requestStatus == 'accepted') actionLabel = 'Accepted';
@@ -1411,7 +1421,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                             ),
                                           ),
                                         ),
-                                        // Status Labels (Expired, Accepted, or Declined)
+                                        // Status Labels or Meeting Timer
                                         if (notification.isExpired ||
                                             notification.actionLabel != null)
                                           _notificationStatusBadge(
@@ -1420,6 +1430,21 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                                 : (notification.actionLabel ??
                                                           '')
                                                       .toLowerCase(),
+                                          )
+                                        else if (_shouldShowMeetingPointTimer(
+                                          notification,
+                                        ))
+                                          ValueListenableBuilder<int>(
+                                            valueListenable: _tick,
+                                            builder: (context, _, __) {
+                                              final timerLabel =
+                                                  _meetingPointTimerLabel(
+                                                notification.endAt!,
+                                              );
+                                              return MeetingTimerBadge(
+                                                label: timerLabel,
+                                              );
+                                            },
                                           ),
                                       ],
                                     ),
@@ -3217,6 +3242,24 @@ class _NotificationsPageState extends State<NotificationsPage> {
           ? (notification.notificationDocId ?? notification.id)
           : null,
     );
+  }
+
+  bool _shouldShowMeetingPointTimer(NotificationItem notification) {
+    if (notification.type != NotificationType.meetingPointRequest) return false;
+    if (notification.isExpired) return false;
+    final status = (notification.requestStatus ?? '').toLowerCase().trim();
+    if (status.isNotEmpty && status != 'pending') return false;
+    return notification.endAt != null;
+  }
+
+  String _meetingPointTimerLabel(DateTime deadline) {
+    final seconds = deadline
+        .difference(MeetingPointService.serverNow)
+        .inSeconds
+        .clamp(0, 3600);
+    final mm = (seconds ~/ 60).toString().padLeft(2, '0');
+    final ss = (seconds % 60).toString().padLeft(2, '0');
+    return '$mm:$ss';
   }
 
   Widget _notificationStatusBadge(String status) {

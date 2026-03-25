@@ -1461,7 +1461,7 @@ class _HistoryPageState extends State<HistoryPage> {
                         _labeledDetail(
                           'Suggested point: ',
                           item.suggestedPoint.isEmpty
-                              ? 'JOE & THE JUICE'
+                              ? '—'
                               : item.suggestedPoint,
                         ),
                         const SizedBox(height: 4),

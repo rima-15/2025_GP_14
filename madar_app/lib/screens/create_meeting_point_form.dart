@@ -19,7 +19,8 @@ import 'package:share_plus/share_plus.dart';
 // ── DEV FLAG ──────────────────────────────────────────────────────────────────
 /// Set to true so the full wizard can be tested even outside a real venue.
 const bool forceVenueForTesting = true;
-const String _kTestVenueName = 'King Khalid International Airport';
+const String _kTestVenueName = 'Solitaire';
+const String _kTestVenueId = 'ChIJcYTQDwDjLj4RZEiboV6gZzM';
 const String _kFallbackMapVenueId = 'ChIJcYTQDwDjLj4RZEiboV6gZzM';
 
 /// Geofence radius in metres – user must be this close to a venue centre.
@@ -162,6 +163,9 @@ class MeetingPointRecord {
     this.waitDeadline,
     this.suggestDeadline,
     this.confirmedAt,
+    this.suggestedPoint = '',
+    this.suggestedCandidates = const [],
+    this.suggestionsComputed = false,
     this.hostArrivalStatus = 'on_the_way',
     this.hostArrivedAt,
     this.hostEstimatedMinutes = 3,
@@ -187,6 +191,9 @@ class MeetingPointRecord {
 
   // ── Arrival tracking (populated when status becomes 'active') ─────────────
   final DateTime? confirmedAt;
+  final String suggestedPoint;
+  final List<Map<String, dynamic>> suggestedCandidates;
+  final bool suggestionsComputed;
   final String hostArrivalStatus; // on_the_way | arrived | cancelled
   final DateTime? hostArrivedAt;
   final int hostEstimatedMinutes; // 1-5 (random)
@@ -267,6 +274,16 @@ class MeetingPointRecord {
     final hostStepRaw = data['hostStep'];
     final hostStep = (hostStepRaw is num) ? hostStepRaw.toInt() : 4;
 
+    final suggestedPoint = (data['suggestedPoint'] ?? '').toString();
+    final suggestionsComputed = data['suggestionsComputed'] == true;
+    final suggestedCandidatesRaw = data['suggestedCandidates'];
+    final suggestedCandidates = (suggestedCandidatesRaw is List)
+        ? suggestedCandidatesRaw
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList()
+        : <Map<String, dynamic>>[];
+
     return MeetingPointRecord(
       id: doc.id,
       hostId: hostId,
@@ -287,6 +304,9 @@ class MeetingPointRecord {
       waitDeadline: _meetingPointAsDateTime(data['waitDeadline']),
       suggestDeadline: _meetingPointAsDateTime(data['suggestDeadline']),
       confirmedAt: _meetingPointAsDateTime(data['confirmedAt']),
+      suggestedPoint: suggestedPoint,
+      suggestedCandidates: suggestedCandidates,
+      suggestionsComputed: suggestionsComputed,
       hostArrivalStatus: (data['hostArrivalStatus'] ?? 'on_the_way').toString(),
       hostArrivedAt: _meetingPointAsDateTime(data['hostArrivedAt']),
       hostEstimatedMinutes: (data['hostEstimatedMinutes'] is num)
@@ -1058,6 +1078,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   Timer? _suggestTimer;
   int _suggestSecondsLeft = 300; // 5 min
   DateTime? _suggestDeadline;
+  String _suggestedPointName = '';
+  List<Map<String, dynamic>> _suggestedCandidates = [];
+  bool _suggestionsComputed = false;
 
   // ── Cached current user ───────────────────────────────────────────────────
   String? _myPhone;
@@ -1210,11 +1233,26 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         _venueName = matched.name;
       } else if (forceVenueForTesting && venues.isNotEmpty) {
         // DEV override: prefer a stable 24h test venue.
-        final expected = _kTestVenueName.toLowerCase();
-        final testVenue = venues.firstWhere((v) {
-          final name = v.name.toLowerCase();
-          return name == expected || name.contains(expected);
-        }, orElse: () => venues.first);
+        _VenueOption? testVenue;
+        if (_kTestVenueId.trim().isNotEmpty) {
+          for (final v in venues) {
+            if (v.id == _kTestVenueId) {
+              testVenue = v;
+              break;
+            }
+          }
+        }
+        if (testVenue == null) {
+          final expected = _kTestVenueName.toLowerCase();
+          for (final v in venues) {
+            final name = v.name.toLowerCase();
+            if (name == expected || name.contains(expected)) {
+              testVenue = v;
+              break;
+            }
+          }
+        }
+        testVenue ??= venues.first;
         _venueId = testVenue.id;
         _venueName = testVenue.name; // no "(DEV)" label shown to user
       } else {
@@ -1839,6 +1877,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       _waitSecondsLeft = waitLeft.toInt();
       _suggestSecondsLeft = suggestLeft.toInt();
       _proceedUnlocked = true;
+      _suggestedPointName = meeting.suggestedPoint;
+      _suggestedCandidates = meeting.suggestedCandidates;
+      _suggestionsComputed = meeting.suggestionsComputed;
     });
 
     if (_step == 4) {
@@ -1908,6 +1949,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
             _waitSecondsLeft = waitLeft.toInt();
             _suggestSecondsLeft = suggestLeft.toInt();
             _step = effectiveStep;
+            _suggestedPointName = meeting.suggestedPoint;
+            _suggestedCandidates = meeting.suggestedCandidates;
+            _suggestionsComputed = meeting.suggestionsComputed;
           });
 
           // Only restart countdowns when the deadline itself changed (e.g.
@@ -2298,6 +2342,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     _suggestDeadline = MeetingPointService.serverNow.add(
       const Duration(minutes: 5),
     );
+    _suggestedPointName = '';
+    _suggestedCandidates = [];
+    _suggestionsComputed = false;
     _startStep5SuggestCountdown();
     // status stays 'pending'; hostStep=5 signals waiting_host_confirmation sub-state
     unawaited(_syncMeetingPointProgress());
@@ -3453,6 +3500,65 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     setState(() {
       _hostLocation = _HostLocation(latitude: x!, longitude: z!, label: label);
     });
+
+    // Persist the picked location to users/{doc}.location.blenderPosition
+    // so suggestions can use the latest saved location.
+    await _saveUserLocationFromResult(result);
+  }
+
+  Map<String, double>? _extractBlenderFromResult(Map<String, dynamic> result) {
+    final blender = result['blender'];
+    if (blender is Map) {
+      final x = (blender['x'] as num?)?.toDouble();
+      final y = (blender['y'] as num?)?.toDouble();
+      final z = (blender['z'] as num?)?.toDouble();
+      if (x != null && y != null && z != null) {
+        return {'x': x, 'y': y, 'z': z};
+      }
+    }
+
+    final gltf = result['gltf'];
+    if (gltf is Map) {
+      final x = (gltf['x'] as num?)?.toDouble();
+      final y = (gltf['y'] as num?)?.toDouble();
+      final z = (gltf['z'] as num?)?.toDouble();
+      if (x != null && y != null && z != null) {
+        // glTF (Y up) -> Blender (Z up)
+        return {'x': x, 'y': -z, 'z': y};
+      }
+    }
+
+    return null;
+  }
+
+  Future<void> _saveUserLocationFromResult(
+    Map<String, dynamic> result,
+  ) async {
+    final blender = _extractBlenderFromResult(result);
+    if (blender == null) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final floorLabel = (result['floorLabel'] ?? '').toString().trim();
+    final floorValue = floorLabel.isNotEmpty
+        ? floorLabel
+        : (_step2InitialFloorLabel ?? '');
+
+    try {
+      final userDocRef = await _resolveUserDocRef(user);
+      await userDocRef.update({
+        'location.blenderPosition': {
+          'x': blender['x'],
+          'y': blender['y'],
+          'z': blender['z'],
+          'floor': floorValue,
+        },
+        'location.updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      debugPrint('❌ Failed to save user location from meeting form: $e');
+    }
   }
 
   Future<DocumentReference<Map<String, dynamic>>> _resolveUserDocRef(
@@ -3463,6 +3569,14 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     final email = user.email;
     if (email != null && email.isNotEmpty) {
       final snap = await users.where('email', isEqualTo: email).limit(1).get();
+      if (snap.docs.isNotEmpty) {
+        return snap.docs.first.reference;
+      }
+    }
+
+    final phone = user.phoneNumber;
+    if (phone != null && phone.isNotEmpty) {
+      final snap = await users.where('phone', isEqualTo: phone).limit(1).get();
       if (snap.docs.isNotEmpty) {
         return snap.docs.first.reference;
       }
@@ -3824,6 +3938,12 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   Widget _buildStep5() {
     final mm = (_suggestSecondsLeft ~/ 60).toString().padLeft(2, '0');
     final ss = (_suggestSecondsLeft % 60).toString().padLeft(2, '0');
+    final hasSuggestion = _suggestedPointName.trim().isNotEmpty;
+    final showLoading = !hasSuggestion && !_suggestionsComputed;
+    final showEmpty = !hasSuggestion && _suggestionsComputed;
+    final primaryName = hasSuggestion
+        ? _suggestedPointName.trim()
+        : (showEmpty ? 'No suitable meeting point found' : 'Calculating...');
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
@@ -3877,21 +3997,30 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           style: TextStyle(fontSize: 14, color: Colors.black54),
         ),
         const SizedBox(height: 8),
-        const Text(
-          '"Adidas"',
+        Text(
+          '"$primaryName"',
           textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 24,
             fontWeight: FontWeight.w700,
-            color: Colors.black87,
+            color: hasSuggestion ? Colors.black87 : Colors.grey[500],
           ),
         ),
         const SizedBox(height: 8),
-        Text(
-          'If you don\'t decide, it will be auto-accepted when the timer runs out.',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-        ),
+        if (hasSuggestion)
+          Text(
+            'If you don\'t decide, it will be auto-accepted when the timer runs out.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+          ),
+        if (showEmpty) ...[
+          const SizedBox(height: 10),
+          Text(
+            'Try different categories or make sure everyone\'s location is available.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+          ),
+        ],
 
         const SizedBox(height: 36),
 
@@ -3900,7 +4029,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           width: double.infinity,
           height: 52,
           child: ElevatedButton(
-            onPressed: _acceptSuggestedMeetingPoint,
+            onPressed: hasSuggestion ? _acceptSuggestedMeetingPoint : null,
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.kGreen,
               elevation: 0,
@@ -3926,6 +4055,66 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         ),
         const SizedBox(height: 20),
       ],
+    );
+  }
+
+  Widget _buildSuggestedCandidateTile(Map<String, dynamic> raw, int index) {
+    final name = (raw['placeName'] ?? '').toString().trim();
+    final entrance = raw['entrance'] is Map ? raw['entrance'] as Map : null;
+    final floor = entrance?['floor']?.toString().trim() ?? '';
+    final rank = index + 1;
+    if (name.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 26,
+            height: 26,
+            decoration: BoxDecoration(
+              color: AppColors.kGreen.withOpacity(0.15),
+              shape: BoxShape.circle,
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              '$rank',
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: AppColors.kGreen,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black87,
+                  ),
+                ),
+                if (floor.isNotEmpty)
+                  Text(
+                    'Floor: $floor',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 

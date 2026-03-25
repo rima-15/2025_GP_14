@@ -1,5 +1,7 @@
 import * as admin from "firebase-admin";
 
+import { computeMeetingPointSuggestions } from "./meeting_point_suggester";
+
 import { setGlobalOptions } from "firebase-functions";
 
 import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
@@ -712,6 +714,86 @@ export const onMeetingPointInviteWindowClosed = onDocumentUpdated(
       if (commits.length > 0) await Promise.all(commits);
     } catch (error) {
       console.error("Error marking meeting invites as expired:", error);
+    }
+  }
+);
+
+/* ------------------------------------------------------------------
+
+   Meeting Point Suggestions (Computed)
+
+   - When hostStep becomes 5 (manual or auto), compute suggested meeting
+     point candidates using entrances + navmesh + connectors.
+
+-------------------------------------------------------------------*/
+
+export const onMeetingPointSuggest = onDocumentUpdated(
+  "meetingPoints/{meetingPointId}",
+  async (event) => {
+    try {
+      const after = event.data?.after.data();
+      if (!after) return;
+
+      const meetingPointId = event.params.meetingPointId;
+      if (!meetingPointId) return;
+
+      const afterStep = Number(after.hostStep ?? 0);
+
+      const status = (after.status ?? "").toString().trim().toLowerCase();
+      if (status && status !== "pending") return;
+
+      const alreadySuggested =
+        (after.suggestedPoint ?? "").toString().trim().length > 0;
+      if (alreadySuggested || after.suggestionsComputed === true) return;
+
+      const participants: any[] = Array.isArray(after.participants)
+        ? after.participants
+        : [];
+      const anyAccepted = participants.some(
+        (p: any) =>
+          (p?.status ?? "").toString().trim().toLowerCase() === "accepted"
+      );
+      if (!anyAccepted) return;
+
+      const allResponded = participants.every(
+        (p: any) =>
+          (p?.status ?? "").toString().trim().toLowerCase() !== "pending"
+      );
+      const toDate = (v: any) =>
+        v && typeof v.toDate === "function" ? v.toDate() : null;
+      const waitDeadline = toDate(after.waitDeadline);
+      const waitExpired = waitDeadline
+        ? waitDeadline.getTime() <= Date.now()
+        : false;
+
+      // Compute suggestions when host is on step 5 OR everyone responded OR
+      // the wait timer expired (auto-advance safety net).
+      if (!(afterStep === 5 || allResponded || waitExpired)) return;
+
+      const result = await computeMeetingPointSuggestions(
+        meetingPointId,
+        after
+      );
+
+      if (!result) {
+        await db.collection("meetingPoints").doc(meetingPointId).update({
+          suggestionsComputed: true,
+          suggestionError: "no_candidates",
+          suggestedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        return;
+      }
+
+      await db.collection("meetingPoints").doc(meetingPointId).update({
+        suggestedPoint: result.suggestedPoint,
+        suggestedCandidates: result.suggestedCandidates,
+        suggestionsComputed: true,
+        suggestedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    } catch (error) {
+      console.error("Error computing meeting point suggestions:", error);
     }
   }
 );

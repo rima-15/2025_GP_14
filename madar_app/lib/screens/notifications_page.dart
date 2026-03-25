@@ -2846,6 +2846,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
     final blocking =
         await MeetingPointService.getBlockingMeetingForCurrentUser();
+    final hadConflict = blocking != null && blocking.id != meeting.id;
     if (blocking != null && blocking.id != meeting.id) {
       if (!mounted) return;
       final proceed = await _showMeetingPointConflictDialog();
@@ -2864,6 +2865,17 @@ class _NotificationsPageState extends State<NotificationsPage> {
           );
         }
       } catch (_) {}
+    }
+
+    if (!hadConflict) {
+      final confirmed = await ConfirmationDialog.showPositiveConfirmation(
+        context,
+        title: 'Accept Invitation',
+        message:
+            'Are you sure you want to accept this meeting point invitation?',
+        confirmText: 'Accept',
+      );
+      if (confirmed != true) return;
     }
 
     if (!mounted) return;

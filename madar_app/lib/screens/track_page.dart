@@ -114,6 +114,11 @@ class _TrackPageState extends State<TrackPage> {
   Timer? _scrollToMeetingInviteTimer;
   String? _meetingInviteScrollTargetId;
 
+  String _suggestedPointLabel(MeetingPointRecord meeting) {
+    final name = meeting.suggestedPoint.trim();
+    return name.isNotEmpty ? name : 'Pending suggestion';
+  }
+
   //Stream<MeetingPointRecord?>
   // get _meetingPointCardStream =>
   Stream<MeetingPointRecord?> get _meetingPointCardStream =>
@@ -2217,7 +2222,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                     children: [
                       const SizedBox(height: 2),
                       Text(
-                        'JOE & THE JUICE',
+                        _suggestedPointLabel(meeting),
                         style: const TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
@@ -2690,7 +2695,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                             children: [
                               const SizedBox(height: 2),
                               Text(
-                                'JOE & THE JUICE',
+                                _suggestedPointLabel(meeting),
                                 style: const TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w600,
@@ -2894,9 +2899,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           const SizedBox(height: 2),
-                          const Text(
-                            'JOE & THE JUICE',
-                            style: TextStyle(
+                          Text(
+                            _suggestedPointLabel(meeting),
+                            style: const TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
                               color: Colors.black87,
@@ -3761,7 +3766,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                                     const SizedBox(height: 8),
                                     _labeledDetail(
                                       'Suggested point: ',
-                                      'JOE & THE JUICE',
+                                      _suggestedPointLabel(meeting),
                                     ),
                                   ],
                                 ],

@@ -60,6 +60,16 @@ class _TrackPageState extends State<TrackPage> {
   final Map<String, double> _trackedGpsLatByUser = {};
   final Map<String, double> _trackedGpsLngByUser = {};
   final Map<String, DateTime> _trackedUpdatedAtByUser = {};
+  final Map<String, Map<String, double>> _meetingPosByUser = {};
+  final Map<String, String> _meetingFloorByUser = {};
+  final Map<String, String> _meetingNameByUser = {};
+  final Map<String, DateTime> _meetingUpdatedAtByUser = {};
+  Map<String, double>? _meetingPointPosGltf;
+  String _meetingPointFloorLabel = '';
+  String _meetingPointLabel = '';
+  final Map<String, StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>>
+      _meetingUserSubs = {};
+  StreamSubscription<MeetingPointRecord?>? _activeMeetingSub;
   final Map<String, double> _venueLatByRequest = {};
   final Map<String, double> _venueLngByRequest = {};
   final Map<String, String> _userPinColorMap = {};
@@ -365,6 +375,7 @@ function getViewer(){ return document.querySelector('model-viewer'); }
 
 function pinId(userId){ return `trackedPin_${userId}`; }
 function labelId(userId){ return `trackedLabel_${userId}`; }
+function meetingPointId(){ return "meeting_point_pin"; }
 
 function ensureTrackStyle() {
   if (document.getElementById("track_pin_hotspot_style")) return;
@@ -380,6 +391,26 @@ function ensureTrackStyle() {
       will-change: transform;
       z-index: 900;
       opacity: var(--hotspot-visibility);
+    }
+    .meetingPointPulse{
+      position:absolute;
+      left:50%;
+      top:50%;
+      width:44px;
+      height:44px;
+      border-radius:50%;
+      border:2px solid rgba(120, 126, 101, 0.6);
+      transform: translate(-50%, -50%) scale(0.6);
+      opacity:0.8;
+      animation: meetingPulse 2.2s ease-out infinite;
+    }
+    .meetingPointPulse.delay{
+      animation-delay:1.1s;
+    }
+    @keyframes meetingPulse{
+      0%{ transform: translate(-50%, -50%) scale(0.6); opacity:0.8; }
+      70%{ opacity:0.25; }
+      100%{ transform: translate(-50%, -50%) scale(1.7); opacity:0; }
     }
   `;
   document.head.appendChild(style);
@@ -465,6 +496,76 @@ function buildTeardropPin(container, opts){
   container.appendChild(wrap);
 }
 
+function buildMeetingPointPin(container, label){
+  const wrap = document.createElement("div");
+  wrap.style.position = "absolute";
+  wrap.style.left = "0";
+  wrap.style.top = "0";
+  wrap.style.transform = "translate(-50%, -92%)";
+  wrap.style.pointerEvents = "none";
+
+  const column = document.createElement("div");
+  column.style.display = "flex";
+  column.style.flexDirection = "column";
+  column.style.alignItems = "center";
+  column.style.gap = "4px";
+
+  if (label) {
+    const bubble = document.createElement("div");
+    bubble.style.padding = "3px 8px";
+    bubble.style.borderRadius = "12px";
+    bubble.style.background = "rgba(0,0,0,0.55)";
+    bubble.style.color = "#fff";
+    bubble.style.fontSize = "11px";
+    bubble.style.maxWidth = "160px";
+    bubble.style.whiteSpace = "nowrap";
+    bubble.style.overflow = "hidden";
+    bubble.style.textOverflow = "ellipsis";
+    bubble.textContent = label;
+    column.appendChild(bubble);
+  }
+
+  const holder = document.createElement("div");
+  holder.style.position = "relative";
+  holder.style.width = "30px";
+  holder.style.height = "30px";
+
+  const pulse1 = document.createElement("div");
+  pulse1.className = "meetingPointPulse";
+  const pulse2 = document.createElement("div");
+  pulse2.className = "meetingPointPulse delay";
+  holder.appendChild(pulse1);
+  holder.appendChild(pulse2);
+
+  const circle = document.createElement("div");
+  circle.style.width = "26px";
+  circle.style.height = "26px";
+  circle.style.borderRadius = "50%";
+  circle.style.background = "radial-gradient(circle at 30% 30%, #D6D9CA, #787E65)";
+  circle.style.border = "2px solid #5E634F";
+  circle.style.boxShadow = "0 6px 14px rgba(0,0,0,0.35)";
+  circle.style.position = "absolute";
+  circle.style.left = "50%";
+  circle.style.top = "50%";
+  circle.style.transform = "translate(-50%, -50%)";
+
+  const dot = document.createElement("div");
+  dot.style.width = "8px";
+  dot.style.height = "8px";
+  dot.style.borderRadius = "50%";
+  dot.style.background = "#3F4334";
+  dot.style.position = "absolute";
+  dot.style.left = "50%";
+  dot.style.top = "50%";
+  dot.style.transform = "translate(-50%, -50%)";
+  circle.appendChild(dot);
+
+  holder.appendChild(circle);
+  column.appendChild(holder);
+  wrap.appendChild(column);
+  container.appendChild(wrap);
+}
+
 // by remas start
 function ensurePin(viewer, userId, label, pinColor){
   pinColor = pinColor || "#ff3b30";
@@ -540,6 +641,37 @@ window.removeTrackedPin = function(userId){
   return true;
 };
 
+window.upsertMeetingPointPin = function(x,y,z,label){
+  const viewer = getViewer();
+  if(!viewer) return false;
+  ensureTrackStyle();
+  let hs = viewer.querySelector(`#${meetingPointId()}`);
+  if(!hs){
+    hs = document.createElement('div');
+    hs.id = meetingPointId();
+    hs.slot = `hotspot-${meetingPointId()}`;
+    hs.className = "trackedPinHotspot";
+    hs.style.display = 'block';
+    viewer.appendChild(hs);
+  }
+  hs.innerHTML = "";
+  buildMeetingPointPin(hs, label || "Meeting Point");
+  hs.setAttribute('data-position', `${Number(x)} ${Number(y)} ${Number(z)}`);
+  hs.setAttribute('data-normal', '0 1 0');
+  hs.style.display = 'block';
+  viewer.requestUpdate();
+  return true;
+};
+
+window.hideMeetingPointPin = function(){
+  const viewer = getViewer();
+  if(!viewer) return false;
+  const hs = viewer.querySelector(`#${meetingPointId()}`);
+  if(hs) hs.style.display = 'none';
+  viewer.requestUpdate();
+  return true;
+};
+
 window.__viewerReady = false;
 (function(){
   const v = getViewer();
@@ -604,6 +736,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       unawaited(_maybeMaintainActiveMeetingIfNeeded());
     });
     _listenToActiveTrackedUsers();
+    _listenToActiveMeetingParticipants();
   }
 
   // ضعّيها داخل _TrackPageState (فوق أو تحت)
@@ -744,6 +877,173 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
       _applyAllTrackedPinsToViewer();
     });
+  }
+
+  void _listenToActiveMeetingParticipants() {
+    _activeMeetingSub?.cancel();
+    _activeMeetingSub = _meetingPointCardStream.listen((meeting) {
+      if (!mounted) return;
+      _syncMeetingParticipantSubs(meeting);
+    });
+  }
+
+  void _clearMeetingParticipantPins() {
+    for (final sub in _meetingUserSubs.values) {
+      sub.cancel();
+    }
+    _meetingUserSubs.clear();
+
+    if (_trackMapController != null) {
+      for (final id in _meetingPosByUser.keys) {
+        _trackMapController!.runJavaScript("removeTrackedPin('$id');");
+      }
+    }
+
+    _meetingPosByUser.clear();
+    _meetingFloorByUser.clear();
+    _meetingNameByUser.clear();
+    _meetingUpdatedAtByUser.clear();
+    _meetingPointPosGltf = null;
+    _meetingPointFloorLabel = '';
+    _meetingPointLabel = '';
+    _trackMapController?.runJavaScript("hideMeetingPointPin();");
+
+    _applyAllTrackedPinsToViewer();
+  }
+
+  bool _isFixedMeetingLabel(String label) {
+    return label == 'Me' || label == 'ME (Host)' || label == 'Host';
+  }
+
+  void _syncMeetingParticipantSubs(MeetingPointRecord? meeting) {
+    if (meeting == null || !meeting.isConfirmed) {
+      _clearMeetingParticipantPins();
+      return;
+    }
+
+    final ids = <String>{};
+    final names = <String, String>{};
+    final currentUid = FirebaseAuth.instance.currentUser?.uid?.trim() ?? '';
+
+    final hostId = meeting.hostId.trim();
+    final hostActive = meeting.hostArrivalStatus != 'cancelled';
+    if (hostActive && hostId.isNotEmpty) {
+      ids.add(hostId);
+      if (currentUid.isNotEmpty && currentUid == hostId) {
+        names[hostId] = 'ME (Host)';
+      } else {
+        names[hostId] = 'Host';
+      }
+    }
+
+    for (final p in meeting.participants) {
+      if (!p.isAccepted) continue;
+      if (p.isCancelledArrival) continue;
+      final id = p.userId.trim();
+      if (id.isEmpty) continue;
+      if (id == hostId) continue;
+      ids.add(id);
+      if (currentUid.isNotEmpty && currentUid == id) {
+        names[id] = 'Me';
+      } else {
+        final n = p.name.trim();
+        names[id] = n.isNotEmpty ? n : 'Participant';
+      }
+    }
+
+    // Update meeting names map
+    names.forEach((id, name) {
+      _meetingNameByUser[id] = name;
+    });
+
+    _meetingPointPosGltf = null;
+    _meetingPointFloorLabel = '';
+    _meetingPointLabel = '';
+    if (meeting.suggestedCandidates.isNotEmpty) {
+      final raw = meeting.suggestedCandidates.first;
+      final entrance = raw['entrance'];
+      if (entrance is Map) {
+        final ex = (entrance['x'] as num?)?.toDouble();
+        final ey = (entrance['y'] as num?)?.toDouble();
+        final ez = (entrance['z'] as num?)?.toDouble();
+        final floor = (entrance['floor'] ?? '').toString();
+        if (ex != null && ey != null && ez != null) {
+          _meetingPointPosGltf = _blenderToGltf(x: ex, y: ey, z: ez);
+          _meetingPointFloorLabel = floor;
+          final name = meeting.suggestedPoint.trim();
+          _meetingPointLabel = name.isNotEmpty ? name : 'Meeting Point';
+        }
+      }
+    }
+
+    final currentIds = _meetingUserSubs.keys.toSet();
+    final toRemove = currentIds.difference(ids);
+    for (final id in toRemove) {
+      _meetingUserSubs[id]?.cancel();
+      _meetingUserSubs.remove(id);
+      _meetingPosByUser.remove(id);
+      _meetingFloorByUser.remove(id);
+      _meetingNameByUser.remove(id);
+      _meetingUpdatedAtByUser.remove(id);
+      _trackMapController?.runJavaScript("removeTrackedPin('$id');");
+    }
+
+    final toAdd = ids.difference(currentIds);
+    for (final id in toAdd) {
+      // Assign a unique color to this user if not already assigned
+      if (!_userPinColorMap.containsKey(id)) {
+        _userPinColorMap[id] =
+            _pinColors[_nextPinColorIndex % _pinColors.length];
+        _nextPinColorIndex++;
+      }
+
+      _meetingUserSubs[id] = FirebaseFirestore.instance
+          .collection('users')
+          .doc(id)
+          .snapshots()
+          .listen((docSnap) {
+            final u = docSnap.data();
+            if (u == null) return;
+
+            final location = (u['location'] as Map?) ?? {};
+            final blender = (location['blenderPosition'] as Map?) ?? {};
+
+            final bx = (blender['x'] as num?)?.toDouble();
+            final by = (blender['y'] as num?)?.toDouble();
+            final bz = (blender['z'] as num?)?.toDouble();
+            final floorRaw = (blender['floor'] ?? '').toString();
+
+            final updatedAtRaw = location['updatedAt'];
+            final updatedAt =
+                updatedAtRaw is Timestamp ? updatedAtRaw.toDate() : null;
+            if (updatedAt != null) _meetingUpdatedAtByUser[id] = updatedAt;
+
+            final first = (u['firstName'] ?? '').toString().trim();
+            final last = (u['lastName'] ?? '').toString().trim();
+            final displayName = (first.isNotEmpty || last.isNotEmpty)
+                ? ('$first $last').trim()
+                : (u['name'] ?? u['fullName'] ?? u['email'] ?? 'User')
+                      .toString();
+            if ((_meetingNameByUser[id] ?? '').trim().isEmpty &&
+                !_isFixedMeetingLabel(_meetingNameByUser[id] ?? '')) {
+              _meetingNameByUser[id] = displayName;
+            }
+
+            if (bx == null || by == null || bz == null) {
+              _meetingPosByUser.remove(id);
+              _meetingFloorByUser.remove(id);
+              _trackMapController?.runJavaScript("hideTrackedPin('$id');");
+              return;
+            }
+
+            final gltf = _blenderToGltf(x: bx, y: by, z: bz);
+            _meetingPosByUser[id] = gltf;
+            _meetingFloorByUser[id] = floorRaw;
+            _applyAllTrackedPinsToViewer();
+          });
+    }
+
+    _applyAllTrackedPinsToViewer();
   }
 
   void _startHighlightClearTimer() {
@@ -915,12 +1215,19 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     _scrollToMeetingInviteTimer?.cancel();
     _highlightClearTimer?.cancel();
     _activeReqSub?.cancel();
+    _activeMeetingSub?.cancel();
 
     // cancel all tracked-users subscriptions
     for (final sub in _userLocSubs.values) {
       sub.cancel();
     }
     _userLocSubs.clear();
+
+    // cancel all meeting participant subscriptions
+    for (final sub in _meetingUserSubs.values) {
+      sub.cancel();
+    }
+    _meetingUserSubs.clear();
 
     for (final timer in _refreshCooldownMessageTimers.values) {
       timer.cancel();
@@ -1063,18 +1370,52 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
     final currentLabel = _currentFloorLabel();
 
-    if (_trackedPosByUser.isEmpty) {
+    final activePosByUser = _isTrackingView ? _trackedPosByUser : _meetingPosByUser;
+    final activeFloorByUser =
+        _isTrackingView ? _trackedFloorByUser : _meetingFloorByUser;
+    final activeNameByUser =
+        _isTrackingView ? _trackedNameByUser : _meetingNameByUser;
+    final activeUpdatedAtByUser =
+        _isTrackingView ? _trackedUpdatedAtByUser : _meetingUpdatedAtByUser;
+
+    final allIds = <String>{};
+    allIds.addAll(_trackedPosByUser.keys);
+    allIds.addAll(_meetingPosByUser.keys);
+    final activeIds = activePosByUser.keys.toSet();
+
+    for (final id in allIds.difference(activeIds)) {
+      await _trackMapController!.runJavaScript("hideTrackedPin('$id');");
+    }
+
+    if (activePosByUser.isEmpty) {
+      if (!_isTrackingView && _meetingPointPosGltf != null) {
+        final mp = _meetingPointPosGltf!;
+        final ok = _floorsMatch(_meetingPointFloorLabel, currentLabel);
+        if (ok) {
+          final mx = (mp['x'] ?? 0).toDouble();
+          final my = (mp['y'] ?? 0).toDouble();
+          final mz = (mp['z'] ?? 0).toDouble();
+          final label = _meetingPointLabel.replaceAll("'", "\\'");
+          _trackMapController!.runJavaScript(
+            "upsertMeetingPointPin($mx,$my,$mz,'$label');",
+          );
+        } else {
+          _trackMapController!.runJavaScript("hideMeetingPointPin();");
+        }
+      } else {
+        _trackMapController!.runJavaScript("hideMeetingPointPin();");
+      }
       _pendingPinApply = false;
       return;
     }
 
     // by remas start
-    for (final entry in _trackedPosByUser.entries) {
+    for (final entry in activePosByUser.entries) {
       final userId = entry.key;
       final pos = entry.value;
       // by remas end
 
-      final trackedFloorLabel = _trackedFloorByUser[userId] ?? '';
+      final trackedFloorLabel = activeFloorByUser[userId] ?? '';
       final ok = _floorsMatch(trackedFloorLabel, currentLabel);
 
       if (!ok) {
@@ -1083,7 +1424,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       }
 
       // by remas start
-      final updatedAt = _trackedUpdatedAtByUser[userId];
+      final updatedAt = activeUpdatedAtByUser[userId];
       final hasRecentLocation =
           updatedAt != null &&
           DateTime.now().difference(updatedAt).inHours < 24;
@@ -1092,21 +1433,25 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         await _trackMapController!.runJavaScript("hideTrackedPin('$userId');");
         continue;
       }
-      final requestId = _requestIdByTrackedUser[userId];
-
-      final outsideVenue = requestId != null
-          ? _isOutsideVenue(userId, requestId)
-          : false;
-      final pinColor = outsideVenue
-          ? '#9E9E9E'
-          : (_userPinColorMap[userId] ?? '#FF3B30');
+      String pinColor;
+      if (_isTrackingView) {
+        final requestId = _requestIdByTrackedUser[userId];
+        final outsideVenue = requestId != null
+            ? _isOutsideVenue(userId, requestId)
+            : false;
+        pinColor = outsideVenue
+            ? '#9E9E9E'
+            : (_userPinColorMap[userId] ?? '#FF3B30');
+      } else {
+        pinColor = _userPinColorMap[userId] ?? '#FF3B30';
+      }
       // by remas end
 
       final x = (pos['x'] ?? 0).toDouble();
       final y = (pos['y'] ?? 0).toDouble();
       final z = (pos['z'] ?? 0).toDouble();
 
-      final label = (_trackedNameByUser[userId] ?? 'User').replaceAll(
+      final label = (activeNameByUser[userId] ?? 'User').replaceAll(
         "'",
         "\\'",
       );
@@ -1116,6 +1461,24 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         "upsertTrackedPin('$userId',$x,$y,$z,'$label','$pinColor');",
       );
       // by remas end
+    }
+
+    if (!_isTrackingView && _meetingPointPosGltf != null) {
+      final mp = _meetingPointPosGltf!;
+      final ok = _floorsMatch(_meetingPointFloorLabel, currentLabel);
+      if (ok) {
+        final mx = (mp['x'] ?? 0).toDouble();
+        final my = (mp['y'] ?? 0).toDouble();
+        final mz = (mp['z'] ?? 0).toDouble();
+        final label = _meetingPointLabel.replaceAll("'", "\\'");
+        _trackMapController!.runJavaScript(
+          "upsertMeetingPointPin($mx,$my,$mz,'$label');",
+        );
+      } else {
+        _trackMapController!.runJavaScript("hideMeetingPointPin();");
+      }
+    } else {
+      _trackMapController!.runJavaScript("hideMeetingPointPin();");
     }
 
     _pendingPinApply = false;
@@ -1210,14 +1573,14 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   // by remas start
   /// Returns a consistent unique color for a connected user based on their userId
   static const List<String> _pinColors = [
-    '#FF3B30',
-    '#007AFF',
-    '#34C759',
-    '#FF9500',
-    '#AF52DE',
-    '#FF2D55',
-    '#5AC8FA',
-    '#FFCC00',
+    '#C77D8E', // soft rose
+    '#6F8FB6', // muted blue
+    '#D0A86E', // soft amber
+    '#8B9A73', // muted olive
+    '#9C7FB6', // muted lavender
+    '#7FA6A5', // muted teal
+    '#B08F7A', // soft clay
+    '#8EA0B7', // soft steel
   ];
 
   // by remas end ─────────────────────────────────────────────────────────────
@@ -3269,10 +3632,13 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           final isSelected = i == 0 ? _isTrackingView : !_isTrackingView;
           return Expanded(
             child: GestureDetector(
-              onTap: () => setState(() {
-                _isTrackingView = (i == 0);
-                _expandedRequestId = null;
-              }),
+              onTap: () {
+                setState(() {
+                  _isTrackingView = (i == 0);
+                  _expandedRequestId = null;
+                });
+                _applyAllTrackedPinsToViewer();
+              },
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [

@@ -1073,6 +1073,10 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   DateTime? _proceedUnlockAt;
   DateTime? _waitDeadline;
 
+  /// Delay before auto-advancing to step 5 so the host can see accepted state.
+  static const Duration _kAutoAdvanceDelay = Duration(seconds: 2);
+  Timer? _autoAdvanceTimer;
+
   // ── Step 5: Suggested meeting point ──────────────────────────────────────
   /// 5-minute timer for host to accept/reject.
   Timer? _suggestTimer;
@@ -1193,6 +1197,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     _waitTimer?.cancel();
     _proceedTimer?.cancel();
     _suggestTimer?.cancel();
+    _autoAdvanceTimer?.cancel();
     _meetingPointSub?.cancel();
     super.dispose();
   }
@@ -1966,19 +1971,43 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
             _startStep5SuggestCountdown();
           }
 
-          // Instant auto-advance: all participants responded + at least one
-          // accepted → go to step 5 without the host tapping Proceed.
-          if (_step == 4 &&
+          // Auto-advance after a short delay so the host can see who accepted.
+          final shouldAutoAdvance =
+              _step == 4 &&
               _participants.isNotEmpty &&
               _participants.every(
                 (p) => p.status != _ParticipantStatus.pending,
               ) &&
               _participants.any(
                 (p) => p.status == _ParticipantStatus.accepted,
-              )) {
-            _goNext();
+              );
+          if (shouldAutoAdvance) {
+            _scheduleAutoAdvance();
+          } else {
+            _autoAdvanceTimer?.cancel();
+            _autoAdvanceTimer = null;
           }
         });
+  }
+
+  void _scheduleAutoAdvance() {
+    if (_autoAdvanceTimer != null) return;
+    _autoAdvanceTimer = Timer(_kAutoAdvanceDelay, () {
+      _autoAdvanceTimer = null;
+      if (!mounted) return;
+      final shouldAdvance =
+          _step == 4 &&
+          _participants.isNotEmpty &&
+          _participants.every(
+            (p) => p.status != _ParticipantStatus.pending,
+          ) &&
+          _participants.any(
+            (p) => p.status == _ParticipantStatus.accepted,
+          );
+      if (shouldAdvance) {
+        _goNext();
+      }
+    });
   }
 
   Future<void> _persistDraftIfNeeded() async {
@@ -2249,6 +2278,8 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     } else if (_step == 4) {
       // Step 4 → 5: cancel wait timer, start suggestion timer.
       // Increment _step FIRST so _syncMeetingPointProgress writes hostStep:5.
+      _autoAdvanceTimer?.cancel();
+      _autoAdvanceTimer = null;
       _waitTimer?.cancel();
       _proceedTimer?.cancel();
       _step = 5;
@@ -4051,7 +4082,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
         SecondaryButton(
           text: 'Reject',
-          onPressed: _rejectSuggestedMeetingPoint,
+          onPressed: hasSuggestion ? _rejectSuggestedMeetingPoint : null,
         ),
         const SizedBox(height: 20),
       ],

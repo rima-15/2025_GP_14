@@ -912,7 +912,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   }
 
   bool _isFixedMeetingLabel(String label) {
-    return label == 'Me' || label == 'ME (Host)' || label == 'Host';
+    return label == 'Me';
   }
 
   void _syncMeetingParticipantSubs(MeetingPointRecord? meeting) {
@@ -930,9 +930,12 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     if (hostActive && hostId.isNotEmpty) {
       ids.add(hostId);
       if (currentUid.isNotEmpty && currentUid == hostId) {
-        names[hostId] = 'ME (Host)';
+        names[hostId] = 'Me';
       } else {
-        names[hostId] = 'Host';
+        final hostName = meeting.hostName.trim();
+        if (hostName.isNotEmpty) {
+          names[hostId] = hostName;
+        }
       }
     }
 
@@ -947,14 +950,21 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         names[id] = 'Me';
       } else {
         final n = p.name.trim();
-        names[id] = n.isNotEmpty ? n : 'Participant';
+        if (n.isNotEmpty) {
+          names[id] = n;
+        }
       }
     }
 
     // Update meeting names map
-    names.forEach((id, name) {
-      _meetingNameByUser[id] = name;
-    });
+    for (final id in ids) {
+      final name = names[id] ?? '';
+      if (name.isNotEmpty) {
+        _meetingNameByUser[id] = name;
+      } else {
+        _meetingNameByUser.remove(id);
+      }
+    }
 
     _meetingPointPosGltf = null;
     _meetingPointFloorLabel = '';

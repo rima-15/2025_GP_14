@@ -158,6 +158,17 @@ class _TrackPageState extends State<TrackPage> {
     return _lastKnownActiveMeetingCount;
   }
 
+  int _meetingPointActiveCount(MeetingPointRecord? meeting) {
+    if (meeting == null) return 0;
+    final hostActive =
+        !meeting.isConfirmed || meeting.hostArrivalStatus != 'cancelled';
+    final accepted = meeting.participants.where((p) => p.isAccepted);
+    final acceptedActive = meeting.isConfirmed
+        ? accepted.where((p) => !p.isCancelledArrival)
+        : accepted;
+    return (hostActive ? 1 : 0) + acceptedActive.length;
+  }
+
   List<MeetingPointRecord> _resolveMeetingListSnapshot(
     AsyncSnapshot<List<MeetingPointRecord>> snapshot,
   ) {
@@ -3437,9 +3448,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                                             _resolveActiveMeetingCountSnapshot(
                                               snap,
                                             );
-                                        final total = meeting == null
-                                            ? 0
-                                            : (meeting.invitedCount + 1);
+                                        final total =
+                                            _meetingPointActiveCount(meeting);
                                         return Text(
                                           total.toString(),
                                           style: const TextStyle(

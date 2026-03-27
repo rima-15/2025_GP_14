@@ -11,9 +11,13 @@ import 'track_request_dialog.dart';
 import 'create_meeting_point_form.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:async';
+import 'dart:convert';
+import 'dart:math' as math;
 // by remas start
 import 'package:geolocator/geolocator.dart';
 // by remas end
+import 'package:flutter/services.dart';
+import 'package:madar_app/nav/navmesh.dart';
 
 const bool kFeatureEnabled = true;
 const String kSolitaireVenueId = 'ChIJcYTQDwDjLj4RZEiboV6gZzM';
@@ -24,6 +28,18 @@ final Map<String, String> _trackedNameByUser = {}; // userDocId -> displayName
 final Map<String, StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>>
 _userLocSubs = {};
 StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _activeReqSub;
+
+class ConnectorLink {
+  final String id;
+  final String type;
+  final Map<String, Map<String, double>> endpointsByFNumber;
+
+  const ConnectorLink({
+    required this.id,
+    required this.type,
+    required this.endpointsByFNumber,
+  });
+}
 
 class TrackPage extends StatefulWidget {
   const TrackPage({
@@ -61,12 +77,19 @@ class _TrackPageState extends State<TrackPage> {
   final Map<String, double> _trackedGpsLngByUser = {};
   final Map<String, DateTime> _trackedUpdatedAtByUser = {};
   final Map<String, Map<String, double>> _meetingPosByUser = {};
+  final Map<String, Map<String, double>> _meetingPosBlenderByUser = {};
   final Map<String, String> _meetingFloorByUser = {};
   final Map<String, String> _meetingNameByUser = {};
   final Map<String, DateTime> _meetingUpdatedAtByUser = {};
   Map<String, double>? _meetingPointPosGltf;
+  Map<String, double>? _meetingPointPosBlender;
   String _meetingPointFloorLabel = '';
   String _meetingPointLabel = '';
+  final Map<String, Map<String, List<Map<String, double>>>>
+      _meetingPathsByUserFloorGltf = {};
+  List<ConnectorLink> _connectors = const [];
+  bool _connectorsLoaded = false;
+  final Map<String, NavMesh> _navmeshCache = {};
   final Map<String, StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>>
       _meetingUserSubs = {};
   StreamSubscription<MeetingPointRecord?>? _activeMeetingSub;
@@ -672,6 +695,88 @@ window.hideMeetingPointPin = function(){
   return true;
 };
 
+window.__meetingPathHotspots = window.__meetingPathHotspots || {};
+
+function ensureMeetingPathStyle(){
+  if (document.getElementById("meeting_path_style")) return;
+  const style = document.createElement("style");
+  style.id = "meeting_path_style";
+  style.textContent = `
+    .meetingPathDotHotspot{
+      pointer-events:none;
+      position:absolute;
+      left:0; top:0;
+      width:1px; height:1px;
+      transform: translate3d(var(--hotspot-x), var(--hotspot-y), 0px);
+      will-change: transform;
+      opacity: var(--hotspot-visibility);
+      z-index: 850;
+    }
+    .meetingPathDot{
+      transform: translate(-50%, -50%);
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: #8EA0B7;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+window.clearMeetingPathForUser = function(userId){
+  const viewer = getViewer();
+  if(!viewer || !userId) return false;
+  const list = window.__meetingPathHotspots[userId] || [];
+  list.forEach((id) => {
+    const el = viewer.querySelector('#' + id);
+    if (el && el.parentElement) el.parentElement.removeChild(el);
+  });
+  window.__meetingPathHotspots[userId] = [];
+  viewer.requestUpdate();
+  return true;
+};
+
+window.clearMeetingPathsFromFlutter = function(){
+  const viewer = getViewer();
+  if(!viewer) return false;
+  Object.keys(window.__meetingPathHotspots || {}).forEach((uid) => {
+    window.clearMeetingPathForUser(uid);
+  });
+  window.__meetingPathHotspots = {};
+  viewer.requestUpdate();
+  return true;
+};
+
+window.setMeetingPathForUser = function(userId, points, color){
+  const viewer = getViewer();
+  if(!viewer || !userId) return false;
+  ensureMeetingPathStyle();
+  window.clearMeetingPathForUser(userId);
+
+  if(!points || !points.length) return true;
+  const ids = [];
+  const safeColor = color || "#8EA0B7";
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    const id = 'meetingPath_' + userId + '_' + i;
+    const hs = document.createElement('div');
+    hs.id = id;
+    hs.slot = 'hotspot-' + id;
+    hs.className = 'meetingPathDotHotspot';
+    hs.innerHTML = '<div class="meetingPathDot"></div>';
+    const dot = hs.firstChild;
+    if (dot) dot.style.background = safeColor;
+    hs.setAttribute('data-position', `${p.x} ${p.y} ${p.z}`);
+    hs.setAttribute('data-normal', '0 1 0');
+    viewer.appendChild(hs);
+    ids.push(id);
+  }
+  window.__meetingPathHotspots[userId] = ids;
+  viewer.requestUpdate();
+  return true;
+};
+
 window.__viewerReady = false;
 (function(){
   const v = getViewer();
@@ -900,13 +1005,17 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     }
 
     _meetingPosByUser.clear();
+    _meetingPosBlenderByUser.clear();
     _meetingFloorByUser.clear();
     _meetingNameByUser.clear();
     _meetingUpdatedAtByUser.clear();
     _meetingPointPosGltf = null;
+    _meetingPointPosBlender = null;
     _meetingPointFloorLabel = '';
     _meetingPointLabel = '';
     _trackMapController?.runJavaScript("hideMeetingPointPin();");
+    _trackMapController?.runJavaScript("clearMeetingPathsFromFlutter();");
+    _meetingPathsByUserFloorGltf.clear();
 
     _applyAllTrackedPinsToViewer();
   }
@@ -967,6 +1076,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     }
 
     _meetingPointPosGltf = null;
+    _meetingPointPosBlender = null;
     _meetingPointFloorLabel = '';
     _meetingPointLabel = '';
     if (meeting.suggestedCandidates.isNotEmpty) {
@@ -978,12 +1088,18 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         final ez = (entrance['z'] as num?)?.toDouble();
         final floor = (entrance['floor'] ?? '').toString();
         if (ex != null && ey != null && ez != null) {
+          _meetingPointPosBlender = {'x': ex, 'y': ey, 'z': ez};
           _meetingPointPosGltf = _blenderToGltf(x: ex, y: ey, z: ez);
           _meetingPointFloorLabel = floor;
           final name = meeting.suggestedPoint.trim();
           _meetingPointLabel = name.isNotEmpty ? name : 'Meeting Point';
         }
       }
+    }
+    if (_meetingPointPosBlender != null) {
+      unawaited(_recomputeAllMeetingPaths());
+    } else {
+      unawaited(_clearMeetingPaths());
     }
 
     final currentIds = _meetingUserSubs.keys.toSet();
@@ -992,10 +1108,13 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       _meetingUserSubs[id]?.cancel();
       _meetingUserSubs.remove(id);
       _meetingPosByUser.remove(id);
+      _meetingPosBlenderByUser.remove(id);
       _meetingFloorByUser.remove(id);
       _meetingNameByUser.remove(id);
       _meetingUpdatedAtByUser.remove(id);
       _trackMapController?.runJavaScript("removeTrackedPin('$id');");
+      _trackMapController?.runJavaScript("clearMeetingPathForUser('$id');");
+      _meetingPathsByUserFloorGltf.remove(id);
     }
 
     final toAdd = ids.difference(currentIds);
@@ -1041,19 +1160,190 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
             if (bx == null || by == null || bz == null) {
               _meetingPosByUser.remove(id);
+              _meetingPosBlenderByUser.remove(id);
               _meetingFloorByUser.remove(id);
               _trackMapController?.runJavaScript("hideTrackedPin('$id');");
+              _trackMapController?.runJavaScript("clearMeetingPathForUser('$id');");
+              _meetingPathsByUserFloorGltf.remove(id);
               return;
             }
 
             final gltf = _blenderToGltf(x: bx, y: by, z: bz);
             _meetingPosByUser[id] = gltf;
+            _meetingPosBlenderByUser[id] = {'x': bx, 'y': by, 'z': bz};
             _meetingFloorByUser[id] = floorRaw;
+            unawaited(_recomputeMeetingPathForUser(id));
             _applyAllTrackedPinsToViewer();
           });
     }
 
     _applyAllTrackedPinsToViewer();
+  }
+
+  Future<void> _clearMeetingPaths() async {
+    _meetingPathsByUserFloorGltf.clear();
+    if (_trackMapController != null) {
+      await _trackMapController!.runJavaScript(
+        "clearMeetingPathsFromFlutter();",
+      );
+    }
+  }
+
+  Future<void> _clearMeetingPathForUser(String userId) async {
+    _meetingPathsByUserFloorGltf.remove(userId);
+    if (_trackMapController != null) {
+      await _trackMapController!.runJavaScript(
+        "clearMeetingPathForUser('$userId');",
+      );
+    }
+  }
+
+  Future<void> _recomputeMeetingPathForUser(String userId) async {
+    final destPos = _meetingPointPosBlender;
+    if (destPos == null) {
+      await _clearMeetingPathForUser(userId);
+      return;
+    }
+
+    final startPos = _meetingPosBlenderByUser[userId];
+    if (startPos == null) {
+      await _clearMeetingPathForUser(userId);
+      return;
+    }
+
+    final startFloorRaw = _meetingFloorByUser[userId] ?? '';
+    final startF = _toFNumber(startFloorRaw);
+    final destF = _toFNumber(_meetingPointFloorLabel);
+    if (startF.isEmpty || destF.isEmpty) {
+      await _clearMeetingPathForUser(userId);
+      return;
+    }
+
+    final startNm = await _ensureNavmeshLoadedForFNumber(startF);
+    final destNm = await _ensureNavmeshLoadedForFNumber(destF);
+    if (startNm == null || destNm == null) {
+      await _clearMeetingPathForUser(userId);
+      return;
+    }
+
+    List<List<double>> computePathOn(
+      NavMesh nm,
+      Map<String, double> aBl,
+      Map<String, double> bBl,
+    ) {
+      final a = nm.snapPointXY([aBl['x']!, aBl['y']!, aBl['z']!]);
+      final b = [bBl['x']!, bBl['y']!, bBl['z']!];
+      var raw = nm.findPathFunnelBlenderXY(start: a, goal: b);
+      var sm = _smoothAndResamplePath(raw, nm);
+      if (sm.length < 2) {
+        raw = [a, b];
+        sm = _smoothAndResamplePath(raw, nm);
+        if (sm.length < 2) sm = raw;
+      }
+      return sm;
+    }
+
+    double pathLen(List<List<double>> pts) {
+      double sum = 0;
+      for (int i = 1; i < pts.length; i++) {
+        sum += _distXY(pts[i - 1], pts[i]);
+      }
+      return sum;
+    }
+
+    final nextPaths = <String, List<Map<String, double>>>{};
+
+    if (startF == destF) {
+      final pts = computePathOn(startNm, startPos, destPos);
+      if (pts.length >= 2) {
+        nextPaths[startF] = pts
+            .map(
+              (p) => _blenderToGltf(x: p[0], y: p[1], z: p[2]),
+            )
+            .toList();
+      }
+    } else {
+      await _ensureConnectorsLoaded();
+
+      final fromFloor = int.tryParse(startF);
+      final toFloor = int.tryParse(destF);
+
+      bool directionOk(ConnectorLink c) {
+        if (fromFloor == null || toFloor == null) return true;
+        final t = _normalizeConnectorType(c.type);
+        return _connectorDirectionAllowed(t, fromFloor, toFloor);
+      }
+
+      final pool = _connectors
+          .where(
+            (c) =>
+                c.endpointsByFNumber.containsKey(startF) &&
+                c.endpointsByFNumber.containsKey(destF) &&
+                directionOk(c),
+          )
+          .toList();
+
+      if (pool.isEmpty) {
+        await _clearMeetingPathForUser(userId);
+        return;
+      }
+
+      double bestScore = double.infinity;
+      List<List<double>> bestA = const [];
+      List<List<double>> bestB = const [];
+
+      for (final c in pool) {
+        final aPos = c.endpointsByFNumber[startF]!;
+        final bPos = c.endpointsByFNumber[destF]!;
+        final aPts = computePathOn(startNm, startPos, aPos);
+        if (aPts.length < 2) continue;
+        final bPts = computePathOn(destNm, bPos, destPos);
+        if (bPts.length < 2) continue;
+        final score = pathLen(aPts) + pathLen(bPts);
+        if (score < bestScore) {
+          bestScore = score;
+          bestA = aPts;
+          bestB = bPts;
+        }
+      }
+
+      if (bestA.length >= 2) {
+        nextPaths[startF] = bestA
+            .map(
+              (p) => _blenderToGltf(x: p[0], y: p[1], z: p[2]),
+            )
+            .toList();
+      }
+      if (bestB.length >= 2) {
+        nextPaths[destF] = bestB
+            .map(
+              (p) => _blenderToGltf(x: p[0], y: p[1], z: p[2]),
+            )
+            .toList();
+      }
+    }
+
+    if (nextPaths.isEmpty) {
+      await _clearMeetingPathForUser(userId);
+      return;
+    }
+
+    _meetingPathsByUserFloorGltf[userId] = nextPaths;
+    if (mounted) {
+      _applyAllTrackedPinsToViewer();
+    }
+  }
+
+  Future<void> _recomputeAllMeetingPaths() async {
+    if (_meetingPointPosBlender == null) {
+      await _clearMeetingPaths();
+      return;
+    }
+
+    final ids = _meetingPosBlenderByUser.keys.toList();
+    for (final id in ids) {
+      await _recomputeMeetingPathForUser(id);
+    }
   }
 
   void _startHighlightClearTimer() {
@@ -1293,6 +1583,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           return {
             'floorNumber': (map['floorNumber'] ?? '').toString(),
             'mapURL': (map['mapURL'] ?? '').toString(),
+            'F_number': (map['F_number'] ?? map['f_number'] ?? '').toString(),
+            'navmesh': (map['navmesh'] ?? '').toString(),
           };
         }).toList();
 
@@ -1372,6 +1664,254 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     return false;
   }
 
+  String _toFNumber(String? raw) {
+    if (raw == null) return '';
+    var s = raw.trim();
+    if (s.isEmpty) return '';
+
+    final up0 = s.toUpperCase();
+    if (up0 == 'G' || up0 == 'GF' || up0.contains('GROUND')) return '0';
+
+    var up = up0.replaceAll(RegExp(r'[\s_\-]+'), '');
+    up = up
+        .replaceAll('FLOOR', '')
+        .replaceAll('LEVEL', '')
+        .replaceAll('LVL', '')
+        .replaceAll('FL', '');
+
+    final m1 = RegExp(r'^(?:F|L)?(-?\d+)$').firstMatch(up);
+    if (m1 != null) return m1.group(1)!;
+
+    final m2 = RegExp(r'(-?\d+)').firstMatch(up);
+    if (m2 != null) return m2.group(1)!;
+
+    return '';
+  }
+
+  String _currentFNumber() => _toFNumber(_currentFloorLabel());
+
+  String _normalizeConnectorType(String raw) {
+    final t = raw.toLowerCase().trim();
+    if (t == 'stair' || t == 'stairs') return 'stairs';
+    if (t == 'elev' || t == 'elevator' || t == 'lift') return 'elevator';
+    if (t == 'esc_up' || t == 'escalator_up' || t == 'escalatorup')
+      return 'escalator_up';
+    if (t == 'esc_dn' ||
+        t == 'esc_down' ||
+        t == 'escalator_down' ||
+        t == 'escalatordown')
+      return 'escalator_down';
+    if (t.contains('esc') || t.contains('escalator')) return 'escalator';
+    return t;
+  }
+
+  bool _connectorDirectionAllowed(String normType, int fromFloor, int toFloor) {
+    final t = normType.toLowerCase();
+    if (t == 'escalator_up') return fromFloor < toFloor;
+    if (t == 'escalator_down') return fromFloor > toFloor;
+    return true;
+  }
+
+  double? _asDouble(dynamic v) {
+    if (v == null) return null;
+    if (v is num) return v.toDouble();
+    return double.tryParse(v.toString());
+  }
+
+  Future<NavMesh?> _ensureNavmeshLoadedForFNumber(String fNumber) async {
+    if (_navmeshCache.containsKey(fNumber)) return _navmeshCache[fNumber];
+
+    String? assetPath;
+    for (final m in _venueMaps) {
+      if ((m["F_number"]?.toString() ?? "") == fNumber) {
+        assetPath = m["navmesh"];
+        break;
+      }
+    }
+
+    assetPath ??= (fNumber == "0")
+        ? 'assets/nav_cor/navmesh_GF.json'
+        : (fNumber == "1" ? 'assets/nav_cor/navmesh_F1.json' : null);
+
+    if (assetPath == null || assetPath.isEmpty) return null;
+
+    try {
+      final nm = await NavMesh.loadAsset(assetPath);
+      _navmeshCache[fNumber] = nm;
+      debugPrint("✅ Navmesh loaded for floor $fNumber: $assetPath");
+      return nm;
+    } catch (e) {
+      debugPrint(
+        "❌ Failed to load navmesh for floor $fNumber ($assetPath): $e",
+      );
+      return null;
+    }
+  }
+
+  Future<void> _ensureConnectorsLoaded() async {
+    if (_connectorsLoaded) return;
+    try {
+      const path = 'assets/connectors/connectors_merged_local.json';
+      final raw = await rootBundle.loadString(path);
+      debugPrint('✅ Connectors loaded: $path');
+
+      final decoded = jsonDecode(raw);
+      final List<dynamic> list = (decoded is List)
+          ? decoded
+          : (decoded is Map && decoded['connectors'] is List)
+              ? (decoded['connectors'] as List)
+              : const [];
+
+      final out = <ConnectorLink>[];
+      for (final item in list) {
+        if (item is! Map) continue;
+
+        final id = (item['id'] ?? item['name'] ?? item['connector_id'] ?? '')
+            .toString();
+        if (id.isEmpty) continue;
+
+        final type = (item['type'] ?? item['kind'] ?? item['mode'] ?? '')
+            .toString();
+
+        final endpointsRaw =
+            (item['endpoints'] ?? item['floors'] ?? item['nodes']);
+        final endpoints = <String, Map<String, double>>{};
+
+        if (endpointsRaw is List) {
+          for (final ep in endpointsRaw) {
+            if (ep is! Map) continue;
+
+            String? f;
+            if (ep['floorNumber'] != null) {
+              f = ep['floorNumber'].toString();
+            } else if (ep['f_number'] != null) {
+              f = ep['f_number'].toString();
+            } else if (ep['floor'] != null &&
+                (ep['floor'] is num || ep['floor'] is String)) {
+              f = ep['floor'].toString();
+            } else if (ep['floorLabel'] != null ||
+                ep['floor_label'] != null ||
+                ep['label'] != null) {
+              final lbl = (ep['floorLabel'] ?? ep['floor_label'] ?? ep['label'])
+                  .toString();
+              f = _toFNumber(lbl);
+            }
+            if (f == null || f.isEmpty) continue;
+
+            Map<String, dynamic>? posMap;
+            if (ep['position'] is Map) {
+              posMap = (ep['position'] as Map).cast<String, dynamic>();
+            }
+            if (posMap == null && ep['pos'] is Map) {
+              posMap = (ep['pos'] as Map).cast<String, dynamic>();
+            }
+
+            double? x = _asDouble(posMap?['x'] ?? ep['x']);
+            double? y = _asDouble(posMap?['y'] ?? ep['y']);
+            double? z = _asDouble(posMap?['z'] ?? ep['z']);
+
+            if ((x == null || y == null || z == null) && ep['xyz'] is List) {
+              final l = ep['xyz'] as List;
+              if (l.length >= 3) {
+                x = _asDouble(l[0]);
+                y = _asDouble(l[1]);
+                z = _asDouble(l[2]);
+              }
+            }
+            if (x == null || y == null || z == null) continue;
+
+            endpoints[f] = {'x': x, 'y': y, 'z': z};
+          }
+        }
+
+        if (endpoints.isNotEmpty) {
+          out.add(
+            ConnectorLink(id: id, type: type, endpointsByFNumber: endpoints),
+          );
+        }
+      }
+
+      _connectors = out;
+      _connectorsLoaded = true;
+      debugPrint("✅ Connectors parsed: ${_connectors.length}");
+    } catch (e) {
+      _connectors = const [];
+      _connectorsLoaded = true;
+      debugPrint("❌ Failed to load connectors: $e");
+    }
+  }
+
+  List<List<double>> _smoothAndResamplePath(
+    List<List<double>> path,
+    NavMesh nm,
+  ) {
+    var pts = path;
+    pts = _resampleByDistance(pts, step: 0.06);
+    const maxPts = 180;
+    if (pts.length > maxPts) {
+      final stride = (pts.length / maxPts).ceil();
+      final reduced = <List<double>>[];
+      for (var i = 0; i < pts.length; i += stride) {
+        reduced.add(pts[i]);
+      }
+      if (reduced.isEmpty || !_samePoint(reduced.last, pts.last)) {
+        reduced.add(pts.last);
+      }
+      pts = reduced;
+    }
+    return pts;
+  }
+
+  List<List<double>> _resampleByDistance(
+    List<List<double>> pts, {
+    required double step,
+  }) {
+    if (pts.length < 2) return pts;
+
+    final out = <List<double>>[pts.first];
+    var acc = 0.0;
+
+    for (var i = 1; i < pts.length; i++) {
+      var prev = out.last;
+      var cur = pts[i];
+
+      var segLen = _distXY(prev, cur);
+      if (segLen <= 1e-9) continue;
+
+      while (acc + segLen >= step) {
+        final t = (step - acc) / segLen;
+        final nx = prev[0] + (cur[0] - prev[0]) * t;
+        final ny = prev[1] + (cur[1] - prev[1]) * t;
+        final nz = prev[2] + (cur[2] - prev[2]) * t;
+        final np = <double>[nx, ny, nz];
+        out.add(np);
+        prev = np;
+        segLen = _distXY(prev, cur);
+        acc = 0.0;
+        if (segLen <= 1e-9) break;
+      }
+
+      acc += segLen;
+    }
+
+    if (!_samePoint(out.last, pts.last)) {
+      out.add(pts.last);
+    }
+    return out;
+  }
+
+  double _distXY(List<double> a, List<double> b) {
+    final dx = a[0] - b[0];
+    final dy = a[1] - b[1];
+    return math.sqrt(dx * dx + dy * dy);
+  }
+
+  bool _samePoint(List<double> a, List<double> b) {
+    return (a[0] - b[0]).abs() < 1e-6 &&
+        (a[1] - b[1]).abs() < 1e-6 &&
+        (a[2] - b[2]).abs() < 1e-6;
+  }
+
   Future<void> _applyAllTrackedPinsToViewer() async {
     if (_trackMapController == null) {
       _pendingPinApply = true;
@@ -1379,6 +1919,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     }
 
     final currentLabel = _currentFloorLabel();
+    final currentF = _currentFNumber();
 
     final activePosByUser = _isTrackingView ? _trackedPosByUser : _meetingPosByUser;
     final activeFloorByUser =
@@ -1395,9 +1936,14 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
     for (final id in allIds.difference(activeIds)) {
       await _trackMapController!.runJavaScript("hideTrackedPin('$id');");
+      if (!_isTrackingView) {
+        await _trackMapController!
+            .runJavaScript("clearMeetingPathForUser('$id');");
+      }
     }
 
     if (activePosByUser.isEmpty) {
+      _trackMapController!.runJavaScript("clearMeetingPathsFromFlutter();");
       if (!_isTrackingView && _meetingPointPosGltf != null) {
         final mp = _meetingPointPosGltf!;
         final ok = _floorsMatch(_meetingPointFloorLabel, currentLabel);
@@ -1471,6 +2017,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         "upsertTrackedPin('$userId',$x,$y,$z,'$label','$pinColor');",
       );
       // by remas end
+
+      // Path rendering handled below (separated from pin visibility).
     }
 
     if (!_isTrackingView && _meetingPointPosGltf != null) {
@@ -1489,6 +2037,35 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       }
     } else {
       _trackMapController!.runJavaScript("hideMeetingPointPin();");
+    }
+
+    if (_isTrackingView || _meetingPointPosBlender == null) {
+      _trackMapController!.runJavaScript("clearMeetingPathsFromFlutter();");
+    } else {
+      if (currentF.isEmpty) {
+        _trackMapController!.runJavaScript("clearMeetingPathsFromFlutter();");
+      } else {
+        final shown = <String>{};
+        for (final entry in _meetingPathsByUserFloorGltf.entries) {
+          final userId = entry.key;
+          final byFloor = entry.value;
+          final pts = byFloor[currentF] ?? const <Map<String, double>>[];
+          if (pts.isNotEmpty) {
+            final pinColor = _userPinColorMap[userId] ?? '#FF3B30';
+            final jsPoints = jsonEncode(pts);
+            await _trackMapController!.runJavaScript(
+              "setMeetingPathForUser('$userId',$jsPoints,'$pinColor');",
+            );
+            shown.add(userId);
+          }
+        }
+        for (final userId in _meetingPathsByUserFloorGltf.keys) {
+          if (!shown.contains(userId)) {
+            await _trackMapController!
+                .runJavaScript("clearMeetingPathForUser('$userId');");
+          }
+        }
+      }
     }
 
     _pendingPinApply = false;
@@ -1601,11 +2178,15 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         'floorNumber': 'GF',
         'mapURL':
             'https://firebasestorage.googleapis.com/v0/b/madar-database.firebasestorage.app/o/3D%20Maps%2FSolitaire%2FGF.glb?alt=media',
+        'F_number': '0',
+        'navmesh': 'assets/nav_cor/navmesh_GF.json',
       },
       {
         'floorNumber': 'F1',
         'mapURL':
             'https://firebasestorage.googleapis.com/v0/b/madar-database.firebasestorage.app/o/3D%20Maps%2FSolitaire%2FF1.glb?alt=media',
+        'F_number': '1',
+        'navmesh': 'assets/nav_cor/navmesh_F1.json',
       },
     ];
     if (mounted) {

@@ -1266,7 +1266,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
     if (startF == destF) {
       final pts = computePathOn(startNm, startPos, destPos);
-      if (pts.length >= 2) {
+      if (pts.isNotEmpty) {
         nextPaths[startF] = pts
             .map(
               (p) => _blenderToGltf(x: p[0], y: p[1], z: p[2]),
@@ -1307,9 +1307,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         final aPos = c.endpointsByFNumber[startF]!;
         final bPos = c.endpointsByFNumber[destF]!;
         final aPts = computePathOn(startNm, startPos, aPos);
-        if (aPts.length < 2) continue;
+        if (aPts.isEmpty) continue;
         final bPts = computePathOn(destNm, bPos, destPos);
-        if (bPts.length < 2) continue;
+        if (bPts.isEmpty) continue;
         final score = pathLen(aPts) + pathLen(bPts);
         if (score < bestScore) {
           bestScore = score;
@@ -1318,14 +1318,14 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         }
       }
 
-      if (bestA.length >= 2) {
+      if (bestA.isNotEmpty) {
         nextPaths[startF] = bestA
             .map(
               (p) => _blenderToGltf(x: p[0], y: p[1], z: p[2]),
             )
             .toList();
       }
-      if (bestB.length >= 2) {
+      if (bestB.isNotEmpty) {
         nextPaths[destF] = bestB
             .map(
               (p) => _blenderToGltf(x: p[0], y: p[1], z: p[2]),
@@ -2075,7 +2075,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           final pts = byFloor[currentF] ?? const <Map<String, double>>[];
           if (pts.isNotEmpty) {
             final pinColor = _userPinColorMap[userId] ?? '#FF3B30';
-            final jsPoints = jsonEncode(pts);
+            final shifted = _offsetPathPointsForUser(userId, pts);
+            final jsPoints = jsonEncode(shifted);
             await _trackMapController!.runJavaScript(
               "setMeetingPathForUser('$userId',$jsPoints,'$pinColor');",
             );
@@ -2740,6 +2741,27 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         baseTime == null ? 0 : DateTime.now().difference(baseTime).inSeconds;
     final remaining = baseSeconds - elapsed;
     return remaining < 60 ? 60 : remaining;
+  }
+
+  List<Map<String, double>> _offsetPathPointsForUser(
+    String userId,
+    List<Map<String, double>> pts,
+  ) {
+    if (pts.isEmpty) return pts;
+    final hash = userId.codeUnits.fold<int>(0, (a, b) => a + b);
+    final angle = (hash % 360) * (math.pi / 180.0);
+    const radius = 0.015;
+    final dx = math.cos(angle) * radius;
+    final dz = math.sin(angle) * radius;
+    return pts
+        .map(
+          (p) => {
+            'x': (p['x'] ?? 0) + dx,
+            'y': (p['y'] ?? 0),
+            'z': (p['z'] ?? 0) + dz,
+          },
+        )
+        .toList();
   }
 
   /// Formats a DateTime as "HH:mm" (24-h).

@@ -68,6 +68,7 @@ class _TrackPageState extends State<TrackPage> {
   String _currentFloor = '';
   List<Map<String, String>> _venueMaps = [];
   bool _mapsLoading = false;
+  static const double _unitToMeters = 69.32;
   String? _expandedRequestId;
   String? _highlightRequestId;
   String? _highlightMeetingInviteId;
@@ -1187,10 +1188,14 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         "clearMeetingPathsFromFlutter();",
       );
     }
+    if (mounted) setState(() {});
   }
 
   Future<void> _clearMeetingPathForUser(String userId) async {
-    _meetingPathsByUserFloorGltf.remove(userId);
+    if (_meetingPathsByUserFloorGltf.containsKey(userId)) {
+      _meetingPathsByUserFloorGltf.remove(userId);
+      if (mounted) setState(() {});
+    }
     if (_trackMapController != null) {
       await _trackMapController!.runJavaScript(
         "clearMeetingPathForUser('$userId');",
@@ -1330,6 +1335,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
     _meetingPathsByUserFloorGltf[userId] = nextPaths;
     if (mounted) {
+      setState(() {});
       _applyAllTrackedPinsToViewer();
     }
   }
@@ -2684,20 +2690,41 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   // ARRIVAL PHASE UI  (meeting.status == 'active')
   // ══════════════════════════════════════════════════════════════════════════
 
-  /// Formats a remaining-seconds value as "MM:SS", clamped to min 1:00.
-  String _formatArrivalTimer(int totalSecondsLeft) {
-    final secs = totalSecondsLeft.clamp(60, 99999);
-    final m = secs ~/ 60;
-    final s = secs % 60;
-    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  /// Formats ETA minutes (static, only changes when location/path changes).
+  String _formatEtaMinutes(int minutes) {
+    if (minutes <= 1) return '1 min';
+    return '$minutes min';
   }
 
-  /// Remaining seconds for a person whose estimated minutes is [estMins]
-  /// and the meeting was confirmed at [confirmedAt].
-  int _arrivalSecondsLeft(DateTime? confirmedAt, int estMins) {
-    if (confirmedAt == null) return estMins * 60;
-    final deadline = confirmedAt.add(Duration(minutes: estMins));
-    return deadline.difference(MeetingPointService.serverNow).inSeconds;
+  double _meetingPathDistance(
+    Map<String, List<Map<String, double>>> pathByFloor,
+  ) {
+    double total = 0.0;
+    for (final points in pathByFloor.values) {
+      for (int i = 1; i < points.length; i++) {
+        final p1 = points[i - 1];
+        final p2 = points[i];
+        final dx = (p1['x'] ?? 0) - (p2['x'] ?? 0);
+        final dy = (p1['y'] ?? 0) - (p2['y'] ?? 0);
+        final dz = (p1['z'] ?? 0) - (p2['z'] ?? 0);
+        total += math.sqrt(dx * dx + dy * dy + dz * dz);
+      }
+    }
+    return total;
+  }
+
+  int _estimatedMinutesForUser(String userId, int fallbackMins) {
+    final pathByFloor = _meetingPathsByUserFloorGltf[userId];
+    if (pathByFloor == null || pathByFloor.isEmpty) return fallbackMins;
+
+    final rawDist = _meetingPathDistance(pathByFloor);
+    if (rawDist <= 0) return fallbackMins;
+
+    final totalMeters = rawDist * _unitToMeters;
+    final timeSeconds = totalMeters / 1.4;
+    if (timeSeconds < 50) return 1;
+    final minutes = (timeSeconds / 60).ceil();
+    return minutes < 1 ? 1 : minutes;
   }
 
   /// Formats a DateTime as "HH:mm" (24-h).
@@ -2753,14 +2780,14 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     final arrivedAt = isHost
         ? meeting.hostArrivedAt
         : meeting.participantFor(uid)?.arrivedAt;
-    final estMins = isHost
+    final fallbackMins = isHost
         ? meeting.hostEstimatedMinutes
         : (meeting.participantFor(uid)?.estimatedArrivalMinutes ?? 3);
+    final estMins = _estimatedMinutesForUser(uid, fallbackMins);
     final locationUpdatedAt = isHost
         ? meeting.hostLocationUpdatedAt
         : meeting.participantFor(uid)?.locationUpdatedAt;
 
-    final secsLeft = _arrivalSecondsLeft(meeting.confirmedAt, estMins);
     final isArrived = arrivalStatus == 'arrived';
     final isCancelled = arrivalStatus == 'cancelled';
 
@@ -2854,7 +2881,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                   Icon(Icons.timer_outlined, size: 14, color: Colors.grey[600]),
                   const SizedBox(width: 4),
                   Text(
-                    _formatArrivalTimer(secsLeft),
+                    _formatEtaMinutes(estMins),
                     style: TextStyle(
                       fontSize: 13,
                       color: Colors.grey[700],
@@ -2903,10 +2930,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     final isExpanded = _expandedArrivalParticipantId == p.userId;
     final isCancelled = p.arrivalStatus == 'cancelled';
     final isArrived = p.arrivalStatus == 'arrived';
-    final secsLeft = _arrivalSecondsLeft(
-      meeting.confirmedAt,
-      p.estimatedArrivalMinutes,
-    );
+    final fallbackMins = p.estimatedArrivalMinutes;
+    final estMins = _estimatedMinutesForUser(p.userId, fallbackMins);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -3102,7 +3127,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                                     ),
                                     const SizedBox(width: 4),
                                     Text(
-                                      _formatArrivalTimer(secsLeft),
+                                      _formatEtaMinutes(estMins),
                                       style: TextStyle(
                                         fontSize: 13,
                                         color: Colors.black87,

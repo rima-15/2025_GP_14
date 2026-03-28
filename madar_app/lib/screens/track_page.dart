@@ -1057,6 +1057,12 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       _pendingCompletionHoldStartedAt = null;
     }
 
+    if ((meeting == null || !meeting.isConfirmed) &&
+        _lastKnownConfirmedMeeting != null &&
+        _allArrived(_lastKnownConfirmedMeeting!)) {
+      _maybeStartCompletionHoldFromStream(_lastKnownConfirmedMeeting!);
+    }
+
     final holdActive = _completionHoldUntil != null &&
         DateTime.now().isBefore(_completionHoldUntil!);
     if ((meeting == null || !meeting.isConfirmed) &&
@@ -1128,6 +1134,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       if (p.arrivalStatus == 'cancelled') continue;
       _meetingArrivalStatusByUser[p.userId] = p.arrivalStatus;
     }
+
+    _maybeStartCompletionHoldFromStream(meeting);
 
     _meetingPointPosGltf = null;
     _meetingPointPosBlender = null;
@@ -3473,6 +3481,17 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   }) async {
     final now = DateTime.now();
     final willComplete = _willCompleteAfterArrive(meeting, isHost, uid);
+    final prevArrivalStatus = _meetingArrivalStatusByUser[uid];
+    if (mounted) {
+      if (willComplete) {
+        _pendingCompletionHoldMeetingId = meeting.id;
+        _pendingCompletionHoldStartedAt = DateTime.now();
+        _lastKnownConfirmedMeeting = meeting;
+      }
+      _meetingArrivalStatusByUser[uid] = 'arrived';
+      _applyAllTrackedPinsToViewer();
+      unawaited(_clearMeetingPathForUser(uid));
+    }
     try {
       await MeetingPointService.updateArrivalStatus(
         meetingPointId: meeting.id,
@@ -3482,9 +3501,6 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         arrivedAt: now,
       );
       if (mounted) {
-        _pendingCompletionHoldMeetingId = meeting.id;
-        _pendingCompletionHoldStartedAt = DateTime.now();
-        _lastKnownConfirmedMeeting = meeting;
         _meetingArrivalStatusByUser[uid] = 'arrived';
         _applyAllTrackedPinsToViewer();
         unawaited(_clearMeetingPathForUser(uid));
@@ -3492,13 +3508,16 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       _forceStreamRefresh();
       if (willComplete && mounted) {
         _startCompletionHold(meeting);
-        SnackbarHelper.showSuccess(
-          context,
-          'Meeting point completed',
-        );
       }
     } catch (e) {
       if (mounted) {
+        if (prevArrivalStatus == null) {
+          _meetingArrivalStatusByUser.remove(uid);
+        } else {
+          _meetingArrivalStatusByUser[uid] = prevArrivalStatus;
+        }
+        unawaited(_recomputeMeetingPathForUser(uid));
+        _applyAllTrackedPinsToViewer();
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to mark arrived: $e')));
@@ -4793,6 +4812,27 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       }
     }
     return hostArrived && allParticipantsArrived;
+  }
+
+  bool _allArrived(MeetingPointRecord meeting) {
+    if (meeting.hostArrivalStatus == 'cancelled') return false;
+    if (meeting.hostArrivalStatus != 'arrived') return false;
+    for (final p in meeting.participants) {
+      if (!p.isAccepted) continue;
+      if (p.isCancelledArrival) continue;
+      if (p.arrivalStatus != 'arrived') return false;
+    }
+    return true;
+  }
+
+  void _maybeStartCompletionHoldFromStream(MeetingPointRecord meeting) {
+    if (!meeting.isConfirmed) return;
+    if (!_allArrived(meeting)) return;
+    final holdActive = _completionHoldUntil != null &&
+        _completionHoldMeetingId == meeting.id &&
+        DateTime.now().isBefore(_completionHoldUntil!);
+    if (holdActive) return;
+    _startCompletionHold(meeting);
   }
 
   void _startCompletionHold(MeetingPointRecord meeting) {

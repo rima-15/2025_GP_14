@@ -56,6 +56,7 @@ class MeetingPointParticipant {
   bool get isPending => status == 'pending';
   bool get isAccepted => status == 'accepted';
   bool get isDeclined => status == 'declined';
+  bool get isCancelledParticipation => status == 'cancelled';
 
   bool get isOnTheWay => arrivalStatus == 'on_the_way';
   bool get isArrived => arrivalStatus == 'arrived';
@@ -225,7 +226,7 @@ class MeetingPointRecord {
   int get invitedCount => participants.length;
   int get acceptedCount => participants.where((p) => p.isAccepted).length;
   int get pendingCount => participants.where((p) => p.isPending).length;
-  int get declinedCount => participants.where((p) => p.isDeclined).length;
+  int get declinedCount => participants.where((p) => p.isDeclined || p.isCancelledParticipation).length;
 
   DateTime? get activeDeadline {
     if (hostStep == 4) return waitDeadline;
@@ -492,6 +493,7 @@ class MeetingPointService {
       try {
         await _col.doc(meeting.id).update({
           'status': 'cancelled',
+          'cancellationReason': 'all_participants_declined',
           'updatedAt': FieldValue.serverTimestamp(),
         });
         await _markPendingNotificationsCancelled(meeting);
@@ -526,6 +528,7 @@ class MeetingPointService {
           try {
             await _col.doc(meeting.id).update({
               'status': 'cancelled',
+              'cancellationReason': 'all_participants_declined',
               'updatedAt': FieldValue.serverTimestamp(),
             });
             await _markPendingNotificationsCancelled(meeting);
@@ -622,6 +625,7 @@ class MeetingPointService {
         try {
           await _col.doc(meeting.id).update({
             'status': 'cancelled',
+            'cancellationReason': 'all_participants_declined',
             'updatedAt': FieldValue.serverTimestamp(),
           });
         } catch (_) {}
@@ -656,6 +660,7 @@ class MeetingPointService {
         try {
           await _col.doc(meeting.id).update({
             'status': 'cancelled',
+            'cancellationReason': 'all_participants_declined',
             'updatedAt': FieldValue.serverTimestamp(),
           });
         } catch (_) {}
@@ -928,6 +933,7 @@ class MeetingPointService {
   static Future<void> respondToInvitation({
     required String meetingPointId,
     required bool accepted,
+    bool cancelParticipation = false,
   }) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null || uid.trim().isEmpty) return;
@@ -941,7 +947,7 @@ class MeetingPointService {
     if (index < 0) return;
 
     final now = DateTime.now();
-    final newStatus = accepted ? 'accepted' : 'declined';
+    final newStatus = accepted ? 'accepted' : (cancelParticipation ? 'cancelled' : 'declined');
     final updatedParticipants = List<MeetingPointParticipant>.from(
       meeting.participants,
     );
@@ -961,6 +967,7 @@ class MeetingPointService {
         updatedParticipants.every((p) => p.isDeclined);
     if (allDeclined) {
       payload['status'] = 'cancelled';
+      payload['cancellationReason'] = 'all_participants_declined';
     }
 
     // Auto-advance to step 5 when every invitee has responded and at least
@@ -2632,7 +2639,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
               borderRadius: BorderRadius.circular(8),
             ),
             child: const Icon(
-              Icons.place_outlined,
+              Icons.people_outline,
               color: AppColors.kGreen,
               size: 24,
             ),
@@ -2677,7 +2684,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           ClipRRect(
             borderRadius: BorderRadius.circular(4),
             child: LinearProgressIndicator(
-              value: _step / 5,
+              value: (_step - 1) / 5,
               minHeight: 3,
               backgroundColor: Colors.grey.shade200,
               valueColor: const AlwaysStoppedAnimation(AppColors.kGreen),

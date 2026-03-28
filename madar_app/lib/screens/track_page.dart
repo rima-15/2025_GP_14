@@ -88,14 +88,14 @@ class _TrackPageState extends State<TrackPage> {
   String _meetingPointFloorLabel = '';
   String _meetingPointLabel = '';
   final Map<String, Map<String, List<Map<String, double>>>>
-      _meetingPathsByUserFloorGltf = {};
+  _meetingPathsByUserFloorGltf = {};
   final Map<String, int> _meetingEtaBaseSecondsByUser = {};
   final Map<String, DateTime> _meetingEtaBaseTimeByUser = {};
   List<ConnectorLink> _connectors = const [];
   bool _connectorsLoaded = false;
   final Map<String, NavMesh> _navmeshCache = {};
   final Map<String, StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>>
-      _meetingUserSubs = {};
+  _meetingUserSubs = {};
   StreamSubscription<MeetingPointRecord?>? _activeMeetingSub;
   final Map<String, double> _venueLatByRequest = {};
   final Map<String, double> _venueLngByRequest = {};
@@ -113,6 +113,9 @@ class _TrackPageState extends State<TrackPage> {
   final Map<String, DateTime> _refreshCooldownUntilByRequestId = {};
   final Set<String> _refreshCooldownMessageRequestIds = {};
   final Map<String, Timer> _refreshCooldownMessageTimers = {};
+  // Meeting participant location refresh state (keyed by participant userId)
+  final Set<String> _refreshingMeetingParticipantIds = {};
+  final Map<String, DateTime> _meetingRefreshCooldownUntilByUserId = {};
 
   /// 0 = Sent, 1 = Received (same order as History page)
   int _selectedFilterIndex = 0;
@@ -147,6 +150,21 @@ class _TrackPageState extends State<TrackPage> {
   /// Tracks confirmed meetings that have been reconciled (arrival-phase check)
   /// so we don't fire the reconciliation on every stream emission.
   final Set<String> _reconciledArrivalMeetingIds = {};
+
+  /// Tracks pending meetings where all participants declined, so we don't
+  /// fire maybeMaintain (which writes cancellationReason) on every rebuild.
+  final Set<String> _reconciledDeclinedMeetingIds = {};
+
+  /// Tracks pending meetings where all participants responded and at least one
+  /// accepted (hostStep 4→5 advance needed), so we fire maybeMaintain once
+  /// immediately without waiting for the 2-second throttle.
+  final Set<String> _reconciledStep5MeetingIds = {};
+
+  /// Local approximate start time for step 3 (invitee), recorded the moment
+  /// pendingCount hits 0. Used to show an immediate ~5-min countdown while
+  /// waiting for Firestore to deliver hostStep=5 + suggestDeadline.
+  final Map<String, DateTime> _approxStep3StartByMeetingId = {};
+
   static const Duration _kMeetingMaintainThrottle = Duration(seconds: 2);
 
   /// Key for the tile to scroll to when opening from notification (by request ID).
@@ -160,7 +178,7 @@ class _TrackPageState extends State<TrackPage> {
 
   String _suggestedPointLabel(MeetingPointRecord meeting) {
     final name = meeting.suggestedPoint.trim();
-    return name.isNotEmpty ? name : 'Pending suggestion';
+    return name.isNotEmpty ? name : '...';
   }
 
   //Stream<MeetingPointRecord?>
@@ -1063,7 +1081,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       _maybeStartCompletionHoldFromStream(_lastKnownConfirmedMeeting!);
     }
 
-    final holdActive = _completionHoldUntil != null &&
+    final holdActive =
+        _completionHoldUntil != null &&
         DateTime.now().isBefore(_completionHoldUntil!);
     if ((meeting == null || !meeting.isConfirmed) &&
         holdActive &&
@@ -1206,8 +1225,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             final floorRaw = (blender['floor'] ?? '').toString();
 
             final updatedAtRaw = location['updatedAt'];
-            final updatedAt =
-                updatedAtRaw is Timestamp ? updatedAtRaw.toDate() : null;
+            final updatedAt = updatedAtRaw is Timestamp
+                ? updatedAtRaw.toDate()
+                : null;
             if (updatedAt != null) _meetingUpdatedAtByUser[id] = updatedAt;
 
             final first = (u['firstName'] ?? '').toString().trim();
@@ -1226,7 +1246,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               _meetingPosBlenderByUser.remove(id);
               _meetingFloorByUser.remove(id);
               _trackMapController?.runJavaScript("hideTrackedPin('$id');");
-              _trackMapController?.runJavaScript("clearMeetingPathForUser('$id');");
+              _trackMapController?.runJavaScript(
+                "clearMeetingPathForUser('$id');",
+              );
               _meetingPathsByUserFloorGltf.remove(id);
               return;
             }
@@ -1328,9 +1350,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       final pts = computePathOn(startNm, startPos, destPos);
       if (pts.isNotEmpty) {
         nextPaths[startF] = pts
-            .map(
-              (p) => _blenderToGltf(x: p[0], y: p[1], z: p[2]),
-            )
+            .map((p) => _blenderToGltf(x: p[0], y: p[1], z: p[2]))
             .toList();
       }
     } else {
@@ -1380,16 +1400,12 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
       if (bestA.isNotEmpty) {
         nextPaths[startF] = bestA
-            .map(
-              (p) => _blenderToGltf(x: p[0], y: p[1], z: p[2]),
-            )
+            .map((p) => _blenderToGltf(x: p[0], y: p[1], z: p[2]))
             .toList();
       }
       if (bestB.isNotEmpty) {
         nextPaths[destF] = bestB
-            .map(
-              (p) => _blenderToGltf(x: p[0], y: p[1], z: p[2]),
-            )
+            .map((p) => _blenderToGltf(x: p[0], y: p[1], z: p[2]))
             .toList();
       }
     }
@@ -1843,8 +1859,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       final List<dynamic> list = (decoded is List)
           ? decoded
           : (decoded is Map && decoded['connectors'] is List)
-              ? (decoded['connectors'] as List)
-              : const [];
+          ? (decoded['connectors'] as List)
+          : const [];
 
       final out = <ConnectorLink>[];
       for (final item in list) {
@@ -2005,13 +2021,18 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     final currentLabel = _currentFloorLabel();
     final currentF = _currentFNumber();
 
-    final activePosByUser = _isTrackingView ? _trackedPosByUser : _meetingPosByUser;
-    final activeFloorByUser =
-        _isTrackingView ? _trackedFloorByUser : _meetingFloorByUser;
-    final activeNameByUser =
-        _isTrackingView ? _trackedNameByUser : _meetingNameByUser;
-    final activeUpdatedAtByUser =
-        _isTrackingView ? _trackedUpdatedAtByUser : _meetingUpdatedAtByUser;
+    final activePosByUser = _isTrackingView
+        ? _trackedPosByUser
+        : _meetingPosByUser;
+    final activeFloorByUser = _isTrackingView
+        ? _trackedFloorByUser
+        : _meetingFloorByUser;
+    final activeNameByUser = _isTrackingView
+        ? _trackedNameByUser
+        : _meetingNameByUser;
+    final activeUpdatedAtByUser = _isTrackingView
+        ? _trackedUpdatedAtByUser
+        : _meetingUpdatedAtByUser;
 
     final allIds = <String>{};
     allIds.addAll(_trackedPosByUser.keys);
@@ -2021,8 +2042,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     for (final id in allIds.difference(activeIds)) {
       await _trackMapController!.runJavaScript("hideTrackedPin('$id');");
       if (!_isTrackingView) {
-        await _trackMapController!
-            .runJavaScript("clearMeetingPathForUser('$id');");
+        await _trackMapController!.runJavaScript(
+          "clearMeetingPathForUser('$id');",
+        );
       }
     }
 
@@ -2060,8 +2082,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           !_isTrackingView &&
           _meetingPointPosGltf != null &&
           (_meetingArrivalStatusByUser[userId] ?? '') == 'arrived';
-      final displayFloorLabel =
-          isArrived ? _meetingPointFloorLabel : trackedFloorLabel;
+      final displayFloorLabel = isArrived
+          ? _meetingPointFloorLabel
+          : trackedFloorLabel;
       final ok = _floorsMatch(displayFloorLabel, currentLabel);
 
       if (!ok) {
@@ -2098,17 +2121,16 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       double z = (pos['z'] ?? 0).toDouble();
 
       if (isArrived) {
-        final arrivedPos =
-            _offsetMeetingPointForUser(userId, _meetingPointPosGltf!);
+        final arrivedPos = _offsetMeetingPointForUser(
+          userId,
+          _meetingPointPosGltf!,
+        );
         x = (arrivedPos['x'] ?? x).toDouble();
         y = (arrivedPos['y'] ?? y).toDouble();
         z = (arrivedPos['z'] ?? z).toDouble();
       }
 
-      final label = (activeNameByUser[userId] ?? 'User').replaceAll(
-        "'",
-        "\\'",
-      );
+      final label = (activeNameByUser[userId] ?? 'User').replaceAll("'", "\\'");
 
       // by remas start
       _trackMapController!.runJavaScript(
@@ -2163,8 +2185,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         }
         for (final userId in _meetingPathsByUserFloorGltf.keys) {
           if (!shown.contains(userId)) {
-            await _trackMapController!
-                .runJavaScript("clearMeetingPathForUser('$userId');");
+            await _trackMapController!.runJavaScript(
+              "clearMeetingPathForUser('$userId');",
+            );
           }
         }
       }
@@ -2309,6 +2332,26 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   }
 
   String? _currentStepTimerLabel(MeetingPointRecord meeting) {
+    // All participants responded and at least one accepted → meeting is
+    // transitioning from step 4 to step 5. Instead of hiding the timer,
+    // show an immediate ~5-min countdown using a local start time so the
+    // invitee doesn't see a gap before Firestore delivers suggestDeadline.
+    if (meeting.hostStep == 4 &&
+        meeting.pendingCount == 0 &&
+        meeting.acceptedCount > 0) {
+      final approxStart = _approxStep3StartByMeetingId[meeting.id];
+      if (approxStart != null) {
+        final approxDeadline = approxStart.add(const Duration(minutes: 5));
+        final seconds = approxDeadline
+            .difference(MeetingPointService.serverNow)
+            .inSeconds
+            .clamp(0, 300);
+        final mm = (seconds ~/ 60).toString().padLeft(2, '0');
+        final ss = (seconds % 60).toString().padLeft(2, '0');
+        return '$mm:$ss';
+      }
+      return null;
+    }
     final deadline = meeting.activeDeadline;
     if (deadline == null) return null;
     final seconds = deadline
@@ -2653,7 +2696,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         if (confirmedMeeting != null) {
           _lastKnownConfirmedMeeting = confirmedMeeting;
         }
-        final holdActive = _completionHoldUntil != null &&
+        final holdActive =
+            _completionHoldUntil != null &&
             DateTime.now().isBefore(_completionHoldUntil!);
         if (confirmedMeeting == null &&
             holdActive &&
@@ -2672,6 +2716,57 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             !_reconciledArrivalMeetingIds.contains(confirmedMeeting.id)) {
           _reconciledArrivalMeetingIds.add(confirmedMeeting.id);
           MeetingPointService.reconcileArrivalPhase(confirmedMeeting).then((_) {
+            if (mounted) {
+              setState(() {
+                _activeMeetingPointListStream =
+                    MeetingPointService.watchAllBlockingForCurrentUser();
+              });
+            }
+          });
+        }
+
+        // Setup-phase: if all participants declined, auto-cancel immediately.
+        if (activeMeeting != null &&
+            activeMeeting.participants.isNotEmpty &&
+            activeMeeting.acceptedCount == 0 &&
+            activeMeeting.pendingCount == 0 &&
+            !_reconciledDeclinedMeetingIds.contains(activeMeeting.id)) {
+          _reconciledDeclinedMeetingIds.add(activeMeeting.id);
+          MeetingPointService.maybeMaintain(activeMeeting).then((_) {
+            if (mounted) {
+              setState(() {
+                _activeMeetingPointListStream =
+                    MeetingPointService.watchAllBlockingForCurrentUser();
+              });
+            }
+          });
+        }
+
+        // Setup-phase: all participants responded and at least one accepted →
+        // advance hostStep 4→5 immediately without waiting for the throttle.
+        // This eliminates the brief period where the stale step-4 timer shows.
+        if (activeMeeting != null &&
+            activeMeeting.hostStep == 4 &&
+            activeMeeting.pendingCount == 0 &&
+            activeMeeting.acceptedCount > 0) {
+          // Record approximate step-3 start so invitees see an immediate
+          // ~5-min countdown before Firestore delivers hostStep=5+suggestDeadline.
+          _approxStep3StartByMeetingId[activeMeeting.id] ??=
+              MeetingPointService.serverNow;
+        }
+
+        // Clean up the approx start once the real suggestDeadline is live.
+        if (activeMeeting != null && activeMeeting.hostStep >= 5) {
+          _approxStep3StartByMeetingId.remove(activeMeeting.id);
+        }
+
+        if (activeMeeting != null &&
+            activeMeeting.hostStep == 4 &&
+            activeMeeting.pendingCount == 0 &&
+            activeMeeting.acceptedCount > 0 &&
+            !_reconciledStep5MeetingIds.contains(activeMeeting.id)) {
+          _reconciledStep5MeetingIds.add(activeMeeting.id);
+          MeetingPointService.maybeMaintain(activeMeeting).then((_) {
             if (mounted) {
               setState(() {
                 _activeMeetingPointListStream =
@@ -2702,11 +2797,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               children: [
                 Expanded(
                   flex: 3,
-                  child: _pillButton(
-                    icon: Icons.place_outlined,
-                    label: 'Create Meeting Point',
+                  child: PrimaryButton(
+                    icon: Icons.people_outline,
+                    text: 'Create Meeting Point',
                     enabled: canCreateMeetingPoint,
-                    onTap: () => _showCreateMeetingPointForm(),
+                    onPressed: () => _showCreateMeetingPointForm(),
                   ),
                 ),
               ],
@@ -2828,8 +2923,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     final baseSeconds =
         _meetingEtaBaseSecondsByUser[userId] ?? (fallbackMins * 60);
     final baseTime = _meetingEtaBaseTimeByUser[userId];
-    final elapsed =
-        baseTime == null ? 0 : DateTime.now().difference(baseTime).inSeconds;
+    final elapsed = baseTime == null
+        ? 0
+        : DateTime.now().difference(baseTime).inSeconds;
     final remaining = baseSeconds - elapsed;
     return remaining < 60 ? 60 : remaining;
   }
@@ -3155,12 +3251,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                           Text(
                             'Location updated • ${() {
                               final live = _meetingUpdatedAtByUser[p.userId];
-                              final fallback =
-                                  p.locationUpdatedAt ?? p.updatedAt;
+                              final fallback = p.locationUpdatedAt ?? p.updatedAt;
                               final resolved = live ?? fallback;
-                              return resolved != null
-                                  ? _timeAgo(resolved)
-                                  : 'Unknown';
+                              return resolved != null ? _timeAgo(resolved) : 'Unknown';
                             }()}',
                             style: TextStyle(
                               fontSize: 13,
@@ -3238,6 +3331,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                                           : 'Participant: ',
                                       style: const TextStyle(
                                         fontWeight: FontWeight.w400,
+                                        fontSize: 13,
                                       ),
                                     ),
                                     TextSpan(
@@ -3301,7 +3395,16 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
-                      icon: const Icon(Icons.refresh, size: 18),
+                      icon: _refreshingMeetingParticipantIds.contains(p.userId)
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.refresh, size: 18),
                       label: const Text(
                         'Refresh Location',
                         style: TextStyle(
@@ -3318,9 +3421,14 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                           borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                      onPressed: () {
-                        // Location refresh — to be implemented by teammate
-                      },
+                      onPressed:
+                          _refreshingMeetingParticipantIds.contains(p.userId)
+                          ? null
+                          : () => _requestMeetingParticipantLocationRefresh(
+                              meeting,
+                              p.userId,
+                              p.name,
+                            ),
                     ),
                   ),
                 ],
@@ -3345,43 +3453,57 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       children: [
         // ── Destination info ────────────────────────────────────────────
         if (meeting.venueName.isNotEmpty)
-          Container(
-            margin: const EdgeInsets.only(bottom: 10),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: AppColors.kGreen.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.location_on,
-                  color: AppColors.kGreen,
-                  size: 20,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const SizedBox(height: 2),
-                      Text(
-                        _suggestedPointLabel(meeting),
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.black87,
-                        ),
-                      ),
-                      Text(
-                        meeting.venueName,
-                        style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                      ),
-                      const SizedBox(height: 2),
-                    ],
+          GestureDetector(
+            onTap: () => _navigateToMeetingPoint(meeting),
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: AppColors.kGreen.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.location_on,
+                    color: AppColors.kGreen,
+                    size: 20,
                   ),
-                ),
-              ],
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 2),
+                        Text(
+                          _suggestedPointLabel(meeting),
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black87,
+                          ),
+                        ),
+                        Text(
+                          meeting.venueName,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[500],
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                      ],
+                    ),
+                  ),
+                  const Tooltip(
+                    message: 'Navigate',
+                    child: Icon(
+                      Icons.north_east,
+                      color: AppColors.kGreen,
+                      size: 20,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
 
@@ -3454,14 +3576,12 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
         // Other participants (excluding me), cancelled ones last.
         ...(() {
-          final others = arrivalParticipants
-              .where((p) => p.userId != uid)
-              .toList()
-            ..sort(
-              (a, b) => (a.arrivalStatus == 'cancelled' ? 1 : 0).compareTo(
-                b.arrivalStatus == 'cancelled' ? 1 : 0,
-              ),
-            );
+          final others =
+              arrivalParticipants.where((p) => p.userId != uid).toList()..sort(
+                (a, b) => (a.arrivalStatus == 'cancelled' ? 1 : 0).compareTo(
+                  b.arrivalStatus == 'cancelled' ? 1 : 0,
+                ),
+              );
           return others.map(
             (p) => _buildParticipantArrivalCard(
               p: p,
@@ -3981,13 +4101,20 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                     color: AppColors.kGreen,
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Text(
-                    'View details',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                    ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.people_outline, color: Colors.white, size: 16),
+                      SizedBox(width: 6),
+                      Text(
+                        'View details',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -4093,20 +4220,23 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 ),
               ),
           ],
-          if (step == 2) ...[
+          if (me.isAccepted && (step == 2 || step == 3)) ...[
             const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
               child: SecondaryButton(
                 text: 'Cancel Participation',
-                onPressed: () => _declineMeetingInvite(
-                  meeting,
-                  title: 'Cancel Participation',
-                  message:
-                      'Are you sure you want to cancel your participation in this meeting point?',
-                  confirmText: 'Cancel Participation',
-                  successMessage: 'Participation cancelled.',
-                ),
+                onPressed: step == 3 && meeting.suggestedPoint.trim().isEmpty
+                    ? null
+                    : () => _declineMeetingInvite(
+                        meeting,
+                        title: 'Cancel Participation',
+                        message:
+                            'Are you sure you want to cancel your participation in this meeting point?',
+                        confirmText: 'Cancel Participation',
+                        successMessage: 'Participation cancelled.',
+                        cancelParticipation: step == 3,
+                      ),
               ),
             ),
           ],
@@ -4611,8 +4741,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                                             _resolveActiveMeetingCountSnapshot(
                                               snap,
                                             );
-                                        final total =
-                                            _meetingPointActiveCount(meeting);
+                                        final total = _meetingPointActiveCount(
+                                          meeting,
+                                        );
                                         return Text(
                                           total.toString(),
                                           style: const TextStyle(
@@ -4750,37 +4881,10 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   }
 
   Widget _buildTrackRequestButton() {
-    return GestureDetector(
-      onTap: _showTrackRequestDialog,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        decoration: BoxDecoration(
-          color: AppColors.kGreen,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.kGreen.withOpacity(0.3),
-              blurRadius: 8,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: const Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.person_search_outlined, color: Colors.white, size: 20),
-            SizedBox(width: 8),
-            Text(
-              'Track Request',
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w700,
-                color: Colors.white,
-              ),
-            ),
-          ],
-        ),
-      ),
+    return PrimaryButton(
+      text: 'Track Request',
+      icon: Icons.person_search_outlined,
+      onPressed: _showTrackRequestDialog,
     );
   }
 
@@ -4828,7 +4932,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   void _maybeStartCompletionHoldFromStream(MeetingPointRecord meeting) {
     if (!meeting.isConfirmed) return;
     if (!_allArrived(meeting)) return;
-    final holdActive = _completionHoldUntil != null &&
+    final holdActive =
+        _completionHoldUntil != null &&
         _completionHoldMeetingId == meeting.id &&
         DateTime.now().isBefore(_completionHoldUntil!);
     if (holdActive) return;
@@ -4858,234 +4963,292 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   Future<void> _showInviteeDetailsSheet(MeetingPointRecord meeting) async {
     final currentUid = FirebaseAuth.instance.currentUser?.uid;
     if (currentUid == null) return;
-    final me = meeting.participantFor(currentUid);
-    if (me == null) return;
-    final step = _inviteeStep(meeting, currentUid);
-    final timerLabel = _currentStepTimerLabel(meeting);
+    if (meeting.participantFor(currentUid) == null) return;
+    final meetingId = meeting.id;
+    var autoCloseScheduled = false;
 
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) {
-        return Container(
-          height: MediaQuery.of(context).size.height * 0.78,
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.only(
-              topLeft: Radius.circular(24),
-              topRight: Radius.circular(24),
-            ),
-          ),
-          child: Column(
-            children: [
-              // ── Header ──────────────────────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      width: 42,
-                      height: 42,
-                      decoration: BoxDecoration(
-                        color: Colors.grey[200],
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Icon(
-                        Icons.location_on_outlined,
-                        color: Colors.grey[600],
-                        size: 22,
-                      ),
+        return StreamBuilder<int>(
+          stream: Stream.periodic(const Duration(seconds: 1), (i) => i),
+          builder: (_, snapshot) {
+            // After the first tick, check if the meeting was cancelled/removed.
+            if (snapshot.hasData && !autoCloseScheduled) {
+              final stillPresent = _lastKnownBlockingMeetings.any(
+                (m) => m.id == meetingId,
+              );
+              if (!stillPresent) {
+                autoCloseScheduled = true;
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (ctx.mounted) Navigator.of(ctx).pop();
+                  if (mounted) {
+                    SnackbarHelper.showError(
+                      context,
+                      'The host rejected the suggested point. Meeting has been cancelled.',
+                    );
+                  }
+                });
+              }
+            }
+
+            final live = _lastKnownBlockingMeetings.firstWhere(
+              (m) => m.id == meetingId,
+              orElse: () => meeting,
+            );
+            final me = live.participantFor(currentUid);
+            if (me == null) return const SizedBox.shrink();
+            final step = _inviteeStep(live, currentUid);
+            final timerLabel = _currentStepTimerLabel(live);
+
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.78,
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(24),
+                  topRight: Radius.circular(24),
+                ),
+              ),
+              child: Column(
+                children: [
+                  // ── Header ──────────────────────────────────────────────────
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          width: 42,
+                          height: 42,
+                          decoration: BoxDecoration(
+                            color: Colors.grey[200],
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(
+                            Icons.location_on_outlined,
+                            color: Colors.grey[600],
+                            size: 22,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Meeting Point Request',
+                                style: TextStyle(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.black87,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                _inviteeStepLabel(step),
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.grey[600],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              onPressed: () => Navigator.pop(ctx),
+                              icon: Icon(
+                                Icons.close,
+                                size: 20,
+                                color: Colors.grey[600],
+                              ),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                            ),
+                            if (timerLabel != null) ...[
+                              const SizedBox(height: 4),
+                              _meetingTimerBadge(timerLabel),
+                            ],
+                          ],
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
+                  ),
+                  const Divider(
+                    height: 1,
+                    thickness: 1,
+                    color: Color(0xFFEEEEEE),
+                  ),
+                  // ── Scrollable body ──────────────────────────────────────────
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          // Progress bar
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(6),
+                            child: LinearProgressIndicator(
+                              value: (step - 1) / 3,
+                              minHeight: 7,
+                              backgroundColor: AppColors.kGreen.withValues(
+                                alpha: 0.2,
+                              ),
+                              valueColor: const AlwaysStoppedAnimation(
+                                AppColors.kGreen,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Step $step of 3',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppColors.kGreen,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          // Section title
                           const Text(
-                            'Meeting Point Request',
+                            'Meeting point details',
                             style: TextStyle(
-                              fontSize: 17,
+                              fontSize: 18,
                               fontWeight: FontWeight.w700,
                               color: Colors.black87,
                             ),
                           ),
-                          const SizedBox(height: 3),
-                          Text(
-                            _inviteeStepLabel(step),
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      onPressed: () => Navigator.pop(ctx),
-                      icon: Icon(
-                        Icons.close,
-                        size: 20,
-                        color: Colors.grey[600],
-                      ),
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                    ),
-                  ],
-                ),
-              ),
-              const Divider(height: 1, thickness: 1, color: Color(0xFFEEEEEE)),
-              // ── Scrollable body ──────────────────────────────────────────
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Progress bar
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
-                        child: LinearProgressIndicator(
-                          value: step / 3,
-                          minHeight: 7,
-                          backgroundColor: AppColors.kGreen.withValues(
-                            alpha: 0.2,
-                          ),
-                          valueColor: const AlwaysStoppedAnimation(
-                            AppColors.kGreen,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Step $step of 3',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppColors.kGreen,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      // Section title
-                      const Text(
-                        'Meeting point details',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.black87,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      // Details block with green left bar
-                      IntrinsicHeight(
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Container(
-                              width: 3,
-                              decoration: BoxDecoration(
-                                color: AppColors.kGreen,
-                                borderRadius: BorderRadius.circular(2),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  _labeledDetail(
-                                    'Host: ',
-                                    meeting.hostPhone.isEmpty
-                                        ? meeting.hostName
-                                        : '${meeting.hostName} (${meeting.hostPhone})',
+                          const SizedBox(height: 12),
+                          // Details block with green left bar
+                          IntrinsicHeight(
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Container(
+                                  width: 3,
+                                  decoration: BoxDecoration(
+                                    color: AppColors.kGreen,
+                                    borderRadius: BorderRadius.circular(2),
                                   ),
-                                  const SizedBox(height: 8),
-                                  _labeledDetail('Venue: ', meeting.venueName),
-                                  if (step == 3) ...[
-                                    const SizedBox(height: 8),
-                                    _labeledDetail(
-                                      'Suggested point: ',
-                                      _suggestedPointLabel(meeting),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      // Participants label + timer
-                      Row(
-                        children: [
-                          Text(
-                            'Participants:',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.grey[700],
-                              fontWeight: FontWeight.w600,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      _labeledDetail(
+                                        'Host: ',
+                                        live.hostPhone.isEmpty
+                                            ? live.hostName
+                                            : '${live.hostName} (${live.hostPhone})',
+                                      ),
+                                      const SizedBox(height: 8),
+                                      _labeledDetail('Venue: ', live.venueName),
+                                      if (step == 3) ...[
+                                        const SizedBox(height: 8),
+                                        _labeledDetail(
+                                          'Suggested point: ',
+                                          _suggestedPointLabel(live),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                          if (timerLabel != null) ...[
-                            const Spacer(),
-                            _meetingTimerBadge(timerLabel),
-                          ],
+                          const SizedBox(height: 14),
+                          // Participants label
+                          Row(
+                            children: [
+                              Text(
+                                'Participants:',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.grey[700],
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          ...[
+                            if (step == 3) ...[
+                              ...live.participants.where((p) => p.isAccepted),
+                              ...live.participants.where((p) => p.isCancelledParticipation),
+                            ] else
+                              ...live.participants,
+                          ].map(
+                            (p) => _buildInviteeParticipantStatusRow(
+                              p,
+                              isMe: p.userId == currentUid,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          // Note
+                          Text(
+                            'Note: You can cancel your participation in this meeting point.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[500],
+                            ),
+                          ),
                         ],
                       ),
-                      const SizedBox(height: 8),
-                      ...meeting.participants.map(
-                        (p) => _buildInviteeParticipantStatusRow(
-                          p,
-                          isMe: p.userId == currentUid,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      // Note
-                      Text(
-                        step == 3
-                            ? 'Note: You cannot cancel your participation now as we are using your location to find the most suitable meeting point for all.'
-                            : 'Note: You can cancel your participation in this meeting point.',
-                        style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              // ── Cancel button ────────────────────────────────────────────
-              if (me.isAccepted && step != 3)
-                Padding(
-                  padding: EdgeInsets.fromLTRB(
-                    20,
-                    10,
-                    20,
-                    MediaQuery.of(context).padding.bottom + 12,
-                  ),
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: SecondaryButton(
-                      text: 'Cancel Participation',
-                      onPressed: () async {
-                        final dialogCtx = ctx;
-                        final confirmed = await _declineMeetingInvite(
-                          meeting,
-                          title: 'Cancel Participation',
-                          message:
-                              'Are you sure you want to cancel your participation in this meeting point?',
-                          confirmText: 'Cancel Participation',
-                          successMessage: 'Participation cancelled.',
-                        );
-                        if (confirmed && mounted && dialogCtx.mounted) {
-                          Navigator.pop(dialogCtx);
-                        }
-                      },
                     ),
                   ),
-                )
-              else
-                SizedBox(height: MediaQuery.of(context).padding.bottom + 12),
-            ],
-          ),
+                  // ── Cancel button ────────────────────────────────────────────
+                  if (me.isAccepted)
+                    Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        20,
+                        10,
+                        20,
+                        MediaQuery.of(context).padding.bottom + 12,
+                      ),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: SecondaryButton(
+                          text: 'Cancel Participation',
+                          onPressed:
+                              step == 3 && live.suggestedPoint.trim().isEmpty
+                              ? null
+                              : () async {
+                                  final dialogCtx = ctx;
+                                  final confirmed = await _declineMeetingInvite(
+                                    live,
+                                    title: 'Cancel Participation',
+                                    message:
+                                        'Are you sure you want to cancel your participation in this meeting point?',
+                                    confirmText: 'Cancel Participation',
+                                    successMessage: 'Participation cancelled.',
+                                    cancelParticipation: step == 3,
+                                  );
+                                  if (confirmed &&
+                                      mounted &&
+                                      dialogCtx.mounted) {
+                                    Navigator.pop(dialogCtx);
+                                  }
+                                },
+                        ),
+                      ),
+                    )
+                  else
+                    SizedBox(
+                      height: MediaQuery.of(context).padding.bottom + 12,
+                    ),
+                ],
+              ),
+            );
+          },
         );
       },
     );
@@ -5097,17 +5260,17 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   }) {
     final bg = p.isAccepted
         ? AppColors.kGreen.withValues(alpha: 0.1)
-        : p.isDeclined
+        : (p.isDeclined || p.isCancelledParticipation)
         ? AppColors.kError.withValues(alpha: 0.1)
         : Colors.orange.withValues(alpha: 0.1);
     final textColor = p.isAccepted
         ? AppColors.kGreen
-        : p.isDeclined
+        : (p.isDeclined || p.isCancelledParticipation)
         ? AppColors.kError
         : Colors.orange.shade700;
     final label = p.isAccepted
         ? 'Accepted'
-        : p.isDeclined
+        : (p.isDeclined || p.isCancelledParticipation)
         ? 'Declined'
         : 'Pending';
 
@@ -5388,10 +5551,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             onPressed: () => Navigator.pop(ctx, false),
             style: TextButton.styleFrom(
               backgroundColor: Colors.grey[200],
-              padding: const EdgeInsets.symmetric(
-                horizontal: 24,
-                vertical: 12,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8),
               ),
@@ -5409,10 +5569,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             onPressed: () => Navigator.pop(ctx, true),
             style: TextButton.styleFrom(
               backgroundColor: AppColors.kGreen,
-              padding: const EdgeInsets.symmetric(
-                horizontal: 24,
-                vertical: 12,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(8),
               ),
@@ -5659,6 +5816,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         'Are you sure you want to decline this meeting point invitation?',
     String confirmText = 'Decline',
     String successMessage = 'Invitation declined.',
+    bool cancelParticipation = false,
   }) async {
     final confirmed = await ConfirmationDialog.showDeleteConfirmation(
       context,
@@ -5675,6 +5833,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       await MeetingPointService.respondToInvitation(
         meetingPointId: meeting.id,
         accepted: false,
+        cancelParticipation: cancelParticipation,
       );
       if (!mounted) return true;
       SnackbarHelper.showSuccess(context, successMessage);
@@ -5799,42 +5958,12 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // -------- Scheduled Tracking (always show title) --------
-        _buildSubsectionLabel('Scheduled Tracking'),
-        const SizedBox(height: 4),
-        if (scheduled.isEmpty)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 24, top: 0),
-            child: Center(
-              child: Text(
-                'No Scheduled Requests',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey[600],
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-          )
-        else
-          ...scheduled.map(
-            (r) => Padding(
-              key:
-                  widget.initialExpandRequestId != null &&
-                      r.id == widget.initialExpandRequestId
-                  ? _scrollToTargetKey
-                  : null,
-              padding: const EdgeInsets.only(bottom: 8),
-              child: _buildReceivedScheduledTile(r),
-            ),
-          ),
-        const SizedBox(height: 24),
         // -------- Active Tracking (always show title) --------
         _buildSubsectionLabel('Active Tracking'),
         const SizedBox(height: 4),
         if (active.isEmpty)
           Padding(
-            padding: const EdgeInsets.only(bottom: 8, top: 0),
+            padding: const EdgeInsets.only(bottom: 24, top: 0),
             child: Center(
               child: Text(
                 'No Active Requests',
@@ -5856,6 +5985,36 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                   : null,
               padding: const EdgeInsets.only(bottom: 8),
               child: _buildReceivedActiveTile(r),
+            ),
+          ),
+        const SizedBox(height: 24),
+        // -------- Scheduled Tracking (always show title) --------
+        _buildSubsectionLabel('Scheduled Tracking'),
+        const SizedBox(height: 4),
+        if (scheduled.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8, top: 0),
+            child: Center(
+              child: Text(
+                'No Scheduled Requests',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.grey[600],
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          )
+        else
+          ...scheduled.map(
+            (r) => Padding(
+              key:
+                  widget.initialExpandRequestId != null &&
+                      r.id == widget.initialExpandRequestId
+                  ? _scrollToTargetKey
+                  : null,
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _buildReceivedScheduledTile(r),
             ),
           ),
       ],
@@ -5884,40 +6043,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildSubsectionLabel('Scheduled Tracking'),
-        const SizedBox(height: 4),
-        if (upcoming.isEmpty)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 24, top: 0),
-            child: Center(
-              child: Text(
-                'No Scheduled Requests',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey[600],
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-          )
-        else
-          ...upcoming.map(
-            (r) => Padding(
-              key:
-                  widget.initialExpandRequestId != null &&
-                      r.id == widget.initialExpandRequestId
-                  ? _scrollToTargetKey
-                  : null,
-              padding: const EdgeInsets.only(bottom: 8),
-              child: _buildUpcomingTile(r),
-            ),
-          ),
-        const SizedBox(height: 24),
         _buildSubsectionLabel('Active Tracking'),
         const SizedBox(height: 4),
         if (active.isEmpty)
           Padding(
-            padding: const EdgeInsets.only(bottom: 8, top: 0),
+            padding: const EdgeInsets.only(bottom: 24, top: 0),
             child: Center(
               child: Text(
                 'No Active Requests',
@@ -5941,6 +6071,35 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                   : null,
               padding: const EdgeInsets.only(bottom: 8),
               child: _buildActiveTile(r),
+            ),
+          ),
+        const SizedBox(height: 24),
+        _buildSubsectionLabel('Scheduled Tracking'),
+        const SizedBox(height: 4),
+        if (upcoming.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8, top: 0),
+            child: Center(
+              child: Text(
+                'No Scheduled Requests',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.grey[600],
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          )
+        else
+          ...upcoming.map(
+            (r) => Padding(
+              key:
+                  widget.initialExpandRequestId != null &&
+                      r.id == widget.initialExpandRequestId
+                  ? _scrollToTargetKey
+                  : null,
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _buildUpcomingTile(r),
             ),
           ),
       ],
@@ -6816,44 +6975,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   Widget _buildIncomingActionButtons(BuildContext context, TrackingRequest r) {
     return Row(
       children: [
-        // Accept (left) = filled green
-        Expanded(
-          child: ElevatedButton.icon(
-            onPressed: () async {
-              final confirmed =
-                  await ConfirmationDialog.showPositiveConfirmation(
-                    context,
-                    title: 'Accept Track Request',
-                    message:
-                        'Are you sure you want to accept this tracking request?',
-                    confirmText: 'Accept',
-                  );
-              if (confirmed && mounted) {
-                _updateRequestStatus(
-                  r.id,
-                  'accepted',
-                  successMessage: 'Tracking request accepted successfully.',
-                );
-              }
-            },
-            icon: const Icon(Icons.check_circle_outline, size: 18),
-            label: const Text(
-              'Accept',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.kGreen,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(width: 12),
-        // Decline (right) = outlined
+        // Decline (left) = outlined
         Expanded(
           child: OutlinedButton.icon(
             onPressed: () async {
@@ -6884,6 +7006,43 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               foregroundColor: AppColors.kGreen,
               side: BorderSide(color: AppColors.kGreen, width: 2),
               padding: const EdgeInsets.symmetric(vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        // Accept (right) = filled green
+        Expanded(
+          child: ElevatedButton.icon(
+            onPressed: () async {
+              final confirmed =
+                  await ConfirmationDialog.showPositiveConfirmation(
+                    context,
+                    title: 'Accept Track Request',
+                    message:
+                        'Are you sure you want to accept this tracking request?',
+                    confirmText: 'Accept',
+                  );
+              if (confirmed && mounted) {
+                _updateRequestStatus(
+                  r.id,
+                  'accepted',
+                  successMessage: 'Tracking request accepted successfully.',
+                );
+              }
+            },
+            icon: const Icon(Icons.check_circle_outline, size: 18),
+            label: const Text(
+              'Accept',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.kGreen,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              elevation: 0,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -7083,6 +7242,89 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       'Dec',
     ];
     return '${months[d.month - 1]} ${d.day}';
+  }
+
+  // ========== MEETING PARTICIPANT LOCATION REFRESH ==========
+  Future<void> _requestMeetingParticipantLocationRefresh(
+    MeetingPointRecord meeting,
+    String participantUserId,
+    String participantName,
+  ) async {
+    if (_refreshingMeetingParticipantIds.contains(participantUserId)) return;
+
+    final until = _meetingRefreshCooldownUntilByUserId[participantUserId];
+    if (until != null && DateTime.now().isBefore(until)) {
+      SnackbarHelper.showError(
+        context,
+        'Refresh already sent. Please wait before retrying.',
+      );
+      return;
+    }
+
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return;
+
+    setState(() => _refreshingMeetingParticipantIds.add(participantUserId));
+
+    try {
+      final token =
+          '${currentUser.uid}_${DateTime.now().millisecondsSinceEpoch}';
+      await FirebaseFirestore.instance
+          .collection('meetingPoints')
+          .doc(meeting.id)
+          .update({'locationRefreshTokens.$participantUserId': token});
+
+      _meetingRefreshCooldownUntilByUserId[participantUserId] = DateTime.now()
+          .add(_refreshCooldownDuration);
+
+      if (mounted) {
+        final name = participantName.trim().isNotEmpty
+            ? participantName
+            : 'participant';
+        SnackbarHelper.showSuccess(
+          context,
+          'Refresh location request sent to $name.',
+        );
+      }
+    } catch (e) {
+      debugPrint('Failed to request meeting participant location refresh: $e');
+      if (mounted) {
+        SnackbarHelper.showError(
+          context,
+          'Failed to send refresh request. Please try again.',
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(
+          () => _refreshingMeetingParticipantIds.remove(participantUserId),
+        );
+      } else {
+        _refreshingMeetingParticipantIds.remove(participantUserId);
+      }
+    }
+  }
+
+  // ========== NAVIGATE TO MEETING POINT ==========
+  void _navigateToMeetingPoint(MeetingPointRecord meeting) {
+    final pos = _meetingPointPosGltf;
+    if (pos == null) {
+      SnackbarHelper.showError(
+        context,
+        'Meeting point location is not available yet.',
+      );
+      return;
+    }
+    showNavigationDialog(
+      context,
+      _suggestedPointLabel(meeting),
+      meeting.id,
+      destinationPoiMaterial: '',
+      floorSrc: '',
+      destinationHitGltf: pos,
+      destinationFloorLabel: _meetingPointFloorLabel,
+      venueId: meeting.venueId,
+    );
   }
 
   // ========== NAVIGATE TO FRIEND ==========
@@ -7380,71 +7622,6 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   }
 
   // ---------- UI Helpers ----------
-
-  Widget _pillButton({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-    bool outlined = false,
-    bool enabled = true,
-  }) {
-    final shape = RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(14),
-    );
-    if (outlined) {
-      return OutlinedButton.icon(
-        onPressed: enabled ? onTap : null,
-        icon: Icon(
-          icon,
-          color: enabled ? AppColors.kGreen : Colors.grey[500],
-          size: 20,
-        ),
-        label: Text(
-          label,
-          style: TextStyle(
-            color: enabled ? AppColors.kGreen : Colors.grey[500],
-            fontWeight: FontWeight.w600,
-            fontSize: 14,
-          ),
-        ),
-        style: OutlinedButton.styleFrom(
-          side: BorderSide(
-            color: enabled ? AppColors.kGreen : Colors.grey.shade400,
-            width: 2,
-          ),
-          shape: shape,
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          backgroundColor: Colors.white,
-          disabledForegroundColor: Colors.grey[500],
-        ),
-      );
-    }
-    return ElevatedButton.icon(
-      onPressed: enabled ? onTap : null,
-      icon: Icon(
-        icon,
-        color: enabled ? Colors.white : Colors.grey[500],
-        size: 20,
-      ),
-      label: Text(
-        label,
-        style: TextStyle(
-          fontWeight: FontWeight.w600,
-          fontSize: 14,
-          color: enabled ? Colors.white : Colors.grey[500],
-        ),
-      ),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: enabled ? AppColors.kGreen : Colors.grey.shade300,
-        foregroundColor: enabled ? Colors.white : Colors.grey[500],
-        disabledBackgroundColor: Colors.grey.shade300,
-        disabledForegroundColor: Colors.grey[500],
-        shape: shape,
-        elevation: 0,
-        padding: const EdgeInsets.symmetric(vertical: 14),
-      ),
-    );
-  }
 
   Widget _roleChip(String text) {
     return Container(

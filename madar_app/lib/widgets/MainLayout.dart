@@ -44,6 +44,8 @@ class _MainLayoutState
   // GPS tracking service subscription
   StreamSubscription<QuerySnapshot>?
   _activeTrackingSub;
+  StreamSubscription<QuerySnapshot>?
+  _activeMeetingPointSub;
 
   Timer? _gpsPeriodicTimer;
   bool _hasActiveTrackingRequest =
@@ -78,6 +80,7 @@ class _MainLayoutState
     super.initState();
     _loadUserData();
     _listenForActiveTrackingRequests();
+    _listenForActiveMeetingPoints();
   }
 
   // ---------- GPS Tracking Service ──────────────────────────────────────────
@@ -395,9 +398,34 @@ class _MainLayoutState
     }
   }
 
+  void _listenForActiveMeetingPoints() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    _activeMeetingPointSub?.cancel();
+
+    _activeMeetingPointSub = FirebaseFirestore.instance
+        .collection('meetingPoints')
+        .where('participantUserIds', arrayContains: uid)
+        .where('status', isEqualTo: 'active')
+        .snapshots()
+        .listen((snap) async {
+          for (final doc in snap.docChanges) {
+            final data = doc.doc.data();
+            if (data == null) continue;
+            final tokens = data['locationRefreshTokens'];
+            if (tokens is Map && tokens.containsKey(uid)) {
+              await GpsTrackingService.uploadGps();
+              break;
+            }
+          }
+        });
+  }
+
   @override
   void dispose() {
     _activeTrackingSub?.cancel();
+    _activeMeetingPointSub?.cancel();
     _gpsPeriodicTimer?.cancel();
     super.dispose();
   }

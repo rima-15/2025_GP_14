@@ -82,6 +82,7 @@ class _TrackPageState extends State<TrackPage> {
   final Map<String, String> _meetingFloorByUser = {};
   final Map<String, String> _meetingNameByUser = {};
   final Map<String, DateTime> _meetingUpdatedAtByUser = {};
+  final Map<String, String> _meetingArrivalStatusByUser = {};
   Map<String, double>? _meetingPointPosGltf;
   Map<String, double>? _meetingPointPosBlender;
   String _meetingPointFloorLabel = '';
@@ -124,6 +125,13 @@ class _TrackPageState extends State<TrackPage> {
   MeetingPointRecord? _lastKnownActiveMeetingCard;
   MeetingPointRecord? _lastKnownActiveMeetingCount;
   List<MeetingPointRecord> _lastKnownBlockingMeetings = [];
+  MeetingPointRecord? _lastKnownConfirmedMeeting;
+  String? _pendingCompletionHoldMeetingId;
+  DateTime? _pendingCompletionHoldStartedAt;
+  static const Duration _kCompletionHoldGrace = Duration(seconds: 5);
+  DateTime? _completionHoldUntil;
+  String? _completionHoldMeetingId;
+  Timer? _completionHoldTimer;
   String? _expandedMeetingInviteId;
 
   // ── Arrival section state ──────────────────────────────────────────────────
@@ -1012,6 +1020,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     _meetingFloorByUser.clear();
     _meetingNameByUser.clear();
     _meetingUpdatedAtByUser.clear();
+    _meetingArrivalStatusByUser.clear();
     _meetingPointPosGltf = null;
     _meetingPointPosBlender = null;
     _meetingPointFloorLabel = '';
@@ -1028,10 +1037,42 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   }
 
   void _syncMeetingParticipantSubs(MeetingPointRecord? meeting) {
+    if (_pendingCompletionHoldStartedAt != null &&
+        DateTime.now().difference(_pendingCompletionHoldStartedAt!) >
+            _kCompletionHoldGrace) {
+      _pendingCompletionHoldMeetingId = null;
+      _pendingCompletionHoldStartedAt = null;
+    }
+
+    final pendingHoldId = _pendingCompletionHoldMeetingId;
+    final pendingHoldActive =
+        pendingHoldId != null && _pendingCompletionHoldStartedAt != null;
+
+    if ((meeting == null || !meeting.isConfirmed) &&
+        pendingHoldActive &&
+        _lastKnownConfirmedMeeting != null &&
+        _lastKnownConfirmedMeeting!.id == pendingHoldId) {
+      _startCompletionHold(_lastKnownConfirmedMeeting!);
+      _pendingCompletionHoldMeetingId = null;
+      _pendingCompletionHoldStartedAt = null;
+    }
+
+    final holdActive = _completionHoldUntil != null &&
+        DateTime.now().isBefore(_completionHoldUntil!);
+    if ((meeting == null || !meeting.isConfirmed) &&
+        holdActive &&
+        _lastKnownConfirmedMeeting != null &&
+        (_completionHoldMeetingId == null ||
+            _lastKnownConfirmedMeeting!.id == _completionHoldMeetingId)) {
+      meeting = _lastKnownConfirmedMeeting;
+    }
+
     if (meeting == null || !meeting.isConfirmed) {
       _clearMeetingParticipantPins();
       return;
     }
+
+    _lastKnownConfirmedMeeting = meeting;
 
     final ids = <String>{};
     final names = <String, String>{};
@@ -1078,6 +1119,16 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       }
     }
 
+    _meetingArrivalStatusByUser.clear();
+    if (hostActive && hostId.isNotEmpty) {
+      _meetingArrivalStatusByUser[hostId] = meeting.hostArrivalStatus;
+    }
+    for (final p in meeting.participants) {
+      if (!p.isAccepted) continue;
+      if (p.arrivalStatus == 'cancelled') continue;
+      _meetingArrivalStatusByUser[p.userId] = p.arrivalStatus;
+    }
+
     _meetingPointPosGltf = null;
     _meetingPointPosBlender = null;
     _meetingPointFloorLabel = '';
@@ -1115,6 +1166,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       _meetingFloorByUser.remove(id);
       _meetingNameByUser.remove(id);
       _meetingUpdatedAtByUser.remove(id);
+      _meetingArrivalStatusByUser.remove(id);
       _trackMapController?.runJavaScript("removeTrackedPin('$id');");
       _trackMapController?.runJavaScript("clearMeetingPathForUser('$id');");
       _meetingPathsByUserFloorGltf.remove(id);
@@ -1534,6 +1586,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     _clockTimer?.cancel();
     _meetingPointCardTimer?.cancel();
     _arrivalTimer?.cancel();
+    _completionHoldTimer?.cancel();
     _scrollToTargetTimer?.cancel();
     _scrollToMeetingInviteTimer?.cancel();
     _highlightClearTimer?.cancel();
@@ -1995,7 +2048,13 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       // by remas end
 
       final trackedFloorLabel = activeFloorByUser[userId] ?? '';
-      final ok = _floorsMatch(trackedFloorLabel, currentLabel);
+      final isArrived =
+          !_isTrackingView &&
+          _meetingPointPosGltf != null &&
+          (_meetingArrivalStatusByUser[userId] ?? '') == 'arrived';
+      final displayFloorLabel =
+          isArrived ? _meetingPointFloorLabel : trackedFloorLabel;
+      final ok = _floorsMatch(displayFloorLabel, currentLabel);
 
       if (!ok) {
         await _trackMapController!.runJavaScript("hideTrackedPin('$userId');");
@@ -2026,9 +2085,17 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       }
       // by remas end
 
-      final x = (pos['x'] ?? 0).toDouble();
-      final y = (pos['y'] ?? 0).toDouble();
-      final z = (pos['z'] ?? 0).toDouble();
+      double x = (pos['x'] ?? 0).toDouble();
+      double y = (pos['y'] ?? 0).toDouble();
+      double z = (pos['z'] ?? 0).toDouble();
+
+      if (isArrived) {
+        final arrivedPos =
+            _offsetMeetingPointForUser(userId, _meetingPointPosGltf!);
+        x = (arrivedPos['x'] ?? x).toDouble();
+        y = (arrivedPos['y'] ?? y).toDouble();
+        z = (arrivedPos['z'] ?? z).toDouble();
+      }
 
       final label = (activeNameByUser[userId] ?? 'User').replaceAll(
         "'",
@@ -2071,6 +2138,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         final shown = <String>{};
         for (final entry in _meetingPathsByUserFloorGltf.entries) {
           final userId = entry.key;
+          if ((_meetingArrivalStatusByUser[userId] ?? '') == 'arrived') {
+            continue;
+          }
           final byFloor = entry.value;
           final pts = byFloor[currentF] ?? const <Map<String, double>>[];
           if (pts.isNotEmpty) {
@@ -2572,6 +2642,19 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           }
         }
 
+        if (confirmedMeeting != null) {
+          _lastKnownConfirmedMeeting = confirmedMeeting;
+        }
+        final holdActive = _completionHoldUntil != null &&
+            DateTime.now().isBefore(_completionHoldUntil!);
+        if (confirmedMeeting == null &&
+            holdActive &&
+            _lastKnownConfirmedMeeting != null &&
+            (_completionHoldMeetingId == null ||
+                _lastKnownConfirmedMeeting!.id == _completionHoldMeetingId)) {
+          confirmedMeeting = _lastKnownConfirmedMeeting;
+        }
+
         // Reconcile confirmed meetings that may be stuck due to old app code
         // not writing meeting-level status transitions (completion/cancellation).
         // Runs at most once per meeting ID so it doesn't loop on every rebuild.
@@ -2762,6 +2845,22 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           },
         )
         .toList();
+  }
+
+  Map<String, double> _offsetMeetingPointForUser(
+    String userId,
+    Map<String, double> base,
+  ) {
+    final hash = userId.codeUnits.fold<int>(0, (a, b) => a + b);
+    final angle = (hash % 360) * (math.pi / 180.0);
+    const radius = 0.065;
+    final dx = math.cos(angle) * radius;
+    final dz = math.sin(angle) * radius;
+    return {
+      'x': (base['x'] ?? 0) + dx,
+      'y': (base['y'] ?? 0),
+      'z': (base['z'] ?? 0) + dz,
+    };
   }
 
   /// Formats a DateTime as "HH:mm" (24-h).
@@ -3373,6 +3472,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     required String uid,
   }) async {
     final now = DateTime.now();
+    final willComplete = _willCompleteAfterArrive(meeting, isHost, uid);
     try {
       await MeetingPointService.updateArrivalStatus(
         meetingPointId: meeting.id,
@@ -3381,7 +3481,22 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         arrivalStatus: 'arrived',
         arrivedAt: now,
       );
+      if (mounted) {
+        _pendingCompletionHoldMeetingId = meeting.id;
+        _pendingCompletionHoldStartedAt = DateTime.now();
+        _lastKnownConfirmedMeeting = meeting;
+        _meetingArrivalStatusByUser[uid] = 'arrived';
+        _applyAllTrackedPinsToViewer();
+        unawaited(_clearMeetingPathForUser(uid));
+      }
       _forceStreamRefresh();
+      if (willComplete && mounted) {
+        _startCompletionHold(meeting);
+        SnackbarHelper.showSuccess(
+          context,
+          'Meeting point completed',
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
@@ -4652,6 +4767,52 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
   Widget _meetingTimerBadge(String timerLabel) {
     return MeetingTimerBadge(label: timerLabel);
+  }
+
+  bool _willCompleteAfterArrive(
+    MeetingPointRecord meeting,
+    bool isHost,
+    String uid,
+  ) {
+    final hostActive = meeting.hostArrivalStatus != 'cancelled';
+    final activeParticipants = meeting.participants
+        .where((p) => p.isAccepted && !p.isCancelledArrival)
+        .toList();
+
+    final hostArrived =
+        !hostActive || (isHost ? true : meeting.hostArrivalStatus == 'arrived');
+
+    bool allParticipantsArrived = true;
+    for (final p in activeParticipants) {
+      if (!isHost && p.userId == uid) {
+        continue; // this user is now arrived
+      }
+      if (p.arrivalStatus != 'arrived') {
+        allParticipantsArrived = false;
+        break;
+      }
+    }
+    return hostArrived && allParticipantsArrived;
+  }
+
+  void _startCompletionHold(MeetingPointRecord meeting) {
+    _completionHoldTimer?.cancel();
+    final holdMeetingId = meeting.id;
+    _completionHoldMeetingId = meeting.id;
+    _completionHoldUntil = DateTime.now().add(const Duration(seconds: 4));
+    _pendingCompletionHoldMeetingId = null;
+    _pendingCompletionHoldStartedAt = null;
+    _completionHoldTimer = Timer(const Duration(seconds: 4), () {
+      if (!mounted) return;
+      setState(() {
+        _completionHoldUntil = null;
+        _completionHoldMeetingId = null;
+      });
+      if (_lastKnownConfirmedMeeting?.id == holdMeetingId) {
+        _clearMeetingParticipantPins();
+      }
+    });
+    setState(() {});
   }
 
   Future<void> _showInviteeDetailsSheet(MeetingPointRecord meeting) async {

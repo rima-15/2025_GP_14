@@ -78,8 +78,9 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
   String _selectedPreference = 'any';
   String _originFloorLabel = 'GF';
   String _desiredStartFloorLabel = '';
-  String _estimatedTime = '2 min';
-  String _estimatedDistance = '166 m';
+  bool _isCalculating = false;
+  String _estimatedTime = '';
+  String _estimatedDistance = '';
 
   bool _usePinAsStart = true;
   Map<String, dynamic>? _customStartPoi;
@@ -757,6 +758,14 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
                             .trim()
                       : null),
               'category': item['category']?.toString(),
+              // ---- FIX: parse categories as List<String> ----
+              'categories': item['categories'] is List
+                  ? (item['categories'] as List)
+                        .map((e) => e.toString())
+                        .toList()
+                  : (item['category'] != null
+                        ? [item['category'].toString()]
+                        : []),
               'type': item['type']?.toString(),
               'gender': item['gender']?.toString(),
             });
@@ -999,6 +1008,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
         'z': first['z'],
         'material': material,
         'category': first['category'],
+        'categories': first['categories'] ?? [],
         'serviceType': first['type'],
         'gender': first['gender'],
         'description': first['description'],
@@ -1016,6 +1026,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
         'z': best['z'],
         'material': best['material'],
         'category': 'bathrooms',
+        'categories': [],
         'serviceType': 'bathroom_female_or_shared',
         'gender': 'female',
       });
@@ -1377,277 +1388,296 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       return;
     }
 
-    Map<String, double>? effectiveStart;
-    String? effectiveStartFloor;
+    if (mounted)
+      setState(() {
+        _isCalculating = true;
+        _estimatedTime = '';
+        _estimatedDistance = '';
+      });
 
-    if (_usePinAsStart) {
-      effectiveStart = _userPosBlender;
-      effectiveStartFloor = _originFloorLabel;
-    } else {
-      effectiveStart = _customStartPoi != null
-          ? {
-              'x': _customStartPoi!['x'],
-              'y': _customStartPoi!['y'],
-              'z': _customStartPoi!['z'],
-            }
-          : null;
-      effectiveStartFloor = _customStartPoi?['floor'];
-    }
+    try {
+      Map<String, double>? effectiveStart;
+      String? effectiveStartFloor;
 
-    Map<String, double>? effectiveDest =
-        _destPosBlender ??
-        (_selectedDestPoi != null
-            ? {
-                'x': _selectedDestPoi!['x'],
-                'y': _selectedDestPoi!['y'],
-                'z': _selectedDestPoi!['z'],
-              }
-            : null);
-    String? effectiveDestFloor = _selectedDestPoi?['floor'] ?? _destFloorLabel;
-
-    if (effectiveStart == null || effectiveDest == null) {
-      debugPrint('⚠️ Missing start or destination coordinates');
-      await _syncOverlaysForCurrentFloor();
-      return;
-    }
-
-    if (_destEntrances != null &&
-        _destEntrances!.length > 1 &&
-        effectiveStart != null) {
-      final startFloor = _toFNumber(
-        effectiveStartFloor ?? _desiredStartFloorLabel,
-      );
-      final destFloor = _toFNumber(_destFloorLabel ?? '');
-
-      if (startFloor == destFloor) {
-        double bestDistSq = double.infinity;
-        Map<String, double>? bestEntrance;
-
-        final sameFloorEntrances = _destEntrances!
-            .where(
-              (e) => _toFNumber(e['floor']?.toString() ?? '') == startFloor,
-            )
-            .toList();
-        final entrList = sameFloorEntrances.isNotEmpty
-            ? sameFloorEntrances
-            : _destEntrances!;
-
-        for (final e in entrList) {
-          final dx = (e['x'] as double) - (effectiveStart['x'] ?? 0);
-          final dy = (e['y'] as double) - (effectiveStart['y'] ?? 0);
-          final dz = (e['z'] as double) - (effectiveStart['z'] ?? 0);
-          final distSq = dx * dx + dy * dy + dz * dz;
-          if (distSq < bestDistSq) {
-            bestDistSq = distSq;
-            bestEntrance = {'x': e['x'], 'y': e['y'], 'z': e['z']};
-          }
-        }
-
-        if (bestEntrance != null) {
-          effectiveDest = bestEntrance;
-          _destPosBlender = bestEntrance;
-          if (_selectedDestPoi != null) {
-            _selectedDestPoi!['x'] = bestEntrance['x'];
-            _selectedDestPoi!['y'] = bestEntrance['y'];
-            _selectedDestPoi!['z'] = bestEntrance['z'];
-          }
-          debugPrint('✅ Chosen closest entrance');
-        }
+      if (_usePinAsStart) {
+        effectiveStart = _userPosBlender;
+        effectiveStartFloor = _originFloorLabel;
       } else {
-        debugPrint(
-          '⚠️ Start and destination on different floors – using first entrance',
-        );
-      }
-    }
-
-    final startLabel = effectiveStartFloor ?? _desiredStartFloorLabel;
-    final destLabel = effectiveDestFloor ?? '';
-    if (startLabel.trim().isEmpty) {
-      debugPrint('⚠️ Start floor unknown — abort routing');
-      await _syncOverlaysForCurrentFloor();
-      return;
-    }
-    final destCandidate = _floorLabelFromToken(destLabel) ?? destLabel;
-    final destFloor = destCandidate.isNotEmpty ? destCandidate : startLabel;
-
-    final startF = _toFNumber(startLabel);
-    final destF = _toFNumber(destFloor);
-
-    _originFloorLabelFixed ??= startLabel;
-    _destFloorLabelFixed ??= destFloor;
-    _originFNumberFixed ??= startF;
-    _destFNumberFixed ??= destF;
-
-    final startNm = await _ensureNavmeshLoadedForFNumber(startF);
-    final destNm = await _ensureNavmeshLoadedForFNumber(destF);
-    if (startNm == null || destNm == null) {
-      await _syncOverlaysForCurrentFloor();
-      return;
-    }
-    _navmeshF1 = _navmeshCache[_currentFloor];
-    await _ensureConnectorsLoaded();
-
-    _pathPointsByFloorGltf.clear();
-    _chosenConnectorId = null;
-    _connectorStartBlender = null;
-    _connectorDestBlender = null;
-
-    List<List<double>> computePathOn(
-      NavMesh nm,
-      Map<String, double> aBl,
-      Map<String, double> bBl,
-    ) {
-      final a = nm.snapPointXY([aBl['x']!, aBl['y']!, aBl['z']!]);
-      final b = [bBl['x']!, bBl['y']!, bBl['z']!];
-      var raw = nm.findPathFunnelBlenderXY(start: a, goal: b);
-      var sm = _smoothAndResamplePath(raw, nm);
-      if (sm.length < 2) {
-        raw = [a, b];
-        sm = _smoothAndResamplePath(raw, nm);
-        if (sm.length < 2) sm = raw;
-      }
-      return sm;
-    }
-
-    double pathLen(List<List<double>> pts) {
-      double sum = 0;
-      for (int i = 1; i < pts.length; i++) {
-        sum += _distXY(pts[i - 1], pts[i]);
-      }
-      return sum;
-    }
-
-    if (startF == destF) {
-      final pts = computePathOn(startNm, effectiveStart, effectiveDest);
-      final gltf = pts
-          .map((p) => _blenderToGltf({'x': p[0], 'y': p[1], 'z': p[2]}))
-          .toList();
-      _pathPointsByFloorGltf[startF] = gltf;
-    } else {
-      final pref = _selectedPreference.toLowerCase();
-      bool linksFloors(ConnectorLink c) =>
-          c.endpointsByFNumber.containsKey(startF) &&
-          c.endpointsByFNumber.containsKey(destF);
-
-      bool directionOk(ConnectorLink c) {
-        final t = _normalizeConnectorType(c.type);
-        return _connectorDirectionAllowed(
-          t,
-          int.tryParse(startF) ?? 1,
-          int.tryParse(destF) ?? 1,
-        );
+        effectiveStart = _customStartPoi != null
+            ? {
+                'x': _customStartPoi!['x'],
+                'y': _customStartPoi!['y'],
+                'z': _customStartPoi!['z'],
+              }
+            : null;
+        effectiveStartFloor = _customStartPoi?['floor'];
       }
 
-      bool matchesPref(ConnectorLink c) {
-        final t = _normalizeConnectorType(c.type);
-        return directionOk(c) && _connectorMatchesPreference(t, pref);
-      }
+      Map<String, double>? effectiveDest =
+          _destPosBlender ??
+          (_selectedDestPoi != null
+              ? {
+                  'x': _selectedDestPoi!['x'],
+                  'y': _selectedDestPoi!['y'],
+                  'z': _selectedDestPoi!['z'],
+                }
+              : null);
+      String? effectiveDestFloor =
+          _selectedDestPoi?['floor'] ?? _destFloorLabel;
 
-      final candidates = _connectors
-          .where((c) => linksFloors(c) && matchesPref(c))
-          .toList();
-      final pool = candidates.isNotEmpty
-          ? candidates
-          : _connectors.where((c) => linksFloors(c) && directionOk(c)).toList();
-
-      debugPrint(
-        '🧭 pref=$pref start=$startLabel($startF) dest=$destFloor($destF) matched=${candidates.length} pool=${pool.length}',
-      );
-      if (pool.isEmpty) {
-        debugPrint("⚠️ No connectors found linking $startLabel -> $destFloor");
+      if (effectiveStart == null || effectiveDest == null) {
+        debugPrint('⚠️ Missing start or destination coordinates');
         await _syncOverlaysForCurrentFloor();
         return;
       }
 
-      double bestScore = double.infinity;
-      ConnectorLink? best;
-      List<List<double>> bestA = const [];
-      List<List<double>> bestB = const [];
+      if (_destEntrances != null &&
+          _destEntrances!.length > 1 &&
+          effectiveStart != null) {
+        final startFloor = _toFNumber(
+          effectiveStartFloor ?? _desiredStartFloorLabel,
+        );
+        final destFloor = _toFNumber(_destFloorLabel ?? '');
 
-      final destCandidates = <Map<String, double>>[];
-      if (_destEntrances != null && _destEntrances!.isNotEmpty) {
-        for (final e in _destEntrances!) {
-          final ef = _toFNumber(e['floor']?.toString() ?? '');
-          if (ef == destF) {
-            destCandidates.add({
-              'x': (e['x'] as num).toDouble(),
-              'y': (e['y'] as num).toDouble(),
-              'z': (e['z'] as num).toDouble(),
-            });
+        if (startFloor == destFloor) {
+          double bestDistSq = double.infinity;
+          Map<String, double>? bestEntrance;
+
+          final sameFloorEntrances = _destEntrances!
+              .where(
+                (e) => _toFNumber(e['floor']?.toString() ?? '') == startFloor,
+              )
+              .toList();
+          final entrList = sameFloorEntrances.isNotEmpty
+              ? sameFloorEntrances
+              : _destEntrances!;
+
+          for (final e in entrList) {
+            final dx = (e['x'] as double) - (effectiveStart['x'] ?? 0);
+            final dy = (e['y'] as double) - (effectiveStart['y'] ?? 0);
+            final dz = (e['z'] as double) - (effectiveStart['z'] ?? 0);
+            final distSq = dx * dx + dy * dy + dz * dz;
+            if (distSq < bestDistSq) {
+              bestDistSq = distSq;
+              bestEntrance = {'x': e['x'], 'y': e['y'], 'z': e['z']};
+            }
           }
+
+          if (bestEntrance != null) {
+            effectiveDest = bestEntrance;
+            _destPosBlender = bestEntrance;
+            if (_selectedDestPoi != null) {
+              _selectedDestPoi!['x'] = bestEntrance['x'];
+              _selectedDestPoi!['y'] = bestEntrance['y'];
+              _selectedDestPoi!['z'] = bestEntrance['z'];
+            }
+            debugPrint('✅ Chosen closest entrance');
+          }
+        } else {
+          debugPrint(
+            '⚠️ Start and destination on different floors – using first entrance',
+          );
         }
       }
-      if (destCandidates.isEmpty && effectiveDest != null) {
-        destCandidates.add(effectiveDest);
-      }
 
-      Map<String, double>? bestDest;
-      for (final c in pool) {
-        final aPos = c.endpointsByFNumber[startF]!;
-        final bPos = c.endpointsByFNumber[destF]!;
-        final aPts = computePathOn(startNm, effectiveStart, aPos);
-        if (aPts.length < 2) continue;
-
-        for (final d in destCandidates) {
-          final bPts = computePathOn(destNm, bPos, d);
-          if (bPts.length < 2) continue;
-          final score = pathLen(aPts) + pathLen(bPts);
-          if (score < bestScore) {
-            bestScore = score;
-            best = c;
-            bestA = aPts;
-            bestB = bPts;
-            bestDest = d;
-          }
-        }
-      }
-      if (best == null) {
-        debugPrint("⚠️ Could not compute a valid connector path.");
+      final startLabel = effectiveStartFloor ?? _desiredStartFloorLabel;
+      final destLabel = effectiveDestFloor ?? '';
+      if (startLabel.trim().isEmpty) {
+        debugPrint('⚠️ Start floor unknown — abort routing');
+        await _syncOverlaysForCurrentFloor();
         return;
       }
+      final destCandidate = _floorLabelFromToken(destLabel) ?? destLabel;
+      final destFloor = destCandidate.isNotEmpty ? destCandidate : startLabel;
 
-      if (bestDest != null) {
-        effectiveDest = bestDest;
-        _destPosBlender = bestDest;
+      final startF = _toFNumber(startLabel);
+      final destF = _toFNumber(destFloor);
+
+      _originFloorLabelFixed ??= startLabel;
+      _destFloorLabelFixed ??= destFloor;
+      _originFNumberFixed ??= startF;
+      _destFNumberFixed ??= destF;
+
+      final startNm = await _ensureNavmeshLoadedForFNumber(startF);
+      final destNm = await _ensureNavmeshLoadedForFNumber(destF);
+      if (startNm == null || destNm == null) {
+        await _syncOverlaysForCurrentFloor();
+        return;
+      }
+      _navmeshF1 = _navmeshCache[_currentFloor];
+      await _ensureConnectorsLoaded();
+
+      _pathPointsByFloorGltf.clear();
+      _chosenConnectorId = null;
+      _connectorStartBlender = null;
+      _connectorDestBlender = null;
+
+      List<List<double>> computePathOn(
+        NavMesh nm,
+        Map<String, double> aBl,
+        Map<String, double> bBl,
+      ) {
+        final a = nm.snapPointXY([aBl['x']!, aBl['y']!, aBl['z']!]);
+        final b = [bBl['x']!, bBl['y']!, bBl['z']!];
+        var raw = nm.findPathFunnelBlenderXY(start: a, goal: b);
+        var sm = _smoothAndResamplePath(raw, nm);
+        if (sm.length < 2) {
+          raw = [a, b];
+          sm = _smoothAndResamplePath(raw, nm);
+          if (sm.length < 2) sm = raw;
+        }
+        return sm;
       }
 
-      _chosenConnectorId = '${best.type}:${best.id}';
-      debugPrint(
-        '✅ chosen connector pref=$pref -> $_chosenConnectorId score=${bestScore.toStringAsFixed(2)}',
-      );
-      _connectorStartBlender = best.endpointsByFNumber[startF];
-      _connectorDestBlender = best.endpointsByFNumber[destF];
+      double pathLen(List<List<double>> pts) {
+        double sum = 0;
+        for (int i = 1; i < pts.length; i++) {
+          sum += _distXY(pts[i - 1], pts[i]);
+        }
+        return sum;
+      }
 
-      final gltfA = bestA
-          .map((p) => _blenderToGltf({'x': p[0], 'y': p[1], 'z': p[2]}))
-          .toList();
-      final gltfB = bestB
-          .map((p) => _blenderToGltf({'x': p[0], 'y': p[1], 'z': p[2]}))
-          .toList();
-
-      _pathPointsByFloorGltf[startF] = gltfA;
-      _pathPointsByFloorGltf[destF] = gltfB;
-    }
-
-    _routeComputed = true;
-
-    if (_pathPointsByFloorGltf.isNotEmpty) {
-      final rawDist = _calculateTotalDistance();
-      final totalDist = rawDist * _unitToMeters;
-      _estimatedDistance = '${totalDist.toStringAsFixed(0)} m';
-      final timeSeconds = totalDist / 1.4;
-      if (timeSeconds < 50) {
-        _estimatedTime = 'Less than 1 min';
+      if (startF == destF) {
+        final pts = computePathOn(startNm, effectiveStart, effectiveDest);
+        final gltf = pts
+            .map((p) => _blenderToGltf({'x': p[0], 'y': p[1], 'z': p[2]}))
+            .toList();
+        _pathPointsByFloorGltf[startF] = gltf;
       } else {
-        final minutes = (timeSeconds / 60).ceil();
-        _estimatedTime = '$minutes min';
+        final pref = _selectedPreference.toLowerCase();
+        bool linksFloors(ConnectorLink c) =>
+            c.endpointsByFNumber.containsKey(startF) &&
+            c.endpointsByFNumber.containsKey(destF);
+
+        bool directionOk(ConnectorLink c) {
+          final t = _normalizeConnectorType(c.type);
+          return _connectorDirectionAllowed(
+            t,
+            int.tryParse(startF) ?? 1,
+            int.tryParse(destF) ?? 1,
+          );
+        }
+
+        bool matchesPref(ConnectorLink c) {
+          final t = _normalizeConnectorType(c.type);
+          return directionOk(c) && _connectorMatchesPreference(t, pref);
+        }
+
+        final candidates = _connectors
+            .where((c) => linksFloors(c) && matchesPref(c))
+            .toList();
+        final pool = candidates.isNotEmpty
+            ? candidates
+            : _connectors
+                  .where((c) => linksFloors(c) && directionOk(c))
+                  .toList();
+
+        debugPrint(
+          '🧭 pref=$pref start=$startLabel($startF) dest=$destFloor($destF) matched=${candidates.length} pool=${pool.length}',
+        );
+        if (pool.isEmpty) {
+          debugPrint(
+            "⚠️ No connectors found linking $startLabel -> $destFloor",
+          );
+          await _syncOverlaysForCurrentFloor();
+          return;
+        }
+
+        double bestScore = double.infinity;
+        ConnectorLink? best;
+        List<List<double>> bestA = const [];
+        List<List<double>> bestB = const [];
+
+        final destCandidates = <Map<String, double>>[];
+        if (_destEntrances != null && _destEntrances!.isNotEmpty) {
+          for (final e in _destEntrances!) {
+            final ef = _toFNumber(e['floor']?.toString() ?? '');
+            if (ef == destF) {
+              destCandidates.add({
+                'x': (e['x'] as num).toDouble(),
+                'y': (e['y'] as num).toDouble(),
+                'z': (e['z'] as num).toDouble(),
+              });
+            }
+          }
+        }
+        if (destCandidates.isEmpty && effectiveDest != null) {
+          destCandidates.add(effectiveDest);
+        }
+
+        Map<String, double>? bestDest;
+        for (final c in pool) {
+          final aPos = c.endpointsByFNumber[startF]!;
+          final bPos = c.endpointsByFNumber[destF]!;
+          final aPts = computePathOn(startNm, effectiveStart, aPos);
+          if (aPts.length < 2) continue;
+
+          for (final d in destCandidates) {
+            final bPts = computePathOn(destNm, bPos, d);
+            if (bPts.length < 2) continue;
+            final score = pathLen(aPts) + pathLen(bPts);
+            if (score < bestScore) {
+              bestScore = score;
+              best = c;
+              bestA = aPts;
+              bestB = bPts;
+              bestDest = d;
+            }
+          }
+        }
+        if (best == null) {
+          debugPrint("⚠️ Could not compute a valid connector path.");
+          return;
+        }
+
+        if (bestDest != null) {
+          effectiveDest = bestDest;
+          _destPosBlender = bestDest;
+        }
+
+        _chosenConnectorId = '${best.type}:${best.id}';
+        debugPrint(
+          '✅ chosen connector pref=$pref -> $_chosenConnectorId score=${bestScore.toStringAsFixed(2)}',
+        );
+        _connectorStartBlender = best.endpointsByFNumber[startF];
+        _connectorDestBlender = best.endpointsByFNumber[destF];
+
+        final gltfA = bestA
+            .map((p) => _blenderToGltf({'x': p[0], 'y': p[1], 'z': p[2]}))
+            .toList();
+        final gltfB = bestB
+            .map((p) => _blenderToGltf({'x': p[0], 'y': p[1], 'z': p[2]}))
+            .toList();
+
+        _pathPointsByFloorGltf[startF] = gltfA;
+        _pathPointsByFloorGltf[destF] = gltfB;
       }
-    } else {
-      _estimatedDistance = '? m';
-      _estimatedTime = '? min';
+
+      _routeComputed = true;
+
+      if (_pathPointsByFloorGltf.isNotEmpty) {
+        final rawDist = _calculateTotalDistance();
+        final totalDist = rawDist * _unitToMeters;
+        _estimatedDistance = '${totalDist.toStringAsFixed(0)} m';
+        final timeSeconds = totalDist / 1.4;
+        if (timeSeconds < 50) {
+          _estimatedTime = 'Less than 1 min';
+        } else {
+          final minutes = (timeSeconds / 60).ceil();
+          _estimatedTime = '$minutes min';
+        }
+      } else {
+        _estimatedDistance = '? m';
+        _estimatedTime = '? min';
+      }
+      if (mounted) setState(() {});
+      _syncOverlaysForCurrentFloor();
+    } finally {
+      if (mounted)
+        setState(() {
+          _isCalculating = false;
+        });
     }
-    if (mounted) setState(() {});
-    _syncOverlaysForCurrentFloor();
   }
 
   void _handlePoiMessage(String raw) {
@@ -3281,14 +3311,35 @@ const timer = setInterval(function() {
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              '$_estimatedTime ($_estimatedDistance)',
-                              style: const TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.black,
+                            if (_isCalculating)
+                              const Text(
+                                'Calculating…',
+                                style: TextStyle(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black,
+                                ),
+                              )
+                            else if (_routeComputed &&
+                                _estimatedTime.isNotEmpty &&
+                                _estimatedDistance.isNotEmpty)
+                              Text(
+                                '$_estimatedTime ($_estimatedDistance)',
+                                style: const TextStyle(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black,
+                                ),
+                              )
+                            else
+                              const Text(
+                                '',
+                                style: TextStyle(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black,
+                                ),
                               ),
-                            ),
                             const SizedBox(height: 4),
                             Text(
                               _selectedDestPoi?['name'] ?? widget.shopName,
@@ -3711,7 +3762,44 @@ class __PoiPickerSheetState extends State<_PoiPickerSheet> {
                   horizontal: 20,
                   vertical: 4,
                 ),
-                leading: Icon(Icons.store, color: Colors.grey[600], size: 24),
+                leading: () {
+                  List<String> cats = (poi['categories'] is List)
+                      ? List<String>.from(poi['categories'])
+                      : const <String>[];
+                  // If empty, fall back to the single category field
+                  if (cats.isEmpty && poi['category'] != null) {
+                    cats = [poi['category'].toString()];
+                  }
+
+                  final primaryCat = cats.isNotEmpty
+                      ? cats.first.toLowerCase()
+                      : '';
+
+                  IconData icon;
+                  if (primaryCat.contains('restaurant')) {
+                    icon = Icons.restaurant;
+                  } else if (primaryCat.contains('café')) {
+                    icon = Icons.local_cafe;
+                  } else if (primaryCat.contains('shop')) {
+                    icon = Icons.store;
+                  } else if (primaryCat == 'gates') {
+                    icon = Icons.door_front_door;
+                  } else if (primaryCat == 'bathrooms') {
+                    final gender = poi['gender']?.toString().toLowerCase();
+                    if (gender == 'female') {
+                      icon = Icons.woman;
+                    } else if (gender == 'male') {
+                      icon = Icons.man;
+                    } else {
+                      icon = Icons.wc;
+                    }
+                  } else if (primaryCat == 'prayer_rooms') {
+                    icon = Icons.mosque;
+                  } else {
+                    icon = Icons.store;
+                  }
+                  return Icon(icon, color: Colors.grey[600], size: 24);
+                }(),
                 title: Text(
                   poi['name'],
                   style: const TextStyle(

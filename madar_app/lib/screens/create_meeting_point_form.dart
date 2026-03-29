@@ -117,6 +117,9 @@ class MeetingPointParticipant {
       case 'declined':
         status = 'declined';
         break;
+      case 'cancelled':
+        status = 'cancelled';
+        break;
       default:
         status = 'pending';
     }
@@ -384,7 +387,11 @@ class MeetingPointService {
     if (me == null) return false;
     if (me.isDeclined) return false;
     // A pending invitee whose response window has closed should no longer
-    // see the invitation on the track page.
+    // see the invitation on the track page. This covers two cases:
+    // 1. The 2-min wait timer expired naturally.
+    // 2. The host clicked Proceed early (hostStep jumped to 5 while
+    //    waitDeadline was still in the future).
+    if (me.isPending && meeting.hostStep >= 5) return false;
     if (me.isPending &&
         meeting.waitDeadline != null &&
         !meeting.waitDeadline!.isAfter(MeetingPointService.serverNow)) {
@@ -497,6 +504,21 @@ class MeetingPointService {
           'updatedAt': FieldValue.serverTimestamp(),
         });
         await _markPendingNotificationsCancelled(meeting);
+      } catch (_) {}
+      return;
+    }
+
+    // Step 5: all previously-accepted participants cancelled their participation.
+    // Nobody is left — cancel the meeting so the host isn't stuck at step 5.
+    if (meeting.hostStep >= 5 &&
+        meeting.participants.isNotEmpty &&
+        !meeting.participants.any((p) => p.isAccepted)) {
+      try {
+        await _col.doc(meeting.id).update({
+          'status': 'cancelled',
+          'cancellationReason': 'all_participants_left',
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
       } catch (_) {}
       return;
     }
@@ -980,6 +1002,16 @@ class MeetingPointService {
       payload['suggestDeadline'] = Timestamp.fromDate(
         MeetingPointService.serverNow.add(_kSuggestDuration),
       );
+    }
+
+    // At step 5 (host confirmation phase), if this cancellation leaves no
+    // accepted participants, auto-cancel the meeting immediately.
+    // The host has no one to meet — no need to wait for their confirmation.
+    if (cancelParticipation &&
+        meeting.hostStep >= 5 &&
+        !updatedParticipants.any((p) => p.isAccepted)) {
+      payload['status'] = 'cancelled';
+      payload['cancellationReason'] = 'all_participants_left';
     }
 
     try {

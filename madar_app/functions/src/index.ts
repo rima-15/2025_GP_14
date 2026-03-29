@@ -723,6 +723,61 @@ export const onMeetingPointCancelled = onDocumentUpdated(
         }
       }
 
+      // All accepted participants cancelled at step 5 (setup phase):
+      // notify the host that everyone left.
+      if (
+        hostStep === 5 &&
+        !hasConfirmedAt &&
+        cancellationReason === "all_participants_left" &&
+        hostId
+      ) {
+        try {
+          const hostDoc = await db.collection("users").doc(hostId).get();
+          if (hostDoc.exists) {
+            const tokens: string[] = hostDoc.data()?.fcmTokens ?? [];
+            const venueName = (after.venueName ?? "").toString().trim();
+            const locationLabel = venueName ? ` at ${venueName}` : "";
+            const title = "Meeting Point Cancelled";
+            const body = `All participants cancelled their participation in the meeting point${locationLabel}.`;
+
+            const notifRef = db.collection("notifications").doc();
+            const notifId = notifRef.id;
+
+            if (tokens.length > 0) {
+              await admin.messaging().sendEachForMulticast({
+                notification: { title, body },
+                data: {
+                  type: "meetingPointCancelled",
+                  requestId: notifId,
+                  meetingPointId: meetingPointId,
+                },
+                tokens,
+              });
+            }
+
+            await notifRef.set({
+              userId: hostId,
+              type: "meetingPointCancelled",
+              requiresAction: false,
+              data: {
+                requestId: notifId,
+                meetingPointId: meetingPointId,
+                reason: "all_participants_left",
+              },
+              title,
+              body,
+              isRead: false,
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+          }
+        } catch (notifyError) {
+          console.error(
+            "Error sending host all-participants-left notification:",
+            notifyError
+          );
+        }
+      }
+
       // Host rejected suggested point (step 5, not confirmed yet):
       // notify accepted participants.
       if (

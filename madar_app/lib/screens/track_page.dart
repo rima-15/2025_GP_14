@@ -160,6 +160,12 @@ class _TrackPageState extends State<TrackPage> {
   /// immediately without waiting for the 2-second throttle.
   final Set<String> _reconciledStep5MeetingIds = {};
 
+  /// Guards stream resets in _maybeMaintainActiveMeetingIfNeeded so the reset
+  /// only fires once per (meetingId + hostStep) combination. Without this,
+  /// the reset fires every 2 s when writes fail for non-host users and causes
+  /// the UI to blink continuously between step 2 and step 3.
+  final Set<String> _maintainAttemptedKeys = {};
+
   /// Local approximate start time for step 3 (invitee), recorded the moment
   /// pendingCount hits 0. Used to show an immediate ~5-min countdown while
   /// waiting for Firestore to deliver hostStep=5 + suggestDeadline.
@@ -2332,12 +2338,14 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   }
 
   String? _currentStepTimerLabel(MeetingPointRecord meeting) {
-    // All participants responded and at least one accepted → meeting is
-    // transitioning from step 4 to step 5. Instead of hiding the timer,
-    // show an immediate ~5-min countdown using a local start time so the
-    // invitee doesn't see a gap before Firestore delivers suggestDeadline.
+    // Meeting is transitioning from step 4 → 5 (either all participants
+    // responded, or the 2-min wait deadline expired). Show an immediate
+    // ~5-min countdown using a local start time so the invitee doesn't see
+    // a gap or "00:00" before Firestore delivers hostStep=5+suggestDeadline.
+    final waitExpiredForTimer = meeting.waitDeadline != null &&
+        !meeting.waitDeadline!.isAfter(MeetingPointService.serverNow);
     if (meeting.hostStep == 4 &&
-        meeting.pendingCount == 0 &&
+        (meeting.pendingCount == 0 || waitExpiredForTimer) &&
         meeting.acceptedCount > 0) {
       final approxStart = _approxStep3StartByMeetingId[meeting.id];
       if (approxStart != null) {
@@ -2378,10 +2386,14 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     final me = meeting.participantFor(currentUserId);
     if (me == null || me.isPending) return 1;
     // Step 3 = waiting for host to confirm the suggested point.
-    // This happens either when the host explicitly advanced (hostStep >= 5)
-    // OR when no participants are still pending (everyone responded, so
-    // the wait-timer expiry will advance to step 5 imminently).
-    if (me.isAccepted && (meeting.hostStep >= 5 || meeting.pendingCount == 0)) {
+    // This happens when the host explicitly advanced (hostStep >= 5),
+    // OR when all participants responded (pendingCount == 0),
+    // OR when the 2-min wait deadline has expired (some may not have responded
+    // but the window closed — the accepted participants move to step 3).
+    final waitExpired = meeting.waitDeadline != null &&
+        !meeting.waitDeadline!.isAfter(MeetingPointService.serverNow);
+    if (me.isAccepted &&
+        (meeting.hostStep >= 5 || meeting.pendingCount == 0 || waitExpired)) {
       return 3;
     }
     if (me.isAccepted) return 2;
@@ -2417,11 +2429,17 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
   Future<void> _maybeMaintainActiveMeetingIfNeeded() async {
     // Check all blocking meetings for expired deadlines.
+    // Fall back through increasingly stale caches so this works even when
+    // the user is not on the Meeting Point tab (where _lastKnownBlockingMeetings
+    // and _lastKnownActiveMeetingCard are populated). _lastKnownActiveMeetingCount
+    // is always populated via the tab-header badge stream.
     final candidates = _lastKnownBlockingMeetings.isNotEmpty
         ? _lastKnownBlockingMeetings
         : (_lastKnownActiveMeetingCard != null
               ? [_lastKnownActiveMeetingCard!]
-              : <MeetingPointRecord>[]);
+              : (_lastKnownActiveMeetingCount != null
+                    ? [_lastKnownActiveMeetingCount!]
+                    : <MeetingPointRecord>[]));
 
     final now = DateTime.now();
     final needsMaintain = candidates.any((m) {
@@ -2445,6 +2463,13 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       return deadline != null && !deadline.isAfter(now);
     }, orElse: () => candidates.first);
     if (!meeting.isActive) return;
+
+    // Guard is BEFORE the call so stale Firestore cache data (delivered after
+    // a stream reset) never triggers a second maybeMaintain that overwrites
+    // suggestDeadline and resets the 5-min host-confirmation timer.
+    final resetKey = '${meeting.id}_${meeting.hostStep}';
+    if (_maintainAttemptedKeys.contains(resetKey)) return;
+    _maintainAttemptedKeys.add(resetKey);
 
     try {
       await MeetingPointService.maybeMaintain(meeting);
@@ -2742,17 +2767,20 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           });
         }
 
-        // Setup-phase: all participants responded and at least one accepted →
-        // advance hostStep 4→5 immediately without waiting for the throttle.
-        // This eliminates the brief period where the stale step-4 timer shows.
+        // Setup-phase: all participants responded (or wait deadline expired) and
+        // at least one accepted → record approximate step-3 start so invitees
+        // see an immediate ~5-min countdown before Firestore delivers
+        // hostStep=5+suggestDeadline.
         if (activeMeeting != null &&
             activeMeeting.hostStep == 4 &&
-            activeMeeting.pendingCount == 0 &&
             activeMeeting.acceptedCount > 0) {
-          // Record approximate step-3 start so invitees see an immediate
-          // ~5-min countdown before Firestore delivers hostStep=5+suggestDeadline.
-          _approxStep3StartByMeetingId[activeMeeting.id] ??=
-              MeetingPointService.serverNow;
+          final waitExpired = activeMeeting.waitDeadline != null &&
+              !activeMeeting.waitDeadline!
+                  .isAfter(MeetingPointService.serverNow);
+          if (activeMeeting.pendingCount == 0 || waitExpired) {
+            _approxStep3StartByMeetingId[activeMeeting.id] ??=
+                MeetingPointService.serverNow;
+          }
         }
 
         // Clean up the approx start once the real suggestDeadline is live.
@@ -4104,7 +4132,6 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                   child: const Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.people_outline, color: Colors.white, size: 16),
                       SizedBox(width: 6),
                       Text(
                         'View details',
@@ -4313,15 +4340,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                         ),
                         const SizedBox(height: 4),
                         if (timerLabel != null)
-                          _meetingTimerBadge(timerLabel)
-                        else
-                          Text(
-                            'Meeting point invitation',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[500],
-                            ),
-                          ),
+                          _meetingTimerBadge(timerLabel),
                       ],
                     ),
                   ),
@@ -4536,6 +4555,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         Expanded(
           child: SecondaryButton(
             text: 'Decline',
+            icon: Icons.cancel_outlined,
             onPressed: () => _declineMeetingInvite(meeting),
           ),
         ),
@@ -4543,6 +4563,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         Expanded(
           child: PrimaryButton(
             text: 'Accept',
+            icon: Icons.check_circle_outline,
             onPressed: () => _acceptMeetingInvite(meeting),
           ),
         ),
@@ -4975,16 +4996,25 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         return StreamBuilder<int>(
           stream: Stream.periodic(const Duration(seconds: 1), (i) => i),
           builder: (_, snapshot) {
-            // After the first tick, check if the meeting was cancelled/removed.
+            final live = _lastKnownBlockingMeetings.firstWhere(
+              (m) => m.id == meetingId,
+              orElse: () => meeting,
+            );
+
+            // Auto-close when the meeting is gone (cancelled) OR has been
+            // confirmed by the host. For cancellation, also show an error
+            // snackbar. For confirmation, close silently — the main UI will
+            // update and show the active meeting card.
             if (snapshot.hasData && !autoCloseScheduled) {
               final stillPresent = _lastKnownBlockingMeetings.any(
                 (m) => m.id == meetingId,
               );
-              if (!stillPresent) {
+              final isNowConfirmed = stillPresent && live.isConfirmed;
+              if (!stillPresent || isNowConfirmed) {
                 autoCloseScheduled = true;
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   if (ctx.mounted) Navigator.of(ctx).pop();
-                  if (mounted) {
+                  if (!isNowConfirmed && mounted) {
                     SnackbarHelper.showError(
                       context,
                       'The host rejected the suggested point. Meeting has been cancelled.',
@@ -4993,11 +5023,6 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 });
               }
             }
-
-            final live = _lastKnownBlockingMeetings.firstWhere(
-              (m) => m.id == meetingId,
-              orElse: () => meeting,
-            );
             final me = live.participantFor(currentUid);
             if (me == null) return const SizedBox.shrink();
             final step = _inviteeStep(live, currentUid);
@@ -5183,7 +5208,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                           ...[
                             if (step == 3) ...[
                               ...live.participants.where((p) => p.isAccepted),
-                              ...live.participants.where((p) => p.isCancelledParticipation),
+                              ...live.participants.where(
+                                (p) => p.isCancelledParticipation,
+                              ),
                             ] else
                               ...live.participants,
                           ].map(

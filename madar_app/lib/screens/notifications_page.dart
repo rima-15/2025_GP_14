@@ -278,6 +278,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
         _trackTerminatedStream().first,
         _trackCompletedStream().first,
         _trackCancelledStream().first,
+        _meetingPointCancelledStream().first,
         _locationRefreshStream().first,
       ]);
 
@@ -290,11 +291,13 @@ class _NotificationsPageState extends State<NotificationsPage> {
       final trackTerminated = results[6] as List<NotificationItem>;
       final trackCompleted = results[7] as List<NotificationItem>;
       final trackCancelled = results[8] as List<NotificationItem>;
-      final locationRefresh = results[9] as List<NotificationItem>;
+      final meetingPointCancelled = results[9] as List<NotificationItem>;
+      final locationRefresh = results[10] as List<NotificationItem>;
 
       final merged = _mergeNotifications(
         incomingTrack: incomingTrack,
         meetingPointRequests: meetingPointRequests,
+        meetingPointCancelled: meetingPointCancelled,
         senderResponses: senderResponses,
         trackStarted: trackStarted,
         trackTerminated: trackTerminated,
@@ -734,6 +737,38 @@ class _NotificationsPageState extends State<NotificationsPage> {
         });
   }
 
+  Stream<List<NotificationItem>> _meetingPointCancelledStream() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return const Stream.empty();
+
+    return FirebaseFirestore.instance
+        .collection('notifications')
+        .where('userId', isEqualTo: uid)
+        .where('type', isEqualTo: 'meetingPointCancelled')
+        .snapshots()
+        .map((snap) {
+          return snap.docs.map((doc) {
+            final d = doc.data();
+            final ts =
+                (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+            final data = d['data'] as Map<String, dynamic>? ?? {};
+            final requestId = (data['requestId'] ?? doc.id).toString();
+
+            return NotificationItem(
+              id: requestId,
+              notificationDocId: doc.id,
+              type: NotificationType.meetingPointCancelled,
+              title: d['title'] ?? 'Meeting Point Cancelled',
+              message: d['body'] ?? '',
+              timestamp: ts,
+              isRead: d['isRead'] ?? false,
+              requiresAction: d['requiresAction'] == true,
+              actionTaken: d['actionTaken'] == true,
+            );
+          }).toList();
+        });
+  }
+
   Stream<List<NotificationItem>> _locationRefreshStream() {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return const Stream.empty();
@@ -887,74 +922,103 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                             return StreamBuilder<
                                               List<NotificationItem>
                                             >(
-                                              stream: _locationRefreshStream(),
-                                              builder: (context, locationRefreshSnap) {
-                                                final locationRefresh =
-                                                    locationRefreshSnap.data ??
-                                                    [];
+                                              stream:
+                                                  _meetingPointCancelledStream(),
+                                              builder: (
+                                                context,
+                                                meetingPointCancelledSnap,
+                                              ) {
+                                                final meetingPointCancelled =
+                                                    meetingPointCancelledSnap
+                                                            .data ??
+                                                        [];
 
-                                                final hasAllData =
-                                                    docMapSnap.hasData &&
-                                                    notifSnap.hasData &&
-                                                    incomingSnap.hasData &&
-                                                    meetingSnap.hasData &&
-                                                    senderSnap.hasData &&
-                                                    trackStartedSnap.hasData &&
-                                                    trackTerminatedSnap
-                                                        .hasData &&
-                                                    trackCompletedSnap
-                                                        .hasData &&
-                                                    trackCancelledSnap
-                                                        .hasData &&
-                                                    locationRefreshSnap.hasData;
+                                                return StreamBuilder<
+                                                  List<NotificationItem>
+                                                >(
+                                                  stream:
+                                                      _locationRefreshStream(),
+                                                  builder: (
+                                                    context,
+                                                    locationRefreshSnap,
+                                                  ) {
+                                                    final locationRefresh =
+                                                        locationRefreshSnap
+                                                                .data ??
+                                                            [];
 
-                                                if (!hasAllData) {
-                                                  final cacheHasMeetingPoints =
-                                                      _cacheHasMeetingPointRequests();
-                                                  final meetingReady =
-                                                      meetingSnap.hasData;
-                                                  if (_cacheReady &&
-                                                      _initialFreezeReady &&
-                                                      (!cacheHasMeetingPoints ||
-                                                          meetingReady)) {
-                                                    _applyDerivedStateForCache(
-                                                      _cachedMerged,
-                                                    );
+                                                    final hasAllData =
+                                                        docMapSnap.hasData &&
+                                                        notifSnap.hasData &&
+                                                        incomingSnap.hasData &&
+                                                        meetingSnap.hasData &&
+                                                        senderSnap.hasData &&
+                                                        trackStartedSnap
+                                                            .hasData &&
+                                                        trackTerminatedSnap
+                                                            .hasData &&
+                                                        trackCompletedSnap
+                                                            .hasData &&
+                                                        trackCancelledSnap
+                                                            .hasData &&
+                                                        meetingPointCancelledSnap
+                                                            .hasData &&
+                                                        locationRefreshSnap
+                                                            .hasData;
+
+                                                    if (!hasAllData) {
+                                                      final cacheHasMeetingPoints =
+                                                          _cacheHasMeetingPointRequests();
+                                                      final meetingReady =
+                                                          meetingSnap.hasData;
+                                                      if (_cacheReady &&
+                                                          _initialFreezeReady &&
+                                                          (!cacheHasMeetingPoints ||
+                                                              meetingReady)) {
+                                                        _applyDerivedStateForCache(
+                                                          _cachedMerged,
+                                                        );
+                                                        return _buildNotificationsList(
+                                                          merged:
+                                                              _cachedMerged,
+                                                          readMap: readMap,
+                                                        );
+                                                      }
+                                                      return _buildInitialLoader();
+                                                    }
+
+                                                    final merged =
+                                                        _mergeNotifications(
+                                                          incomingTrack:
+                                                              incomingTrack,
+                                                          meetingPointRequests:
+                                                              meetingPointRequests,
+                                                          meetingPointCancelled:
+                                                              meetingPointCancelled,
+                                                          senderResponses:
+                                                              senderResponses,
+                                                          trackStarted:
+                                                              trackStarted,
+                                                          trackTerminated:
+                                                              trackTerminated,
+                                                          trackCompleted:
+                                                              trackCompleted,
+                                                          trackCancelled:
+                                                              trackCancelled,
+                                                          locationRefresh:
+                                                              locationRefresh,
+                                                          notifDocMap:
+                                                              notifDocMap,
+                                                        );
+
+                                                    _cachedMerged = merged;
+                                                    _cacheReady = true;
+
                                                     return _buildNotificationsList(
-                                                      merged: _cachedMerged,
+                                                      merged: merged,
                                                       readMap: readMap,
                                                     );
-                                                  }
-                                                  return _buildInitialLoader();
-                                                }
-
-                                                final merged =
-                                                    _mergeNotifications(
-                                                      incomingTrack:
-                                                          incomingTrack,
-                                                      meetingPointRequests:
-                                                          meetingPointRequests,
-                                                      senderResponses:
-                                                          senderResponses,
-                                                      trackStarted:
-                                                          trackStarted,
-                                                      trackTerminated:
-                                                          trackTerminated,
-                                                      trackCompleted:
-                                                          trackCompleted,
-                                                      trackCancelled:
-                                                          trackCancelled,
-                                                      locationRefresh:
-                                                          locationRefresh,
-                                                      notifDocMap: notifDocMap,
-                                                    );
-
-                                                _cachedMerged = merged;
-                                                _cacheReady = true;
-
-                                                return _buildNotificationsList(
-                                                  merged: merged,
-                                                  readMap: readMap,
+                                                  },
                                                 );
                                               },
                                             );
@@ -989,6 +1053,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
   List<NotificationItem> _mergeNotifications({
     required List<NotificationItem> incomingTrack,
     required List<NotificationItem> meetingPointRequests,
+    required List<NotificationItem> meetingPointCancelled,
     required List<NotificationItem> senderResponses,
     required List<NotificationItem> trackStarted,
     required List<NotificationItem> trackTerminated,
@@ -1000,6 +1065,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
     final merged = [
       ...incomingTrack,
       ...meetingPointRequests,
+      ...meetingPointCancelled,
       ...senderResponses,
       ...trackStarted,
       ...trackTerminated,
@@ -2187,6 +2253,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
         return Icons.navigation_outlined;
       case NotificationType.meetingPointRequest:
         return Icons.people_outline;
+      case NotificationType.meetingPointCancelled:
+        return Icons.cancel_outlined;
       case NotificationType.meetingPointConfirmation:
         return Icons.place_outlined;
       case NotificationType.meetingLocationRefresh:
@@ -2214,6 +2282,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
       case NotificationType.trackTerminated:
       case NotificationType.participantRejected:
       case NotificationType.participantCancelled:
+      case NotificationType.meetingPointCancelled:
         return AppColors.kError;
       case NotificationType.trackCancelled:
         return AppColors.kError;
@@ -3406,6 +3475,7 @@ enum NotificationType {
   locationRefresh,
   navigateRequest,
   meetingPointRequest,
+  meetingPointCancelled,
   meetingLocationRefresh,
   meetingPointConfirmation,
   allArrived,

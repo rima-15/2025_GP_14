@@ -566,6 +566,9 @@ export const onMeetingPointCancelled = onDocumentUpdated(
         .toString()
         .trim();
       const hostStep = Number(after.hostStep ?? 0);
+      const hasConfirmedAt =
+        after.confirmedAt != null &&
+        typeof after.confirmedAt?.toDate === "function";
 
       const participants: any[] = Array.isArray(after.participants)
         ? after.participants
@@ -700,6 +703,86 @@ export const onMeetingPointCancelled = onDocumentUpdated(
                 senderId: hostId,
                 senderName: hostName,
                 venueName: venueName || null,
+              },
+              title,
+              body,
+              isRead: false,
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+
+            ops++;
+            if (ops >= 450) {
+              commits.push(batch.commit());
+              batch = db.batch();
+              ops = 0;
+            }
+          }
+
+          if (ops > 0) commits.push(batch.commit());
+          if (commits.length > 0) await Promise.all(commits);
+        }
+      }
+
+      // Host rejected suggested point (step 5, not confirmed yet):
+      // notify accepted participants.
+      if (
+        hostStep === 5 &&
+        !hasConfirmedAt &&
+        cancellationReason !== "all_participants_declined" &&
+        cancellationReason !== "all_participants_left"
+      ) {
+        const acceptedIds = participants
+          .filter((p: any) => statusOf(p) === "accepted")
+          .map((p: any) => (p?.userId ?? "").toString().trim())
+          .filter((uid: string) => uid && uid !== hostId);
+
+        if (acceptedIds.length > 0 && hostId) {
+          const hostName =
+            (after.hostName ?? "Host").toString().trim() || "Host";
+          const title = "Meeting Point Cancelled";
+          const body = `${hostName} rejected the suggested meeting point.`;
+
+          let batch = db.batch();
+          let ops = 0;
+          const commits: Promise<any>[] = [];
+
+          for (const uid of acceptedIds) {
+            const userDoc = await db.collection("users").doc(uid).get();
+            if (!userDoc.exists) continue;
+
+            const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
+            const notifRef = db.collection("notifications").doc();
+            const notifId = notifRef.id;
+
+            if (tokens.length > 0) {
+              try {
+                await admin.messaging().sendEachForMulticast({
+                  notification: { title, body },
+                  data: {
+                    type: "meetingPointCancelled",
+                    requestId: notifId,
+                    meetingPointId: meetingPointId,
+                  },
+                  tokens,
+                });
+              } catch (err) {
+                console.error(
+                  `Failed to send meeting point rejected to ${uid}`,
+                  err
+                );
+              }
+            }
+
+            batch.set(notifRef, {
+              userId: uid,
+              type: "meetingPointCancelled",
+              requiresAction: false,
+              data: {
+                requestId: notifId,
+                meetingPointId: meetingPointId,
+                reason: "host_rejected_suggestion",
+                senderId: hostId,
+                senderName: hostName,
               },
               title,
               body,

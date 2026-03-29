@@ -514,11 +514,12 @@ class _NotificationsPageState extends State<NotificationsPage> {
               final requiresActionRaw =
                   d['requiresAction'] ?? (requestStatus == 'pending');
 
-              return NotificationItem(
-                id: meetingPointId,
-                notificationDocId: doc.id,
-                type: NotificationType.meetingPointRequest,
-                title: (d['title'] ?? 'Meeting Point Request').toString(),
+            return NotificationItem(
+              id: meetingPointId,
+              notificationDocId: doc.id,
+              type: NotificationType.meetingPointRequest,
+              meetingPointId: meetingPointId,
+              title: (d['title'] ?? 'Meeting Point Request').toString(),
                 message: (d['body'] ?? '').toString(),
                 timestamp: ts,
                 isRead: d['isRead'] ?? false,
@@ -753,11 +754,15 @@ class _NotificationsPageState extends State<NotificationsPage> {
                 (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
             final data = d['data'] as Map<String, dynamic>? ?? {};
             final requestId = (data['requestId'] ?? doc.id).toString();
+            final meetingPointId =
+                (data['meetingPointId'] ?? '').toString().trim();
 
             return NotificationItem(
               id: requestId,
               notificationDocId: doc.id,
               type: NotificationType.meetingPointCancelled,
+              meetingPointId:
+                  meetingPointId.isEmpty ? null : meetingPointId,
               title: d['title'] ?? 'Meeting Point Cancelled',
               message: d['body'] ?? '',
               timestamp: ts,
@@ -2403,6 +2408,29 @@ class _NotificationsPageState extends State<NotificationsPage> {
       return;
     }
 
+    if (notification.type == NotificationType.meetingPointCancelled) {
+      final rawMeetingPointId = notification.meetingPointId?.trim() ?? '';
+      final meetingPointId = rawMeetingPointId.isNotEmpty
+          ? rawMeetingPointId
+          : notification.id.trim();
+      MeetingPointRecord? meeting;
+      if (meetingPointId.isNotEmpty) {
+        meeting = await MeetingPointService.getById(meetingPointId);
+      }
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      final isHost =
+          meeting == null ? true : (uid != null && meeting.isHost(uid));
+
+      if (!mounted) return;
+      Navigator.pop(context, {
+        'page': 'history',
+        'meetingPointId': meetingPointId,
+        'historyMainTabIndex': 1,
+        'meetingFilterIndex': isHost ? 0 : 1,
+      });
+      return;
+    }
+
     final hasTrackRequestId =
         notification.trackRequestId != null &&
         notification.trackRequestId!.trim().isNotEmpty;
@@ -3490,6 +3518,7 @@ class NotificationItem {
   final bool isSystem;
   String? notificationDocId; // ?? New
   final String? trackRequestId;
+  final String? meetingPointId;
   final String? requestStatus;
   final DateTime? endAt;
   final bool requiresAction;
@@ -3516,6 +3545,7 @@ class NotificationItem {
     this.isSystem = false,
     this.notificationDocId,
     this.trackRequestId,
+    this.meetingPointId,
     this.requestStatus,
     this.endAt,
 

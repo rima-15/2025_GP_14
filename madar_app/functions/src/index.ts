@@ -872,6 +872,126 @@ export const onMeetingPointInviteWindowClosed = onDocumentUpdated(
 
 /* ------------------------------------------------------------------
 
+   Meeting Point Started Notification (Active)
+
+   - When a meeting point becomes active, notify accepted participants.
+
+-------------------------------------------------------------------*/
+
+export const onMeetingPointStarted = onDocumentUpdated(
+  "meetingPoints/{meetingPointId}",
+  async (event) => {
+    try {
+      const before = event.data?.before.data();
+      const after = event.data?.after.data();
+      if (!before || !after) return;
+
+      const normalizeStatus = (raw: any) => {
+        const s = (raw ?? "pending").toString().trim().toLowerCase();
+        return s === "active" ||
+          s === "pending" ||
+          s === "cancelled" ||
+          s === "completed"
+          ? s
+          : "pending";
+      };
+
+      const beforeStatus = normalizeStatus(before.status);
+      const afterStatus = normalizeStatus(after.status);
+      if (afterStatus !== "active" || beforeStatus === "active") return;
+
+      const meetingPointId = event.params.meetingPointId;
+      if (!meetingPointId) return;
+
+      const hostId = (after.hostId ?? "").toString().trim();
+      const hostName =
+        (after.hostName ?? "Someone").toString().trim() || "Someone";
+      const venueName = (after.venueName ?? "").toString().trim();
+      const pointName = (after.suggestedPoint ?? "").toString().trim();
+      const locationName = pointName || venueName || "the meeting point";
+
+      const participants: any[] = Array.isArray(after.participants)
+        ? after.participants
+        : [];
+      const statusOf = (p: any) =>
+        (p?.status ?? "pending").toString().trim().toLowerCase();
+      const acceptedIds = participants
+        .filter((p: any) => statusOf(p) === "accepted")
+        .map((p: any) => (p?.userId ?? "").toString().trim())
+        .filter((uid: string) => uid && uid !== hostId);
+
+      if (acceptedIds.length === 0) return;
+
+      const title = "Meeting point started";
+      const body = `${hostName} will meet you at ${locationName}.`;
+
+      let batch = db.batch();
+      let ops = 0;
+      const commits: Promise<any>[] = [];
+
+      for (const uid of acceptedIds) {
+        const userDoc = await db.collection("users").doc(uid).get();
+        if (!userDoc.exists) continue;
+
+        const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
+        const notifRef = db.collection("notifications").doc();
+        const notifId = notifRef.id;
+
+        if (tokens.length > 0) {
+          try {
+            await admin.messaging().sendEachForMulticast({
+              notification: { title, body },
+              data: {
+                type: "meetingPointStarted",
+                requestId: notifId,
+                meetingPointId: meetingPointId,
+              },
+              tokens,
+            });
+          } catch (err) {
+            console.error(
+              `Failed to send meeting point started to ${uid}`,
+              err
+            );
+          }
+        }
+
+        batch.set(notifRef, {
+          userId: uid,
+          type: "meetingPointStarted",
+          requiresAction: false,
+          data: {
+            requestId: notifId,
+            meetingPointId: meetingPointId,
+            senderId: hostId,
+            senderName: hostName,
+            pointName: pointName || null,
+            venueName: venueName || null,
+          },
+          title,
+          body,
+          isRead: false,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        ops++;
+        if (ops >= 450) {
+          commits.push(batch.commit());
+          batch = db.batch();
+          ops = 0;
+        }
+      }
+
+      if (ops > 0) commits.push(batch.commit());
+      if (commits.length > 0) await Promise.all(commits);
+    } catch (error) {
+      console.error("Error sending meeting point started notifications:", error);
+    }
+  }
+);
+
+/* ------------------------------------------------------------------
+
    Meeting Point Suggestions (Computed)
 
    - When hostStep becomes 5 (manual or auto), compute suggested meeting

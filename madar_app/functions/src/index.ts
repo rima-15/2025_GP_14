@@ -562,15 +562,89 @@ export const onMeetingPointCancelled = onDocumentUpdated(
       if (!meetingPointId) return;
 
       const hostId = (after.hostId ?? "").toString().trim();
+      const cancellationReason = (after.cancellationReason ?? "")
+        .toString()
+        .trim();
 
       const participants: any[] = Array.isArray(after.participants)
         ? after.participants
         : [];
 
+      const statusOf = (p: any) =>
+        (p?.status ?? "pending").toString().trim().toLowerCase();
+
+      const allDeclined =
+        participants.length > 0 &&
+        participants.every((p: any) => statusOf(p) === "declined");
+      const anyAccepted = participants.some(
+        (p: any) => statusOf(p) === "accepted"
+      );
+      const waitDeadline =
+        typeof after.waitDeadline?.toDate === "function"
+          ? after.waitDeadline.toDate()
+          : null;
+      const waitExpired = waitDeadline
+        ? waitDeadline.getTime() <= Date.now()
+        : false;
+
+      // Notify host only when no one accepted (all declined OR time expired with
+      // no accept). This matches "all_participants_declined" cancellation.
+      if (
+        hostId &&
+        cancellationReason !== "all_participants_left" &&
+        !anyAccepted &&
+        (allDeclined || waitExpired)
+      ) {
+        try {
+          const hostDoc = await db.collection("users").doc(hostId).get();
+          if (hostDoc.exists) {
+            const tokens: string[] = hostDoc.data()?.fcmTokens ?? [];
+            const venueName = (after.venueName ?? "").toString().trim();
+            const locationLabel = venueName ? ` at ${venueName}` : "";
+            const title = "Meeting Point Cancelled";
+            const body = `No one accepted the meeting point invitation${locationLabel}.`;
+
+            const notifRef = db.collection("notifications").doc();
+            const notifId = notifRef.id;
+
+            if (tokens.length > 0) {
+              await admin.messaging().sendEachForMulticast({
+                notification: { title, body },
+                data: {
+                  type: "meetingPointCancelled",
+                  requestId: notifId,
+                  meetingPointId: meetingPointId,
+                },
+                tokens,
+              });
+            }
+
+            await notifRef.set({
+              userId: hostId,
+              type: "meetingPointCancelled",
+              requiresAction: false,
+              data: {
+                requestId: notifId,
+                meetingPointId: meetingPointId,
+                reason: "no_accepts",
+              },
+              title,
+              body,
+              isRead: false,
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+          }
+        } catch (notifyError) {
+          console.error(
+            "Error sending host meeting point cancelled notification:",
+            notifyError
+          );
+        }
+      }
+
       const pendingIds = participants
         .filter((p: any) => {
-          const status = (p?.status ?? "pending").toString().trim().toLowerCase();
-          return status === "pending";
+          return statusOf(p) === "pending";
         })
         .map((p: any) => (p?.userId ?? "").toString().trim())
         .filter((uid: string) => uid && uid !== hostId);

@@ -339,7 +339,6 @@ class _HistoryPageState extends State<HistoryPage> {
     final hostId = (data['hostId'] ?? '').toString();
     final venueName = (data['venueName'] ?? '').toString();
     final suggestedPoint = (data['suggestedPoint'] ?? '').toString();
-    final cancellationReason = _deriveCancellationReason(data, uid);
     final hostName = (data['hostName'] ?? '').toString();
     final hostPhone = (data['hostPhone'] ?? '').toString();
     final createdAt = _parseTimestamp(data['createdAt']) ?? DateTime.now();
@@ -373,7 +372,7 @@ class _HistoryPageState extends State<HistoryPage> {
                   status: 'declined',
                   venueName: venueName,
                   suggestedPoint: suggestedPoint,
-                  cancellationReason: cancellationReason,
+                  cancellationReason: 'You declined this invitation',
                   hostId: hostId,
                   hostName: hostName,
                   hostPhone: hostPhone,
@@ -430,7 +429,7 @@ class _HistoryPageState extends State<HistoryPage> {
         status: 'terminated',
         venueName: venueName,
         suggestedPoint: suggestedPoint,
-        cancellationReason: cancellationReason,
+        cancellationReason: 'You left the meeting',
         hostId: hostId,
         hostName: hostName,
         hostPhone: hostPhone,
@@ -490,6 +489,20 @@ class _HistoryPageState extends State<HistoryPage> {
             }
           }
         }
+      }
+    }
+
+    final String cancellationReason;
+    if (displayStatus == 'terminated') {
+      cancellationReason = 'You left the meeting';
+    } else if (displayStatus == 'declined') {
+      cancellationReason = 'You declined this invitation';
+    } else {
+      final derived = _deriveCancellationReason(data, uid);
+      if (displayStatus == 'expired' && derived.isEmpty) {
+        cancellationReason = 'This meeting ended before you responded';
+      } else {
+        cancellationReason = derived;
       }
     }
 
@@ -1400,7 +1413,8 @@ class _HistoryPageState extends State<HistoryPage> {
               ],
             ),
             // ── Cancellation reason banner ────────────────────────────────
-            if (item.cancellationReason.isNotEmpty) ...[
+            if (item.cancellationReason.isNotEmpty &&
+                item.status == 'cancelled') ...[
               const SizedBox(height: 10),
               Container(
                 width: double.infinity,
@@ -1457,13 +1471,15 @@ class _HistoryPageState extends State<HistoryPage> {
                           'Venue: ',
                           item.venueName.isEmpty ? '—' : item.venueName,
                         ),
-                        const SizedBox(height: 4),
-                        _labeledDetail(
-                          'Suggested point: ',
-                          item.suggestedPoint.isEmpty
-                              ? '—'
-                              : item.suggestedPoint,
-                        ),
+                        if (item.suggestedPoint.isNotEmpty &&
+                            item.status != 'declined' &&
+                            item.status != 'expired') ...[
+                          const SizedBox(height: 4),
+                          _labeledDetail(
+                            'Suggested point: ',
+                            item.suggestedPoint,
+                          ),
+                        ],
                         const SizedBox(height: 4),
                         _labeledDetail(
                           'Date: ',

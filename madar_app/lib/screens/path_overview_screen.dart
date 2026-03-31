@@ -81,6 +81,9 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
   bool _isCalculating = false;
   String _estimatedTime = '';
   String _estimatedDistance = '';
+  bool _arSupported = false;
+  bool _arRefreshPending = false;
+  final Map<String, bool> _arSupportCache = {};
 
   bool _usePinAsStart = true;
   Map<String, dynamic>? _customStartPoi;
@@ -150,6 +153,140 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     if (m2 != null) return m2.group(1)!;
 
     return '';
+  }
+
+  Future<bool> _checkArSupportForDestination() async {
+    // No destination coordinates → AR not possible
+    if (_destPosBlender == null) return false;
+
+    // If no selected destination POI, assume it's a custom pin (user placed) → valid
+    if (_selectedDestPoi == null) return true;
+
+    final dest = _selectedDestPoi!;
+    final destType = dest['type'] ?? '';
+
+    // Service destinations (bathrooms, prayer room) have predefined coordinates → valid
+    final name = (dest['name'] ?? '').toString().toLowerCase();
+    if (name == 'female bathroom' ||
+        name == 'male bathroom' ||
+        name == 'prayer room') {
+      return true;
+    }
+
+    // For POIs, check Firestore for worldPosition
+    if (destType == 'poi') {
+      // Use a cache key
+      final cacheKey = dest['id'] ?? dest['material'] ?? dest['name'] ?? '';
+      if (cacheKey.isNotEmpty && _arSupportCache.containsKey(cacheKey)) {
+        return _arSupportCache[cacheKey]!;
+      }
+
+      // Helper to fetch place document by various identifiers, returns null if not found
+      Future<DocumentSnapshot<Map<String, dynamic>>?>
+      _fetchPlaceDocument() async {
+        // 1. Try by place ID (most reliable)
+        String? placeId = dest['id']?.toString();
+        if (placeId != null && placeId.isNotEmpty) {
+          final doc = await FirebaseFirestore.instance
+              .collection('places')
+              .doc(placeId)
+              .get();
+          if (doc.exists) return doc;
+        }
+
+        // 2. Try by poiMaterial (raw)
+        final material = dest['material']?.toString();
+        if (material != null && material.isNotEmpty) {
+          final snap = await FirebaseFirestore.instance
+              .collection('places')
+              .where('venue_ID', isEqualTo: 'ChIJcYTQDwDjLj4RZEiboV6gZzM')
+              .where('poiMaterial', isEqualTo: material)
+              .limit(1)
+              .get();
+          if (snap.docs.isNotEmpty) return snap.docs.first;
+        }
+
+        // 3. Try by poiMaterial without suffix (e.g., POIMAT_Balenciaga.001 → POIMAT_Balenciaga)
+        if (material != null && material.isNotEmpty) {
+          final base = material.replaceAll(RegExp(r'\.\d+$'), '');
+          if (base != material) {
+            final snap = await FirebaseFirestore.instance
+                .collection('places')
+                .where('venue_ID', isEqualTo: 'ChIJcYTQDwDjLj4RZEiboV6gZzM')
+                .where('poiMaterial', isEqualTo: base)
+                .limit(1)
+                .get();
+            if (snap.docs.isNotEmpty) return snap.docs.first;
+          }
+        }
+
+        // 4. Try by placeName (cleaned name)
+        final placeName = dest['name']?.toString();
+        if (placeName != null && placeName.isNotEmpty) {
+          final snap = await FirebaseFirestore.instance
+              .collection('places')
+              .where('venue_ID', isEqualTo: 'ChIJcYTQDwDjLj4RZEiboV6gZzM')
+              .where('placeName', isEqualTo: placeName)
+              .limit(1)
+              .get();
+          if (snap.docs.isNotEmpty) return snap.docs.first;
+        }
+
+        // 5. Last resort: try to find by material normalized using client-side fetch
+        if (material != null && material.isNotEmpty) {
+          final norm = _normPoiKey(material);
+          final allSnap = await FirebaseFirestore.instance
+              .collection('places')
+              .where('venue_ID', isEqualTo: 'ChIJcYTQDwDjLj4RZEiboV6gZzM')
+              .get();
+          for (final doc in allSnap.docs) {
+            final docMat = doc.data()['poiMaterial']?.toString();
+            if (docMat != null && _normPoiKey(docMat) == norm) {
+              return doc;
+            }
+            final docName = doc.data()['placeName']?.toString();
+            if (docName != null && _normPoiKey(docName) == norm) {
+              return doc;
+            }
+          }
+        }
+
+        return null; // Not found
+      }
+
+      final doc = await _fetchPlaceDocument();
+      if (doc != null && doc.exists) {
+        final data = doc.data();
+        final supported =
+            data != null &&
+            data.containsKey('worldPosition') &&
+            data['worldPosition'] != null;
+        if (cacheKey.isNotEmpty) _arSupportCache[cacheKey] = supported;
+        return supported;
+      }
+
+      // Not found in Firestore → assume not supported
+      if (cacheKey.isNotEmpty) _arSupportCache[cacheKey] = false;
+      return false;
+    }
+
+    // Any other type (e.g., custom pin) → assume valid
+    return true;
+  }
+
+  Future<void> _refreshArSupport() async {
+    if (_arRefreshPending) return; // prevent overlapping runs
+    _arRefreshPending = true;
+    try {
+      final supported = await _checkArSupportForDestination();
+      if (mounted && _arSupported != supported) {
+        setState(() {
+          _arSupported = supported;
+        });
+      }
+    } finally {
+      _arRefreshPending = false;
+    }
   }
 
   int? _fNumberFromLabel(String? floorLabel) {
@@ -1148,6 +1285,18 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
         }
       });
 
+      // 🔥 Set _selectedDestPoi with full entrance data
+      _selectedDestPoi = {
+        'name': _displayNameFromEntrance(first, name),
+        'type': 'poi',
+        'floor': _destFloorLabel ?? first['floor'],
+        'x': first['x'],
+        'y': first['y'],
+        'z': first['z'],
+        'material': first['material'],
+        'id': first['id'],
+      };
+
       // Try to pick a better label from venue maps
       if (_venueMaps.isNotEmpty) {
         for (final vm in _venueMaps) {
@@ -1383,6 +1532,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
   Future<void> _maybeComputeAndPushPath() async {
     if (_booting) return;
     await _resolveDestinationFromEntrances();
+    _refreshArSupport();
     if (_routeComputed) {
       await _syncOverlaysForCurrentFloor();
       return;
@@ -1422,6 +1572,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
                   'z': _selectedDestPoi!['z'],
                 }
               : null);
+      _refreshArSupport();
       String? effectiveDestFloor =
           _selectedDestPoi?['floor'] ?? _destFloorLabel;
 
@@ -2329,11 +2480,14 @@ const timer = setInterval(function() {
       await _loadVenueMaps();
       await _loadEntrances();
       await _loadActiveRequests();
-      await _resolveDestinationFromEntrances();
-
+      await _resolveDestinationFromEntrances(); // sets _selectedDestPoi and _destPosBlender
+      _refreshArSupport();
       await _loadUserBlenderPosition();
 
-      if (_destPosBlender != null) {
+      // No need to set _selectedDestPoi again here; entrances already set it.
+      // If there's a case where entrances didn't find it, fallback to a default.
+      if (_selectedDestPoi == null && _destPosBlender != null) {
+        // Fallback for destinations not in entrances (custom pin, etc.)
         _selectedDestPoi = {
           'name': widget.shopName,
           'type': 'poi',
@@ -2343,12 +2497,14 @@ const timer = setInterval(function() {
           'z': _destPosBlender!['z'],
           'material': _pendingPoiToHighlight ?? '',
         };
+        _refreshArSupport();
       }
 
       final serviceDest = _findServiceDestinationOption(widget.shopId);
       if (serviceDest != null) {
         _selectedDestPoi = serviceDest;
         _pendingPoiToHighlight = serviceDest['material']?.toString();
+        _refreshArSupport();
       }
 
       final target = (_desiredStartFloorLabel.isNotEmpty)
@@ -2857,6 +3013,8 @@ const timer = setInterval(function() {
           _originFNumberFixed = null;
           _selectedPreference = 'any';
         });
+        _refreshArSupport();
+
         final blender = pinResult['blender'];
         _pendingUserPinGltf = {
           'x': blender['x'].toDouble(),
@@ -2999,6 +3157,7 @@ const timer = setInterval(function() {
         _selectedPreference = 'any';
         _destEntrances = null;
       });
+      _refreshArSupport();
 
       _routeComputed = false;
       _pathPointsByFloorGltf.clear();
@@ -3023,6 +3182,7 @@ const timer = setInterval(function() {
         _destFNumberFixed = null;
         _selectedPreference = 'any';
       });
+      _refreshArSupport();
 
       final normName = _normPoiKey(result['material']);
       if (_entrancesByPoi.containsKey(normName)) {
@@ -3357,7 +3517,8 @@ const timer = setInterval(function() {
                     const SizedBox(height: 20),
                     PrimaryButton(
                       text: 'Start AR Navigation',
-                      onPressed: _openNavigationAR,
+                      enabled: _arSupported,
+                      onPressed: _arSupported ? _openNavigationAR : null,
                     ),
                     SizedBox(height: MediaQuery.of(context).padding.bottom),
                   ],
@@ -3544,10 +3705,11 @@ class __PoiPickerSheetState extends State<_PoiPickerSheet> {
   }
 
   void _filter() {
-    final query = _searchController.text.toLowerCase();
+    final query = _searchController.text.trim().toLowerCase();
     setState(() {
       _filtered = widget.pois.where((p) {
-        return p['name'].toLowerCase().contains(query);
+        final name = (p['name'] ?? '').toString().trim().toLowerCase();
+        return name.contains(query);
       }).toList();
     });
   }

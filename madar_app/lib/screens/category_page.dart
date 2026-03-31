@@ -252,90 +252,83 @@ class _CategoryPageState extends State<CategoryPage>
   }
 
   Future<void> _openNavigationFlow(
-    String placeId,
-    String placeName,
-    String? poiMaterial,
-    String floorSrc,
-  ) async {
-    final normalizedName = placeName.trim().toLowerCase();
-    final isServicesCategory =
-        widget.categoryName.trim().toLowerCase() == 'services';
+  String placeId,
+  String placeName,
+  String? poiMaterial,
+  String floorSrc,
+) async {
+  final normalizedName = placeName.trim().toLowerCase();
+  final isServicesCategory =
+      widget.categoryName.trim().toLowerCase() == 'services';
 
-    // Services use logical routing from entrances JSON,
-    // so they should NOT require Firestore worldPosition on the tapped doc.
-    if (isServicesCategory) {
-      if (normalizedName == 'female bathroom') {
-        showNavigationDialog(
-          context,
-          'Female Bathroom',
-          'service_bathroom_female',
-          destinationPoiMaterial: '',
-          floorSrc: floorSrc,
-          destinationFloorLabel: _floorLabelFromSrc(floorSrc),
-        );
-        return;
-      }
-
-      if (normalizedName == 'male bathroom') {
-        showNavigationDialog(
-          context,
-          'Male Bathroom',
-          'service_bathroom_male',
-          destinationPoiMaterial: '',
-          floorSrc: floorSrc,
-          destinationFloorLabel: _floorLabelFromSrc(floorSrc),
-        );
-        return;
-      }
-
-      if (normalizedName == 'prayer room') {
-        showNavigationDialog(
-          context,
-          'Prayer Room',
-          'service_prayer_room',
-          destinationPoiMaterial: '',
-          floorSrc: floorSrc,
-          destinationFloorLabel: _floorLabelFromSrc(floorSrc),
-        );
-        return;
-      }
-    }
-
-    final hasPosition = await _hasWorldPosition(placeId);
-    if (!hasPosition) {
-      if (!mounted) return;
-      _showNoPositionDialog(placeName);
-      return;
-    }
-    if (!mounted) return;
-
-    var material = (poiMaterial ?? '').trim();
-    if (material.isEmpty) {
-      material = 'POIMAT_${placeName.trim()}';
-    }
-
-    if (material.toUpperCase().startsWith('POI_')) {
-      material = 'POIMAT_${material.substring(4)}';
-    }
-
-    debugPrint(
-      '🧾 Category selected: name="$placeName" -> material="$material"',
-    );
-
-    if (material.isEmpty) {
-      debugPrint('❌ No material field found in Firestore for "$placeName"');
+  // Services use logical routing from entrances JSON,
+  // so they should NOT require Firestore worldPosition on the tapped doc.
+  if (isServicesCategory) {
+    if (normalizedName == 'female bathroom') {
+      showNavigationDialog(
+        context,
+        'Female Bathroom',
+        'service_bathroom_female',
+        destinationPoiMaterial: '',
+        floorSrc: floorSrc,
+        destinationFloorLabel: _floorLabelFromSrc(floorSrc),
+      );
       return;
     }
 
-    showNavigationDialog(
-      context,
-      placeName,
-      placeId,
-      destinationPoiMaterial: material,
-      floorSrc: floorSrc,
-      destinationFloorLabel: _floorLabelFromSrc(floorSrc),
-    );
+    if (normalizedName == 'male bathroom') {
+      showNavigationDialog(
+        context,
+        'Male Bathroom',
+        'service_bathroom_male',
+        destinationPoiMaterial: '',
+        floorSrc: floorSrc,
+        destinationFloorLabel: _floorLabelFromSrc(floorSrc),
+      );
+      return;
+    }
+
+    if (normalizedName == 'prayer room') {
+      showNavigationDialog(
+        context,
+        'Prayer Room',
+        'service_prayer_room',
+        destinationPoiMaterial: '',
+        floorSrc: floorSrc,
+        destinationFloorLabel: _floorLabelFromSrc(floorSrc),
+      );
+      return;
+    }
   }
+
+  // For non‑services, directly proceed to navigation dialog
+  var material = (poiMaterial ?? '').trim();
+  if (material.isEmpty) {
+    material = 'POIMAT_${placeName.trim()}';
+  }
+
+  if (material.toUpperCase().startsWith('POI_')) {
+    material = 'POIMAT_${material.substring(4)}';
+  }
+
+  debugPrint(
+    '🧾 Category selected: name="$placeName" -> material="$material"',
+  );
+
+  if (material.isEmpty) {
+    debugPrint('❌ No material field found in Firestore for "$placeName"');
+    return;
+  }
+
+  showNavigationDialog(
+    context,
+    placeName,
+    placeId,
+    destinationPoiMaterial: material,
+    floorSrc: floorSrc,
+    destinationFloorLabel: _floorLabelFromSrc(floorSrc),
+  );
+}
 
   // ---------- Build ----------
 

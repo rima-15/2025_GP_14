@@ -171,6 +171,12 @@ class _TrackPageState extends State<TrackPage> {
   /// waiting for Firestore to deliver hostStep=5 + suggestDeadline.
   final Map<String, DateTime> _approxStep3StartByMeetingId = {};
 
+  /// Last known non-null timer label per meeting, used as a fallback to
+  /// prevent the 1-2 s flicker when activeDeadline is briefly null during
+  /// Firestore step transitions (e.g. hostStep 4 → 5 before suggestDeadline
+  /// arrives).
+  final Map<String, String> _cachedInviteTimerLabel = {};
+
   static const Duration _kMeetingMaintainThrottle = Duration(seconds: 2);
 
   /// Key for the tile to scroll to when opening from notification (by request ID).
@@ -2844,15 +2850,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               ),
             ),
             const SizedBox(height: 10),
-            if (isFirstLoad)
-              const SizedBox(
-                height: 4,
-                child: LinearProgressIndicator(
-                  color: AppColors.kGreen,
-                  backgroundColor: Colors.black12,
-                ),
-              )
-            else if (confirmedMeeting == null &&
+            if (confirmedMeeting == null &&
                 activeMeeting == null &&
                 pendingMeetings.isEmpty) ...[
               // ── Nothing at all ──────────────────────────────────────────
@@ -4280,7 +4278,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   ) {
     final isExpanded = _expandedMeetingInviteId == meeting.id;
     final isHighlighted = _highlightMeetingInviteId == meeting.id;
-    final timerLabel = _currentStepTimerLabel(meeting);
+    final computed = _currentStepTimerLabel(meeting);
+    if (computed != null) _cachedInviteTimerLabel[meeting.id] = computed;
+    final timerLabel = computed ?? _cachedInviteTimerLabel[meeting.id];
 
     return Container(
       decoration: BoxDecoration(

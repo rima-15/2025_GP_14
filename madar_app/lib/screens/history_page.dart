@@ -346,16 +346,10 @@ class _HistoryPageState extends State<HistoryPage> {
     final participants = _parseParticipants(data['participants']);
 
     // ── Still-pending meeting ─────────────────────────────────────────────
-    // Only show in history for a participant who has already declined.
+    // Show immediately in history when this user declined, cancelled
+    // participation, or their invitation window has already closed (expired).
     if (status == 'pending') {
       if (hostId == uid) return null; // host still has an active meeting
-      for (final p in participants) {
-        if (p.userId == uid) {
-          // participant found — only show if they declined
-          return null; // still pending for this user (non-declined)
-        }
-      }
-      // check raw for declined
       final rawParticipants = data['participants'];
       if (rawParticipants is List) {
         for (final p in rawParticipants) {
@@ -366,7 +360,8 @@ class _HistoryPageState extends State<HistoryPage> {
                   .toString()
                   .trim()
                   .toLowerCase();
-              if (pStatus == 'declined') {
+              // Declined at invitation OR cancelled participation in step 2/3.
+              if (pStatus == 'declined' || pStatus == 'cancelled') {
                 return HistoryMeetingPoint(
                   id: d.id,
                   status: 'declined',
@@ -382,12 +377,36 @@ class _HistoryPageState extends State<HistoryPage> {
                   participants: participants,
                 );
               }
-              break;
+              // Invitation window closed (timer expired or host already proceeded).
+              final waitDeadline = _parseTimestamp(data['waitDeadline']);
+              final hostStep = (data['hostStep'] is num)
+                  ? (data['hostStep'] as num).toInt()
+                  : 4;
+              if (pStatus == 'pending' &&
+                  (hostStep >= 5 ||
+                      (waitDeadline != null &&
+                          !waitDeadline.isAfter(DateTime.now())))) {
+                return HistoryMeetingPoint(
+                  id: d.id,
+                  status: 'expired',
+                  venueName: venueName,
+                  suggestedPoint: suggestedPoint,
+                  cancellationReason: 'This meeting ended before you responded',
+                  hostId: hostId,
+                  hostName: hostName,
+                  hostPhone: hostPhone,
+                  isHost: false,
+                  createdAt: createdAt,
+                  updatedAt: updatedAt,
+                  participants: participants,
+                );
+              }
+              return null; // invitation still active for this user
             }
           }
         }
       }
-      return null; // still pending for this user
+      return null; // user not found in participants list
     }
 
     // ── Terminal meeting ──────────────────────────────────────────────────
@@ -453,8 +472,21 @@ class _HistoryPageState extends State<HistoryPage> {
                   .toString()
                   .trim()
                   .toLowerCase();
-              if (pStatus == 'pending') displayStatus = 'expired';
-              if (pStatus == 'declined') displayStatus = 'declined';
+              // 'cancelled' = participant used "Cancel participation" in step 2/3.
+              if (pStatus == 'declined' || pStatus == 'cancelled') displayStatus = 'declined';
+              // Only treat as 'expired' when the timer actually ran out.
+              // If the host cancelled before the deadline, keep 'cancelled'
+              // so the reason shows as "Cancelled by host".
+              if (pStatus == 'pending' && status == 'cancelled') {
+                final waitDeadline = _parseTimestamp(data['waitDeadline']);
+                final hostStep = (data['hostStep'] is num)
+                    ? (data['hostStep'] as num).toInt()
+                    : 4;
+                final timerExpired = waitDeadline != null &&
+                    !waitDeadline.isAfter(DateTime.now());
+                if (timerExpired || hostStep >= 5) displayStatus = 'expired';
+                // else: displayStatus stays 'cancelled' → "Cancelled by host"
+              }
               break;
             }
           }
@@ -549,20 +581,19 @@ class _HistoryPageState extends State<HistoryPage> {
         ? rawParticipants.whereType<Map>().toList()
         : <Map>[];
 
-    final allDeclined =
-        parts.isNotEmpty &&
-        parts.every(
-          (p) => (p['status'] ?? '').toString().toLowerCase() == 'declined',
-        );
     final anyAccepted = parts.any(
       (p) => (p['status'] ?? '').toString().toLowerCase() == 'accepted',
     );
 
     if (isHost) {
-      if (allDeclined) return 'All participants declined the request';
       if (hostStep == 5 && !wasInArrivalPhase)
         return 'Host (you) rejected the suggested meeting point';
-      if (!anyAccepted) return 'None of participants respond';
+      // 'all_participants_declined' is written by the auto-cancel logic when
+      // the timer expired or everyone declined/left — nobody accepted at all.
+      // An empty storedReason means the host manually cancelled before anyone
+      // had a chance to respond.
+      if (!anyAccepted && storedReason == 'all_participants_declined')
+        return 'None of participants accept';
       return 'You cancelled this request for all participants';
     } else {
       if (hostStep == 5 && !wasInArrivalPhase)
@@ -1099,7 +1130,7 @@ class _HistoryPageState extends State<HistoryPage> {
                 HistoryMeetingPoint(
                   id: 'demo_sent_1',
                   status: 'cancelled',
-                  cancellationReason: 'All participants declined the request',
+                  cancellationReason: 'None of participants accept',
                   venueName: 'King Khalid International Airport',
                   hostId: 'demo_me',
                   hostName: 'ar saeed',
@@ -1112,7 +1143,7 @@ class _HistoryPageState extends State<HistoryPage> {
                 HistoryMeetingPoint(
                   id: 'demo_sent_2',
                   status: 'cancelled',
-                  cancellationReason: 'None of participants respond',
+                  cancellationReason: 'None of participants accept',
                   venueName: 'King Khalid International Airport',
                   hostId: 'demo_me',
                   hostName: 'ar saeed',

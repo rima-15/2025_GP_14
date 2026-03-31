@@ -547,10 +547,15 @@ class MeetingPointService {
     if (meeting.hostStep == 4 && meeting.waitDeadline != null) {
       if (!meeting.waitDeadline!.isAfter(now)) {
         if (meeting.acceptedCount <= 0) {
+          final anyCancelledParticipation = meeting.participants.any(
+            (p) => p.isCancelledParticipation,
+          );
           try {
             await _col.doc(meeting.id).update({
               'status': 'cancelled',
-              'cancellationReason': 'all_participants_declined',
+              'cancellationReason': anyCancelledParticipation
+                  ? 'all_participants_left'
+                  : 'all_participants_declined',
               'updatedAt': FieldValue.serverTimestamp(),
             });
             await _markPendingNotificationsCancelled(meeting);
@@ -984,34 +989,44 @@ class MeetingPointService {
       'updatedAt': FieldValue.serverTimestamp(),
     };
 
-    final allDeclined =
-        updatedParticipants.isNotEmpty &&
-        updatedParticipants.every((p) => p.isDeclined);
-    if (allDeclined) {
+    final noPendingLeft = updatedParticipants.every((p) => !p.isPending);
+    final anyAccepted = updatedParticipants.any((p) => p.isAccepted);
+    final anyCancelledParticipation = updatedParticipants.any(
+      (p) => p.isCancelledParticipation,
+    );
+
+    // Cancel immediately when no invitee is still deciding and nobody accepted.
+    // Covers: all declined, all cancelled participation, or a mix of both.
+    // At step 4: only fires once every invitee has given their answer.
+    // At step 5: invitees should have all responded already (no pending left).
+    if (noPendingLeft && !anyAccepted) {
       payload['status'] = 'cancelled';
-      payload['cancellationReason'] = 'all_participants_declined';
+      payload['cancellationReason'] = anyCancelledParticipation
+          ? 'all_participants_left'
+          : 'all_participants_declined';
+    }
+
+    // Edge case at step 5: some invitees may still be 'pending' (invitation
+    // expired mid-flow) yet no accepted participants remain — cancel now.
+    if (!payload.containsKey('status') &&
+        cancelParticipation &&
+        meeting.hostStep >= 5 &&
+        !anyAccepted) {
+      payload['status'] = 'cancelled';
+      payload['cancellationReason'] = 'all_participants_left';
     }
 
     // Auto-advance to step 5 when every invitee has responded and at least
     // one accepted — host no longer needs to manually tap "Proceed", and the
     // transition works even if the host is offline.
-    final noneLeft = updatedParticipants.every((p) => !p.isPending);
-    final anyAccepted = updatedParticipants.any((p) => p.isAccepted);
-    if (!allDeclined && noneLeft && anyAccepted && meeting.hostStep == 4) {
+    if (!payload.containsKey('status') &&
+        noPendingLeft &&
+        anyAccepted &&
+        meeting.hostStep == 4) {
       payload['hostStep'] = 5;
       payload['suggestDeadline'] = Timestamp.fromDate(
         MeetingPointService.serverNow.add(_kSuggestDuration),
       );
-    }
-
-    // At step 5 (host confirmation phase), if this cancellation leaves no
-    // accepted participants, auto-cancel the meeting immediately.
-    // The host has no one to meet — no need to wait for their confirmation.
-    if (cancelParticipation &&
-        meeting.hostStep >= 5 &&
-        !updatedParticipants.any((p) => p.isAccepted)) {
-      payload['status'] = 'cancelled';
-      payload['cancellationReason'] = 'all_participants_left';
     }
 
     try {
@@ -1983,6 +1998,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
           // Never let a stale cached snapshot downgrade a step we've already
           // advanced past locally (e.g. auto-advance race with Firestore cache).
+          final prevStep = _step;
           final effectiveStep = nextStep >= _step ? nextStep : _step;
           final prevWaitDeadline = _waitDeadline;
           final prevSuggestDeadline = _suggestDeadline;
@@ -1997,6 +2013,15 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
             _suggestedCandidates = meeting.suggestedCandidates;
             _suggestionsComputed = meeting.suggestionsComputed;
           });
+
+          // If Firestore advanced us from step 4 → 5 (e.g. the last participant
+          // accepted and their device wrote hostStep=5 via respondToInvitation),
+          // cancel the local wait-phase timers so they don't fire
+          // _onWaitTimerExpired and reset the step-5 countdown.
+          if (prevStep == 4 && _step >= 5) {
+            _waitTimer?.cancel();
+            _proceedTimer?.cancel();
+          }
 
           // Only restart countdowns when the deadline itself changed (e.g.
           // step transition) — NOT on every participant accept/decline update.

@@ -555,7 +555,10 @@ class _MainLayoutState
     return Scaffold(
       key: _scaffoldKey,
       appBar: _buildAppBar(_index),
-      body: pages[_index],
+      body: IndexedStack(
+        index: _index,
+        children: pages,
+      ),
       drawer: _buildDrawer(context),
       bottomNavigationBar:
           _buildBottomNavBar(),

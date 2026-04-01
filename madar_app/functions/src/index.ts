@@ -573,6 +573,9 @@ export const onMeetingPointCancelled = onDocumentUpdated(
       const participants: any[] = Array.isArray(after.participants)
         ? after.participants
         : [];
+      const beforeParticipants: any[] = Array.isArray(before.participants)
+        ? before.participants
+        : [];
 
       const statusOf = (p: any) =>
         (p?.status ?? "pending").toString().trim().toLowerCase();
@@ -583,6 +586,9 @@ export const onMeetingPointCancelled = onDocumentUpdated(
       const anyAccepted = participants.some(
         (p: any) => statusOf(p) === "accepted"
       );
+      const hadAcceptedBefore = beforeParticipants.some(
+        (p: any) => statusOf(p) === "accepted"
+      );
       const waitDeadline =
         typeof after.waitDeadline?.toDate === "function"
           ? after.waitDeadline.toDate()
@@ -590,14 +596,18 @@ export const onMeetingPointCancelled = onDocumentUpdated(
       const waitExpired = waitDeadline
         ? waitDeadline.getTime() <= Date.now()
         : false;
+      const preActive = !hasConfirmedAt;
 
       // Notify host only when no one accepted (all declined OR time expired with
       // no accept). This matches "all_participants_declined" cancellation.
       if (
         hostId &&
-        cancellationReason !== "all_participants_left" &&
+        preActive &&
         !anyAccepted &&
-        (allDeclined || waitExpired)
+        (allDeclined ||
+          waitExpired ||
+          cancellationReason === "all_participants_declined" ||
+          cancellationReason === "all_participants_left")
       ) {
         try {
           const hostDoc = await db.collection("users").doc(hostId).get();
@@ -606,7 +616,10 @@ export const onMeetingPointCancelled = onDocumentUpdated(
             const venueName = (after.venueName ?? "").toString().trim();
             const locationLabel = venueName ? ` at ${venueName}` : "";
             const title = "Meeting Point Cancelled";
-            const body = `No one accepted the meeting point invitation${locationLabel}.`;
+            const body =
+              hadAcceptedBefore && hostStep >= 5
+                ? `No more participants left to proceed the meeting point${locationLabel}.`
+                : `No one accepted the meeting point invitation${locationLabel}.`;
 
             const notifRef = db.collection("notifications").doc();
             const notifId = notifRef.id;

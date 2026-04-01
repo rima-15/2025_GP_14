@@ -974,7 +974,13 @@ class MeetingPointService {
     if (index < 0) return;
 
     final now = DateTime.now();
-    final newStatus = accepted ? 'accepted' : (cancelParticipation ? 'cancelled' : 'declined');
+    final treatCancelAsDeclined =
+        cancelParticipation && meeting.hostStep >= 5 && !meeting.isConfirmed;
+    final newStatus = accepted
+        ? 'accepted'
+        : (treatCancelAsDeclined
+            ? 'declined'
+            : (cancelParticipation ? 'cancelled' : 'declined'));
     final updatedParticipants = List<MeetingPointParticipant>.from(
       meeting.participants,
     );
@@ -1013,7 +1019,9 @@ class MeetingPointService {
         meeting.hostStep >= 5 &&
         !anyAccepted) {
       payload['status'] = 'cancelled';
-      payload['cancellationReason'] = 'all_participants_left';
+      payload['cancellationReason'] = meeting.isConfirmed
+          ? 'all_participants_left'
+          : 'all_participants_declined';
     }
 
     // Auto-advance to step 5 when every invitee has responded and at least

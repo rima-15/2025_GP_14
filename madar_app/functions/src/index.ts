@@ -579,6 +579,8 @@ export const onMeetingPointCancelled = onDocumentUpdated(
 
       const statusOf = (p: any) =>
         (p?.status ?? "pending").toString().trim().toLowerCase();
+      const arrivalStatusOf = (p: any) =>
+        (p?.arrivalStatus ?? "on_the_way").toString().trim().toLowerCase();
 
       const allDeclined =
         participants.length > 0 &&
@@ -589,6 +591,16 @@ export const onMeetingPointCancelled = onDocumentUpdated(
       const hadAcceptedBefore = beforeParticipants.some(
         (p: any) => statusOf(p) === "accepted"
       );
+      const hostArrivalStatus = (after.hostArrivalStatus ?? "on_the_way")
+        .toString()
+        .trim()
+        .toLowerCase();
+      const hostActive = hostArrivalStatus !== "cancelled";
+      const activeAccepted = participants.filter(
+        (p: any) =>
+          statusOf(p) === "accepted" && arrivalStatusOf(p) !== "cancelled"
+      );
+      const noActiveParticipants = activeAccepted.length === 0;
       const waitDeadline =
         typeof after.waitDeadline?.toDate === "function"
           ? after.waitDeadline.toDate()
@@ -636,11 +648,11 @@ export const onMeetingPointCancelled = onDocumentUpdated(
               });
             }
 
-            await notifRef.set({
-              userId: hostId,
-              type: "meetingPointCancelled",
-              requiresAction: false,
-              data: {
+              await notifRef.set({
+                userId: hostId,
+                type: "meetingPointCancelled",
+                requiresAction: false,
+                data: {
                 requestId: notifId,
                 meetingPointId: meetingPointId,
                 reason: "no_accepts",
@@ -654,6 +666,61 @@ export const onMeetingPointCancelled = onDocumentUpdated(
         } catch (notifyError) {
           console.error(
             "Error sending host meeting point cancelled notification:",
+            notifyError
+          );
+        }
+      }
+
+      // Active meeting: everyone left, host is the only one remaining.
+      if (
+        hostId &&
+        hasConfirmedAt &&
+        cancellationReason === "all_participants_left" &&
+        hostActive &&
+        noActiveParticipants
+      ) {
+        try {
+          const hostDoc = await db.collection("users").doc(hostId).get();
+          if (hostDoc.exists) {
+            const tokens: string[] = hostDoc.data()?.fcmTokens ?? [];
+            const venueName = (after.venueName ?? "").toString().trim();
+            const locationLabel = venueName ? ` at ${venueName}` : "";
+            const title = "Meeting Point Cancelled";
+            const body = `No more participants left to proceed the meeting point${locationLabel}.`;
+
+            const notifRef = db.collection("notifications").doc();
+            const notifId = notifRef.id;
+
+            if (tokens.length > 0) {
+              await admin.messaging().sendEachForMulticast({
+                notification: { title, body },
+                data: {
+                  type: "meetingPointCancelled",
+                  requestId: notifId,
+                  meetingPointId: meetingPointId,
+                },
+                tokens,
+              });
+            }
+
+            await notifRef.set({
+              userId: hostId,
+              type: "meetingPointCancelled",
+              requiresAction: false,
+              data: {
+                requestId: notifId,
+                meetingPointId: meetingPointId,
+                reason: "all_participants_left",
+              },
+              title,
+              body,
+              isRead: false,
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+          }
+        } catch (notifyError) {
+          console.error(
+            "Error sending host active meeting cancelled notification:",
             notifyError
           );
         }

@@ -2361,11 +2361,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         meeting.acceptedCount > 0) {
       final approxStart = _approxStep3StartByMeetingId[meeting.id];
       if (approxStart != null) {
-        final approxDeadline = approxStart.add(const Duration(minutes: 1));
+        final approxDeadline = approxStart.add(const Duration(minutes: 5));
         final seconds = approxDeadline
             .difference(MeetingPointService.serverNow)
             .inSeconds
-            .clamp(0, 60);
+            .clamp(0, 300);
         final mm = (seconds ~/ 60).toString().padLeft(2, '0');
         final ss = (seconds % 60).toString().padLeft(2, '0');
         return '$mm:$ss';

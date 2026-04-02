@@ -229,7 +229,9 @@ class MeetingPointRecord {
   int get invitedCount => participants.length;
   int get acceptedCount => participants.where((p) => p.isAccepted).length;
   int get pendingCount => participants.where((p) => p.isPending).length;
-  int get declinedCount => participants.where((p) => p.isDeclined || p.isCancelledParticipation).length;
+  int get declinedCount => participants
+      .where((p) => p.isDeclined || p.isCancelledParticipation)
+      .length;
 
   DateTime? get activeDeadline {
     if (hostStep == 4) return waitDeadline;
@@ -283,9 +285,9 @@ class MeetingPointRecord {
     final suggestedCandidatesRaw = data['suggestedCandidates'];
     final suggestedCandidates = (suggestedCandidatesRaw is List)
         ? suggestedCandidatesRaw
-            .whereType<Map>()
-            .map((e) => Map<String, dynamic>.from(e))
-            .toList()
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList()
         : <Map<String, dynamic>>[];
 
     return MeetingPointRecord(
@@ -329,7 +331,7 @@ class MeetingPointService {
   static CollectionReference<Map<String, dynamic>> get _col =>
       FirebaseFirestore.instance.collection(collectionName);
 
-  static const Duration _kSuggestDuration = Duration(minutes: 1);
+  static const Duration _kSuggestDuration = Duration(minutes: 5);
 
   // ── Server-clock calibration ───────────────────────────────────────────────
   // Estimated offset: serverTime − localTime. Updated from every live
@@ -979,8 +981,8 @@ class MeetingPointService {
     final newStatus = accepted
         ? 'accepted'
         : (treatCancelAsDeclined
-            ? 'declined'
-            : (cancelParticipation ? 'cancelled' : 'declined'));
+              ? 'declined'
+              : (cancelParticipation ? 'cancelled' : 'declined'));
     final updatedParticipants = List<MeetingPointParticipant>.from(
       meeting.participants,
     );
@@ -2050,9 +2052,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
               _participants.every(
                 (p) => p.status != _ParticipantStatus.pending,
               ) &&
-              _participants.any(
-                (p) => p.status == _ParticipantStatus.accepted,
-              );
+              _participants.any((p) => p.status == _ParticipantStatus.accepted);
           if (shouldAutoAdvance) {
             _scheduleAutoAdvance();
           } else {
@@ -2070,12 +2070,8 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       final shouldAdvance =
           _step == 4 &&
           _participants.isNotEmpty &&
-          _participants.every(
-            (p) => p.status != _ParticipantStatus.pending,
-          ) &&
-          _participants.any(
-            (p) => p.status == _ParticipantStatus.accepted,
-          );
+          _participants.every((p) => p.status != _ParticipantStatus.pending) &&
+          _participants.any((p) => p.status == _ParticipantStatus.accepted);
       if (shouldAdvance) {
         _goNext();
       }
@@ -2390,10 +2386,10 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
     // 2-minute countdown.  Use the deadline that was already committed to
     // Firestore so the local timer and the Firestore field are identical.
-    _waitSecondsLeft = 60;
+    _waitSecondsLeft = 120;
     _waitDeadline =
         _pendingWaitDeadline ??
-        MeetingPointService.serverNow.add(const Duration(minutes: 1));
+        MeetingPointService.serverNow.add(const Duration(minutes: 2));
     _pendingWaitDeadline = null; // consumed
     _startStep4WaitCountdown();
 
@@ -2441,9 +2437,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   }
 
   void _initStep5() {
-    _suggestSecondsLeft = 60;
+    _suggestSecondsLeft = 300;
     _suggestDeadline = MeetingPointService.serverNow.add(
-      const Duration(minutes: 1),
+      const Duration(minutes: 5),
     );
     _suggestedPointName = '';
     _suggestedCandidates = [];
@@ -2589,7 +2585,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       placeCategories: _selectedPlaceCategories.toList(),
       hostLocation: _hostLocation?.toMap(),
       participants: participants,
-      waitDuration: const Duration(minutes: 1),
+      waitDuration: const Duration(minutes: 2),
     );
     _pendingWaitDeadline = serverDeadline;
 
@@ -3634,9 +3630,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     return null;
   }
 
-  Future<void> _saveUserLocationFromResult(
-    Map<String, dynamic> result,
-  ) async {
+  Future<void> _saveUserLocationFromResult(Map<String, dynamic> result) async {
     final blender = _extractBlenderFromResult(result);
     if (blender == null) return;
 

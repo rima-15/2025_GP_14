@@ -142,6 +142,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
   final Map<String, String> _localStatusOverride = {};
   final Set<String> _autoCancelledMeetingNotifIds = {};
   final Map<String, String> _meetingStatusCache = {};
+  final Map<String, int> _meetingHostStepCache = {};
+  final Set<String> _autoExpiredMeetingNotifIds = {};
 
   // Read or Unread notifications
   @override
@@ -468,7 +470,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
               final data = d['data'] as Map<String, dynamic>? ?? {};
               final meetingPointId =
                   (data['meetingPointId'] ?? data['requestId'] ?? doc.id)
-                      .toString();
+                      .toString()
+                      .trim();
               var requestStatus =
                   (d['requestStatus'] ?? data['requestStatus'] ?? 'pending')
                       .toString()
@@ -497,6 +500,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                 final meetingStatus = await _getMeetingStatusCached(
                   meetingPointId,
                 );
+                final hostStep = _meetingHostStepCache[meetingPointId] ?? 0;
                 if (meetingStatus == 'cancelled' ||
                     meetingStatus == 'completed') {
                   requestStatus = 'cancelled';
@@ -504,6 +508,13 @@ class _NotificationsPageState extends State<NotificationsPage> {
                   if (!_autoCancelledMeetingNotifIds.contains(doc.id)) {
                     _autoCancelledMeetingNotifIds.add(doc.id);
                     unawaited(_markMeetingPointNotificationCancelled(doc.id));
+                  }
+                } else if (hostStep >= 5) {
+                  requestStatus = 'expired';
+                  isExpired = true;
+                  if (!_autoExpiredMeetingNotifIds.contains(doc.id)) {
+                    _autoExpiredMeetingNotifIds.add(doc.id);
+                    unawaited(_markMeetingPointNotificationExpired(doc.id));
                   }
                 }
               }
@@ -557,6 +568,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
     try {
       final meeting = await MeetingPointService.getById(id);
       final status = meeting?.status.toString().trim().toLowerCase();
+      if (meeting != null) {
+        _meetingHostStepCache[id] = meeting.hostStep;
+      }
       if (status != null && status.isNotEmpty) {
         _meetingStatusCache[id] = status;
       }
@@ -564,6 +578,19 @@ class _NotificationsPageState extends State<NotificationsPage> {
     } catch (_) {
       return null;
     }
+  }
+
+  Future<void> _markMeetingPointNotificationExpired(String docId) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('notifications')
+          .doc(docId)
+          .update({
+            'requestStatus': 'expired',
+            'requiresAction': false,
+            'actionTaken': true,
+          });
+    } catch (_) {}
   }
 
   Future<void> _markMeetingPointNotificationCancelled(String docId) async {
@@ -2436,35 +2463,59 @@ class _NotificationsPageState extends State<NotificationsPage> {
     }
 
     if (notification.type == NotificationType.meetingPointRequest) {
+      final targetMeetingPointId =
+          (notification.meetingPointId ?? notification.id).trim();
+      final notifStatus =
+          (notification.requestStatus ?? '').toLowerCase().trim();
+      final notifExpired = notification.isExpired || notifStatus == 'expired';
       final meeting = await _fetchMeetingPointForNotification(notification);
       final uid = FirebaseAuth.instance.currentUser?.uid;
       final status = (meeting?.status ?? '').toString().trim().toLowerCase();
       final isHost = uid != null && meeting?.isHost(uid) == true;
+      final me = (uid != null && meeting != null)
+          ? meeting.participantFor(uid)
+          : null;
+      final inviteExpiredByHostProceed =
+          !isHost && me != null && me.isPending && meeting!.hostStep >= 5;
       // Pending (setup) and Active (confirmed) should open Track page.
       final isTrackStatus =
           status.isEmpty || status == 'pending' || status == 'active';
 
       if (!mounted) return;
       if (meeting != null) {
-        if (isTrackStatus) {
+        if (notifExpired || inviteExpiredByHostProceed) {
+          Navigator.pop(context, {
+            'page': 'history',
+            'meetingPointId':
+                targetMeetingPointId.isNotEmpty ? targetMeetingPointId : meeting.id,
+            'historyMainTabIndex': 1,
+            'meetingFilterIndex': isHost ? 0 : 1,
+          });
+        } else if (isTrackStatus) {
           Navigator.pop(context, {
             'page': 'track',
-            'meetingPointId': meeting.id,
+            'meetingPointId':
+                targetMeetingPointId.isNotEmpty ? targetMeetingPointId : meeting.id,
             'openMeetingTab': true,
           });
         } else {
           Navigator.pop(context, {
             'page': 'history',
-            'meetingPointId': meeting.id,
+            'meetingPointId':
+                targetMeetingPointId.isNotEmpty ? targetMeetingPointId : meeting.id,
             'historyMainTabIndex': 1,
             'meetingFilterIndex': isHost ? 0 : 1,
           });
         }
       } else {
         // Fallback: if meeting doc is missing, send to history.
+        final fallbackMeetingPointId =
+            (notification.meetingPointId ?? notification.id).trim();
         Navigator.pop(context, {
           'page': 'history',
-          'meetingPointId': notification.id,
+          'meetingPointId': fallbackMeetingPointId.isNotEmpty
+              ? fallbackMeetingPointId
+              : notification.id,
           'historyMainTabIndex': 1,
           'meetingFilterIndex': isHost ? 0 : 1,
         });
@@ -3053,10 +3104,19 @@ class _NotificationsPageState extends State<NotificationsPage> {
             accepted: false,
           );
         } else {
-          await MeetingPointService.respondToInvitation(
-            meetingPointId: blocking.id,
-            accepted: false,
-          );
+          if (blocking.isConfirmed) {
+            await MeetingPointService.updateArrivalStatus(
+              meetingPointId: blocking.id,
+              isHost: false,
+              userId: uid,
+              arrivalStatus: 'cancelled',
+            );
+          } else {
+            await MeetingPointService.respondToInvitation(
+              meetingPointId: blocking.id,
+              accepted: false,
+            );
+          }
         }
       } catch (_) {}
     }
@@ -3178,7 +3238,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
   Future<MeetingPointRecord?> _fetchMeetingPointForNotification(
     NotificationItem notification,
   ) async {
-    final meetingPointId = notification.id.trim();
+    final meetingPointId =
+        (notification.meetingPointId ?? notification.id).trim();
     if (meetingPointId.isEmpty) return null;
     try {
       return await MeetingPointService.getById(meetingPointId);

@@ -560,7 +560,7 @@ class MeetingPointService {
                   : 'all_participants_declined',
               'updatedAt': FieldValue.serverTimestamp(),
             });
-            await _markPendingNotificationsCancelled(meeting);
+            await _markPendingNotificationsExpired(meeting);
           } catch (_) {}
         } else {
           try {
@@ -613,6 +613,46 @@ class MeetingPointService {
           if (docRequestId != meeting.id) continue;
           batch.update(doc.reference, {
             'requestStatus': 'cancelled',
+            'requiresAction': false,
+            'actionTaken': true,
+          });
+          hasUpdates = true;
+        }
+      }
+
+      if (hasUpdates) {
+        await batch.commit();
+      }
+    } catch (_) {}
+  }
+
+  static Future<void> _markPendingNotificationsExpired(
+    MeetingPointRecord meeting,
+  ) async {
+    final pendingIds = meeting.participants
+        .where((p) => p.isPending)
+        .map((p) => p.userId)
+        .toSet();
+    if (pendingIds.isEmpty) return;
+
+    try {
+      final batch = FirebaseFirestore.instance.batch();
+      bool hasUpdates = false;
+
+      for (final uid in pendingIds) {
+        final snap = await FirebaseFirestore.instance
+            .collection('notifications')
+            .where('userId', isEqualTo: uid)
+            .where('type', isEqualTo: 'meetingPointRequest')
+            .get();
+        for (final doc in snap.docs) {
+          final payload = doc.data()['data'] as Map<String, dynamic>? ?? {};
+          final docRequestId =
+              (payload['meetingPointId'] ?? payload['requestId'] ?? '')
+                  .toString();
+          if (docRequestId != meeting.id) continue;
+          batch.update(doc.reference, {
+            'requestStatus': 'expired',
             'requiresAction': false,
             'actionTaken': true,
           });

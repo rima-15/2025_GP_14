@@ -569,6 +569,7 @@ export const onMeetingPointCancelled = onDocumentUpdated(
       const hasConfirmedAt =
         after.confirmedAt != null &&
         typeof after.confirmedAt?.toDate === "function";
+      const wasActiveBefore = beforeStatus === "active";
 
       const participants: any[] = Array.isArray(after.participants)
         ? after.participants
@@ -609,6 +610,7 @@ export const onMeetingPointCancelled = onDocumentUpdated(
         ? waitDeadline.getTime() <= Date.now()
         : false;
       const preActive = !hasConfirmedAt;
+      const expirePending = preActive && hostStep === 4 && waitExpired;
 
       // Notify host only when no one accepted (all declined OR time expired with
       // no accept). This matches "all_participants_declined" cancellation.
@@ -674,7 +676,7 @@ export const onMeetingPointCancelled = onDocumentUpdated(
       // Active meeting: everyone left, host is the only one remaining.
       if (
         hostId &&
-        hasConfirmedAt &&
+        (hasConfirmedAt || wasActiveBefore) &&
         cancellationReason === "all_participants_left" &&
         hostActive &&
         noActiveParticipants
@@ -951,6 +953,8 @@ export const onMeetingPointCancelled = onDocumentUpdated(
       let ops = 0;
       const commits: Promise<any>[] = [];
 
+      const pendingStatus = expirePending ? "expired" : "cancelled";
+
       for (const uid of pendingIds) {
         const snap = await db
           .collection("notifications")
@@ -977,8 +981,8 @@ export const onMeetingPointCancelled = onDocumentUpdated(
           }
 
           batch.update(doc.ref, {
-            requestStatus: "cancelled",
-            "data.requestStatus": "cancelled",
+            requestStatus: pendingStatus,
+            "data.requestStatus": pendingStatus,
             actionTaken: true,
             requiresAction: false,
             actionTakenAt: admin.firestore.FieldValue.serverTimestamp(),

@@ -5515,10 +5515,19 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         );
         if (!mounted || proceed != true) return;
         try {
-          await MeetingPointService.respondToInvitation(
-            meetingPointId: conflicting.id,
-            accepted: false,
-          );
+          if (conflicting.isConfirmed) {
+            await MeetingPointService.updateArrivalStatus(
+              meetingPointId: conflicting.id,
+              isHost: false,
+              userId: uid ?? '',
+              arrivalStatus: 'cancelled',
+            );
+          } else {
+            await MeetingPointService.respondToInvitation(
+              meetingPointId: conflicting.id,
+              accepted: false,
+            );
+          }
         } catch (_) {}
       }
     } else {

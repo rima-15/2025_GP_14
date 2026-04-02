@@ -3099,10 +3099,14 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
       try {
         if (blocking.isHost(uid)) {
-          await MeetingPointService.markHostDecision(
-            meetingPointId: blocking.id,
-            accepted: false,
-          );
+          if (blocking.isConfirmed) {
+            await MeetingPointService.cancelMeetingForAll(blocking.id);
+          } else {
+            await MeetingPointService.markHostDecision(
+              meetingPointId: blocking.id,
+              accepted: false,
+            );
+          }
         } else {
           if (blocking.isConfirmed) {
             await MeetingPointService.updateArrivalStatus(

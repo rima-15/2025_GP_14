@@ -728,6 +728,86 @@ export const onMeetingPointCancelled = onDocumentUpdated(
         }
       }
 
+      // Host cancelled for all during active meeting: notify active participants.
+      if (
+        hostId &&
+        (hasConfirmedAt || wasActiveBefore) &&
+        cancellationReason === "host_cancelled"
+      ) {
+        const acceptedIds = activeAccepted
+          .map((p: any) => (p?.userId ?? "").toString().trim())
+          .filter((uid: string) => uid && uid !== hostId);
+
+        if (acceptedIds.length > 0) {
+          const hostName =
+            (after.hostName ?? "Host").toString().trim() || "Host";
+          const venueName = (after.venueName ?? "").toString().trim();
+          const locationLabel = venueName ? ` at ${venueName}` : "";
+          const title = "Meeting Point Cancelled";
+          const body = `${hostName} cancelled the meeting point${locationLabel}.`;
+
+          let batch = db.batch();
+          let ops = 0;
+          const commits: Promise<any>[] = [];
+
+          for (const uid of acceptedIds) {
+            const userDoc = await db.collection("users").doc(uid).get();
+            if (!userDoc.exists) continue;
+
+            const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
+            const notifRef = db.collection("notifications").doc();
+            const notifId = notifRef.id;
+
+            if (tokens.length > 0) {
+              try {
+                await admin.messaging().sendEachForMulticast({
+                  notification: { title, body },
+                  data: {
+                    type: "meetingPointCancelled",
+                    requestId: notifId,
+                    meetingPointId: meetingPointId,
+                  },
+                  tokens,
+                });
+              } catch (err) {
+                console.error(
+                  `Failed to send meeting point cancel to ${uid}`,
+                  err
+                );
+              }
+            }
+
+            batch.set(notifRef, {
+              userId: uid,
+              type: "meetingPointCancelled",
+              requiresAction: false,
+              data: {
+                requestId: notifId,
+                meetingPointId: meetingPointId,
+                reason: "host_cancelled",
+                senderId: hostId,
+                senderName: hostName,
+                venueName: venueName || null,
+              },
+              title,
+              body,
+              isRead: false,
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+
+            ops++;
+            if (ops >= 450) {
+              commits.push(batch.commit());
+              batch = db.batch();
+              ops = 0;
+            }
+          }
+
+          if (ops > 0) commits.push(batch.commit());
+          if (commits.length > 0) await Promise.all(commits);
+        }
+      }
+
       // Host cancelled during step 4: notify only accepted participants.
       if (hostStep === 4) {
         const acceptedIds = participants

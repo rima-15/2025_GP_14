@@ -916,17 +916,27 @@ class MeetingPointService {
 
   /// Cancel the entire meeting for all participants (host only action).
   static Future<void> cancelMeetingForAll(String meetingPointId) async {
-    await _col.doc(meetingPointId).update({
-      'status': 'cancelled',
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    MeetingPointRecord? meeting;
     try {
       final doc = await _col.doc(meetingPointId).get();
-      final meeting = MeetingPointRecord.fromDoc(doc);
-      if (meeting != null) {
-        await _markPendingNotificationsCancelled(meeting);
-      }
+      meeting = MeetingPointRecord.fromDoc(doc);
     } catch (_) {}
+
+    final payload = <String, dynamic>{
+      'status': 'cancelled',
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+    if (meeting?.isConfirmed == true) {
+      payload['cancellationReason'] = 'host_cancelled';
+    }
+
+    await _col.doc(meetingPointId).update(payload);
+
+    if (meeting != null) {
+      try {
+        await _markPendingNotificationsCancelled(meeting);
+      } catch (_) {}
+    }
   }
 
   /// Update a participant's (or host's) arrival status during the confirmed phase.

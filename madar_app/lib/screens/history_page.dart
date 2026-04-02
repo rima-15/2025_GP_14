@@ -58,6 +58,12 @@ class HistoryMeetingPoint {
   final String hostName;
   final String hostPhone;
   final bool isHost;
+
+  /// True when the host confirmed the suggested point (meeting reached the
+  /// arrival phase). Used to distinguish "all left at step 5 before
+  /// confirmation" (hide suggested point) vs "all left during arrival"
+  /// (show suggested point).
+  final bool wasConfirmed;
   final DateTime createdAt;
   final DateTime updatedAt;
   final List<HistoryMeetingPointParticipant> participants;
@@ -72,6 +78,7 @@ class HistoryMeetingPoint {
     required this.hostName,
     required this.hostPhone,
     required this.isHost,
+    this.wasConfirmed = false,
     required this.createdAt,
     required this.updatedAt,
     required this.participants,
@@ -344,6 +351,7 @@ class _HistoryPageState extends State<HistoryPage> {
     final createdAt = _parseTimestamp(data['createdAt']) ?? DateTime.now();
     final updatedAt = _parseTimestamp(data['updatedAt']) ?? createdAt;
     final participants = _parseParticipants(data['participants']);
+    final wasConfirmed = data['confirmedAt'] != null;
 
     // ── Still-pending meeting ─────────────────────────────────────────────
     // Show immediately in history when this user declined, cancelled
@@ -473,7 +481,8 @@ class _HistoryPageState extends State<HistoryPage> {
                   .trim()
                   .toLowerCase();
               // 'cancelled' = participant used "Cancel participation" in step 2/3.
-              if (pStatus == 'declined' || pStatus == 'cancelled') displayStatus = 'declined';
+              if (pStatus == 'declined' || pStatus == 'cancelled')
+                displayStatus = 'declined';
               // Only treat as 'expired' when the timer actually ran out.
               // If the host cancelled before the deadline, keep 'cancelled'
               // so the reason shows as "Cancelled by host".
@@ -482,7 +491,8 @@ class _HistoryPageState extends State<HistoryPage> {
                 final hostStep = (data['hostStep'] is num)
                     ? (data['hostStep'] as num).toInt()
                     : 4;
-                final timerExpired = waitDeadline != null &&
+                final timerExpired =
+                    waitDeadline != null &&
                     !waitDeadline.isAfter(DateTime.now());
                 if (timerExpired || hostStep >= 5) displayStatus = 'expired';
                 // else: displayStatus stays 'cancelled' → "Cancelled by host"
@@ -548,6 +558,7 @@ class _HistoryPageState extends State<HistoryPage> {
       hostName: hostName,
       hostPhone: hostPhone,
       isHost: hostId == uid,
+      wasConfirmed: wasConfirmed,
       createdAt: createdAt,
       updatedAt: updatedAt,
       participants: participants,
@@ -1113,108 +1124,7 @@ class _HistoryPageState extends State<HistoryPage> {
                 );
               }
 
-              // ── Static demo entries ────────────────────────────────────
-              final dummyParticipants = [
-                HistoryMeetingPointParticipant(
-                  userId: 'dp1',
-                  name: 'Razan Saeedf',
-                  phone: '+966503349694',
-                ),
-                HistoryMeetingPointParticipant(
-                  userId: 'dp2',
-                  name: 'Mona Saleh',
-                  phone: '+966557225235',
-                ),
-              ];
-              final dummySent = [
-                HistoryMeetingPoint(
-                  id: 'demo_sent_1',
-                  status: 'cancelled',
-                  cancellationReason: 'None of participants accept',
-                  venueName: 'King Khalid International Airport',
-                  hostId: 'demo_me',
-                  hostName: 'ar saeed',
-                  hostPhone: '+966334333333',
-                  isHost: true,
-                  createdAt: DateTime(2026, 3, 15, 10, 0),
-                  updatedAt: DateTime(2026, 3, 15, 10, 0),
-                  participants: dummyParticipants,
-                ),
-                HistoryMeetingPoint(
-                  id: 'demo_sent_2',
-                  status: 'cancelled',
-                  cancellationReason: 'None of participants accept',
-                  venueName: 'King Khalid International Airport',
-                  hostId: 'demo_me',
-                  hostName: 'ar saeed',
-                  hostPhone: '+966334333333',
-                  isHost: true,
-                  createdAt: DateTime(2026, 3, 14, 9, 0),
-                  updatedAt: DateTime(2026, 3, 14, 9, 0),
-                  participants: dummyParticipants,
-                ),
-                HistoryMeetingPoint(
-                  id: 'demo_sent_3',
-                  status: 'cancelled',
-                  cancellationReason:
-                      'Host (me) rejected the suggested meeting point',
-                  venueName: 'King Khalid International Airport',
-                  hostId: 'demo_me',
-                  hostName: 'ar saeed',
-                  hostPhone: '+966334333333',
-                  isHost: true,
-                  createdAt: DateTime(2026, 3, 13, 8, 0),
-                  updatedAt: DateTime(2026, 3, 13, 8, 0),
-                  participants: dummyParticipants,
-                ),
-                HistoryMeetingPoint(
-                  id: 'demo_sent_4',
-                  status: 'cancelled',
-                  cancellationReason: 'You cancelled this request',
-                  venueName: 'King Khalid International Airport',
-                  hostId: 'demo_me',
-                  hostName: 'ar saeed',
-                  hostPhone: '+966334333333',
-                  isHost: true,
-                  createdAt: DateTime(2026, 3, 12, 7, 0),
-                  updatedAt: DateTime(2026, 3, 12, 7, 0),
-                  participants: dummyParticipants,
-                ),
-              ];
-              final dummyReceived = [
-                HistoryMeetingPoint(
-                  id: 'demo_rcv_1',
-                  status: 'cancelled',
-                  cancellationReason:
-                      'Host rejected the suggested meeting point',
-                  venueName: 'King Khalid International Airport',
-                  hostId: 'demo_host',
-                  hostName: 'Sara Ahmed',
-                  hostPhone: '+966500000001',
-                  isHost: false,
-                  createdAt: DateTime(2026, 3, 11, 14, 0),
-                  updatedAt: DateTime(2026, 3, 11, 14, 0),
-                  participants: dummyParticipants,
-                ),
-                HistoryMeetingPoint(
-                  id: 'demo_rcv_2',
-                  status: 'cancelled',
-                  cancellationReason: 'Cancelled by host',
-                  venueName: 'King Khalid International Airport',
-                  hostId: 'demo_host',
-                  hostName: 'Sara Ahmed',
-                  hostPhone: '+966500000001',
-                  isHost: false,
-                  createdAt: DateTime(2026, 3, 10, 13, 0),
-                  updatedAt: DateTime(2026, 3, 10, 13, 0),
-                  participants: dummyParticipants,
-                ),
-              ];
-
-              final allList = [
-                ...(_meetingFilterIndex == 0 ? dummySent : dummyReceived),
-                ...(snapshot.data ?? []),
-              ];
+              final allList = [...(snapshot.data ?? [])];
               final list = _meetingFilterIndex == 0
                   ? allList.where((m) => m.isHost).toList()
                   : allList.where((m) => !m.isHost).toList();
@@ -1504,7 +1414,10 @@ class _HistoryPageState extends State<HistoryPage> {
                         ),
                         if (item.suggestedPoint.isNotEmpty &&
                             item.status != 'declined' &&
-                            item.status != 'expired') ...[
+                            item.status != 'expired' &&
+                            (item.wasConfirmed ||
+                                item.cancellationReason !=
+                                    'All participants left the meeting')) ...[
                           const SizedBox(height: 4),
                           _labeledDetail(
                             'Suggested point: ',

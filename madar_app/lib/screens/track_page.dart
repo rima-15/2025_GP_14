@@ -171,6 +171,12 @@ class _TrackPageState extends State<TrackPage> {
   /// waiting for Firestore to deliver hostStep=5 + suggestDeadline.
   final Map<String, DateTime> _approxStep3StartByMeetingId = {};
 
+  /// Meeting IDs for which hostStep >= 5 has been observed via the live stream.
+  /// Used to reject stale cached snapshots that still show hostStep=4 after
+  /// the meeting has already advanced — prevents maybeMaintain from
+  /// overwriting suggestDeadline and resetting the step-3 (invitee) timer.
+  final Set<String> _observedStep5MeetingIds = {};
+
   /// Last known non-null timer label per meeting, used as a fallback to
   /// prevent the 1-2 s flicker when activeDeadline is briefly null during
   /// Firestore step transitions (e.g. hostStep 4 → 5 before suggestDeadline
@@ -2355,11 +2361,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         meeting.acceptedCount > 0) {
       final approxStart = _approxStep3StartByMeetingId[meeting.id];
       if (approxStart != null) {
-        final approxDeadline = approxStart.add(const Duration(minutes: 5));
+        final approxDeadline = approxStart.add(const Duration(minutes: 1));
         final seconds = approxDeadline
             .difference(MeetingPointService.serverNow)
             .inSeconds
-            .clamp(0, 300);
+            .clamp(0, 60);
         final mm = (seconds ~/ 60).toString().padLeft(2, '0');
         final ss = (seconds % 60).toString().padLeft(2, '0');
         return '$mm:$ss';
@@ -2469,6 +2475,16 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       return deadline != null && !deadline.isAfter(now);
     }, orElse: () => candidates.first);
     if (!meeting.isActive) return;
+
+    // If we've previously seen this meeting at hostStep >= 5 via the live
+    // stream but the current snapshot still shows hostStep < 5, it's a stale
+    // cached record delivered after a stream reset. Calling maybeMaintain with
+    // it would write a fresh suggestDeadline and reset the invitee's step-3
+    // (non-host) timer, so skip it.
+    if (_observedStep5MeetingIds.contains(meeting.id) &&
+        meeting.hostStep < 5) {
+      return;
+    }
 
     // Guard is BEFORE the call so stale Firestore cache data (delivered after
     // a stream reset) never triggers a second maybeMaintain that overwrites
@@ -2789,9 +2805,13 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           }
         }
 
-        // Clean up the approx start once the real suggestDeadline is live.
+        // Clean up the approx start once the real suggestDeadline is live,
+        // and record that this meeting has been seen at hostStep >= 5 so that
+        // stale cached snapshots (hostStep=4) can't trigger a maybeMaintain
+        // call that would reset the suggestDeadline.
         if (activeMeeting != null && activeMeeting.hostStep >= 5) {
           _approxStep3StartByMeetingId.remove(activeMeeting.id);
+          _observedStep5MeetingIds.add(activeMeeting.id);
         }
 
         if (activeMeeting != null &&
@@ -3713,6 +3733,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         backgroundColor: Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         titlePadding: const EdgeInsets.fromLTRB(24, 16, 8, 0),
+        contentPadding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
         title: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -4259,6 +4280,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                         message:
                             'Are you sure you want to cancel your participation in this meeting point?',
                         confirmText: 'Cancel Participation',
+                        cancelText: 'Keep',
                         successMessage: 'Participation cancelled.',
                         cancelParticipation: step == 3,
                       ),
@@ -5063,44 +5085,48 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
-                                'Meeting Point Request',
-                                style: TextStyle(
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.black87,
-                                ),
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Expanded(
+                                    child: Text(
+                                      'Meeting Point Request',
+                                      style: TextStyle(
+                                        fontSize: 17,
+                                        fontWeight: FontWeight.w700,
+                                        color: Colors.black87,
+                                      ),
+                                    ),
+                                  ),
+                                  GestureDetector(
+                                    onTap: () => Navigator.pop(ctx),
+                                    child: Icon(
+                                      Icons.close,
+                                      size: 20,
+                                      color: Colors.grey[600],
+                                    ),
+                                  ),
+                                ],
                               ),
                               const SizedBox(height: 3),
-                              Text(
-                                _inviteeStepLabel(step),
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: Colors.grey[600],
-                                ),
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      _inviteeStepLabel(step),
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: Colors.grey[600],
+                                      ),
+                                    ),
+                                  ),
+                                  if (timerLabel != null)
+                                    _meetingTimerBadge(timerLabel),
+                                ],
                               ),
                             ],
                           ),
-                        ),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              onPressed: () => Navigator.pop(ctx),
-                              icon: Icon(
-                                Icons.close,
-                                size: 20,
-                                color: Colors.grey[600],
-                              ),
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                            ),
-                            if (timerLabel != null) ...[
-                              const SizedBox(height: 4),
-                              _meetingTimerBadge(timerLabel),
-                            ],
-                          ],
                         ),
                       ],
                     ),
@@ -5256,6 +5282,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                                     message:
                                         'Are you sure you want to cancel your participation in this meeting point?',
                                     confirmText: 'Cancel Participation',
+                                    cancelText: 'Keep',
                                     successMessage: 'Participation cancelled.',
                                     cancelParticipation: step == 3,
                                   );
@@ -5842,6 +5869,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     String message =
         'Are you sure you want to decline this meeting point invitation?',
     String confirmText = 'Decline',
+    String cancelText = 'Cancel',
     String successMessage = 'Invitation declined.',
     bool cancelParticipation = false,
   }) async {
@@ -5850,6 +5878,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       title: title,
       message: message,
       confirmText: confirmText,
+      cancelText: cancelText,
     );
     if (confirmed != true) return false;
 

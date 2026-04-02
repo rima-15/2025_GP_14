@@ -329,7 +329,7 @@ class MeetingPointService {
   static CollectionReference<Map<String, dynamic>> get _col =>
       FirebaseFirestore.instance.collection(collectionName);
 
-  static const Duration _kSuggestDuration = Duration(minutes: 5);
+  static const Duration _kSuggestDuration = Duration(minutes: 1);
 
   // ── Server-clock calibration ───────────────────────────────────────────────
   // Estimated offset: serverTime − localTime. Updated from every live
@@ -2390,10 +2390,10 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
     // 2-minute countdown.  Use the deadline that was already committed to
     // Firestore so the local timer and the Firestore field are identical.
-    _waitSecondsLeft = 120;
+    _waitSecondsLeft = 60;
     _waitDeadline =
         _pendingWaitDeadline ??
-        MeetingPointService.serverNow.add(const Duration(minutes: 2));
+        MeetingPointService.serverNow.add(const Duration(minutes: 1));
     _pendingWaitDeadline = null; // consumed
     _startStep4WaitCountdown();
 
@@ -2441,9 +2441,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   }
 
   void _initStep5() {
-    _suggestSecondsLeft = 300;
+    _suggestSecondsLeft = 60;
     _suggestDeadline = MeetingPointService.serverNow.add(
-      const Duration(minutes: 5),
+      const Duration(minutes: 1),
     );
     _suggestedPointName = '';
     _suggestedCandidates = [];
@@ -2589,7 +2589,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       placeCategories: _selectedPlaceCategories.toList(),
       hostLocation: _hostLocation?.toMap(),
       participants: participants,
-      waitDuration: const Duration(minutes: 2),
+      waitDuration: const Duration(minutes: 1),
     );
     _pendingWaitDeadline = serverDeadline;
 

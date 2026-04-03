@@ -1568,8 +1568,8 @@ export const onMeetingPointSuggest = onDocumentUpdated(
 
    Auto Refresh Location (Scheduled)
 
-   - If tracking is active and receiver hasn't updated location for 1 hour,
-     send "Refresh Your Location" notification from system.
+   - If user has any active session (track or meeting point) and hasn't
+     updated location for 1 hour, send a single system refresh notification.
 
 -------------------------------------------------------------------*/
 
@@ -1578,41 +1578,20 @@ export const onAutoLocationRefresh = onSchedule(
   async () => {
     try {
       const now = admin.firestore.Timestamp.now();
+      const cutoff = new Date(now.toDate().getTime() - 60 * 60 * 1000);
 
-      const snap = await db
+      const activeUsers = new Map<
+        string,
+        { endAt: admin.firestore.Timestamp | null }
+      >();
+
+      const trackSnap = await db
         .collection("trackRequests")
         .where("status", "==", "accepted")
         .where("startAt", "<=", now)
         .get();
 
-      if (snap.empty) return;
-
-      const userCache = new Map<
-        string,
-        { tokens: string[]; updatedAt: admin.firestore.Timestamp | null }
-      >();
-
-      const getUserInfo = async (uid: string) => {
-        if (userCache.has(uid)) return userCache.get(uid)!;
-        const userDoc = await db.collection("users").doc(uid).get();
-        if (!userDoc.exists) {
-          const info = { tokens: [] as string[], updatedAt: null };
-          userCache.set(uid, info);
-          return info;
-        }
-        const data = userDoc.data() ?? {};
-        const tokens: string[] = data.fcmTokens ?? [];
-        const updatedAt: admin.firestore.Timestamp | null =
-          data.location?.updatedAt ?? null;
-        const info = { tokens, updatedAt };
-        userCache.set(uid, info);
-        return info;
-      };
-
-      const cutoff = new Date(now.toDate().getTime() - 60 * 60 * 1000);
-      const batch = db.batch();
-
-      for (const doc of snap.docs) {
+      for (const doc of trackSnap.docs) {
         const data = doc.data();
         const endAt = data.endAt;
         const endAtDate =
@@ -1622,52 +1601,153 @@ export const onAutoLocationRefresh = onSchedule(
         const receiverId = (data.receiverId ?? "").toString().trim();
         if (!receiverId) continue;
 
-        const userInfo = await getUserInfo(receiverId);
+        const existing = activeUsers.get(receiverId);
+        const currentEndAt = existing?.endAt ?? null;
+        const candidateEndAt =
+          endAt && typeof endAt.toDate === "function"
+            ? (endAt as admin.firestore.Timestamp)
+            : null;
+        const shouldReplace =
+          !!candidateEndAt &&
+          (!currentEndAt ||
+            candidateEndAt.toMillis() > currentEndAt.toMillis());
+
+        if (!existing || shouldReplace) {
+          activeUsers.set(receiverId, { endAt: candidateEndAt });
+        }
+      }
+
+      const meetingSnap = await db
+        .collection("meetingPoints")
+        .where("status", "==", "active")
+        .get();
+
+      for (const doc of meetingSnap.docs) {
+        const data = doc.data();
+        const hostId = (data.hostId ?? "").toString().trim();
+        const hostArrival = (data.hostArrivalStatus ?? "on_the_way")
+          .toString()
+          .trim()
+          .toLowerCase();
+        if (hostId && hostArrival !== "cancelled") {
+          if (!activeUsers.has(hostId)) {
+            activeUsers.set(hostId, { endAt: null });
+          }
+        }
+
+        const participants: any[] = Array.isArray(data.participants)
+          ? data.participants
+          : [];
+        for (const p of participants) {
+          const uid = (p?.userId ?? "").toString().trim();
+          if (!uid) continue;
+          const arrival = (p?.arrivalStatus ?? "on_the_way")
+            .toString()
+            .trim()
+            .toLowerCase();
+          if (arrival === "cancelled") continue;
+          if (!activeUsers.has(uid)) {
+            activeUsers.set(uid, { endAt: null });
+          }
+        }
+      }
+
+      if (activeUsers.size === 0) return;
+
+      const userCache = new Map<
+        string,
+        {
+          tokens: string[];
+          updatedAt: admin.firestore.Timestamp | null;
+          lastAutoRefreshAt: admin.firestore.Timestamp | null;
+          lastAutoRefreshNotifId: string | null;
+          exists: boolean;
+          ref: FirebaseFirestore.DocumentReference;
+        }
+      >();
+
+      const getUserInfo = async (uid: string) => {
+        if (userCache.has(uid)) return userCache.get(uid)!;
+        const userRef = db.collection("users").doc(uid);
+        const userDoc = await userRef.get();
+        if (!userDoc.exists) {
+          const info = {
+            tokens: [] as string[],
+            updatedAt: null,
+            lastAutoRefreshAt: null,
+            lastAutoRefreshNotifId: null,
+            exists: false,
+            ref: userRef,
+          };
+          userCache.set(uid, info);
+          return info;
+        }
+        const data = userDoc.data() ?? {};
+        const tokens: string[] = data.fcmTokens ?? [];
+        const updatedAt: admin.firestore.Timestamp | null =
+          data.location?.updatedAt ?? null;
+        const lastAutoRefreshAt: admin.firestore.Timestamp | null =
+          data.lastAutoRefreshAt ?? null;
+        const lastAutoRefreshNotifId =
+          (data.lastAutoRefreshNotifId ?? "").toString().trim() || null;
+        const info = {
+          tokens,
+          updatedAt,
+          lastAutoRefreshAt,
+          lastAutoRefreshNotifId,
+          exists: true,
+          ref: userRef,
+        };
+        userCache.set(uid, info);
+        return info;
+      };
+
+      let batch = db.batch();
+      let ops = 0;
+      const commits: Promise<any>[] = [];
+
+      for (const [uid, meta] of activeUsers.entries()) {
+        const userInfo = await getUserInfo(uid);
+        if (!userInfo.exists) continue;
         const lastUpdate =
           userInfo.updatedAt &&
           typeof userInfo.updatedAt.toDate === "function"
             ? userInfo.updatedAt.toDate()
             : null;
 
-        const lastAuto =
-          data.lastAutoRefreshAt &&
-          typeof data.lastAutoRefreshAt.toDate === "function"
-            ? data.lastAutoRefreshAt.toDate()
-            : null;
-
         const isStale = !lastUpdate || lastUpdate <= cutoff;
-        const cooldownPassed = !lastAuto || lastAuto <= cutoff;
+        if (!isStale) continue;
 
-        // Send every hour while stale
-        if (!isStale || !cooldownPassed) continue;
+        const lastAuto =
+          userInfo.lastAutoRefreshAt &&
+          typeof userInfo.lastAutoRefreshAt.toDate === "function"
+            ? userInfo.lastAutoRefreshAt.toDate()
+            : null;
+        if (lastAuto && lastAuto > cutoff) continue;
 
         const title = "Refresh Location Request";
         const body = "You are in an active session, Please refresh your location for better accuracy";
 
-        // Replace previous pending system refresh notification (same session)
-        const lastNotifId = (data.lastAutoRefreshNotifId ?? "").toString();
-        let notifRef = lastNotifId
-          ? db.collection("notifications").doc(lastNotifId)
-          : db.collection("notifications").doc();
-        let reuseExisting = false;
-
-        if (lastNotifId) {
-          const lastSnap = await notifRef.get();
+        let notifRef = db.collection("notifications").doc();
+        if (userInfo.lastAutoRefreshNotifId) {
+          const lastSnap = await db
+            .collection("notifications")
+            .doc(userInfo.lastAutoRefreshNotifId)
+            .get();
           if (lastSnap.exists) {
             const lastData: any = lastSnap.data() ?? {};
             const lastPayload: any = lastData.data ?? {};
-            const matchesSession =
-              lastData.userId === receiverId &&
-              lastData.type === "locationRefresh" &&
-              lastPayload.trackRequestId === doc.id &&
-              lastPayload.system === true;
             const pending = lastData.actionTaken !== true;
-            if (matchesSession && pending) reuseExisting = true;
+            const isSystem =
+              lastPayload.system === true || lastData.system === true;
+            const matches =
+              lastData.userId === uid &&
+              lastData.type === "locationRefresh" &&
+              isSystem;
+            if (matches && pending) {
+              notifRef = lastSnap.ref;
+            }
           }
-        }
-
-        if (!reuseExisting) {
-          notifRef = db.collection("notifications").doc();
         }
         const notifId = notifRef.id;
 
@@ -1680,14 +1760,13 @@ export const onAutoLocationRefresh = onSchedule(
             data: {
               type: "locationRefresh",
               requestId: notifId,
-              trackRequestId: doc.id,
             },
             tokens: userInfo.tokens,
           });
         }
 
         batch.set(notifRef, {
-          userId: receiverId,
+          userId: uid,
           type: "locationRefresh",
           requiresAction: true,
           actionTaken: false,
@@ -1696,25 +1775,27 @@ export const onAutoLocationRefresh = onSchedule(
           body,
           data: {
             requestId: notifId,
-            trackRequestId: doc.id,
-            senderId: data.senderId ?? null,
-            senderName: data.senderName ?? null,
-            senderPhone: data.senderPhone ?? null,
-            venueId: data.venueId ?? null,
-            venueName: data.venueName ?? null,
-            endAt: data.endAt ?? null,
+            endAt: meta.endAt ?? null,
             system: true,
           },
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
 
-        batch.update(doc.ref, {
+        batch.update(userInfo.ref, {
           lastAutoRefreshAt: admin.firestore.FieldValue.serverTimestamp(),
           lastAutoRefreshNotifId: notifId,
         });
+
+        ops++;
+        if (ops >= 450) {
+          commits.push(batch.commit());
+          batch = db.batch();
+          ops = 0;
+        }
       }
 
-      await batch.commit();
+      if (ops > 0) commits.push(batch.commit());
+      if (commits.length > 0) await Promise.all(commits);
     } catch (error) {
       console.error("Error sending auto refresh notification:", error);
     }

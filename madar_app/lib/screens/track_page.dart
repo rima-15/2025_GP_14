@@ -73,6 +73,8 @@ class _TrackPageState extends State<TrackPage> {
   String? _highlightRequestId;
   String? _highlightMeetingInviteId;
   Timer? _highlightClearTimer;
+  static const Duration _meetingRefreshCooldownDuration =
+      Duration(minutes: 2);
   // by remas start
   final Map<String, double> _trackedGpsLatByUser = {};
   final Map<String, double> _trackedGpsLngByUser = {};
@@ -3440,41 +3442,85 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                   // Refresh location button — outside the green line
                   SizedBox(
                     width: double.infinity,
-                    child: ElevatedButton.icon(
-                      icon: _refreshingMeetingParticipantIds.contains(p.userId)
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Icon(Icons.refresh, size: 18),
-                      label: const Text(
-                        'Refresh Location',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.kGreen,
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      onPressed:
-                          _refreshingMeetingParticipantIds.contains(p.userId)
-                          ? null
-                          : () => _requestMeetingParticipantLocationRefresh(
-                              meeting,
+                    child: Builder(
+                      builder: (_) {
+                        final isBusy =
+                            _refreshingMeetingParticipantIds.contains(
                               p.userId,
-                              p.name,
+                            );
+                        final until =
+                            _meetingRefreshCooldownUntilByUserId[p.userId];
+                        final isCoolingDown =
+                            !isBusy &&
+                            until != null &&
+                            DateTime.now().isBefore(until);
+                        final disabled = isBusy || isCoolingDown;
+
+                        return Stack(
+                          children: [
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton.icon(
+                                icon: isBusy
+                                    ? const SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.white,
+                                        ),
+                                      )
+                                    : const Icon(Icons.refresh, size: 18),
+                                label: const Text(
+                                  'Refresh Location',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: disabled
+                                      ? Colors.grey[300]
+                                      : AppColors.kGreen,
+                                  foregroundColor: disabled
+                                      ? Colors.grey[600]
+                                      : Colors.white,
+                                  elevation: 0,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 12,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                                onPressed: disabled
+                                    ? null
+                                    : () =>
+                                        _requestMeetingParticipantLocationRefresh(
+                                          meeting,
+                                          p.userId,
+                                          p.name,
+                                        ),
+                              ),
                             ),
+                            if (isCoolingDown)
+                              Positioned.fill(
+                                child: Material(
+                                  color: Colors.transparent,
+                                  child: InkWell(
+                                    onTap: () {
+                                      SnackbarHelper.showError(
+                                        context,
+                                        'you cannot send many request within short period',
+                                      );
+                                    },
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        );
+                      },
                     ),
                   ),
                 ],
@@ -7321,7 +7367,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     if (until != null && DateTime.now().isBefore(until)) {
       SnackbarHelper.showError(
         context,
-        'Refresh already sent. Please wait before retrying.',
+        'you cannot send many request within short period',
       );
       return;
     }
@@ -7345,7 +7391,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           });
 
       _meetingRefreshCooldownUntilByUserId[participantUserId] = DateTime.now()
-          .add(_refreshCooldownDuration);
+          .add(_meetingRefreshCooldownDuration);
 
       if (mounted) {
         final name = participantName.trim().isNotEmpty

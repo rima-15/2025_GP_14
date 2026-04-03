@@ -132,6 +132,14 @@ class _NotificationsPageState extends State<NotificationsPage> {
   bool _exitReadTriggered = false;
   bool _autoMarkRunning = false;
   final Set<String> _expiredActionDocIdsThisVisit = {};
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
+  _activeTrackSessionSub;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
+  _activeMeetingSessionSub;
+  bool _hasActiveTrackSession = false;
+  bool _hasActiveMeetingSession = false;
+  bool _activeMeetingSessionReady = false;
+  Set<String> _activeMeetingIds = {};
 
   // Cache across page opens (app still alive)
   static List<NotificationItem> _cachedMerged = [];
@@ -151,6 +159,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
     super.initState();
     _ensureCacheUser();
     _initialFreezeReady = false;
+    _listenForActiveSessions();
 
     _uiRefreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (mounted) setState(() {});
@@ -171,8 +180,104 @@ class _NotificationsPageState extends State<NotificationsPage> {
     unawaited(_markReadOnExit());
     _uiRefreshTimer?.cancel();
     _tickTimer?.cancel();
+    _activeTrackSessionSub?.cancel();
+    _activeMeetingSessionSub?.cancel();
     _tick.dispose();
     super.dispose();
+  }
+
+  bool get _hasAnyActiveSession =>
+      _hasActiveTrackSession || _hasActiveMeetingSession;
+
+  void _listenForActiveSessions() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    _activeTrackSessionSub?.cancel();
+    _activeMeetingSessionSub?.cancel();
+
+    _activeTrackSessionSub = FirebaseFirestore.instance
+        .collection('trackRequests')
+        .where('receiverId', isEqualTo: uid)
+        .where('status', isEqualTo: 'accepted')
+        .snapshots()
+        .listen((snap) {
+          final now = DateTime.now();
+          bool hasActive = false;
+          for (final doc in snap.docs) {
+            final data = doc.data();
+            final startAt = (data['startAt'] as Timestamp?)?.toDate();
+            final endAt = (data['endAt'] as Timestamp?)?.toDate();
+            if (startAt == null || endAt == null) continue;
+            final started = !now.isBefore(startAt);
+            final notEnded = now.isBefore(endAt);
+            if (started && notEnded) {
+              hasActive = true;
+              break;
+            }
+          }
+          if (mounted) {
+            if (_hasActiveTrackSession != hasActive) {
+              setState(() => _hasActiveTrackSession = hasActive);
+            }
+          } else {
+            _hasActiveTrackSession = hasActive;
+          }
+        });
+
+    _activeMeetingSessionSub = FirebaseFirestore.instance
+        .collection('meetingPoints')
+        .where('participantUserIds', arrayContains: uid)
+        .where('status', isEqualTo: 'active')
+        .snapshots()
+        .listen((snap) {
+          bool hasActive = false;
+          final nextActiveIds = <String>{};
+          for (final doc in snap.docs) {
+            final data = doc.data();
+            final meetingId = doc.id;
+            final hostId = (data['hostId'] ?? '').toString().trim();
+            if (uid == hostId) {
+              final hostArrival = (data['hostArrivalStatus'] ?? 'on_the_way')
+                  .toString()
+                  .trim()
+                  .toLowerCase();
+              if (hostArrival != 'cancelled') {
+                hasActive = true;
+                nextActiveIds.add(meetingId);
+              }
+            } else {
+              final participants = data['participants'];
+              if (participants is List) {
+                for (final p in participants) {
+                  if (p is! Map) continue;
+                  final pid = (p['userId'] ?? '').toString().trim();
+                  if (pid != uid) continue;
+                  final arrival = (p['arrivalStatus'] ?? 'on_the_way')
+                      .toString()
+                      .trim()
+                      .toLowerCase();
+                  if (arrival != 'cancelled') {
+                    hasActive = true;
+                    nextActiveIds.add(meetingId);
+                  }
+                  break;
+                }
+              }
+            }
+          }
+          if (mounted) {
+            setState(() {
+              _hasActiveMeetingSession = hasActive;
+              _activeMeetingIds = nextActiveIds;
+              _activeMeetingSessionReady = true;
+            });
+          } else {
+            _hasActiveMeetingSession = hasActive;
+            _activeMeetingIds = nextActiveIds;
+            _activeMeetingSessionReady = true;
+          }
+        });
   }
 
   void _ensureCacheUser() {
@@ -1346,6 +1451,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
     if (notification.type == NotificationType.trackStarted ||
         notification.type == NotificationType.locationRefresh) {
+      if (notification.type == NotificationType.locationRefresh &&
+          _isSystemLocationRefresh(notification)) {
+        return notification.actionTaken || !_hasAnyActiveSession;
+      }
       final status = notification.trackRequestId == null
           ? null
           : trackRequestStatusById[notification.trackRequestId!];
@@ -1358,7 +1467,15 @@ class _NotificationsPageState extends State<NotificationsPage> {
       final endedByTime =
           notification.endAt != null &&
           DateTime.now().isAfter(notification.endAt!);
-      return endedByStatus || endedByTime;
+      bool meetingEnded = false;
+      if (notification.type == NotificationType.locationRefresh &&
+          !_isSystemLocationRefresh(notification)) {
+        final meetingId = notification.meetingPointId?.trim() ?? '';
+        if (meetingId.isNotEmpty && _activeMeetingSessionReady) {
+          meetingEnded = !_activeMeetingIds.contains(meetingId);
+        }
+      }
+      return endedByStatus || endedByTime || meetingEnded;
     }
 
     return false;
@@ -1848,6 +1965,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
                             Builder(
                               builder: (_) {
+                                final isSystem = _isSystemLocationRefresh(
+                                  notification,
+                                );
                                 final trackStatus =
                                     notification.trackRequestId == null
                                     ? null
@@ -1864,7 +1984,20 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                     isTerminated ||
                                     isCompleted;
                                 final actionTaken = notification.actionTaken;
-                                final disabled = expired || actionTaken;
+                                bool meetingEnded = false;
+                                if (!isSystem &&
+                                    notification.meetingPointId != null &&
+                                    notification.meetingPointId!
+                                        .trim()
+                                        .isNotEmpty &&
+                                    _activeMeetingSessionReady) {
+                                  meetingEnded = !_activeMeetingIds.contains(
+                                    notification.meetingPointId!.trim(),
+                                  );
+                                }
+                                final disabled = isSystem
+                                    ? (actionTaken || !_hasAnyActiveSession)
+                                    : (expired || actionTaken || meetingEnded);
 
                                 return AbsorbPointer(
                                   absorbing: disabled,
@@ -2474,12 +2607,32 @@ class _NotificationsPageState extends State<NotificationsPage> {
     if (notification.type == NotificationType.locationRefresh) {
       final rawMeetingPointId = notification.meetingPointId?.trim() ?? '';
       if (rawMeetingPointId.isNotEmpty) {
+        MeetingPointRecord? meeting;
+        if (rawMeetingPointId.isNotEmpty) {
+          meeting = await MeetingPointService.getById(rawMeetingPointId);
+        }
+        final uid = FirebaseAuth.instance.currentUser?.uid;
+        final status = (meeting?.status ?? '').toString().trim().toLowerCase();
+        final isHost =
+            meeting == null ? true : (uid != null && meeting.isHost(uid));
+        final isTrackStatus =
+            status.isEmpty || status == 'pending' || status == 'active';
+
         if (!mounted) return;
-        Navigator.pop(context, {
-          'page': 'track',
-          'meetingPointId': rawMeetingPointId,
-          'openMeetingTab': true,
-        });
+        if (meeting != null && isTrackStatus) {
+          Navigator.pop(context, {
+            'page': 'track',
+            'meetingPointId': rawMeetingPointId,
+            'openMeetingTab': true,
+          });
+        } else {
+          Navigator.pop(context, {
+            'page': 'history',
+            'meetingPointId': rawMeetingPointId,
+            'historyMainTabIndex': 1,
+            'meetingFilterIndex': isHost ? 0 : 1,
+          });
+        }
         return;
       }
     }

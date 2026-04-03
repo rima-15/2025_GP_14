@@ -601,7 +601,6 @@ export const onMeetingPointCancelled = onDocumentUpdated(
         (p: any) =>
           statusOf(p) === "accepted" && arrivalStatusOf(p) !== "cancelled"
       );
-      const noActiveParticipants = activeAccepted.length === 0;
       const waitDeadline =
         typeof after.waitDeadline?.toDate === "function"
           ? after.waitDeadline.toDate()
@@ -673,58 +672,66 @@ export const onMeetingPointCancelled = onDocumentUpdated(
         }
       }
 
-      // Active meeting: everyone left, host is the only one remaining.
+      // Active meeting: only one active user remains (host or participant).
       if (
         hostId &&
         (hasConfirmedAt || wasActiveBefore) &&
-        cancellationReason === "all_participants_left" &&
-        hostActive &&
-        noActiveParticipants
+        cancellationReason === "all_participants_left"
       ) {
-        try {
-          const hostDoc = await db.collection("users").doc(hostId).get();
-          if (hostDoc.exists) {
-            const tokens: string[] = hostDoc.data()?.fcmTokens ?? [];
-            const venueName = (after.venueName ?? "").toString().trim();
-            const locationLabel = venueName ? ` at ${venueName}` : "";
-            const title = "Meeting Point Cancelled";
-            const body = `No more participants left to proceed the meeting point${locationLabel}.`;
+        const remainingIds = [
+          ...(hostActive ? [hostId] : []),
+          ...activeAccepted
+            .map((p: any) => (p?.userId ?? "").toString().trim())
+            .filter((uid: string) => uid && uid !== hostId),
+        ];
 
-            const notifRef = db.collection("notifications").doc();
-            const notifId = notifRef.id;
+        if (remainingIds.length === 1) {
+          const targetId = remainingIds[0];
+          try {
+            const userDoc = await db.collection("users").doc(targetId).get();
+            if (userDoc.exists) {
+              const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
+              const venueName = (after.venueName ?? "").toString().trim();
+              const locationLabel = venueName ? ` at ${venueName}` : "";
+              const title = "Meeting Point Cancelled";
+              const body = `No more participants left to proceed the meeting point${locationLabel}.`;
 
-            if (tokens.length > 0) {
-              await admin.messaging().sendEachForMulticast({
-                notification: { title, body },
+              const notifRef = db.collection("notifications").doc();
+              const notifId = notifRef.id;
+
+              if (tokens.length > 0) {
+                await admin.messaging().sendEachForMulticast({
+                  notification: { title, body },
+                  data: {
+                    type: "meetingPointCancelled",
+                    requestId: notifId,
+                    meetingPointId: meetingPointId,
+                  },
+                  tokens,
+                });
+              }
+
+              await notifRef.set({
+                userId: targetId,
+                type: "meetingPointCancelled",
+                requiresAction: false,
                 data: {
-                  type: "meetingPointCancelled",
                   requestId: notifId,
                   meetingPointId: meetingPointId,
+                  reason: "all_participants_left",
                 },
-                tokens,
+                title,
+                body,
+                isRead: false,
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
               });
             }
-
-            await notifRef.set({
-              userId: hostId,
-              type: "meetingPointCancelled",
-              requiresAction: false,
-              data: {
-                requestId: notifId,
-                meetingPointId: meetingPointId,
-                reason: "all_participants_left",
-              },
-              title,
-              body,
-              isRead: false,
-              createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            });
+          } catch (notifyError) {
+            console.error(
+              "Error sending active meeting remaining-user notification:",
+              notifyError
+            );
           }
-        } catch (notifyError) {
-          console.error(
-            "Error sending host active meeting cancelled notification:",
-            notifyError
-          );
         }
       }
 

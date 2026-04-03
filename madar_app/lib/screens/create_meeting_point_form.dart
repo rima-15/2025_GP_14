@@ -840,6 +840,7 @@ class MeetingPointService {
         'status': 'cancelled',
         'updatedAt': FieldValue.serverTimestamp(),
         'hostStep': 5,
+        'cancellationReason': 'host_rejected_suggestion',
       });
       return;
     }
@@ -925,10 +926,8 @@ class MeetingPointService {
     final payload = <String, dynamic>{
       'status': 'cancelled',
       'updatedAt': FieldValue.serverTimestamp(),
+      'cancellationReason': 'host_cancelled',
     };
-    if (meeting?.isConfirmed == true) {
-      payload['cancellationReason'] = 'host_cancelled';
-    }
 
     await _col.doc(meetingPointId).update(payload);
 

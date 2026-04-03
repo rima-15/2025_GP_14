@@ -947,13 +947,94 @@ export const onMeetingPointCancelled = onDocumentUpdated(
         }
       }
 
+      // Host cancelled during step 5 before confirmation:
+      // notify accepted participants (not a rejection case).
+      if (
+        hostStep === 5 &&
+        !hasConfirmedAt &&
+        cancellationReason === "host_cancelled"
+      ) {
+        const acceptedIds = participants
+          .filter((p: any) => statusOf(p) === "accepted")
+          .map((p: any) => (p?.userId ?? "").toString().trim())
+          .filter((uid: string) => uid && uid !== hostId);
+
+        if (acceptedIds.length > 0 && hostId) {
+          const hostName =
+            (after.hostName ?? "Host").toString().trim() || "Host";
+          const venueName = (after.venueName ?? "").toString().trim();
+          const locationLabel = venueName ? ` at ${venueName}` : "";
+          const title = "Meeting Point Cancelled";
+          const body = `${hostName} cancelled the meeting point${locationLabel}.`;
+
+          let batch = db.batch();
+          let ops = 0;
+          const commits: Promise<any>[] = [];
+
+          for (const uid of acceptedIds) {
+            const userDoc = await db.collection("users").doc(uid).get();
+            if (!userDoc.exists) continue;
+
+            const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
+            const notifRef = db.collection("notifications").doc();
+            const notifId = notifRef.id;
+
+            if (tokens.length > 0) {
+              try {
+                await admin.messaging().sendEachForMulticast({
+                  notification: { title, body },
+                  data: {
+                    type: "meetingPointCancelled",
+                    requestId: notifId,
+                    meetingPointId: meetingPointId,
+                  },
+                  tokens,
+                });
+              } catch (err) {
+                console.error(
+                  `Failed to send meeting point cancel to ${uid}`,
+                  err
+                );
+              }
+            }
+
+            batch.set(notifRef, {
+              userId: uid,
+              type: "meetingPointCancelled",
+              requiresAction: false,
+              data: {
+                requestId: notifId,
+                meetingPointId: meetingPointId,
+                reason: "host_cancelled",
+                senderId: hostId,
+                senderName: hostName,
+                venueName: venueName || null,
+              },
+              title,
+              body,
+              isRead: false,
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+
+            ops++;
+            if (ops >= 450) {
+              commits.push(batch.commit());
+              batch = db.batch();
+              ops = 0;
+            }
+          }
+
+          if (ops > 0) commits.push(batch.commit());
+          if (commits.length > 0) await Promise.all(commits);
+        }
+      }
+
       // Host rejected suggested point (step 5, not confirmed yet):
       // notify accepted participants.
       if (
         hostStep === 5 &&
         !hasConfirmedAt &&
-        cancellationReason !== "all_participants_declined" &&
-        cancellationReason !== "all_participants_left"
+        cancellationReason === "host_rejected_suggestion"
       ) {
         const acceptedIds = participants
           .filter((p: any) => statusOf(p) === "accepted")
@@ -1295,6 +1376,139 @@ export const onMeetingPointStarted = onDocumentUpdated(
       if (commits.length > 0) await Promise.all(commits);
     } catch (error) {
       console.error("Error sending meeting point started notifications:", error);
+    }
+  }
+);
+
+/* ------------------------------------------------------------------
+
+   Meeting Point Completed Notification
+
+   - When a meeting point becomes completed, notify arrived participants
+     who did not leave the session.
+
+-------------------------------------------------------------------*/
+
+export const onMeetingPointCompleted = onDocumentUpdated(
+  "meetingPoints/{meetingPointId}",
+  async (event) => {
+    try {
+      const before = event.data?.before.data();
+      const after = event.data?.after.data();
+      if (!before || !after) return;
+
+      const normalizeStatus = (raw: any) => {
+        const s = (raw ?? "pending").toString().trim().toLowerCase();
+        return s === "active" ||
+          s === "pending" ||
+          s === "cancelled" ||
+          s === "completed"
+          ? s
+          : "pending";
+      };
+
+      const beforeStatus = normalizeStatus(before.status);
+      const afterStatus = normalizeStatus(after.status);
+      if (afterStatus !== "completed" || beforeStatus === "completed") return;
+
+      const meetingPointId = event.params.meetingPointId;
+      if (!meetingPointId) return;
+
+      const hostId = (after.hostId ?? "").toString().trim();
+      const hostName =
+        (after.hostName ?? "Someone").toString().trim() || "Someone";
+      const venueName = (after.venueName ?? "").toString().trim();
+      const pointName = (after.suggestedPoint ?? "").toString().trim();
+      const locationName = pointName || venueName || "meeting point";
+
+      const hostArrival = (after.hostArrivalStatus ?? "on_the_way")
+        .toString()
+        .trim()
+        .toLowerCase();
+
+      const participants: any[] = Array.isArray(after.participants)
+        ? after.participants
+        : [];
+      const statusOf = (p: any) =>
+        (p?.status ?? "pending").toString().trim().toLowerCase();
+      const arrivalOf = (p: any) =>
+        (p?.arrivalStatus ?? "on_the_way").toString().trim().toLowerCase();
+
+      const targetIds = new Set<string>();
+      if (hostId && hostArrival === "arrived") targetIds.add(hostId);
+      for (const p of participants) {
+        if (statusOf(p) !== "accepted") continue;
+        if (arrivalOf(p) !== "arrived") continue;
+        const uid = (p?.userId ?? "").toString().trim();
+        if (uid) targetIds.add(uid);
+      }
+
+      if (targetIds.size === 0) return;
+
+      const title = "Meeting Point Completed";
+      const body = `All participants arrived at "${locationName}".`;
+
+      let batch = db.batch();
+      let ops = 0;
+      const commits: Promise<any>[] = [];
+
+      for (const uid of targetIds) {
+        const userDoc = await db.collection("users").doc(uid).get();
+        if (!userDoc.exists) continue;
+
+        const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
+        const notifRef = db.collection("notifications").doc();
+        const notifId = notifRef.id;
+
+        if (tokens.length > 0) {
+          try {
+            await admin.messaging().sendEachForMulticast({
+              notification: { title, body },
+              data: {
+                type: "meetingPointCompleted",
+                requestId: notifId,
+                meetingPointId: meetingPointId,
+              },
+              tokens,
+            });
+          } catch (err) {
+            console.error(
+              `Failed to send meeting point completed to ${uid}`,
+              err
+            );
+          }
+        }
+
+        batch.set(notifRef, {
+          userId: uid,
+          type: "meetingPointCompleted",
+          requiresAction: false,
+          data: {
+            requestId: notifId,
+            meetingPointId: meetingPointId,
+            senderId: hostId || null,
+            senderName: hostName || null,
+            pointName: pointName || null,
+            venueName: venueName || null,
+          },
+          title,
+          body,
+          isRead: false,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        ops++;
+        if (ops >= 450) {
+          commits.push(batch.commit());
+          batch = db.batch();
+          ops = 0;
+        }
+      }
+
+      if (ops > 0) commits.push(batch.commit());
+      if (commits.length > 0) await Promise.all(commits);
+    } catch (error) {
+      console.error("Error sending meeting point completed notifications:", error);
     }
   }
 );

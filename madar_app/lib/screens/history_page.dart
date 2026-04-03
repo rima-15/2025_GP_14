@@ -597,6 +597,12 @@ class _HistoryPageState extends State<HistoryPage> {
     );
 
     if (isHost) {
+      if (storedReason == 'host_rejected_suggestion') {
+        return 'Host (you) rejected the suggested meeting point';
+      }
+      if (storedReason == 'host_cancelled') {
+        return 'You cancelled this request for all participants';
+      }
       if (hostStep == 5 && !wasInArrivalPhase)
         return 'Host (you) rejected the suggested meeting point';
       // 'all_participants_declined' is written by the auto-cancel logic when
@@ -607,6 +613,12 @@ class _HistoryPageState extends State<HistoryPage> {
         return 'None of participants accept';
       return 'You cancelled this request for all participants';
     } else {
+      if (storedReason == 'host_rejected_suggestion') {
+        return 'Host rejected the suggested meeting point';
+      }
+      if (storedReason == 'host_cancelled') {
+        return 'Cancelled by host';
+      }
       if (hostStep == 5 && !wasInArrivalPhase)
         return 'Host rejected the suggested meeting point';
       return 'Cancelled by host';

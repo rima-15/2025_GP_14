@@ -852,15 +852,23 @@ class _NotificationsPageState extends State<NotificationsPage> {
         .map((snap) {
           return snap.docs.map((doc) {
             final d = doc.data();
+            final data = d['data'] as Map<String, dynamic>? ?? {};
             final ts =
                 (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+            final rawTrackRequestId =
+                (data['trackRequestId'] ?? '').toString().trim();
+            final rawMeetingPointId =
+                (data['meetingPointId'] ?? '').toString().trim();
 
             return NotificationItem(
-              id: d['data']?['requestId'],
+              id: (data['requestId'] ?? doc.id).toString(),
               notificationDocId: doc.id,
-              trackRequestId: d['data']?['trackRequestId'],
-              senderId: (d['data']?['senderId'] ?? '').toString(),
-              isSystem: d['data']?['system'] == true || d['system'] == true,
+              trackRequestId:
+                  rawTrackRequestId.isEmpty ? null : rawTrackRequestId,
+              meetingPointId:
+                  rawMeetingPointId.isEmpty ? null : rawMeetingPointId,
+              senderId: (data['senderId'] ?? '').toString(),
+              isSystem: data['system'] == true || d['system'] == true,
               type: NotificationType.locationRefresh,
               title: d['title'] ?? 'Refresh Location Request',
               message: d['body'] ?? '',
@@ -868,9 +876,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
               isRead: d['isRead'] ?? false,
               requiresAction: d['requiresAction'] == true,
               actionTaken: d['actionTaken'] == true,
-              endAt: (d['data']?['endAt'] as Timestamp?)?.toDate(),
-              senderName: d['data']?['senderName'],
-              senderPhone: d['data']?['senderPhone'],
+              endAt: (data['endAt'] as Timestamp?)?.toDate(),
+              senderName: data['senderName'],
+              senderPhone: data['senderPhone'],
+              venueName: data['venueName'],
             );
           }).toList();
         });
@@ -2462,6 +2471,19 @@ class _NotificationsPageState extends State<NotificationsPage> {
       return;
     }
 
+    if (notification.type == NotificationType.locationRefresh) {
+      final rawMeetingPointId = notification.meetingPointId?.trim() ?? '';
+      if (rawMeetingPointId.isNotEmpty) {
+        if (!mounted) return;
+        Navigator.pop(context, {
+          'page': 'track',
+          'meetingPointId': rawMeetingPointId,
+          'openMeetingTab': true,
+        });
+        return;
+      }
+    }
+
     if (notification.type == NotificationType.meetingPointRequest) {
       final targetMeetingPointId =
           (notification.meetingPointId ?? notification.id).trim();
@@ -3465,7 +3487,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
     String? dialogSubtitle,
   }) async {
     final trackRequestId = notification.trackRequestId;
-    if (trackRequestId == null || trackRequestId.isEmpty) {
+    final meetingPointId = notification.meetingPointId;
+    if ((trackRequestId == null || trackRequestId.isEmpty) &&
+        (meetingPointId == null || meetingPointId.isEmpty)) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Tracking request not found.')),
@@ -3476,14 +3500,26 @@ class _NotificationsPageState extends State<NotificationsPage> {
     String venueId = '';
     String venueName = '';
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('trackRequests')
-          .doc(trackRequestId)
-          .get();
-      final data = doc.data();
-      if (data != null) {
-        venueId = (data['venueId'] ?? '').toString().trim();
-        venueName = (data['venueName'] ?? '').toString().trim();
+      if (trackRequestId != null && trackRequestId.isNotEmpty) {
+        final doc = await FirebaseFirestore.instance
+            .collection('trackRequests')
+            .doc(trackRequestId)
+            .get();
+        final data = doc.data();
+        if (data != null) {
+          venueId = (data['venueId'] ?? '').toString().trim();
+          venueName = (data['venueName'] ?? '').toString().trim();
+        }
+      } else if (meetingPointId != null && meetingPointId.isNotEmpty) {
+        final doc = await FirebaseFirestore.instance
+            .collection('meetingPoints')
+            .doc(meetingPointId)
+            .get();
+        final data = doc.data();
+        if (data != null) {
+          venueId = (data['venueId'] ?? '').toString().trim();
+          venueName = (data['venueName'] ?? '').toString().trim();
+        }
       }
     } catch (e) {
       debugPrint('Failed to load track request for location dialog: $e');
@@ -3500,10 +3536,19 @@ class _NotificationsPageState extends State<NotificationsPage> {
         ? dialogSubtitle.trim()
         : 'Choose how to set your location.';
 
+    final targetId = (trackRequestId != null && trackRequestId.isNotEmpty)
+        ? trackRequestId
+        : meetingPointId!;
+    final targetLabel = venueName.isNotEmpty
+        ? venueName
+        : (meetingPointId != null && meetingPointId.isNotEmpty)
+        ? 'Meeting point'
+        : 'Set Location';
+
     showNavigationDialog(
       context,
-      venueName.isNotEmpty ? venueName : 'Set Location',
-      trackRequestId,
+      targetLabel,
+      targetId,
       returnResultOnly: true,
       dialogTitle: effectiveTitle,
       dialogSubtitle: effectiveSubtitle,

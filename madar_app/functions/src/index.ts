@@ -1301,6 +1301,191 @@ export const onMeetingPointStarted = onDocumentUpdated(
 
 /* ------------------------------------------------------------------
 
+   Meeting Point Refresh Location Request (Manual)
+
+   - When a participant requests a location refresh, notify the target user.
+   - If the same requester sends again while the previous request is pending,
+     reuse the existing notification (replace it with the latest).
+
+-------------------------------------------------------------------*/
+
+export const onMeetingPointLocationRefreshRequested = onDocumentUpdated(
+  "meetingPoints/{meetingPointId}",
+  async (event) => {
+    try {
+      const before = event.data?.before.data();
+      const after = event.data?.after.data();
+      if (!before || !after) return;
+
+      const meetingPointId = event.params.meetingPointId;
+      if (!meetingPointId) return;
+
+      const toMap = (v: any) =>
+        v && typeof v === "object" && !Array.isArray(v) ? v : {};
+
+      const beforeTokens: Record<string, any> = toMap(
+        before.locationRefreshTokens
+      );
+      const afterTokens: Record<string, any> = toMap(
+        after.locationRefreshTokens
+      );
+
+      const changedEntries = Object.entries(afterTokens).filter(
+        ([uid, token]) => {
+          const id = (uid ?? "").toString().trim();
+          if (!id) return false;
+          const nextToken = (token ?? "").toString().trim();
+          if (!nextToken) return false;
+          const prevToken = (beforeTokens[id] ?? "").toString().trim();
+          return nextToken !== prevToken;
+        }
+      );
+
+      if (changedEntries.length === 0) return;
+
+      const requestedBy: Record<string, any> = toMap(
+        after.locationRefreshRequestedBy
+      );
+
+      const hostId = (after.hostId ?? "").toString().trim();
+      const hostName =
+        (after.hostName ?? "Someone").toString().trim() || "Someone";
+      const hostPhone = (after.hostPhone ?? "").toString().trim();
+      const venueId = (after.venueId ?? "").toString().trim();
+      const venueName = (after.venueName ?? "").toString().trim();
+
+      const participants: any[] = Array.isArray(after.participants)
+        ? after.participants
+        : [];
+      const participantInfo = new Map<
+        string,
+        { name: string; phone: string }
+      >();
+      for (const p of participants) {
+        const uid = (p?.userId ?? "").toString().trim();
+        if (!uid) continue;
+        participantInfo.set(uid, {
+          name: (p?.name ?? "").toString().trim(),
+          phone: (p?.phone ?? "").toString().trim(),
+        });
+      }
+
+      const resolveSenderInfo = (senderId: string) => {
+        if (senderId === hostId) {
+          return { name: hostName || "Someone", phone: hostPhone || "" };
+        }
+        const info = participantInfo.get(senderId);
+        if (info) {
+          return {
+            name: info.name || "Someone",
+            phone: info.phone || "",
+          };
+        }
+        return { name: "Someone", phone: "" };
+      };
+
+      for (const [rawReceiverId, rawToken] of changedEntries) {
+        const receiverId = (rawReceiverId ?? "").toString().trim();
+        if (!receiverId) continue;
+
+        let senderId = (requestedBy[receiverId] ?? "").toString().trim();
+        if (!senderId) {
+          const tokenStr = (rawToken ?? "").toString();
+          const splitAt = tokenStr.indexOf("_");
+          if (splitAt > 0) senderId = tokenStr.substring(0, splitAt).trim();
+        }
+
+        if (!senderId || senderId === receiverId) continue;
+
+        const { name: senderName, phone: senderPhone } =
+          resolveSenderInfo(senderId);
+
+        const receiverDoc = await db.collection("users").doc(receiverId).get();
+        if (!receiverDoc.exists) continue;
+
+        const tokens: string[] = receiverDoc.data()?.fcmTokens ?? [];
+        const title = "Refresh Location Request";
+        const body = `${senderName} asked to refresh your location`;
+
+        let notifRef = db.collection("notifications").doc();
+        try {
+          const existingSnap = await db
+            .collection("notifications")
+            .where("userId", "==", receiverId)
+            .where("type", "==", "locationRefresh")
+            .get();
+
+          for (const doc of existingSnap.docs) {
+            const data: any = doc.data() ?? {};
+            const payload: any = data.data ?? {};
+            const payloadMeetingId = (payload.meetingPointId ?? "")
+              .toString()
+              .trim();
+            const payloadSenderId = (payload.senderId ?? "")
+              .toString()
+              .trim();
+            const pending = data.actionTaken !== true;
+            const isSystem = payload.system === true || data.system === true;
+            if (
+              pending &&
+              !isSystem &&
+              payloadMeetingId === meetingPointId &&
+              payloadSenderId === senderId
+            ) {
+              notifRef = doc.ref;
+              break;
+            }
+          }
+        } catch (err) {
+          console.error("Error finding existing refresh notification:", err);
+        }
+
+        const notifId = notifRef.id;
+
+        if (tokens.length > 0) {
+          await admin.messaging().sendEachForMulticast({
+            notification: { title, body },
+            data: {
+              type: "locationRefresh",
+              requestId: notifId,
+              meetingPointId: meetingPointId,
+            },
+            tokens,
+          });
+        }
+
+        await notifRef.set({
+          userId: receiverId,
+          type: "locationRefresh",
+          requiresAction: true,
+          actionTaken: false,
+          isRead: false,
+          title,
+          body,
+          data: {
+            requestId: notifId,
+            meetingPointId: meetingPointId,
+            senderId,
+            senderName,
+            senderPhone: senderPhone || null,
+            venueId: venueId || null,
+            venueName: venueName || null,
+            system: false,
+          },
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+    } catch (error) {
+      console.error(
+        "Error sending meeting point refresh location notifications:",
+        error
+      );
+    }
+  }
+);
+
+/* ------------------------------------------------------------------
+
    Meeting Point Suggestions (Computed)
 
    - When hostStep becomes 5 (manual or auto), compute suggested meeting

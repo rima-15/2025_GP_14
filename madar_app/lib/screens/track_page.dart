@@ -7337,7 +7337,12 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       await FirebaseFirestore.instance
           .collection('meetingPoints')
           .doc(meeting.id)
-          .update({'locationRefreshTokens.$participantUserId': token});
+          .update({
+            'locationRefreshTokens.$participantUserId': token,
+            'locationRefreshRequestedBy.$participantUserId': currentUser.uid,
+            'locationRefreshRequestedAt.$participantUserId':
+                FieldValue.serverTimestamp(),
+          });
 
       _meetingRefreshCooldownUntilByUserId[participantUserId] = DateTime.now()
           .add(_refreshCooldownDuration);

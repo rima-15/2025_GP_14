@@ -905,7 +905,6 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
                         : []),
               'type': item['type']?.toString(),
               'gender': item['gender']?.toString(),
-              'nearby': item['nearby']?.toString(),
             });
           }
         }
@@ -3745,6 +3744,30 @@ class _PoiPickerSheet extends StatefulWidget {
 class __PoiPickerSheetState extends State<_PoiPickerSheet> {
   final TextEditingController _searchController = TextEditingController();
   List<Map<String, dynamic>> _filtered = [];
+  bool _showActiveUsers = true;
+  bool _showAllDestinations = true;
+
+  String _formatFloorLabel(dynamic raw) {
+    final s = (raw ?? '').toString().trim().toUpperCase();
+    if (s.isEmpty) return '';
+    if (s == '0' || s == 'GF' || s == 'G' || s == 'F0') return 'GF';
+
+    final pureNum = RegExp(r'^-?\d+$').firstMatch(s);
+    if (pureNum != null) {
+      if (s.startsWith('-')) return 'B${s.substring(1)}';
+      return 'F$s';
+    }
+
+    final fNum = RegExp(r'^F\s*(-?\d+)$').firstMatch(s);
+    if (fNum != null) {
+      final n = fNum.group(1)!;
+      if (n == '0') return 'GF';
+      if (n.startsWith('-')) return 'B${n.substring(1)}';
+      return 'F$n';
+    }
+
+    return s;
+  }
 
   @override
   void initState() {
@@ -3773,40 +3796,51 @@ class __PoiPickerSheetState extends State<_PoiPickerSheet> {
     final selected = widget.selectedPoi;
     if (selected == null) return false;
 
-    final itemMaterial = (item['material'] ?? '')
-        .toString()
-        .trim()
-        .toLowerCase();
-    final selectedMaterial = (selected['material'] ?? '')
-        .toString()
-        .trim()
-        .toLowerCase();
-
-    final itemFloor = (item['floor'] ?? '').toString().trim().toLowerCase();
-    final selectedFloor = (selected['floor'] ?? '')
-        .toString()
-        .trim()
-        .toLowerCase();
-
-    if (itemMaterial.isNotEmpty && selectedMaterial.isNotEmpty) {
-      return itemMaterial == selectedMaterial && itemFloor == selectedFloor;
-    }
-
     final itemName = (item['name'] ?? '').toString().trim().toLowerCase();
     final selectedName = (selected['name'] ?? '')
         .toString()
         .trim()
         .toLowerCase();
-    final itemNearby = (item['nearby'] ?? '').toString().trim().toLowerCase();
-    final selectedNearby = (selected['nearby'] ?? '')
-        .toString()
-        .trim()
-        .toLowerCase();
 
-    return itemName.isNotEmpty &&
-        itemName == selectedName &&
-        itemFloor == selectedFloor &&
-        itemNearby == selectedNearby;
+    return itemName.isNotEmpty && itemName == selectedName;
+  }
+
+  Widget _buildCollapsibleHeader({
+    required String title,
+    required bool isExpanded,
+    required VoidCallback onTap,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(10),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey[700],
+                    ),
+                  ),
+                ),
+                Icon(
+                  isExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                  color: Colors.grey[700],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -3822,7 +3856,6 @@ class __PoiPickerSheetState extends State<_PoiPickerSheet> {
       ),
       child: CustomScrollView(
         slivers: [
-          // Fixed header section
           SliverToBoxAdapter(
             child: Column(
               children: [
@@ -3876,8 +3909,7 @@ class __PoiPickerSheetState extends State<_PoiPickerSheet> {
                     child: Material(
                       color: Colors.transparent,
                       child: InkWell(
-                        onTap: () =>
-                            Navigator.pop(context, {'type': 'pin_placement'}),
+                        onTap: () => Navigator.pop(context, {'type': 'pin_placement'}),
                         borderRadius: BorderRadius.circular(12),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
@@ -3925,62 +3957,46 @@ class __PoiPickerSheetState extends State<_PoiPickerSheet> {
             ),
           ),
 
-          // Active requests section (if any)
           if (widget.activeRequests.isNotEmpty) ...[
             SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Text(
-                  'Active Tracked Users',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey[700],
-                  ),
-                ),
+              child: _buildCollapsibleHeader(
+                title: 'Active Tracked Users',
+                isExpanded: _showActiveUsers,
+                onTap: () => setState(() => _showActiveUsers = !_showActiveUsers),
               ),
             ),
-            SliverList(
-              delegate: SliverChildBuilderDelegate((context, index) {
-                final req = widget.activeRequests[index];
-                final isSelected = _isSelected(req);
-                return ListTile(
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 4,
-                  ),
-                  leading: Icon(
-                    Icons.person_outline,
-                    color: Colors.grey[600],
-                    size: 24,
-                  ),
-                  title: Text(
-                    req['name'],
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.black87,
+            if (_showActiveUsers)
+              SliverList(
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  final req = widget.activeRequests[index];
+                  final isSelected = _isSelected(req);
+                  return ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                    leading: Icon(Icons.person_outline, color: Colors.grey[600], size: 24),
+                    title: Text(
+                      req['name'],
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.black87,
+                      ),
                     ),
-                  ),
-                  subtitle: Text(
-                    'Floor: ${req['floor']}',
-                    style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-                  ),
-                  onTap: () => Navigator.pop(context, {
-                    'type': 'active_request',
-                    'name': req['name'],
-                    'floor': req['floor'],
-                    'x': req['x'],
-                    'y': req['y'],
-                    'z': req['z'],
-                  }),
-                  trailing: isSelected
-                      ? Icon(Icons.check_circle, color: AppColors.kGreen)
-                      : null,
-                );
-              }, childCount: widget.activeRequests.length),
-            ),
-            // Add a separator after active requests
+                    subtitle: Text(
+                      'Floor: ${_formatFloorLabel(req['floor'])}',
+                      style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                    ),
+                    onTap: () => Navigator.pop(context, {
+                      'type': 'active_request',
+                      'name': req['name'],
+                      'floor': req['floor'],
+                      'x': req['x'],
+                      'y': req['y'],
+                      'z': req['z'],
+                    }),
+                    trailing: isSelected ? Icon(Icons.check_circle, color: AppColors.kGreen) : null,
+                  );
+                }, childCount: widget.activeRequests.length),
+              ),
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -3990,82 +4006,84 @@ class __PoiPickerSheetState extends State<_PoiPickerSheet> {
             const SliverToBoxAdapter(child: SizedBox(height: 8)),
           ],
 
-          // POI list
-          SliverList(
-            delegate: SliverChildBuilderDelegate((context, index) {
-              final poi = _filtered[index];
-              final isSelected = _isSelected(poi);
-              return ListTile(
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 4,
-                ),
-                leading: () {
-                  List<String> cats = (poi['categories'] is List)
-                      ? List<String>.from(poi['categories'])
-                      : const <String>[];
-                  // If empty, fall back to the single category field
-                  if (cats.isEmpty && poi['category'] != null) {
-                    cats = [poi['category'].toString()];
-                  }
-
-                  final primaryCat = cats.isNotEmpty
-                      ? cats.first.toLowerCase()
-                      : '';
-
-                  IconData icon;
-                  if (primaryCat.contains('restaurant')) {
-                    icon = Icons.restaurant;
-                  } else if (primaryCat.contains('café')) {
-                    icon = Icons.local_cafe;
-                  } else if (primaryCat.contains('shop')) {
-                    icon = Icons.store;
-                  } else if (primaryCat == 'gates') {
-                    icon = Icons.door_front_door;
-                  } else if (primaryCat == 'bathrooms') {
-                    final gender = poi['gender']?.toString().toLowerCase();
-                    if (gender == 'female') {
-                      icon = Icons.woman;
-                    } else if (gender == 'male') {
-                      icon = Icons.man;
-                    } else {
-                      icon = Icons.wc;
-                    }
-                  } else if (primaryCat == 'prayer_rooms') {
-                    icon = Icons.mosque;
-                  } else {
-                    icon = Icons.store;
-                  }
-                  return Icon(icon, color: Colors.grey[600], size: 24);
-                }(),
-                title: Text(
-                  poi['name'],
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w500,
-                    color: Colors.black87,
-                  ),
-                ),
-                subtitle: Text(() {
-                  final category = poi['category']?.toString().toLowerCase();
-                  if (category == 'gates') {
-                    return poi['description']?.toString() ?? 'Gate';
-                  } else if (category == 'bathrooms' ||
-                      category == 'prayer_rooms') {
-                    final description = poi['description']?.toString().trim() ?? '';
-                    if (description.isNotEmpty) return description;
-                    return 'Floor: ${poi['floor']}';
-                  } else {
-                    return 'Floor: ${poi['floor']}';
-                  }
-                }(), style: TextStyle(fontSize: 14, color: Colors.grey[600])),
-                onTap: () => Navigator.pop(context, poi),
-                trailing: isSelected
-                    ? Icon(Icons.check_circle, color: AppColors.kGreen)
-                    : null,
-              );
-            }, childCount: _filtered.length),
+          SliverToBoxAdapter(
+            child: _buildCollapsibleHeader(
+              title: 'All Destinations',
+              isExpanded: _showAllDestinations,
+              onTap: () => setState(() => _showAllDestinations = !_showAllDestinations),
+            ),
           ),
+          const SliverToBoxAdapter(child: SizedBox(height: 4)),
+          if (_showAllDestinations)
+            SliverList(
+              delegate: SliverChildBuilderDelegate((context, index) {
+                final poi = _filtered[index];
+                final isSelected = _isSelected(poi);
+                return ListTile(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                  leading: () {
+                    List<String> cats = (poi['categories'] is List)
+                        ? List<String>.from(poi['categories'])
+                        : const <String>[];
+                    if (cats.isEmpty && poi['category'] != null) {
+                      cats = [poi['category'].toString()];
+                    }
+
+                    final primaryCat = cats.isNotEmpty ? cats.first.toLowerCase() : '';
+
+                    IconData icon;
+                    if (primaryCat.contains('restaurant')) {
+                      icon = Icons.restaurant;
+                    } else if (primaryCat.contains('café')) {
+                      icon = Icons.local_cafe;
+                    } else if (primaryCat.contains('shop')) {
+                      icon = Icons.store;
+                    } else if (primaryCat == 'gates') {
+                      icon = Icons.door_front_door;
+                    } else if (primaryCat == 'bathrooms') {
+                      final gender = poi['gender']?.toString().toLowerCase();
+                      if (gender == 'female') {
+                        icon = Icons.woman;
+                      } else if (gender == 'male') {
+                        icon = Icons.man;
+                      } else {
+                        icon = Icons.wc;
+                      }
+                    } else if (primaryCat == 'prayer_rooms') {
+                      icon = Icons.mosque;
+                    } else {
+                      icon = Icons.store;
+                    }
+                    return Icon(icon, color: Colors.grey[600], size: 24);
+                  }(),
+                  title: Text(
+                    poi['name'],
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.black87,
+                    ),
+                  ),
+                  subtitle: Text(
+                    () {
+                      final category = poi['category']?.toString().toLowerCase();
+                      if (category == 'gates') {
+                        return poi['description']?.toString() ?? 'Gate';
+                      } else if (category == 'bathrooms' || category == 'prayer_rooms') {
+                        final description = poi['description']?.toString().trim() ?? '';
+                        if (description.isNotEmpty) return description;
+                        return 'Floor: ${_formatFloorLabel(poi['floor'])}';
+                      } else {
+                        return 'Floor: ${_formatFloorLabel(poi['floor'])}';
+                      }
+                    }(),
+                    style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                  ),
+                  onTap: () => Navigator.pop(context, poi),
+                  trailing: isSelected ? Icon(Icons.check_circle, color: AppColors.kGreen) : null,
+                );
+              }, childCount: _filtered.length),
+            ),
           const SliverToBoxAdapter(child: SizedBox(height: 20)),
         ],
       ),

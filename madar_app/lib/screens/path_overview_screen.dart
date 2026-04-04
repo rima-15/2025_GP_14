@@ -88,6 +88,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
   bool _usePinAsStart = true;
   Map<String, dynamic>? _customStartPoi;
   Map<String, dynamic>? _selectedDestPoi;
+  Map<String, dynamic>? _suggestedMeetingPoi;
   List<Map<String, dynamic>> _activeRequests = [];
 
   String _toFNumber(String? raw) {
@@ -486,6 +487,74 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       } else {
         _syncOverlaysForCurrentFloor();
       }
+    }
+  }
+
+  Future<void> _loadSuggestedMeetingPoint() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('meetingPoints')
+          .where('status', isEqualTo: 'active')
+          .where('participantUserIds', arrayContains: uid)
+          .limit(10)
+          .get();
+
+      Map<String, dynamic>? suggestedPoi;
+
+      for (final doc in snap.docs) {
+        final data = doc.data();
+
+        final suggestionsComputed = data['suggestionsComputed'] == true;
+        final suggestedPoint = (data['suggestedPoint'] ?? '').toString().trim();
+        final candidates = data['suggestedCandidates'];
+
+        if (!suggestionsComputed ||
+            suggestedPoint.isEmpty ||
+            candidates is! List) {
+          continue;
+        }
+
+        Map<String, dynamic>? matchedCandidate;
+
+        for (final c in candidates) {
+          if (c is! Map) continue;
+
+          final placeName = (c['placeName'] ?? '').toString().trim();
+          if (placeName.toLowerCase() == suggestedPoint.toLowerCase()) {
+            matchedCandidate = Map<String, dynamic>.from(c);
+            break;
+          }
+        }
+
+        if (matchedCandidate == null) continue;
+
+        final entranceRaw = matchedCandidate['entrance'];
+        if (entranceRaw is! Map) continue;
+
+        final entrance = Map<String, dynamic>.from(entranceRaw);
+
+        suggestedPoi = {
+          'name': (matchedCandidate['placeName'] ?? suggestedPoint).toString(),
+          'material': entrance['material']?.toString(),
+          'floor': entrance['floor']?.toString(),
+          'x': entrance['x'],
+          'y': entrance['y'],
+          'z': entrance['z'],
+        };
+        break;
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _suggestedMeetingPoi = suggestedPoi;
+      });
+
+      debugPrint('✅ Suggested meeting poi: $_suggestedMeetingPoi');
+    } catch (e) {
+      debugPrint('❌ Failed to load suggested meeting point: $e');
     }
   }
 
@@ -984,38 +1053,28 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
   Map<String, dynamic>? _findServiceDestinationOption(String shopId) {
     final all = _getAllPoisFromEntrances();
 
-    List<Map<String, dynamic>> matches;
-
     if (shopId == 'service_bathroom_female') {
-      matches = all.where((e) {
-        final name = (e['name'] ?? '').toString();
-        final category = (e['category'] ?? '').toString().toLowerCase();
-        final gender = (e['gender'] ?? '').toString().toLowerCase();
-        return category == 'bathrooms' &&
-            name == 'Female Bathroom' &&
-            (gender == 'female' || gender == 'shared');
-      }).toList();
-    } else if (shopId == 'service_bathroom_male') {
-      matches = all.where((e) {
-        final name = (e['name'] ?? '').toString();
-        final category = (e['category'] ?? '').toString().toLowerCase();
-        final gender = (e['gender'] ?? '').toString().toLowerCase();
-        return category == 'bathrooms' &&
-            (name == 'Male Bathroom' || name == 'Bathroom') &&
-            (gender == 'male' || gender == 'shared');
-      }).toList();
-    } else if (shopId == 'service_prayer_room') {
-      matches = all.where((e) {
-        final category = (e['category'] ?? '').toString().toLowerCase();
-        final type = (e['serviceType'] ?? '').toString().toLowerCase();
-        return category == 'prayer_rooms' || type.startsWith('prayer_');
-      }).toList();
-    } else {
-      matches = const [];
+      return all.cast<Map<String, dynamic>?>().firstWhere(
+        (e) => e?['name'] == 'Female Bathroom',
+        orElse: () => null,
+      );
     }
 
-    if (matches.isEmpty) return null;
-    return _pickClosestEntryToCurrentStart(matches);
+    if (shopId == 'service_bathroom_male') {
+      return all.cast<Map<String, dynamic>?>().firstWhere(
+        (e) => e?['name'] == 'Male Bathroom',
+        orElse: () => null,
+      );
+    }
+
+    if (shopId == 'service_prayer_room') {
+      return all.cast<Map<String, dynamic>?>().firstWhere(
+        (e) => e?['name'] == 'Prayer Room',
+        orElse: () => null,
+      );
+    }
+
+    return null;
   }
 
   Future<void> _loadActiveRequests() async {
@@ -1091,19 +1150,13 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     }
   }
 
-  String _serviceDescription(Map<String, dynamic> entry) {
-    final floor = (entry['floor'] ?? '').toString().trim();
-    final nearby = (entry['nearby'] ?? '').toString().trim();
-    if (floor.isNotEmpty && nearby.isNotEmpty) {
-      return 'Floor: $floor • Next to $nearby';
-    }
-    if (floor.isNotEmpty) return 'Floor: $floor';
-    if (nearby.isNotEmpty) return 'Next to $nearby';
-    return '';
-  }
-
   List<Map<String, dynamic>> _getAllPoisFromEntrances() {
     final result = <Map<String, dynamic>>[];
+
+    final femaleBathrooms = <Map<String, dynamic>>[];
+    final maleBathrooms = <Map<String, dynamic>>[];
+
+    final prayerRooms = <Map<String, dynamic>>[];
 
     _entrancesByPoi.forEach((normKey, entrances) {
       if (entrances.isEmpty) return;
@@ -1118,26 +1171,35 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       final isPrayer =
           category == 'prayer_rooms' || serviceType.startsWith('prayer_');
 
-      if (isBathroom || isPrayer) {
-        for (final raw in entrances) {
-          final e = Map<String, dynamic>.from(raw);
-          final displayName = _displayNameFromEntrance(e, normKey);
-          result.add({
-            'name': displayName,
-            'type': 'poi',
-            'floor': e['floor'] ?? '',
-            'x': e['x'],
-            'y': e['y'],
-            'z': e['z'],
-            'material': e['material'] ?? material,
-            'category': e['category'],
-            'categories': e['categories'] ?? [],
-            'serviceType': e['type'],
-            'gender': e['gender'],
-            'nearby': e['nearby'],
-            'description': _serviceDescription(e),
-          });
+      if (isBathroom) {
+        if (serviceType == 'bathroom_female') {
+          femaleBathrooms.addAll(
+            entrances.map(
+              (e) => {...Map<String, dynamic>.from(e), 'material': material},
+            ),
+          );
+        } else if (serviceType == 'bathroom_male') {
+          maleBathrooms.addAll(
+            entrances.map(
+              (e) => {...Map<String, dynamic>.from(e), 'material': material},
+            ),
+          );
+        } else if (serviceType == 'bathroom_shared') {
+          final sharedEntries = entrances.map(
+            (e) => {...Map<String, dynamic>.from(e), 'material': material},
+          );
+          femaleBathrooms.addAll(sharedEntries);
+          maleBathrooms.addAll(sharedEntries);
         }
+        return;
+      }
+
+      if (isPrayer) {
+        prayerRooms.addAll(
+          entrances.map(
+            (e) => {...Map<String, dynamic>.from(e), 'material': material},
+          ),
+        );
         return;
       }
 
@@ -1159,11 +1221,56 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       });
     });
 
-    result.sort((a, b) {
-      final byName = a['name'].toString().compareTo(b['name'].toString());
-      if (byName != 0) return byName;
-      return a['description'].toString().compareTo(b['description'].toString());
-    });
+    if (femaleBathrooms.isNotEmpty) {
+      final best = _pickClosestEntryToCurrentStart(femaleBathrooms);
+      result.add({
+        'name': 'Female Bathroom',
+        'type': 'poi',
+        'floor': best['floor'] ?? '',
+        'x': best['x'],
+        'y': best['y'],
+        'z': best['z'],
+        'material': best['material'],
+        'category': 'bathrooms',
+        'categories': [],
+        'serviceType': 'bathroom_female_or_shared',
+        'gender': 'female',
+      });
+    }
+
+    if (maleBathrooms.isNotEmpty) {
+      final best = _pickClosestEntryToCurrentStart(maleBathrooms);
+      result.add({
+        'name': 'Male Bathroom',
+        'type': 'poi',
+        'floor': best['floor'] ?? '',
+        'x': best['x'],
+        'y': best['y'],
+        'z': best['z'],
+        'material': best['material'],
+        'category': 'bathrooms',
+        'serviceType': 'bathroom_male_or_shared',
+        'gender': 'male',
+      });
+    }
+
+    if (prayerRooms.isNotEmpty) {
+      final best = _pickClosestEntryToCurrentStart(prayerRooms);
+      result.add({
+        'name': 'Prayer Room',
+        'type': 'poi',
+        'floor': best['floor'] ?? '',
+        'x': best['x'],
+        'y': best['y'],
+        'z': best['z'],
+        'material': best['material'],
+        'category': 'prayer_rooms',
+        'serviceType': 'prayer_shared',
+        'gender': 'shared',
+      });
+    }
+
+    result.sort((a, b) => a['name'].toString().compareTo(b['name'].toString()));
     return result;
   }
 
@@ -1181,14 +1288,27 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
           'floor': _desiredStartFloorLabel,
         };
 
-    Map<String, dynamic> best = entries.first;
+    final startFloor = _toFNumber((start['floor'] ?? '').toString());
+
+    List<Map<String, dynamic>> candidates = entries;
+    if (startFloor != null) {
+      final sameFloor = entries.where((e) {
+        return _toFNumber((e['floor'] ?? '').toString()) == startFloor;
+      }).toList();
+
+      if (sameFloor.isNotEmpty) {
+        candidates = sameFloor;
+      }
+    }
+
+    Map<String, dynamic> best = candidates.first;
     double bestDistSq = double.infinity;
 
     final sx = (start['x'] as num?)?.toDouble() ?? 0.0;
     final sy = (start['y'] as num?)?.toDouble() ?? 0.0;
     final sz = (start['z'] as num?)?.toDouble() ?? 0.0;
 
-    for (final e in entries) {
+    for (final e in candidates) {
       final ex = (e['x'] as num?)?.toDouble() ?? 0.0;
       final ey = (e['y'] as num?)?.toDouble() ?? 0.0;
       final ez = (e['z'] as num?)?.toDouble() ?? 0.0;
@@ -1463,122 +1583,6 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
         (a[2] - b[2]).abs() < 1e-6;
   }
 
-  Future<Map<String, dynamic>?> _pickBestEntranceByRoute(
-    Map<String, double> effectiveStart,
-    String effectiveStartFloor,
-    List<Map<String, dynamic>> entrances,
-  ) async {
-    if (entrances.isEmpty) return null;
-
-    await _ensureConnectorsLoaded();
-
-    List<List<double>> computePathOn(
-      NavMesh nm,
-      Map<String, double> aBl,
-      Map<String, double> bBl,
-    ) {
-      final a = nm.snapPointXY([aBl['x']!, aBl['y']!, aBl['z']!]);
-      final b = [bBl['x']!, bBl['y']!, bBl['z']!];
-      var raw = nm.findPathFunnelBlenderXY(start: a, goal: b);
-      var sm = _smoothAndResamplePath(raw, nm);
-      if (sm.length < 2) {
-        raw = [a, b];
-        sm = _smoothAndResamplePath(raw, nm);
-        if (sm.length < 2) sm = raw;
-      }
-      return sm;
-    }
-
-    double pathLen(List<List<double>> pts) {
-      double sum = 0;
-      for (int i = 1; i < pts.length; i++) {
-        sum += _distXY(pts[i - 1], pts[i]);
-      }
-      return sum;
-    }
-
-    final startF = _toFNumber(effectiveStartFloor);
-    if (startF.isEmpty) return null;
-
-    final startNm = await _ensureNavmeshLoadedForFNumber(startF);
-    if (startNm == null) return null;
-
-    double bestScore = double.infinity;
-    Map<String, dynamic>? bestEntry;
-
-    for (final e in entrances) {
-      final destF = _toFNumber(e['floor']?.toString() ?? '');
-      if (destF.isEmpty) continue;
-
-      final dest = <String, double>{
-        'x': (e['x'] as num).toDouble(),
-        'y': (e['y'] as num).toDouble(),
-        'z': (e['z'] as num).toDouble(),
-      };
-
-      double? score;
-
-      if (startF == destF) {
-        final pts = computePathOn(startNm, effectiveStart, dest);
-        if (pts.length >= 2) {
-          score = pathLen(pts);
-        }
-      } else {
-        final destNm = await _ensureNavmeshLoadedForFNumber(destF);
-        if (destNm == null) continue;
-
-        final pref = _selectedPreference.toLowerCase();
-        bool linksFloors(ConnectorLink c) =>
-            c.endpointsByFNumber.containsKey(startF) &&
-            c.endpointsByFNumber.containsKey(destF);
-
-        bool directionOk(ConnectorLink c) {
-          final t = _normalizeConnectorType(c.type);
-          return _connectorDirectionAllowed(
-            t,
-            int.tryParse(startF) ?? 1,
-            int.tryParse(destF) ?? 1,
-          );
-        }
-
-        bool matchesPref(ConnectorLink c) {
-          final t = _normalizeConnectorType(c.type);
-          return directionOk(c) && _connectorMatchesPreference(t, pref);
-        }
-
-        final candidates = _connectors
-            .where((c) => linksFloors(c) && matchesPref(c))
-            .toList();
-        final pool = candidates.isNotEmpty
-            ? candidates
-            : _connectors.where((c) => linksFloors(c) && directionOk(c)).toList();
-
-        for (final c in pool) {
-          final aPos = c.endpointsByFNumber[startF]!;
-          final bPos = c.endpointsByFNumber[destF]!;
-
-          final aPts = computePathOn(startNm, effectiveStart, aPos);
-          if (aPts.length < 2) continue;
-
-          final bPts = computePathOn(destNm, bPos, dest);
-          if (bPts.length < 2) continue;
-
-          final total = pathLen(aPts) + pathLen(bPts);
-          if (score == null || total < score) {
-            score = total;
-          }
-        }
-      }
-
-      if (score != null && score < bestScore) {
-        bestScore = score;
-        bestEntry = e;
-      }
-    }
-
-    return bestEntry;
-  }
-
   Future<void> _pushPathToJs() async {
     final c = _webCtrl;
     if (c == null || !_jsReady) return;
@@ -1650,31 +1654,48 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       if (_destEntrances != null &&
           _destEntrances!.length > 1 &&
           effectiveStart != null) {
-        final bestEntrance = await _pickBestEntranceByRoute(
-          effectiveStart,
+        final startFloor = _toFNumber(
           effectiveStartFloor ?? _desiredStartFloorLabel,
-          _destEntrances!,
         );
+        final destFloor = _toFNumber(_destFloorLabel ?? '');
 
-        if (bestEntrance != null) {
-          effectiveDest = {
-            'x': (bestEntrance['x'] as num).toDouble(),
-            'y': (bestEntrance['y'] as num).toDouble(),
-            'z': (bestEntrance['z'] as num).toDouble(),
-          };
-          effectiveDestFloor = (bestEntrance['floor'] ?? '').toString();
-          _destPosBlender = effectiveDest;
-          _destFloorLabel = effectiveDestFloor;
+        if (startFloor == destFloor) {
+          double bestDistSq = double.infinity;
+          Map<String, double>? bestEntrance;
 
-          if (_selectedDestPoi != null) {
-            _selectedDestPoi!['x'] = effectiveDest['x'];
-            _selectedDestPoi!['y'] = effectiveDest['y'];
-            _selectedDestPoi!['z'] = effectiveDest['z'];
-            _selectedDestPoi!['floor'] = effectiveDestFloor;
+          final sameFloorEntrances = _destEntrances!
+              .where(
+                (e) => _toFNumber(e['floor']?.toString() ?? '') == startFloor,
+              )
+              .toList();
+          final entrList = sameFloorEntrances.isNotEmpty
+              ? sameFloorEntrances
+              : _destEntrances!;
+
+          for (final e in entrList) {
+            final dx = (e['x'] as double) - (effectiveStart['x'] ?? 0);
+            final dy = (e['y'] as double) - (effectiveStart['y'] ?? 0);
+            final dz = (e['z'] as double) - (effectiveStart['z'] ?? 0);
+            final distSq = dx * dx + dy * dy + dz * dz;
+            if (distSq < bestDistSq) {
+              bestDistSq = distSq;
+              bestEntrance = {'x': e['x'], 'y': e['y'], 'z': e['z']};
+            }
           }
 
+          if (bestEntrance != null) {
+            effectiveDest = bestEntrance;
+            _destPosBlender = bestEntrance;
+            if (_selectedDestPoi != null) {
+              _selectedDestPoi!['x'] = bestEntrance['x'];
+              _selectedDestPoi!['y'] = bestEntrance['y'];
+              _selectedDestPoi!['z'] = bestEntrance['z'];
+            }
+            debugPrint('✅ Chosen closest entrance');
+          }
+        } else {
           debugPrint(
-            '✅ Chosen shortest service entrance on floor=$effectiveDestFloor',
+            '⚠️ Start and destination on different floors – using first entrance',
           );
         }
       }
@@ -2528,7 +2549,8 @@ const timer = setInterval(function() {
       await _loadVenueMaps();
       await _loadEntrances();
       await _loadActiveRequests();
-      await _resolveDestinationFromEntrances(); // sets _selectedDestPoi and _destPosBlender
+      await _loadSuggestedMeetingPoint();
+      await _resolveDestinationFromEntrances();
       _refreshArSupport();
       await _loadUserBlenderPosition();
 
@@ -3122,6 +3144,7 @@ const timer = setInterval(function() {
         showPinPlacement: true,
         activeRequests: _activeRequests,
         selectedPoi: _selectedDestPoi,
+        suggestedPoi: _suggestedMeetingPoi,
       ),
     );
 
@@ -3246,6 +3269,57 @@ const timer = setInterval(function() {
         _ensureFloorSelected(_destFloorLabel!);
       }
     }
+  }
+
+  String _formatFloorLabel(dynamic floor) {
+    final f = (floor ?? '').toString().trim();
+    if (f.isEmpty) return '';
+    final token = f.toUpperCase();
+    if (token == '0' || token == 'GF' || token == 'G') return 'GF';
+    if (token.startsWith('F')) return token;
+    final n = int.tryParse(token);
+    if (n == null) return f;
+    return n == 0 ? 'GF' : 'F$n';
+  }
+
+  Widget _buildCollapsibleHeader({
+    required String title,
+    required bool isExpanded,
+    required VoidCallback onTap,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.grey[800],
+                    ),
+                  ),
+                ),
+                Icon(
+                  isExpanded
+                      ? Icons.keyboard_arrow_up
+                      : Icons.keyboard_arrow_down,
+                  color: Colors.grey[700],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -3728,6 +3802,7 @@ class _PoiPickerSheet extends StatefulWidget {
   final bool showPinPlacement;
   final List<Map<String, dynamic>> activeRequests;
   final Map<String, dynamic>? selectedPoi;
+  final Map<String, dynamic>? suggestedPoi;
 
   const _PoiPickerSheet({
     required this.pois,
@@ -3735,6 +3810,7 @@ class _PoiPickerSheet extends StatefulWidget {
     this.showPinPlacement = true,
     this.activeRequests = const [],
     this.selectedPoi,
+    this.suggestedPoi,
   });
 
   @override
@@ -3747,32 +3823,11 @@ class __PoiPickerSheetState extends State<_PoiPickerSheet> {
   bool _showActiveUsers = true;
   bool _showAllDestinations = true;
 
-  String _formatFloorLabel(dynamic raw) {
-    final s = (raw ?? '').toString().trim().toUpperCase();
-    if (s.isEmpty) return '';
-    if (s == '0' || s == 'GF' || s == 'G' || s == 'F0') return 'GF';
-
-    final pureNum = RegExp(r'^-?\d+$').firstMatch(s);
-    if (pureNum != null) {
-      if (s.startsWith('-')) return 'B${s.substring(1)}';
-      return 'F$s';
-    }
-
-    final fNum = RegExp(r'^F\s*(-?\d+)$').firstMatch(s);
-    if (fNum != null) {
-      final n = fNum.group(1)!;
-      if (n == '0') return 'GF';
-      if (n.startsWith('-')) return 'B${n.substring(1)}';
-      return 'F$n';
-    }
-
-    return s;
-  }
-
   @override
   void initState() {
     super.initState();
-    _filtered = widget.pois;
+    _filtered = List<Map<String, dynamic>>.from(widget.pois);
+    _sortFiltered(); 
     _searchController.addListener(_filter);
   }
 
@@ -3783,7 +3838,71 @@ class __PoiPickerSheetState extends State<_PoiPickerSheet> {
         final name = (p['name'] ?? '').toString().trim().toLowerCase();
         return name.contains(query);
       }).toList();
+
+      _sortFiltered(); 
     });
+  }
+
+  void _sortFiltered() {
+  _filtered.sort((a, b) {
+    final aSuggested = _isSuggestedPoi(a);
+    final bSuggested = _isSuggestedPoi(b);
+    if (aSuggested != bSuggested) {
+      return aSuggested ? -1 : 1;
+    }
+    // Both suggested or both not suggested → sort alphabetically by name
+    final aName = (a['name'] ?? '').toString().toLowerCase();
+    final bName = (b['name'] ?? '').toString().toLowerCase();
+    return aName.compareTo(bName);
+  });
+}
+
+  String _formatFloorLabel(dynamic floor) {
+    final raw = (floor ?? '').toString().trim().toUpperCase();
+    if (raw.isEmpty) return '';
+
+    if (raw == '0' || raw == 'GF' || raw == 'G') return 'GF';
+
+    final m = RegExp(r'^-?\d+$').firstMatch(raw);
+    if (m != null) {
+      if (raw == '0') return 'GF';
+      if (raw.startsWith('-')) return 'B${raw.substring(1)}';
+      return 'F$raw';
+    }
+
+    if (raw.startsWith('F') || raw.startsWith('B')) return raw;
+    return raw;
+  }
+
+  Widget _buildCollapsibleHeader({
+    required String title,
+    required bool expanded,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.black54,
+                ),
+              ),
+            ),
+            Icon(
+              expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+              color: Colors.black54,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -3805,42 +3924,32 @@ class __PoiPickerSheetState extends State<_PoiPickerSheet> {
     return itemName.isNotEmpty && itemName == selectedName;
   }
 
-  Widget _buildCollapsibleHeader({
-    required String title,
-    required bool isExpanded,
-    required VoidCallback onTap,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(10),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    title,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.grey[700],
-                    ),
-                  ),
-                ),
-                Icon(
-                  isExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
-                  color: Colors.grey[700],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
+  bool _isSuggestedPoi(Map<String, dynamic> item) {
+    final suggested = widget.suggestedPoi;
+    if (suggested == null) return false;
+
+    String norm(String s) {
+      var n = s.trim().toLowerCase();
+      n = n.replaceAll(RegExp(r'\.\d+$'), '');
+      n = n.replaceAll(RegExp(r'[^a-z0-9]+'), '');
+      if (n.startsWith('poimat')) n = n.substring(6);
+      return n;
+    }
+
+    final itemMaterial = norm((item['material'] ?? '').toString());
+    final sugMaterial = norm((suggested['material'] ?? '').toString());
+
+    final itemFloor = (item['floor'] ?? '').toString().trim().toLowerCase();
+    final sugFloor = (suggested['floor'] ?? '').toString().trim().toLowerCase();
+
+    if (itemMaterial.isNotEmpty && sugMaterial.isNotEmpty) {
+      return itemMaterial == sugMaterial && itemFloor == sugFloor;
+    }
+
+    final itemName = norm((item['name'] ?? '').toString());
+    final sugName = norm((suggested['name'] ?? '').toString());
+
+    return itemName == sugName && itemFloor == sugFloor;
   }
 
   @override
@@ -3856,6 +3965,7 @@ class __PoiPickerSheetState extends State<_PoiPickerSheet> {
       ),
       child: CustomScrollView(
         slivers: [
+          // Fixed header section
           SliverToBoxAdapter(
             child: Column(
               children: [
@@ -3909,7 +4019,8 @@ class __PoiPickerSheetState extends State<_PoiPickerSheet> {
                     child: Material(
                       color: Colors.transparent,
                       child: InkWell(
-                        onTap: () => Navigator.pop(context, {'type': 'pin_placement'}),
+                        onTap: () =>
+                            Navigator.pop(context, {'type': 'pin_placement'}),
                         borderRadius: BorderRadius.circular(12),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
@@ -3957,12 +4068,14 @@ class __PoiPickerSheetState extends State<_PoiPickerSheet> {
             ),
           ),
 
+          // Active requests section (if any)
           if (widget.activeRequests.isNotEmpty) ...[
             SliverToBoxAdapter(
               child: _buildCollapsibleHeader(
                 title: 'Active Tracked Users',
-                isExpanded: _showActiveUsers,
-                onTap: () => setState(() => _showActiveUsers = !_showActiveUsers),
+                expanded: _showActiveUsers,
+                onTap: () =>
+                    setState(() => _showActiveUsers = !_showActiveUsers),
               ),
             ),
             if (_showActiveUsers)
@@ -3971,8 +4084,15 @@ class __PoiPickerSheetState extends State<_PoiPickerSheet> {
                   final req = widget.activeRequests[index];
                   final isSelected = _isSelected(req);
                   return ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-                    leading: Icon(Icons.person_outline, color: Colors.grey[600], size: 24),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 4,
+                    ),
+                    leading: Icon(
+                      Icons.person_outline,
+                      color: Colors.grey[600],
+                      size: 24,
+                    ),
                     title: Text(
                       req['name'],
                       style: const TextStyle(
@@ -3993,7 +4113,9 @@ class __PoiPickerSheetState extends State<_PoiPickerSheet> {
                       'y': req['y'],
                       'z': req['z'],
                     }),
-                    trailing: isSelected ? Icon(Icons.check_circle, color: AppColors.kGreen) : null,
+                    trailing: isSelected
+                        ? Icon(Icons.check_circle, color: AppColors.kGreen)
+                        : null,
                   );
                 }, childCount: widget.activeRequests.length),
               ),
@@ -4009,8 +4131,9 @@ class __PoiPickerSheetState extends State<_PoiPickerSheet> {
           SliverToBoxAdapter(
             child: _buildCollapsibleHeader(
               title: 'All Destinations',
-              isExpanded: _showAllDestinations,
-              onTap: () => setState(() => _showAllDestinations = !_showAllDestinations),
+              expanded: _showAllDestinations,
+              onTap: () =>
+                  setState(() => _showAllDestinations = !_showAllDestinations),
             ),
           ),
           const SliverToBoxAdapter(child: SizedBox(height: 4)),
@@ -4020,16 +4143,22 @@ class __PoiPickerSheetState extends State<_PoiPickerSheet> {
                 final poi = _filtered[index];
                 final isSelected = _isSelected(poi);
                 return ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 4,
+                  ),
                   leading: () {
                     List<String> cats = (poi['categories'] is List)
                         ? List<String>.from(poi['categories'])
                         : const <String>[];
+                    // If empty, fall back to the single category field
                     if (cats.isEmpty && poi['category'] != null) {
                       cats = [poi['category'].toString()];
                     }
 
-                    final primaryCat = cats.isNotEmpty ? cats.first.toLowerCase() : '';
+                    final primaryCat = cats.isNotEmpty
+                        ? cats.first.toLowerCase()
+                        : '';
 
                     IconData icon;
                     if (primaryCat.contains('restaurant')) {
@@ -4056,31 +4185,54 @@ class __PoiPickerSheetState extends State<_PoiPickerSheet> {
                     }
                     return Icon(icon, color: Colors.grey[600], size: 24);
                   }(),
-                  title: Text(
-                    poi['name'],
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.black87,
-                    ),
+                  title: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          poi['name'],
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.black87,
+                          ),
+                        ),
+                      ),
+                      if (_isSuggestedPoi(poi))
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.kGreen.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: const Text(
+                            'Suggested Point',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.kGreen,
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
-                  subtitle: Text(
-                    () {
-                      final category = poi['category']?.toString().toLowerCase();
-                      if (category == 'gates') {
-                        return poi['description']?.toString() ?? 'Gate';
-                      } else if (category == 'bathrooms' || category == 'prayer_rooms') {
-                        final description = poi['description']?.toString().trim() ?? '';
-                        if (description.isNotEmpty) return description;
-                        return 'Floor: ${_formatFloorLabel(poi['floor'])}';
-                      } else {
-                        return 'Floor: ${_formatFloorLabel(poi['floor'])}';
-                      }
-                    }(),
-                    style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-                  ),
+                  subtitle: Text(() {
+                    final category = poi['category']?.toString().toLowerCase();
+                    if (category == 'gates') {
+                      return poi['description']?.toString() ?? 'Gate';
+                    } else if (category == 'bathrooms' ||
+                        category == 'prayer_rooms') {
+                      return 'Closest to you';
+                    } else {
+                      return 'Floor: ${poi['floor']}';
+                    }
+                  }(), style: TextStyle(fontSize: 14, color: Colors.grey[600])),
                   onTap: () => Navigator.pop(context, poi),
-                  trailing: isSelected ? Icon(Icons.check_circle, color: AppColors.kGreen) : null,
+                  trailing: isSelected
+                      ? Icon(Icons.check_circle, color: AppColors.kGreen)
+                      : null,
                 );
               }, childCount: _filtered.length),
             ),

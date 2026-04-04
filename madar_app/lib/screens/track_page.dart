@@ -4898,7 +4898,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 top: 16,
                 right: 16,
                 child: Column(
-                  children: _venueMaps
+                  children: _venueMaps.reversed
                       .map(
                         (m) => Padding(
                           padding: const EdgeInsets.only(bottom: 8),

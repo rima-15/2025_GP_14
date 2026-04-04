@@ -905,6 +905,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
                         : []),
               'type': item['type']?.toString(),
               'gender': item['gender']?.toString(),
+              'nearby': item['nearby']?.toString(),
             });
           }
         }
@@ -984,28 +985,38 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
   Map<String, dynamic>? _findServiceDestinationOption(String shopId) {
     final all = _getAllPoisFromEntrances();
 
+    List<Map<String, dynamic>> matches;
+
     if (shopId == 'service_bathroom_female') {
-      return all.cast<Map<String, dynamic>?>().firstWhere(
-        (e) => e?['name'] == 'Female Bathroom',
-        orElse: () => null,
-      );
+      matches = all.where((e) {
+        final name = (e['name'] ?? '').toString();
+        final category = (e['category'] ?? '').toString().toLowerCase();
+        final gender = (e['gender'] ?? '').toString().toLowerCase();
+        return category == 'bathrooms' &&
+            name == 'Female Bathroom' &&
+            (gender == 'female' || gender == 'shared');
+      }).toList();
+    } else if (shopId == 'service_bathroom_male') {
+      matches = all.where((e) {
+        final name = (e['name'] ?? '').toString();
+        final category = (e['category'] ?? '').toString().toLowerCase();
+        final gender = (e['gender'] ?? '').toString().toLowerCase();
+        return category == 'bathrooms' &&
+            (name == 'Male Bathroom' || name == 'Bathroom') &&
+            (gender == 'male' || gender == 'shared');
+      }).toList();
+    } else if (shopId == 'service_prayer_room') {
+      matches = all.where((e) {
+        final category = (e['category'] ?? '').toString().toLowerCase();
+        final type = (e['serviceType'] ?? '').toString().toLowerCase();
+        return category == 'prayer_rooms' || type.startsWith('prayer_');
+      }).toList();
+    } else {
+      matches = const [];
     }
 
-    if (shopId == 'service_bathroom_male') {
-      return all.cast<Map<String, dynamic>?>().firstWhere(
-        (e) => e?['name'] == 'Male Bathroom',
-        orElse: () => null,
-      );
-    }
-
-    if (shopId == 'service_prayer_room') {
-      return all.cast<Map<String, dynamic>?>().firstWhere(
-        (e) => e?['name'] == 'Prayer Room',
-        orElse: () => null,
-      );
-    }
-
-    return null;
+    if (matches.isEmpty) return null;
+    return _pickClosestEntryToCurrentStart(matches);
   }
 
   Future<void> _loadActiveRequests() async {
@@ -1081,13 +1092,19 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     }
   }
 
+  String _serviceDescription(Map<String, dynamic> entry) {
+    final floor = (entry['floor'] ?? '').toString().trim();
+    final nearby = (entry['nearby'] ?? '').toString().trim();
+    if (floor.isNotEmpty && nearby.isNotEmpty) {
+      return 'Floor: $floor • Next to $nearby';
+    }
+    if (floor.isNotEmpty) return 'Floor: $floor';
+    if (nearby.isNotEmpty) return 'Next to $nearby';
+    return '';
+  }
+
   List<Map<String, dynamic>> _getAllPoisFromEntrances() {
     final result = <Map<String, dynamic>>[];
-
-    final femaleBathrooms = <Map<String, dynamic>>[];
-    final maleBathrooms = <Map<String, dynamic>>[];
-
-    final prayerRooms = <Map<String, dynamic>>[];
 
     _entrancesByPoi.forEach((normKey, entrances) {
       if (entrances.isEmpty) return;
@@ -1102,35 +1119,26 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       final isPrayer =
           category == 'prayer_rooms' || serviceType.startsWith('prayer_');
 
-      if (isBathroom) {
-        if (serviceType == 'bathroom_female') {
-          femaleBathrooms.addAll(
-            entrances.map(
-              (e) => {...Map<String, dynamic>.from(e), 'material': material},
-            ),
-          );
-        } else if (serviceType == 'bathroom_male') {
-          maleBathrooms.addAll(
-            entrances.map(
-              (e) => {...Map<String, dynamic>.from(e), 'material': material},
-            ),
-          );
-        } else if (serviceType == 'bathroom_shared') {
-          final sharedEntries = entrances.map(
-            (e) => {...Map<String, dynamic>.from(e), 'material': material},
-          );
-          femaleBathrooms.addAll(sharedEntries);
-          maleBathrooms.addAll(sharedEntries);
+      if (isBathroom || isPrayer) {
+        for (final raw in entrances) {
+          final e = Map<String, dynamic>.from(raw);
+          final displayName = _displayNameFromEntrance(e, normKey);
+          result.add({
+            'name': displayName,
+            'type': 'poi',
+            'floor': e['floor'] ?? '',
+            'x': e['x'],
+            'y': e['y'],
+            'z': e['z'],
+            'material': e['material'] ?? material,
+            'category': e['category'],
+            'categories': e['categories'] ?? [],
+            'serviceType': e['type'],
+            'gender': e['gender'],
+            'nearby': e['nearby'],
+            'description': _serviceDescription(e),
+          });
         }
-        return;
-      }
-
-      if (isPrayer) {
-        prayerRooms.addAll(
-          entrances.map(
-            (e) => {...Map<String, dynamic>.from(e), 'material': material},
-          ),
-        );
         return;
       }
 
@@ -1152,56 +1160,11 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       });
     });
 
-    if (femaleBathrooms.isNotEmpty) {
-      final best = _pickClosestEntryToCurrentStart(femaleBathrooms);
-      result.add({
-        'name': 'Female Bathroom',
-        'type': 'poi',
-        'floor': best['floor'] ?? '',
-        'x': best['x'],
-        'y': best['y'],
-        'z': best['z'],
-        'material': best['material'],
-        'category': 'bathrooms',
-        'categories': [],
-        'serviceType': 'bathroom_female_or_shared',
-        'gender': 'female',
-      });
-    }
-
-    if (maleBathrooms.isNotEmpty) {
-      final best = _pickClosestEntryToCurrentStart(maleBathrooms);
-      result.add({
-        'name': 'Male Bathroom',
-        'type': 'poi',
-        'floor': best['floor'] ?? '',
-        'x': best['x'],
-        'y': best['y'],
-        'z': best['z'],
-        'material': best['material'],
-        'category': 'bathrooms',
-        'serviceType': 'bathroom_male_or_shared',
-        'gender': 'male',
-      });
-    }
-
-    if (prayerRooms.isNotEmpty) {
-      final best = _pickClosestEntryToCurrentStart(prayerRooms);
-      result.add({
-        'name': 'Prayer Room',
-        'type': 'poi',
-        'floor': best['floor'] ?? '',
-        'x': best['x'],
-        'y': best['y'],
-        'z': best['z'],
-        'material': best['material'],
-        'category': 'prayer_rooms',
-        'serviceType': 'prayer_shared',
-        'gender': 'shared',
-      });
-    }
-
-    result.sort((a, b) => a['name'].toString().compareTo(b['name'].toString()));
+    result.sort((a, b) {
+      final byName = a['name'].toString().compareTo(b['name'].toString());
+      if (byName != 0) return byName;
+      return a['description'].toString().compareTo(b['description'].toString());
+    });
     return result;
   }
 
@@ -3810,13 +3773,40 @@ class __PoiPickerSheetState extends State<_PoiPickerSheet> {
     final selected = widget.selectedPoi;
     if (selected == null) return false;
 
+    final itemMaterial = (item['material'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+    final selectedMaterial = (selected['material'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+
+    final itemFloor = (item['floor'] ?? '').toString().trim().toLowerCase();
+    final selectedFloor = (selected['floor'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+
+    if (itemMaterial.isNotEmpty && selectedMaterial.isNotEmpty) {
+      return itemMaterial == selectedMaterial && itemFloor == selectedFloor;
+    }
+
     final itemName = (item['name'] ?? '').toString().trim().toLowerCase();
     final selectedName = (selected['name'] ?? '')
         .toString()
         .trim()
         .toLowerCase();
+    final itemNearby = (item['nearby'] ?? '').toString().trim().toLowerCase();
+    final selectedNearby = (selected['nearby'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
 
-    return itemName.isNotEmpty && itemName == selectedName;
+    return itemName.isNotEmpty &&
+        itemName == selectedName &&
+        itemFloor == selectedFloor &&
+        itemNearby == selectedNearby;
   }
 
   @override
@@ -4062,7 +4052,9 @@ class __PoiPickerSheetState extends State<_PoiPickerSheet> {
                     return poi['description']?.toString() ?? 'Gate';
                   } else if (category == 'bathrooms' ||
                       category == 'prayer_rooms') {
-                    return 'Closest to you';
+                    final description = poi['description']?.toString().trim() ?? '';
+                    if (description.isNotEmpty) return description;
+                    return 'Floor: ${poi['floor']}';
                   } else {
                     return 'Floor: ${poi['floor']}';
                   }

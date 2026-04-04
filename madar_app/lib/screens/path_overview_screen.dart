@@ -1219,27 +1219,14 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
           'floor': _desiredStartFloorLabel,
         };
 
-    final startFloor = _toFNumber((start['floor'] ?? '').toString());
-
-    List<Map<String, dynamic>> candidates = entries;
-    if (startFloor != null) {
-      final sameFloor = entries.where((e) {
-        return _toFNumber((e['floor'] ?? '').toString()) == startFloor;
-      }).toList();
-
-      if (sameFloor.isNotEmpty) {
-        candidates = sameFloor;
-      }
-    }
-
-    Map<String, dynamic> best = candidates.first;
+    Map<String, dynamic> best = entries.first;
     double bestDistSq = double.infinity;
 
     final sx = (start['x'] as num?)?.toDouble() ?? 0.0;
     final sy = (start['y'] as num?)?.toDouble() ?? 0.0;
     final sz = (start['z'] as num?)?.toDouble() ?? 0.0;
 
-    for (final e in candidates) {
+    for (final e in entries) {
       final ex = (e['x'] as num?)?.toDouble() ?? 0.0;
       final ey = (e['y'] as num?)?.toDouble() ?? 0.0;
       final ez = (e['z'] as num?)?.toDouble() ?? 0.0;
@@ -1514,6 +1501,122 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
         (a[2] - b[2]).abs() < 1e-6;
   }
 
+  Future<Map<String, dynamic>?> _pickBestEntranceByRoute(
+    Map<String, double> effectiveStart,
+    String effectiveStartFloor,
+    List<Map<String, dynamic>> entrances,
+  ) async {
+    if (entrances.isEmpty) return null;
+
+    await _ensureConnectorsLoaded();
+
+    List<List<double>> computePathOn(
+      NavMesh nm,
+      Map<String, double> aBl,
+      Map<String, double> bBl,
+    ) {
+      final a = nm.snapPointXY([aBl['x']!, aBl['y']!, aBl['z']!]);
+      final b = [bBl['x']!, bBl['y']!, bBl['z']!];
+      var raw = nm.findPathFunnelBlenderXY(start: a, goal: b);
+      var sm = _smoothAndResamplePath(raw, nm);
+      if (sm.length < 2) {
+        raw = [a, b];
+        sm = _smoothAndResamplePath(raw, nm);
+        if (sm.length < 2) sm = raw;
+      }
+      return sm;
+    }
+
+    double pathLen(List<List<double>> pts) {
+      double sum = 0;
+      for (int i = 1; i < pts.length; i++) {
+        sum += _distXY(pts[i - 1], pts[i]);
+      }
+      return sum;
+    }
+
+    final startF = _toFNumber(effectiveStartFloor);
+    if (startF.isEmpty) return null;
+
+    final startNm = await _ensureNavmeshLoadedForFNumber(startF);
+    if (startNm == null) return null;
+
+    double bestScore = double.infinity;
+    Map<String, dynamic>? bestEntry;
+
+    for (final e in entrances) {
+      final destF = _toFNumber(e['floor']?.toString() ?? '');
+      if (destF.isEmpty) continue;
+
+      final dest = <String, double>{
+        'x': (e['x'] as num).toDouble(),
+        'y': (e['y'] as num).toDouble(),
+        'z': (e['z'] as num).toDouble(),
+      };
+
+      double? score;
+
+      if (startF == destF) {
+        final pts = computePathOn(startNm, effectiveStart, dest);
+        if (pts.length >= 2) {
+          score = pathLen(pts);
+        }
+      } else {
+        final destNm = await _ensureNavmeshLoadedForFNumber(destF);
+        if (destNm == null) continue;
+
+        final pref = _selectedPreference.toLowerCase();
+        bool linksFloors(ConnectorLink c) =>
+            c.endpointsByFNumber.containsKey(startF) &&
+            c.endpointsByFNumber.containsKey(destF);
+
+        bool directionOk(ConnectorLink c) {
+          final t = _normalizeConnectorType(c.type);
+          return _connectorDirectionAllowed(
+            t,
+            int.tryParse(startF) ?? 1,
+            int.tryParse(destF) ?? 1,
+          );
+        }
+
+        bool matchesPref(ConnectorLink c) {
+          final t = _normalizeConnectorType(c.type);
+          return directionOk(c) && _connectorMatchesPreference(t, pref);
+        }
+
+        final candidates = _connectors
+            .where((c) => linksFloors(c) && matchesPref(c))
+            .toList();
+        final pool = candidates.isNotEmpty
+            ? candidates
+            : _connectors.where((c) => linksFloors(c) && directionOk(c)).toList();
+
+        for (final c in pool) {
+          final aPos = c.endpointsByFNumber[startF]!;
+          final bPos = c.endpointsByFNumber[destF]!;
+
+          final aPts = computePathOn(startNm, effectiveStart, aPos);
+          if (aPts.length < 2) continue;
+
+          final bPts = computePathOn(destNm, bPos, dest);
+          if (bPts.length < 2) continue;
+
+          final total = pathLen(aPts) + pathLen(bPts);
+          if (score == null || total < score) {
+            score = total;
+          }
+        }
+      }
+
+      if (score != null && score < bestScore) {
+        bestScore = score;
+        bestEntry = e;
+      }
+    }
+
+    return bestEntry;
+  }
+
   Future<void> _pushPathToJs() async {
     final c = _webCtrl;
     if (c == null || !_jsReady) return;
@@ -1585,48 +1688,31 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       if (_destEntrances != null &&
           _destEntrances!.length > 1 &&
           effectiveStart != null) {
-        final startFloor = _toFNumber(
+        final bestEntrance = await _pickBestEntranceByRoute(
+          effectiveStart,
           effectiveStartFloor ?? _desiredStartFloorLabel,
+          _destEntrances!,
         );
-        final destFloor = _toFNumber(_destFloorLabel ?? '');
 
-        if (startFloor == destFloor) {
-          double bestDistSq = double.infinity;
-          Map<String, double>? bestEntrance;
+        if (bestEntrance != null) {
+          effectiveDest = {
+            'x': (bestEntrance['x'] as num).toDouble(),
+            'y': (bestEntrance['y'] as num).toDouble(),
+            'z': (bestEntrance['z'] as num).toDouble(),
+          };
+          effectiveDestFloor = (bestEntrance['floor'] ?? '').toString();
+          _destPosBlender = effectiveDest;
+          _destFloorLabel = effectiveDestFloor;
 
-          final sameFloorEntrances = _destEntrances!
-              .where(
-                (e) => _toFNumber(e['floor']?.toString() ?? '') == startFloor,
-              )
-              .toList();
-          final entrList = sameFloorEntrances.isNotEmpty
-              ? sameFloorEntrances
-              : _destEntrances!;
-
-          for (final e in entrList) {
-            final dx = (e['x'] as double) - (effectiveStart['x'] ?? 0);
-            final dy = (e['y'] as double) - (effectiveStart['y'] ?? 0);
-            final dz = (e['z'] as double) - (effectiveStart['z'] ?? 0);
-            final distSq = dx * dx + dy * dy + dz * dz;
-            if (distSq < bestDistSq) {
-              bestDistSq = distSq;
-              bestEntrance = {'x': e['x'], 'y': e['y'], 'z': e['z']};
-            }
+          if (_selectedDestPoi != null) {
+            _selectedDestPoi!['x'] = effectiveDest['x'];
+            _selectedDestPoi!['y'] = effectiveDest['y'];
+            _selectedDestPoi!['z'] = effectiveDest['z'];
+            _selectedDestPoi!['floor'] = effectiveDestFloor;
           }
 
-          if (bestEntrance != null) {
-            effectiveDest = bestEntrance;
-            _destPosBlender = bestEntrance;
-            if (_selectedDestPoi != null) {
-              _selectedDestPoi!['x'] = bestEntrance['x'];
-              _selectedDestPoi!['y'] = bestEntrance['y'];
-              _selectedDestPoi!['z'] = bestEntrance['z'];
-            }
-            debugPrint('✅ Chosen closest entrance');
-          }
-        } else {
           debugPrint(
-            '⚠️ Start and destination on different floors – using first entrance',
+            '✅ Chosen shortest service entrance on floor=$effectiveDestFloor',
           );
         }
       }

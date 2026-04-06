@@ -156,9 +156,16 @@ class _TrackPageState extends State<TrackPage> {
   /// so we don't call reconcileArrivalPhase on every second tick.
   final Set<String> _expiredArrivalMeetingIds = {};
 
-  /// The meeting ID for which expiresAt has already been written from this
-  /// device after real path ETAs were computed. Prevents duplicate writes.
-  String? _expiresAtWrittenForMeetingId;
+  /// The meeting ID for which real-ETA expiresAt has already been computed
+  /// locally. Prevents recomputing on every path-recompute cycle.
+  String? _localExpiresAtComputedForMeetingId;
+
+  /// Local real-ETA-based session expiry time, computed from navmesh distances.
+  /// Used ONLY for the displayed countdown; Firestore keeps the random-ETA
+  /// safety baseline (written by markHostDecision) so auto-expiry is guaranteed
+  /// even if path computation never runs. Keeping them separate eliminates the
+  /// oscillation caused by two Firestore writes delivering alternating values.
+  DateTime? _localExpiresAt;
 
   /// Tracks pending meetings where all participants declined, so we don't
   /// fire maybeMaintain (which writes cancellationReason) on every rebuild.
@@ -1472,29 +1479,29 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       await _recomputeMeetingPathForUser(id);
     }
 
-    // After all paths are computed, let the host write expiresAt once using
-    // real navmesh ETAs instead of the random estimatedArrivalMinutes values.
-    _maybeWriteExpiresAtFromRealEtas();
+    // After all paths are computed, update the local expiry display using
+    // real navmesh ETAs.  No Firestore write — avoids the oscillation.
+    _maybeComputeLocalExpiresAt();
   }
 
-  /// Computes expiresAt from real path ETAs and writes it to Firestore once,
-  /// from the host's device only.  Falls back to estimatedArrivalMinutes (×60)
-  /// for any participant whose location is not yet available.
-  void _maybeWriteExpiresAtFromRealEtas() {
+  /// Computes the session expiry locally from real navmesh ETAs and stores it
+  /// in [_localExpiresAt] for display only — no Firestore write.
+  /// Firestore keeps the random-ETA safety baseline (written by markHostDecision)
+  /// for the actual auto-expiry trigger; this keeps the two concerns separate
+  /// and eliminates the oscillation caused by two competing Firestore writes.
+  void _maybeComputeLocalExpiresAt() {
     final meeting = _lastKnownConfirmedMeeting;
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (meeting == null || uid == null) return;
-    if (!meeting.isHost(uid)) return;
-    // Don't guard on meeting.expiresAt != null — we always overwrite the
-    // random-based fallback set in markHostDecision with the real-path value.
-    if (_expiresAtWrittenForMeetingId == meeting.id) return;
-    _expiresAtWrittenForMeetingId = meeting.id;
+    // Compute for all users, not just host — participants also see the timer.
+    if (_localExpiresAtComputedForMeetingId == meeting.id) return;
+    _localExpiresAtComputedForMeetingId = meeting.id;
 
     final allEtaSecs = <int>[];
 
     // Host ETA: real path if available, else fall back to stored value.
     final hostSecs =
-        _meetingEtaBaseSecondsByUser[uid] ??
+        _meetingEtaBaseSecondsByUser[meeting.hostId] ??
         (meeting.hostEstimatedMinutes * 60);
     allEtaSecs.add(hostSecs);
 
@@ -1512,19 +1519,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     final largestSecs = allEtaSecs.reduce(math.max);
     const kMinSession = Duration(minutes: 10);
     final rawDuration = Duration(seconds: largestSecs * 3);
-    final sessionDuration = rawDuration < kMinSession
-        ? kMinSession
-        : rawDuration;
+    final sessionDuration =
+        rawDuration < kMinSession ? kMinSession : rawDuration;
     final confirmedAt = meeting.confirmedAt ?? DateTime.now();
-    final expiresAt = confirmedAt.add(sessionDuration);
-
-    // No stream reset on success — the live Firestore listener will deliver
-    // the updated expiresAt automatically, avoiding the blink caused by the
-    // stream momentarily returning null (which injects _lastKnownConfirmedMeeting
-    // with the old random-ETA value through the hold logic).
-    MeetingPointService.updateExpiresAt(meeting.id, expiresAt).catchError((_) {
-      // Reset guard so we can retry next path recompute cycle.
-      _expiresAtWrittenForMeetingId = null;
+    setState(() {
+      _localExpiresAt = confirmedAt.add(sessionDuration);
     });
   }
 
@@ -6135,7 +6134,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   Widget _buildActiveMeetingSubsectionLabel(
     MeetingPointRecord? confirmedMeeting,
   ) {
-    final expiresAt = confirmedMeeting?.expiresAt;
+    // Prefer local real-ETA value; fall back to Firestore random-ETA baseline.
+    final expiresAt = _localExpiresAt ?? confirmedMeeting?.expiresAt;
     if (expiresAt == null) {
       return _buildSubsectionLabel('Active Meeting Point');
     }

@@ -1512,19 +1512,17 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     final largestSecs = allEtaSecs.reduce(math.max);
     const kMinSession = Duration(minutes: 10);
     final rawDuration = Duration(seconds: largestSecs * 3);
-    final sessionDuration =
-        rawDuration < kMinSession ? kMinSession : rawDuration;
+    final sessionDuration = rawDuration < kMinSession
+        ? kMinSession
+        : rawDuration;
     final confirmedAt = meeting.confirmedAt ?? DateTime.now();
     final expiresAt = confirmedAt.add(sessionDuration);
 
-    MeetingPointService.updateExpiresAt(meeting.id, expiresAt).then((_) {
-      if (mounted) {
-        setState(() {
-          _activeMeetingPointListStream =
-              MeetingPointService.watchAllBlockingForCurrentUser();
-        });
-      }
-    }).catchError((_) {
+    // No stream reset on success — the live Firestore listener will deliver
+    // the updated expiresAt automatically, avoiding the blink caused by the
+    // stream momentarily returning null (which injects _lastKnownConfirmedMeeting
+    // with the old random-ETA value through the hold logic).
+    MeetingPointService.updateExpiresAt(meeting.id, expiresAt).catchError((_) {
       // Reset guard so we can retry next path recompute cycle.
       _expiresAtWrittenForMeetingId = null;
     });
@@ -2458,7 +2456,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       case 4:
         return 'Waiting for participants';
       case 5:
-        return 'Confirm Suggested meeting point';
+        return 'Confirm suggested meeting point';
       default:
         return 'Create meeting point';
     }
@@ -2845,7 +2843,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         // Session expiry: trigger auto-cancel once expiresAt has passed.
         if (confirmedMeeting != null &&
             confirmedMeeting.expiresAt != null &&
-            !confirmedMeeting.expiresAt!.isAfter(MeetingPointService.serverNow) &&
+            !confirmedMeeting.expiresAt!.isAfter(
+              MeetingPointService.serverNow,
+            ) &&
             !_expiredArrivalMeetingIds.contains(confirmedMeeting.id)) {
           _expiredArrivalMeetingIds.add(confirmedMeeting.id);
           MeetingPointService.reconcileArrivalPhase(confirmedMeeting).then((_) {
@@ -3527,87 +3527,87 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                   const SizedBox(height: 12),
                   // Refresh location button — outside the green line
                   if (!isArrived)
-                  SizedBox(
-                    width: double.infinity,
-                    child: Builder(
-                      builder: (_) {
-                        final isBusy = _refreshingMeetingParticipantIds
-                            .contains(p.userId);
-                        final until =
-                            _meetingRefreshCooldownUntilByUserId[p.userId];
-                        final isCoolingDown =
-                            !isBusy &&
-                            until != null &&
-                            DateTime.now().isBefore(until);
-                        final disabled = isBusy || isCoolingDown;
+                    SizedBox(
+                      width: double.infinity,
+                      child: Builder(
+                        builder: (_) {
+                          final isBusy = _refreshingMeetingParticipantIds
+                              .contains(p.userId);
+                          final until =
+                              _meetingRefreshCooldownUntilByUserId[p.userId];
+                          final isCoolingDown =
+                              !isBusy &&
+                              until != null &&
+                              DateTime.now().isBefore(until);
+                          final disabled = isBusy || isCoolingDown;
 
-                        return Stack(
-                          children: [
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton.icon(
-                                icon: isBusy
-                                    ? const SizedBox(
-                                        width: 18,
-                                        height: 18,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          color: Colors.white,
-                                        ),
-                                      )
-                                    : const Icon(Icons.refresh, size: 18),
-                                label: const Text(
-                                  'Refresh Location',
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: disabled
-                                      ? Colors.grey[300]
-                                      : AppColors.kGreen,
-                                  foregroundColor: disabled
-                                      ? Colors.grey[600]
-                                      : Colors.white,
-                                  elevation: 0,
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 12,
-                                  ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                ),
-                                onPressed: disabled
-                                    ? null
-                                    : () =>
-                                          _requestMeetingParticipantLocationRefresh(
-                                            meeting,
-                                            p.userId,
-                                            p.name,
+                          return Stack(
+                            children: [
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
+                                  icon: isBusy
+                                      ? const SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: Colors.white,
                                           ),
-                              ),
-                            ),
-                            if (isCoolingDown)
-                              Positioned.fill(
-                                child: Material(
-                                  color: Colors.transparent,
-                                  child: InkWell(
-                                    onTap: () {
-                                      SnackbarHelper.showError(
-                                        context,
-                                        'you cannot send many request within short period',
-                                      );
-                                    },
-                                    borderRadius: BorderRadius.circular(12),
+                                        )
+                                      : const Icon(Icons.refresh, size: 18),
+                                  label: const Text(
+                                    'Refresh Location',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                    ),
                                   ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: disabled
+                                        ? Colors.grey[300]
+                                        : AppColors.kGreen,
+                                    foregroundColor: disabled
+                                        ? Colors.grey[600]
+                                        : Colors.white,
+                                    elevation: 0,
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 12,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                  onPressed: disabled
+                                      ? null
+                                      : () =>
+                                            _requestMeetingParticipantLocationRefresh(
+                                              meeting,
+                                              p.userId,
+                                              p.name,
+                                            ),
                                 ),
                               ),
-                          ],
-                        );
-                      },
+                              if (isCoolingDown)
+                                Positioned.fill(
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    child: InkWell(
+                                      onTap: () {
+                                        SnackbarHelper.showError(
+                                          context,
+                                          'you cannot send many request within short period',
+                                        );
+                                      },
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          );
+                        },
+                      ),
                     ),
-                  ),
                 ],
               ),
             ),
@@ -6132,7 +6132,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
   /// Subsection label for 'Active Meeting Point' with a session countdown
   /// shown on the right when there is a confirmed (active-phase) meeting.
-  Widget _buildActiveMeetingSubsectionLabel(MeetingPointRecord? confirmedMeeting) {
+  Widget _buildActiveMeetingSubsectionLabel(
+    MeetingPointRecord? confirmedMeeting,
+  ) {
     final expiresAt = confirmedMeeting?.expiresAt;
     if (expiresAt == null) {
       return _buildSubsectionLabel('Active Meeting Point');
@@ -6149,8 +6151,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     final timerColor = isExpired
         ? AppColors.kError
         : remaining.inMinutes < 2
-            ? Colors.orange[700]!
-            : Colors.grey[500]!;
+        ? Colors.orange[700]!
+        : Colors.grey[500]!;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),

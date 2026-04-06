@@ -2513,8 +2513,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           if (epA == null || epB == null) continue;
 
           (double?, double?, double?) epXYZ(Map ep) {
-            final posMap =
-                ep['position'] is Map ? ep['position'] as Map : null;
+            final posMap = ep['position'] is Map ? ep['position'] as Map : null;
             return (
               _s5ToDouble(posMap?['x'] ?? ep['x']),
               _s5ToDouble(posMap?['y'] ?? ep['y']),
@@ -3054,7 +3053,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       'Set your location',
       'Review & send',
       'Waiting for participants',
-      'Confirm Suggested meeting point',
+      'Confirm suggested meeting point',
     ];
 
     // Timer badge shown on steps 4 and 5 (same rows as subtitle — mirrors
@@ -4407,54 +4406,54 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-        // Big pin icon centred
-        Container(
-          width: 96,
-          height: 96,
-          decoration: BoxDecoration(
-            color: AppColors.kGreen.withOpacity(0.1),
-            shape: BoxShape.circle,
+          // Big pin icon centred
+          Container(
+            width: 96,
+            height: 96,
+            decoration: BoxDecoration(
+              color: AppColors.kGreen.withOpacity(0.1),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.place, color: AppColors.kGreen, size: 52),
           ),
-          child: const Icon(Icons.place, color: AppColors.kGreen, size: 52),
-        ),
-        const SizedBox(height: 20),
+          const SizedBox(height: 20),
 
-        const Text(
-          'The most suitable meeting point is',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 14, color: Colors.black54),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          '"$primaryName"',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.w700,
-            color: hasSuggestion ? Colors.black87 : Colors.grey[500],
-          ),
-        ),
-        const SizedBox(height: 8),
-        if (hasSuggestion)
-          Text(
-            'If you don\'t decide, it will be auto-accepted when the timer runs out.',
+          const Text(
+            'The most suitable meeting point is',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+            style: TextStyle(fontSize: 14, color: Colors.black54),
           ),
-        if (showEmpty) ...[
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Text(
-            'Try different categories or make sure everyone\'s location is available.',
+            '"$primaryName"',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.w700,
+              color: hasSuggestion ? Colors.black87 : Colors.grey[500],
+            ),
           ),
+          const SizedBox(height: 8),
+          if (hasSuggestion)
+            Text(
+              'If you don\'t decide, it will be auto-accepted when the timer runs out.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+            ),
+          if (showEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              'Try different categories or make sure everyone\'s location is available.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            ),
+          ],
+
+          const SizedBox(height: 24),
+
+          // ── Participants with distances ────────────────────────────────────
+          Expanded(child: _buildStep5ParticipantList()),
         ],
-
-        const SizedBox(height: 24),
-
-        // ── Participants with distances ────────────────────────────────────
-        Expanded(child: _buildStep5ParticipantList()),
-      ],
       ),
     );
   }
@@ -4463,7 +4462,10 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     final hasSuggestion = _suggestedPointName.trim().isNotEmpty;
     return Container(
       padding: EdgeInsets.fromLTRB(
-        20, 12, 20, MediaQuery.of(context).padding.bottom + 12,
+        20,
+        12,
+        20,
+        MediaQuery.of(context).padding.bottom + 12,
       ),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -4618,7 +4620,10 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
             const SizedBox(width: 8),
             if (!isHost)
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: statusColor.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(20),

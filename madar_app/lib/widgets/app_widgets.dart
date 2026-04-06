@@ -3,6 +3,33 @@ import 'package:flutter/services.dart';
 import 'package:madar_app/theme/theme.dart';
 
 // ----------------------------------------------------------------------------
+// Meeting Point Popup Guard
+// ----------------------------------------------------------------------------
+
+/// Suppresses the background "Action needed in meeting point" popup when the
+/// user is already on a screen that handles step-5 actions:
+///   • CreateMeetingPointForm is open (any step — it will auto-advance to 5)
+///   • TrackPage is showing the Meeting Point tab (_isTrackingView == false)
+///
+/// Uses a [ValueNotifier] so MainLayout can listen and show the popup
+/// immediately after suppression is lifted (e.g. the form closes).
+class MeetingPointPopupGuard {
+  MeetingPointPopupGuard._();
+
+  static final ValueNotifier<bool> _notifier = ValueNotifier(false);
+
+  /// True → popup is suppressed.
+  static bool get suppress => _notifier.value;
+  static set suppress(bool value) {
+    if (_notifier.value != value) _notifier.value = value;
+  }
+
+  /// Listen for guard changes. Call [removeListener] when done.
+  static void addListener(VoidCallback cb) => _notifier.addListener(cb);
+  static void removeListener(VoidCallback cb) => _notifier.removeListener(cb);
+}
+
+// ----------------------------------------------------------------------------
 // App Colors
 // ----------------------------------------------------------------------------
 class AppColors {

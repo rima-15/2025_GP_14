@@ -35,6 +35,9 @@ type Selection = {
   gates: boolean;
 };
 
+// Scale factor: 1 navmesh unit = 69.32 metres (matches Flutter _unitToMeters).
+const UNITS_TO_METERS = 69.32;
+
 type SuggestedCandidate = {
   placeId: string;
   placeName: string;
@@ -51,6 +54,7 @@ type SuggestedCandidate = {
   maxDistance: number;
   avgDistance: number;
   categoryIds: string[];
+  userDistances: { userId: string; distanceMeters: number }[];
 };
 
 type SuggestionResult = {
@@ -423,15 +427,15 @@ function bestEntranceForPlace(
   entrances: Entrance[],
   users: UserPos[],
   pathCache: Map<string, number>
-): { entrance: Entrance; maxDistance: number; avgDistance: number } | null {
+): { entrance: Entrance; maxDistance: number; avgDistance: number; perUserDistances: { userId: string; distance: number }[] } | null {
   const conns = loadConnectorsOnce();
   if (!entrances.length || !users.length) return null;
-  let best: { entrance: Entrance; maxDistance: number; avgDistance: number } | null = null;
+  let best: { entrance: Entrance; maxDistance: number; avgDistance: number; perUserDistances: { userId: string; distance: number }[] } | null = null;
 
   for (const ent of entrances) {
     const entFloor = toFNumber(ent.floor);
     if (!entFloor) continue;
-    const distances: number[] = [];
+    const perUserDistances: { userId: string; distance: number }[] = [];
     let ok = true;
     for (const u of users) {
       const d = distanceUserToEntrance(u, ent, entFloor, conns, pathCache);
@@ -439,9 +443,10 @@ function bestEntranceForPlace(
         ok = false;
         break;
       }
-      distances.push(d);
+      perUserDistances.push({ userId: u.userId, distance: d });
     }
-    if (!ok || distances.length === 0) continue;
+    if (!ok || perUserDistances.length === 0) continue;
+    const distances = perUserDistances.map((p) => p.distance);
     const maxDist = Math.max(...distances);
     const avgDist = distances.reduce((a, b) => a + b, 0) / distances.length;
     if (
@@ -449,7 +454,7 @@ function bestEntranceForPlace(
       maxDist < best.maxDistance ||
       (maxDist === best.maxDistance && avgDist < best.avgDistance)
     ) {
-      best = { entrance: ent, maxDistance: maxDist, avgDistance: avgDist };
+      best = { entrance: ent, maxDistance: maxDist, avgDistance: avgDist, perUserDistances };
     }
   }
   return best;
@@ -607,6 +612,10 @@ export async function computeMeetingPointSuggestions(
         maxDistance: best.maxDistance,
         avgDistance: best.avgDistance,
         categoryIds,
+        userDistances: best.perUserDistances.map((ud) => ({
+          userId: ud.userId,
+          distanceMeters: Math.round(ud.distance * UNITS_TO_METERS),
+        })),
       });
     }
     return out;

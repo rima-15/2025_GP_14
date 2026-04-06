@@ -141,6 +141,7 @@ class _HistoryPageState extends State<HistoryPage> {
     'cancelled',
     'completed',
     'active',
+    'terminated', // written by auto-expiry logic
   ];
 
   late final Stream<List<HistoryTrackingRequest>> _sentStream;
@@ -461,6 +462,25 @@ class _HistoryPageState extends State<HistoryPage> {
         hostName: hostName,
         hostPhone: hostPhone,
         isHost: hostId == uid,
+        createdAt: createdAt,
+        updatedAt: updatedAt,
+        participants: participants,
+      );
+    }
+
+    // ── Auto-expired meeting (system terminated, not host action) ───────────
+    if (status == 'terminated') {
+      return HistoryMeetingPoint(
+        id: d.id,
+        status: 'auto_closed',
+        venueName: venueName,
+        suggestedPoint: suggestedPoint,
+        cancellationReason: 'Auto-closed after time limit',
+        hostId: hostId,
+        hostName: hostName,
+        hostPhone: hostPhone,
+        isHost: hostId == uid,
+        wasConfirmed: wasConfirmed,
         createdAt: createdAt,
         updatedAt: updatedAt,
         participants: participants,
@@ -1061,6 +1081,11 @@ class _HistoryPageState extends State<HistoryPage> {
         text = AppColors.kError;
         label = 'Terminated';
         break;
+      case 'auto_closed':
+        bg = Colors.amber.withOpacity(0.15);
+        text = Colors.amber[800]!;
+        label = 'Terminated';
+        break;
       case 'cancelled':
         bg = Colors.grey.withOpacity(0.15);
         text = Colors.grey[700]!;
@@ -1367,7 +1392,8 @@ class _HistoryPageState extends State<HistoryPage> {
             ),
             // ── Cancellation reason banner ────────────────────────────────
             if (item.cancellationReason.isNotEmpty &&
-                item.status == 'cancelled') ...[
+                (item.status == 'cancelled' ||
+                    item.status == 'auto_closed')) ...[
               const SizedBox(height: 10),
               Container(
                 width: double.infinity,

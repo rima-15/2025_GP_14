@@ -73,8 +73,7 @@ class _TrackPageState extends State<TrackPage> {
   String? _highlightRequestId;
   String? _highlightMeetingInviteId;
   Timer? _highlightClearTimer;
-  static const Duration _meetingRefreshCooldownDuration =
-      Duration(minutes: 2);
+  static const Duration _meetingRefreshCooldownDuration = Duration(minutes: 2);
   // by remas start
   final Map<String, double> _trackedGpsLatByUser = {};
   final Map<String, double> _trackedGpsLngByUser = {};
@@ -152,6 +151,14 @@ class _TrackPageState extends State<TrackPage> {
   /// Tracks confirmed meetings that have been reconciled (arrival-phase check)
   /// so we don't fire the reconciliation on every stream emission.
   final Set<String> _reconciledArrivalMeetingIds = {};
+
+  /// Meeting IDs for which session-expiry reconciliation has been triggered
+  /// so we don't call reconcileArrivalPhase on every second tick.
+  final Set<String> _expiredArrivalMeetingIds = {};
+
+  /// The meeting ID for which expiresAt has already been written from this
+  /// device after real path ETAs were computed. Prevents duplicate writes.
+  String? _expiresAtWrittenForMeetingId;
 
   /// Tracks pending meetings where all participants declined, so we don't
   /// fire maybeMaintain (which writes cancellationReason) on every rebuild.
@@ -863,6 +870,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     _loadVenueMaps();
     if (widget.initialMeetingPointId != null) {
       _isTrackingView = false;
+      MeetingPointPopupGuard.suppress = true;
       _expandedMeetingInviteId = widget.initialMeetingPointId;
       _highlightMeetingInviteId = widget.initialMeetingPointId;
       _meetingInviteScrollTargetId = widget.initialMeetingPointId;
@@ -1463,6 +1471,63 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     for (final id in ids) {
       await _recomputeMeetingPathForUser(id);
     }
+
+    // After all paths are computed, let the host write expiresAt once using
+    // real navmesh ETAs instead of the random estimatedArrivalMinutes values.
+    _maybeWriteExpiresAtFromRealEtas();
+  }
+
+  /// Computes expiresAt from real path ETAs and writes it to Firestore once,
+  /// from the host's device only.  Falls back to estimatedArrivalMinutes (×60)
+  /// for any participant whose location is not yet available.
+  void _maybeWriteExpiresAtFromRealEtas() {
+    final meeting = _lastKnownConfirmedMeeting;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (meeting == null || uid == null) return;
+    if (!meeting.isHost(uid)) return;
+    // Don't guard on meeting.expiresAt != null — we always overwrite the
+    // random-based fallback set in markHostDecision with the real-path value.
+    if (_expiresAtWrittenForMeetingId == meeting.id) return;
+    _expiresAtWrittenForMeetingId = meeting.id;
+
+    final allEtaSecs = <int>[];
+
+    // Host ETA: real path if available, else fall back to stored value.
+    final hostSecs =
+        _meetingEtaBaseSecondsByUser[uid] ??
+        (meeting.hostEstimatedMinutes * 60);
+    allEtaSecs.add(hostSecs);
+
+    // Participant ETAs: accepted & not cancelled.
+    for (final p in meeting.participants) {
+      if (!p.isAccepted || p.isCancelledArrival || p.isCancelledParticipation) {
+        continue;
+      }
+      final etaSecs =
+          _meetingEtaBaseSecondsByUser[p.userId] ??
+          (p.estimatedArrivalMinutes * 60);
+      allEtaSecs.add(etaSecs);
+    }
+
+    final largestSecs = allEtaSecs.reduce(math.max);
+    const kMinSession = Duration(minutes: 10);
+    final rawDuration = Duration(seconds: largestSecs * 3);
+    final sessionDuration =
+        rawDuration < kMinSession ? kMinSession : rawDuration;
+    final confirmedAt = meeting.confirmedAt ?? DateTime.now();
+    final expiresAt = confirmedAt.add(sessionDuration);
+
+    MeetingPointService.updateExpiresAt(meeting.id, expiresAt).then((_) {
+      if (mounted) {
+        setState(() {
+          _activeMeetingPointListStream =
+              MeetingPointService.watchAllBlockingForCurrentUser();
+        });
+      }
+    }).catchError((_) {
+      // Reset guard so we can retry next path recompute cycle.
+      _expiresAtWrittenForMeetingId = null;
+    });
   }
 
   void _startHighlightClearTimer() {
@@ -1627,6 +1692,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
   @override
   void dispose() {
+    // Release the popup guard if we were on the meeting-point tab.
+    if (!_isTrackingView) MeetingPointPopupGuard.suppress = false;
     _clockTimer?.cancel();
     _meetingPointCardTimer?.cancel();
     _arrivalTimer?.cancel();
@@ -2356,7 +2423,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     // responded, or the 2-min wait deadline expired). Show an immediate
     // ~5-min countdown using a local start time so the invitee doesn't see
     // a gap or "00:00" before Firestore delivers hostStep=5+suggestDeadline.
-    final waitExpiredForTimer = meeting.waitDeadline != null &&
+    final waitExpiredForTimer =
+        meeting.waitDeadline != null &&
         !meeting.waitDeadline!.isAfter(MeetingPointService.serverNow);
     if (meeting.hostStep == 4 &&
         (meeting.pendingCount == 0 || waitExpiredForTimer) &&
@@ -2404,7 +2472,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     // OR when all participants responded (pendingCount == 0),
     // OR when the 2-min wait deadline has expired (some may not have responded
     // but the window closed — the accepted participants move to step 3).
-    final waitExpired = meeting.waitDeadline != null &&
+    final waitExpired =
+        meeting.waitDeadline != null &&
         !meeting.waitDeadline!.isAfter(MeetingPointService.serverNow);
     if (me.isAccepted &&
         (meeting.hostStep >= 5 || meeting.pendingCount == 0 || waitExpired)) {
@@ -2421,7 +2490,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       case 2:
         return 'Accepted and waiting for others';
       case 3:
-        return 'Accepted and waiting for host confirmation';
+        return 'Waiting for host confirmation';
       default:
         return 'Meeting point in progress';
     }
@@ -2483,8 +2552,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     // cached record delivered after a stream reset. Calling maybeMaintain with
     // it would write a fresh suggestDeadline and reset the invitee's step-3
     // (non-host) timer, so skip it.
-    if (_observedStep5MeetingIds.contains(meeting.id) &&
-        meeting.hostStep < 5) {
+    if (_observedStep5MeetingIds.contains(meeting.id) && meeting.hostStep < 5) {
       return;
     }
 
@@ -2774,6 +2842,22 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           });
         }
 
+        // Session expiry: trigger auto-cancel once expiresAt has passed.
+        if (confirmedMeeting != null &&
+            confirmedMeeting.expiresAt != null &&
+            !confirmedMeeting.expiresAt!.isAfter(MeetingPointService.serverNow) &&
+            !_expiredArrivalMeetingIds.contains(confirmedMeeting.id)) {
+          _expiredArrivalMeetingIds.add(confirmedMeeting.id);
+          MeetingPointService.reconcileArrivalPhase(confirmedMeeting).then((_) {
+            if (mounted) {
+              setState(() {
+                _activeMeetingPointListStream =
+                    MeetingPointService.watchAllBlockingForCurrentUser();
+              });
+            }
+          });
+        }
+
         // Setup-phase: if all participants declined, auto-cancel immediately.
         if (activeMeeting != null &&
             activeMeeting.participants.isNotEmpty &&
@@ -2798,9 +2882,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         if (activeMeeting != null &&
             activeMeeting.hostStep == 4 &&
             activeMeeting.acceptedCount > 0) {
-          final waitExpired = activeMeeting.waitDeadline != null &&
-              !activeMeeting.waitDeadline!
-                  .isAfter(MeetingPointService.serverNow);
+          final waitExpired =
+              activeMeeting.waitDeadline != null &&
+              !activeMeeting.waitDeadline!.isAfter(
+                MeetingPointService.serverNow,
+              );
           if (activeMeeting.pendingCount == 0 || waitExpired) {
             _approxStep3StartByMeetingId[activeMeeting.id] ??=
                 MeetingPointService.serverNow;
@@ -2891,7 +2977,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               ),
             ] else ...[
               // ── Active meeting point ────────────────────────────────────
-              _buildSubsectionLabel('Active Meeting Point'),
+              _buildActiveMeetingSubsectionLabel(confirmedMeeting),
               if (confirmedMeeting != null && uid != null) ...[
                 // ── Arrival-phase UI ──────────────────────────────────────
                 _buildRunningMeetingSection(confirmedMeeting, uid),
@@ -3161,7 +3247,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               Row(
                 children: [
                   Text(
-                    'Estimated arrive by: ',
+                    'Estimated arrival in: ',
                     style: TextStyle(
                       fontSize: 13,
                       color: Colors.grey[700],
@@ -3409,7 +3495,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                                 Row(
                                   children: [
                                     Text(
-                                      'Estimated arrive by: ',
+                                      'Estimated arrival in: ',
                                       style: TextStyle(
                                         fontSize: 13,
                                         fontWeight: FontWeight.w400,
@@ -3440,14 +3526,13 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                   ),
                   const SizedBox(height: 12),
                   // Refresh location button — outside the green line
+                  if (!isArrived)
                   SizedBox(
                     width: double.infinity,
                     child: Builder(
                       builder: (_) {
-                        final isBusy =
-                            _refreshingMeetingParticipantIds.contains(
-                              p.userId,
-                            );
+                        final isBusy = _refreshingMeetingParticipantIds
+                            .contains(p.userId);
                         final until =
                             _meetingRefreshCooldownUntilByUserId[p.userId];
                         final isCoolingDown =
@@ -3496,11 +3581,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                                 onPressed: disabled
                                     ? null
                                     : () =>
-                                        _requestMeetingParticipantLocationRefresh(
-                                          meeting,
-                                          p.userId,
-                                          p.name,
-                                        ),
+                                          _requestMeetingParticipantLocationRefresh(
+                                            meeting,
+                                            p.userId,
+                                            p.name,
+                                          ),
                               ),
                             ),
                             if (isCoolingDown)
@@ -4407,8 +4492,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                           ),
                         ),
                         const SizedBox(height: 4),
-                        if (timerLabel != null)
-                          _meetingTimerBadge(timerLabel),
+                        if (timerLabel != null) _meetingTimerBadge(timerLabel),
                       ],
                     ),
                   ),
@@ -4652,6 +4736,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 setState(() {
                   _isTrackingView = (i == 0);
                   _expandedRequestId = null;
+                  // Update popup guard: meeting-point tab suppresses the popup.
+                  MeetingPointPopupGuard.suppress = !_isTrackingView;
                 });
                 _applyAllTrackedPinsToViewer();
               },
@@ -5107,9 +5193,21 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               ),
               child: Column(
                 children: [
+                  // Drag handle
+                  const SizedBox(height: 12),
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey[300],
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
                   // ── Header ──────────────────────────────────────────────────
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -5131,28 +5229,13 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Expanded(
-                                    child: Text(
-                                      'Meeting Point Request',
-                                      style: TextStyle(
-                                        fontSize: 17,
-                                        fontWeight: FontWeight.w700,
-                                        color: Colors.black87,
-                                      ),
-                                    ),
-                                  ),
-                                  GestureDetector(
-                                    onTap: () => Navigator.pop(ctx),
-                                    child: Icon(
-                                      Icons.close,
-                                      size: 20,
-                                      color: Colors.grey[600],
-                                    ),
-                                  ),
-                                ],
+                              const Text(
+                                'Meeting Point Request',
+                                style: TextStyle(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.black87,
+                                ),
                               ),
                               const SizedBox(height: 3),
                               Row(
@@ -6043,6 +6126,56 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           fontSize: 12,
           fontWeight: FontWeight.w600,
         ),
+      ),
+    );
+  }
+
+  /// Subsection label for 'Active Meeting Point' with a session countdown
+  /// shown on the right when there is a confirmed (active-phase) meeting.
+  Widget _buildActiveMeetingSubsectionLabel(MeetingPointRecord? confirmedMeeting) {
+    final expiresAt = confirmedMeeting?.expiresAt;
+    if (expiresAt == null) {
+      return _buildSubsectionLabel('Active Meeting Point');
+    }
+    final remaining = expiresAt.difference(MeetingPointService.serverNow);
+    final isExpired = remaining.isNegative || remaining.inSeconds == 0;
+    final totalSecs = isExpired ? 0 : remaining.inSeconds;
+    final h = totalSecs ~/ 3600;
+    final m = (totalSecs % 3600) ~/ 60;
+    final s = totalSecs % 60;
+    final timerLabel = h > 0
+        ? '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}'
+        : '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+    final timerColor = isExpired
+        ? AppColors.kError
+        : remaining.inMinutes < 2
+            ? Colors.orange[700]!
+            : Colors.grey[500]!;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Text(
+            'Active Meeting Point',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: Colors.grey[600],
+            ),
+          ),
+          const Spacer(),
+          Icon(Icons.timer_outlined, size: 13, color: timerColor),
+          const SizedBox(width: 3),
+          Text(
+            isExpired ? 'Ending...' : timerLabel,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              color: timerColor,
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -174,6 +175,7 @@ class MeetingPointRecord {
     this.hostArrivedAt,
     this.hostEstimatedMinutes = 3,
     this.hostLocationUpdatedAt,
+    this.expiresAt,
   });
 
   final String id;
@@ -202,6 +204,7 @@ class MeetingPointRecord {
   final DateTime? hostArrivedAt;
   final int hostEstimatedMinutes; // 1-5 (random)
   final DateTime? hostLocationUpdatedAt;
+  final DateTime? expiresAt;
 
   /// Derived from status: the meeting is in setup phase when status == 'pending'.
   bool get isActive => status.trim().toLowerCase() == 'pending';
@@ -321,6 +324,7 @@ class MeetingPointRecord {
       hostLocationUpdatedAt: _meetingPointAsDateTime(
         data['hostLocationUpdatedAt'],
       ),
+      expiresAt: _meetingPointAsDateTime(data['expiresAt']),
     );
   }
 }
@@ -865,6 +869,21 @@ class MeetingPointService {
       );
     }).toList();
 
+    // Write an initial expiresAt using the random estimatedArrivalMinutes as a
+    // guaranteed safety baseline — this ensures auto-expiry always works even if
+    // the host device never completes navmesh path calculation.
+    // The host device will overwrite this with a more accurate real-path-based
+    // value once _maybeWriteExpiresAtFromRealEtas() runs.
+    final acceptedETAs = updatedParticipants
+        .where((p) => p.isAccepted)
+        .map((p) => p.estimatedArrivalMinutes);
+    final allETAs = [hostMins, ...acceptedETAs];
+    final largestMins = allETAs.reduce(math.max);
+    final rawSession = Duration(minutes: largestMins * 3);
+    const kMinSession = Duration(minutes: 10);
+    final sessionDuration = rawSession < kMinSession ? kMinSession : rawSession;
+    final expiresAt = now.add(sessionDuration);
+
     await _col.doc(meetingPointId).update({
       'status': 'active',
       'hostStep': 5,
@@ -874,7 +893,20 @@ class MeetingPointService {
       'hostEstimatedMinutes': hostMins,
       'hostArrivedAt': null,
       'hostLocationUpdatedAt': Timestamp.fromDate(now),
+      'expiresAt': Timestamp.fromDate(expiresAt),
       'participants': updatedParticipants.map((p) => p.toMap()).toList(),
+    });
+  }
+
+  /// Writes the session expiry timestamp once real path ETAs are available.
+  /// Called from the host device after navmesh path calculation completes.
+  static Future<void> updateExpiresAt(
+    String meetingId,
+    DateTime expiresAt,
+  ) async {
+    await _col.doc(meetingId).update({
+      'expiresAt': Timestamp.fromDate(expiresAt),
+      'updatedAt': FieldValue.serverTimestamp(),
     });
   }
 
@@ -883,6 +915,21 @@ class MeetingPointService {
   /// Safe to call repeatedly — only writes to Firestore when a change is needed.
   static Future<void> reconcileArrivalPhase(MeetingPointRecord meeting) async {
     if (!meeting.isConfirmed) return;
+
+    // Session time limit: auto-terminate if expiresAt has passed.
+    // Uses 'terminated' (not 'cancelled') so history shows this as a system
+    // action, never as "You cancelled this request".
+    if (meeting.expiresAt != null &&
+        !meeting.expiresAt!.isAfter(MeetingPointService.serverNow)) {
+      try {
+        await _col.doc(meeting.id).update({
+          'status': 'terminated',
+          'cancellationReason': 'Auto-closed after time limit',
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      } catch (_) {}
+      return;
+    }
 
     final hostActive = meeting.hostArrivalStatus != 'cancelled';
     final activeParticipants = meeting.participants
@@ -1198,6 +1245,11 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   String _suggestedPointName = '';
   List<Map<String, dynamic>> _suggestedCandidates = [];
   bool _suggestionsComputed = false;
+  Map<String, int> _step5DistMap = {};
+  bool _step5DistComputing = false;
+
+  /// Persists across widget rebuilds for the lifetime of the app process.
+  static final Map<String, Map<String, int>> _distCache = {};
 
   // ── Cached current user ───────────────────────────────────────────────────
   String? _myPhone;
@@ -1270,6 +1322,8 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   @override
   void initState() {
     super.initState();
+    // Suppress the background popup while this form is open.
+    MeetingPointPopupGuard.suppress = true;
     _phoneFocus.addListener(() {
       setState(() => _isPhoneFocused = _phoneFocus.hasFocus);
     });
@@ -1301,6 +1355,8 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
   @override
   void dispose() {
+    // Restore popup guard when the form closes.
+    MeetingPointPopupGuard.suppress = false;
     _saveEarlyStepsToMemory();
     if (_allowDisposeDraftSave && _shouldManageDraft) {
       unawaited(_persistDraftIfNeeded());
@@ -2004,6 +2060,13 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       _startStep4WaitCountdown();
     } else if (_step == 5) {
       _startStep5SuggestCountdown();
+      final mid = _meetingPointId;
+      if (mid != null && _distCache.containsKey(mid)) {
+        // Already computed in a previous session — show instantly.
+        _step5DistMap = Map.of(_distCache[mid]!);
+      } else if (_suggestionsComputed) {
+        unawaited(_computeStep5Distances());
+      }
     }
 
     _startMeetingSubscription(meeting.id);
@@ -2072,6 +2135,15 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
             _suggestedCandidates = meeting.suggestedCandidates;
             _suggestionsComputed = meeting.suggestionsComputed;
           });
+
+          // Compute client-side distances whenever step 5 has suggestions
+          // but no distances yet (covers first delivery and any retry case).
+          if (_step == 5 &&
+              _suggestionsComputed &&
+              _step5DistMap.isEmpty &&
+              !_step5DistComputing) {
+            unawaited(_computeStep5Distances());
+          }
 
           // If Firestore advanced us from step 4 → 5 (e.g. the last participant
           // accepted and their device wrote hostStep=5 via respondToInvitation),
@@ -2259,6 +2331,239 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
     onTick();
     _suggestTimer = Timer.periodic(const Duration(seconds: 1), (_) => onTick());
+  }
+
+  // ── Step-5 client-side distance computation (same algorithm as path_overview) ─
+
+  /// Converts navmesh floor number string ("0","1") to the asset file label
+  /// ("GF","F1") used in navmesh_<label>.json.  Handles both numeric and label
+  /// inputs so it works whatever format Firestore stored the floor in.
+  static String _s5FNumToLabel(String fNum) {
+    switch (fNum) {
+      case '0':
+        return 'GF';
+      case '1':
+        return 'F1';
+      case '2':
+        return 'F2';
+      default:
+        // Already a label (e.g. "GF", "F1") — return as-is.
+        return fNum;
+    }
+  }
+
+  static String _s5FloorToFNum(String label) {
+    final up = label.toUpperCase().trim();
+    if (up == 'G' || up == 'GF' || up.contains('GROUND')) return '0';
+    final n = up.replaceAll(RegExp(r'[^0-9]'), '');
+    return n.isEmpty ? label : n;
+  }
+
+  static double? _s5ToDouble(dynamic v) {
+    if (v == null) return null;
+    if (v is num) return v.toDouble();
+    return double.tryParse(v.toString());
+  }
+
+  static double _s5PathLen(List<List<double>> pts) {
+    double sum = 0;
+    for (int i = 1; i < pts.length; i++) {
+      final dx = pts[i][0] - pts[i - 1][0];
+      final dy = pts[i][1] - pts[i - 1][1];
+      sum += math.sqrt(dx * dx + dy * dy);
+    }
+    return sum;
+  }
+
+  static String? _s5EpFNum(Map ep) {
+    if (ep['floorNumber'] != null) return ep['floorNumber'].toString();
+    if (ep['f_number'] != null) return ep['f_number'].toString();
+    final floor = ep['floor']?.toString();
+    if (floor != null) {
+      if (int.tryParse(floor) != null) return floor;
+      return _s5FloorToFNum(floor);
+    }
+    final lbl = ep['floorLabel'] ?? ep['floor_label'] ?? ep['label'];
+    if (lbl != null) return _s5FloorToFNum(lbl.toString());
+    return null;
+  }
+
+  Future<void> _computeStep5Distances() async {
+    if (_step5DistComputing) return;
+    if (_suggestedCandidates.isEmpty) return;
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    if (uid.isEmpty) return;
+
+    if (mounted) setState(() => _step5DistComputing = true);
+
+    final raw = _suggestedCandidates.first;
+    final entranceMap = raw['entrance'];
+    if (entranceMap is! Map) {
+      if (mounted) setState(() => _step5DistComputing = false);
+      return;
+    }
+
+    final entX = _s5ToDouble(entranceMap['x']) ?? 0.0;
+    final entY = _s5ToDouble(entranceMap['y']) ?? 0.0;
+    final entZ = _s5ToDouble(entranceMap['z']) ?? 0.0;
+    final entFloorRaw = (entranceMap['floor'] ?? '').toString().trim();
+    if (entFloorRaw.isEmpty) {
+      if (mounted) setState(() => _step5DistComputing = false);
+      return;
+    }
+    // Normalise: "0" → "GF", "1" → "F1", so navmesh asset loads correctly.
+    final entFNum = _s5FloorToFNum(entFloorRaw);
+    final entNavLabel = _s5FNumToLabel(entFNum);
+
+    // All users to compute for: host + accepted participants.
+    final accepted = _participants.where(
+      (p) => p.status == _ParticipantStatus.accepted,
+    );
+    final allUserIds = [uid, ...accepted.map((p) => p.friend.id)];
+
+    // Fetch each user's Blender position from Firestore.
+    final db = FirebaseFirestore.instance;
+    final Map<String, Map<String, dynamic>> positions = {};
+    for (final userId in allUserIds) {
+      try {
+        final doc = await db.collection('users').doc(userId).get();
+        final data = doc.data() ?? {};
+        final bp =
+            ((data['location'] as Map?)?['blenderPosition'] as Map?) ?? {};
+        final x = _s5ToDouble(bp['x']);
+        final y = _s5ToDouble(bp['y']);
+        final z = _s5ToDouble(bp['z']);
+        final floor = (bp['floor'] ?? '').toString().trim();
+        if (x != null && y != null && z != null && floor.isNotEmpty) {
+          positions[userId] = {'x': x, 'y': y, 'z': z, 'floor': floor};
+        }
+      } catch (_) {}
+    }
+
+    // Cache loaded navmeshes by asset label ("GF", "F1", …).
+    final Map<String, NavMesh> nmCache = {};
+    Future<NavMesh?> getNm(String navLabel) async {
+      if (nmCache.containsKey(navLabel)) return nmCache[navLabel];
+      try {
+        final nm = await NavMesh.loadAsset(
+          'assets/nav_cor/navmesh_$navLabel.json',
+        );
+        nmCache[navLabel] = nm;
+        return nm;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    // Load connectors (needed only for cross-floor paths).
+    List<dynamic> connectorList = const [];
+    try {
+      final connRaw = await rootBundle.loadString(
+        'assets/connectors/connectors_merged_local.json',
+      );
+      final decoded = jsonDecode(connRaw);
+      connectorList = (decoded is List)
+          ? decoded
+          : (decoded is Map && decoded['connectors'] is List)
+          ? decoded['connectors'] as List
+          : const [];
+    } catch (_) {}
+
+    const double unitToMeters = 69.32;
+    final Map<String, int> result = {};
+
+    for (final userId in allUserIds) {
+      final pos = positions[userId];
+      if (pos == null) continue;
+
+      final userFloorRaw = pos['floor'] as String;
+      final userFNum = _s5FloorToFNum(userFloorRaw);
+      final userNavLabel = _s5FNumToLabel(userFNum);
+      final userPt = [
+        pos['x'] as double,
+        pos['y'] as double,
+        pos['z'] as double,
+      ];
+      final entPt = [entX, entY, entZ];
+
+      double? rawDist;
+
+      if (userFNum == entFNum) {
+        // Same floor — direct funneled path.
+        final nm = await getNm(entNavLabel);
+        if (nm != null) {
+          final pts = nm.findPathFunnelBlenderXY(start: userPt, goal: entPt);
+          rawDist = _s5PathLen(pts);
+        }
+      } else {
+        // Cross-floor — find best connector between the two floors.
+        double best = double.infinity;
+        for (final c in connectorList) {
+          if (c is! Map) continue;
+          final endpoints = c['endpoints'] ?? c['floors'] ?? c['nodes'];
+          if (endpoints is! List) continue;
+
+          Map? epA, epB;
+          for (final ep in endpoints) {
+            if (ep is! Map) continue;
+            final f = _s5EpFNum(ep);
+            if (f == userFNum) epA = ep;
+            if (f == entFNum) epB = ep;
+          }
+          if (epA == null || epB == null) continue;
+
+          (double?, double?, double?) epXYZ(Map ep) {
+            final posMap =
+                ep['position'] is Map ? ep['position'] as Map : null;
+            return (
+              _s5ToDouble(posMap?['x'] ?? ep['x']),
+              _s5ToDouble(posMap?['y'] ?? ep['y']),
+              _s5ToDouble(posMap?['z'] ?? ep['z']),
+            );
+          }
+
+          final (ax, ay, az) = epXYZ(epA);
+          final (bx, by, bz) = epXYZ(epB);
+          if (ax == null ||
+              ay == null ||
+              az == null ||
+              bx == null ||
+              by == null ||
+              bz == null) {
+            continue;
+          }
+
+          final nmA = await getNm(userNavLabel);
+          final nmB = await getNm(entNavLabel);
+          if (nmA == null || nmB == null) continue;
+
+          final ptsA = nmA.findPathFunnelBlenderXY(
+            start: userPt,
+            goal: [ax, ay, az],
+          );
+          final ptsB = nmB.findPathFunnelBlenderXY(
+            start: [bx, by, bz],
+            goal: entPt,
+          );
+          final total = _s5PathLen(ptsA) + _s5PathLen(ptsB);
+          if (total < best) best = total;
+        }
+        if (best.isFinite) rawDist = best;
+      }
+
+      if (rawDist != null) {
+        result[userId] = (rawDist * unitToMeters).round();
+      }
+    }
+
+    if (mounted) {
+      final mid = _meetingPointId;
+      if (mid != null) _distCache[mid] = result;
+      setState(() {
+        _step5DistMap = result;
+        _step5DistComputing = false;
+      });
+    }
   }
 
   DateTime? _dateFromEpoch(dynamic value) {
@@ -2710,14 +3015,30 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
             ? const Center(child: CircularProgressIndicator())
             : Column(
                 children: [
-                  _buildHeader(),
-                  _buildProgressBar(),
-                  Expanded(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
-                      child: _buildStepBody(),
+                  // Drag handle
+                  const SizedBox(height: 12),
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey[300],
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
                   ),
+                  _buildHeader(),
+                  _buildProgressBar(),
+                  if (_step == 5)
+                    Expanded(child: _buildStepBody())
+                  else
+                    Expanded(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+                        child: _buildStepBody(),
+                      ),
+                    ),
+                  if (_step == 5) _buildStep5FixedButtons(),
                   _buildFooter(),
                 ],
               ),
@@ -2735,23 +3056,39 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       'Waiting for participants',
       'Confirm Suggested meeting point',
     ];
+
+    // Timer badge shown on steps 4 and 5 (same rows as subtitle — mirrors
+    // non-host "View details" sheet where timer sits next to the step label).
+    String? timerLabel;
+    if (_step == 4) {
+      final mm = (_waitSecondsLeft ~/ 60).toString().padLeft(2, '0');
+      final ss = (_waitSecondsLeft % 60).toString().padLeft(2, '0');
+      timerLabel = '$mm:$ss';
+    } else if (_step == 5) {
+      final mm = (_suggestSecondsLeft ~/ 60).toString().padLeft(2, '0');
+      final ss = (_suggestSecondsLeft % 60).toString().padLeft(2, '0');
+      timerLabel = '$mm:$ss';
+    }
+
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            padding: const EdgeInsets.all(8),
+            width: 42,
+            height: 42,
             decoration: BoxDecoration(
               color: Colors.grey[100],
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(10),
             ),
             child: const Icon(
               Icons.people_outline,
               color: AppColors.kGreen,
-              size: 24,
+              size: 22,
             ),
           ),
           const SizedBox(width: 12),
@@ -2762,21 +3099,30 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
                 const Text(
                   'Create Meeting Point',
                   style: TextStyle(
-                    fontSize: 18,
+                    fontSize: 17,
                     fontWeight: FontWeight.w700,
                     color: Colors.black87,
                   ),
                 ),
-                Text(
-                  subtitles[_step - 1],
-                  style: const TextStyle(fontSize: 13, color: Colors.black54),
+                const SizedBox(height: 3),
+                // Subtitle row: step description + timer badge
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        subtitles[_step - 1],
+                        style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                      ),
+                    ),
+                    if (timerLabel != null) ...[
+                      const SizedBox(width: 8),
+                      MeetingTimerBadge(label: timerLabel),
+                    ],
+                  ],
                 ),
               ],
             ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.close, color: Colors.black54),
-            onPressed: _handleExitRequested,
           ),
         ],
       ),
@@ -3937,42 +4283,10 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   // ─────────────────────────────────────────────────────────────────────────
 
   Widget _buildStep4() {
-    final mm = (_waitSecondsLeft ~/ 60).toString().padLeft(2, '0');
-    final ss = (_waitSecondsLeft % 60).toString().padLeft(2, '0');
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            _sectionLabel('Waiting for participants'),
-            const Spacer(),
-            // Small grey timer in top-right corner
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: Colors.grey[100],
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: Colors.grey.shade300),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.timer_outlined, size: 13, color: Colors.grey[500]),
-                  const SizedBox(width: 4),
-                  Text(
-                    '$mm:$ss',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[600],
-                      fontWeight: FontWeight.w600,
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+        _sectionLabel('Waiting for participants'),
         const SizedBox(height: 16),
 
         // Participant rows
@@ -3984,7 +4298,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         Align(
           alignment: Alignment.centerLeft,
           child: Text(
-            'Note: you can proceed with accepted participants or cancel the meeting point for all participants.',
+            'Note: you can proceed with participants who accepted, or cancel the meeting point for all.',
             textAlign: TextAlign.left,
             style: TextStyle(fontSize: 12, color: Colors.grey[400]),
           ),
@@ -4082,49 +4396,17 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   // ─────────────────────────────────────────────────────────────────────────
 
   Widget _buildStep5() {
-    final mm = (_suggestSecondsLeft ~/ 60).toString().padLeft(2, '0');
-    final ss = (_suggestSecondsLeft % 60).toString().padLeft(2, '0');
     final hasSuggestion = _suggestedPointName.trim().isNotEmpty;
-    final showLoading = !hasSuggestion && !_suggestionsComputed;
     final showEmpty = !hasSuggestion && _suggestionsComputed;
     final primaryName = hasSuggestion
         ? _suggestedPointName.trim()
         : (showEmpty ? 'No suitable meeting point found' : 'Calculating...');
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        const SizedBox(height: 10),
-        // Timer at top
-        Align(
-          alignment: Alignment.centerRight,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: Colors.grey[100],
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.grey.shade300),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.timer_outlined, size: 13, color: Colors.grey[500]),
-                const SizedBox(width: 4),
-                Text(
-                  '$mm:$ss',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[600],
-                    fontWeight: FontWeight.w600,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 30),
-
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
         // Big pin icon centred
         Container(
           width: 96,
@@ -4168,38 +4450,267 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           ),
         ],
 
-        const SizedBox(height: 36),
+        const SizedBox(height: 24),
 
-        // Accept button
-        SizedBox(
-          width: double.infinity,
-          height: 52,
-          child: ElevatedButton(
-            onPressed: hasSuggestion ? _acceptSuggestedMeetingPoint : null,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.kGreen,
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
+        // ── Participants with distances ────────────────────────────────────
+        Expanded(child: _buildStep5ParticipantList()),
+      ],
+      ),
+    );
+  }
+
+  Widget _buildStep5FixedButtons() {
+    final hasSuggestion = _suggestedPointName.trim().isNotEmpty;
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+        20, 12, 20, MediaQuery.of(context).padding.bottom + 12,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(top: BorderSide(color: Colors.grey.shade200)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: ElevatedButton(
+              onPressed: hasSuggestion ? _acceptSuggestedMeetingPoint : null,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.kGreen,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
               ),
-            ),
-            child: const Text(
-              'Confirm',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
+              child: const Text(
+                'Confirm',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ),
-        ),
-        const SizedBox(height: 12),
+          const SizedBox(height: 10),
+          SecondaryButton(
+            text: 'Reject',
+            onPressed: hasSuggestion ? _rejectSuggestedMeetingPoint : null,
+          ),
+        ],
+      ),
+    );
+  }
 
-        SecondaryButton(
-          text: 'Reject',
-          onPressed: hasSuggestion ? _rejectSuggestedMeetingPoint : null,
+  Widget _buildStep5ParticipantList() {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+
+    // Use client-side funneled distances (same algorithm as path_overview).
+    final Map<String, int> distMap = _step5DistMap;
+
+    String formatTime(int meters) {
+      final secs = meters / 1.4;
+      if (secs < 60) return '~1 min';
+      return '~${(secs / 60).ceil()} min';
+    }
+
+    // Accepted non-host participants + those who declined during step 5.
+    final accepted = _participants
+        .where((p) => p.status == _ParticipantStatus.accepted)
+        .toList();
+    final declined = _participants
+        .where((p) => p.status == _ParticipantStatus.declined)
+        .toList();
+
+    if (accepted.isEmpty && uid.isEmpty) return const SizedBox.shrink();
+
+    final isComputing = _step5DistComputing;
+
+    Widget participantTile({
+      required String name,
+      required String phone,
+      required bool isHost,
+      required bool isDeclined,
+      int? distMeters,
+    }) {
+      final statusColor = isDeclined ? AppColors.kError : AppColors.kGreen;
+      final statusText = isDeclined ? 'Declined' : 'Accepted';
+
+      // Time label: shown inline with name, or a tiny spinner while computing.
+      Widget? timeWidget;
+      if (!isDeclined) {
+        if (distMeters != null) {
+          timeWidget = Text(
+            formatTime(distMeters),
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey[500],
+              fontWeight: FontWeight.w500,
+            ),
+          );
+        } else if (isComputing) {
+          timeWidget = SizedBox(
+            width: 10,
+            height: 10,
+            child: CircularProgressIndicator(
+              strokeWidth: 1.5,
+              color: Colors.grey[400],
+            ),
+          );
+        }
+      }
+
+      return Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.grey[50],
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.shade200),
         ),
-        const SizedBox(height: 20),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: Colors.grey[200],
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.person, color: Colors.grey[600], size: 20),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Name + time on the same row
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          isHost ? 'Me (Host)' : name,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black87,
+                          ),
+                        ),
+                      ),
+                      if (timeWidget != null) ...[
+                        const SizedBox(width: 6),
+                        timeWidget,
+                      ],
+                    ],
+                  ),
+                  // Phone below name (skip for host)
+                  if (!isHost && phone.isNotEmpty)
+                    Text(
+                      phone,
+                      style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            if (!isHost)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: statusColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  statusText,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: statusColor,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      );
+    }
+
+    // Build the flat tile list.
+    final tiles = <Widget>[
+      if (uid.isNotEmpty)
+        participantTile(
+          name: _myName ?? '',
+          phone: '',
+          isHost: true,
+          isDeclined: false,
+          distMeters: distMap[uid],
+        ),
+      ...accepted.map(
+        (p) => participantTile(
+          name: p.friend.name,
+          phone: p.friend.phone,
+          isHost: false,
+          isDeclined: false,
+          distMeters: distMap[p.friend.id],
+        ),
+      ),
+      ...declined.map(
+        (p) => participantTile(
+          name: p.friend.name,
+          phone: p.friend.phone,
+          isHost: false,
+          isDeclined: true,
+          distMeters: null,
+        ),
+      ),
+    ];
+
+    // ≤2 tiles: natural height (no scroll, no fixed box).
+    // 3+ tiles: capped at ~2.4 tiles tall with a visible scrollbar.
+    const double tileHeight = 76; // name + phone + margin
+    final isScrollable = tiles.length > 2;
+
+    final listWidget = isScrollable
+        ? Scrollbar(
+            thumbVisibility: true,
+            radius: const Radius.circular(4),
+            child: SizedBox(
+              height: tileHeight * 2.4,
+              child: ListView(
+                padding: EdgeInsets.zero,
+                physics: const ClampingScrollPhysics(),
+                children: tiles,
+              ),
+            ),
+          )
+        : Column(children: tiles);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              'Participants',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey[700],
+              ),
+            ),
+            if (isScrollable) ...[
+              const SizedBox(width: 6),
+              Icon(Icons.expand_more, size: 14, color: Colors.grey[400]),
+            ],
+          ],
+        ),
+        const SizedBox(height: 8),
+        ScrollConfiguration(
+          behavior: ScrollConfiguration.of(context).copyWith(scrollbars: true),
+          child: listWidget,
+        ),
       ],
     );
   }

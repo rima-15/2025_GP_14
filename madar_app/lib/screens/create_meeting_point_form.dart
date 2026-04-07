@@ -2713,6 +2713,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       _initStep5();
       setState(() {});
     } else {
+      if (_step == 2) {
+        unawaited(_touchStep2LocationOnNext());
+      }
       // Steps 1 → 2 and 2 → 3: simple increment.
       setState(() => _step++);
     }
@@ -4055,6 +4058,32 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       });
     } catch (e) {
       debugPrint('❌ Failed to save user location from meeting form: $e');
+    }
+  }
+
+  Future<void> _touchStep2LocationOnNext() async {
+    if (_hostLocation == null) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final gltf = _step2InitialUserPinGltf;
+    if (gltf != null && gltf.isNotEmpty) {
+      final floorLabel = (_step2InitialFloorLabel ?? '').toString().trim();
+      await _saveUserLocationFromResult({
+        'gltf': gltf,
+        'floorLabel': floorLabel,
+      });
+      return;
+    }
+
+    try {
+      final userDocRef = await _resolveUserDocRef(user);
+      await userDocRef.update({
+        'location.updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      debugPrint('Failed to touch user location timestamp: $e');
     }
   }
 

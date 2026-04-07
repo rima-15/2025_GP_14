@@ -1534,6 +1534,19 @@ export const onMeetingPointLocationRefreshRequested = onDocumentUpdated(
       const meetingPointId = event.params.meetingPointId;
       if (!meetingPointId) return;
 
+      const meetingStatus = (after.status ?? "pending")
+        .toString()
+        .trim()
+        .toLowerCase();
+      if (meetingStatus !== "active") return;
+
+      const now = new Date();
+      const expiresAt =
+        after.expiresAt && typeof after.expiresAt.toDate === "function"
+          ? after.expiresAt.toDate()
+          : null;
+      if (expiresAt && expiresAt <= now) return;
+
       const toMap = (v: any) =>
         v && typeof v === "object" && !Array.isArray(v) ? v : {};
 
@@ -1565,6 +1578,10 @@ export const onMeetingPointLocationRefreshRequested = onDocumentUpdated(
       const hostName =
         (after.hostName ?? "Someone").toString().trim() || "Someone";
       const hostPhone = (after.hostPhone ?? "").toString().trim();
+      const hostArrival = (after.hostArrivalStatus ?? "on_the_way")
+        .toString()
+        .trim()
+        .toLowerCase();
       const venueId = (after.venueId ?? "").toString().trim();
       const venueName = (after.venueName ?? "").toString().trim();
 
@@ -1573,14 +1590,21 @@ export const onMeetingPointLocationRefreshRequested = onDocumentUpdated(
         : [];
       const participantInfo = new Map<
         string,
-        { name: string; phone: string }
+        { name: string; phone: string; status: string; arrivalStatus: string }
       >();
       for (const p of participants) {
         const uid = (p?.userId ?? "").toString().trim();
         if (!uid) continue;
+        const status = (p?.status ?? "pending").toString().trim().toLowerCase();
+        const arrival = (p?.arrivalStatus ?? "on_the_way")
+          .toString()
+          .trim()
+          .toLowerCase();
         participantInfo.set(uid, {
           name: (p?.name ?? "").toString().trim(),
           phone: (p?.phone ?? "").toString().trim(),
+          status,
+          arrivalStatus: arrival,
         });
       }
 
@@ -1610,6 +1634,26 @@ export const onMeetingPointLocationRefreshRequested = onDocumentUpdated(
         }
 
         if (!senderId || senderId === receiverId) continue;
+
+        const senderIsHost = senderId === hostId;
+        if (senderIsHost) {
+          if (hostArrival === "cancelled") continue;
+        } else {
+          const senderInfo = participantInfo.get(senderId);
+          if (!senderInfo) continue;
+          if (senderInfo.status !== "accepted") continue;
+          if (senderInfo.arrivalStatus === "cancelled") continue;
+        }
+
+        const receiverIsHost = receiverId === hostId;
+        if (receiverIsHost) {
+          if (hostArrival === "cancelled") continue;
+        } else {
+          const receiverInfo = participantInfo.get(receiverId);
+          if (!receiverInfo) continue;
+          if (receiverInfo.status !== "accepted") continue;
+          if (receiverInfo.arrivalStatus === "cancelled") continue;
+        }
 
         const { name: senderName, phone: senderPhone } =
           resolveSenderInfo(senderId);
@@ -1792,7 +1836,8 @@ export const onAutoLocationRefresh = onSchedule(
   async () => {
     try {
       const now = admin.firestore.Timestamp.now();
-      const cutoff = new Date(now.toDate().getTime() - 60 * 60 * 1000);
+      const nowDate = now.toDate();
+      const cutoff = new Date(nowDate.getTime() - 60 * 60 * 1000);
 
       const activeUsers = new Map<
         string,
@@ -1810,7 +1855,7 @@ export const onAutoLocationRefresh = onSchedule(
         const endAt = data.endAt;
         const endAtDate =
           endAt && typeof endAt.toDate === "function" ? endAt.toDate() : null;
-        if (!endAtDate || endAtDate <= now.toDate()) continue;
+        if (!endAtDate || endAtDate <= nowDate) continue;
 
         const receiverId = (data.receiverId ?? "").toString().trim();
         if (!receiverId) continue;
@@ -1838,6 +1883,18 @@ export const onAutoLocationRefresh = onSchedule(
 
       for (const doc of meetingSnap.docs) {
         const data = doc.data();
+        const meetingStatus = (data.status ?? "active")
+          .toString()
+          .trim()
+          .toLowerCase();
+        if (meetingStatus !== "active") continue;
+
+        const expiresAt =
+          data.expiresAt && typeof data.expiresAt.toDate === "function"
+            ? data.expiresAt.toDate()
+            : null;
+        if (expiresAt && expiresAt <= nowDate) continue;
+
         const hostId = (data.hostId ?? "").toString().trim();
         const hostArrival = (data.hostArrivalStatus ?? "on_the_way")
           .toString()
@@ -1855,6 +1912,9 @@ export const onAutoLocationRefresh = onSchedule(
         for (const p of participants) {
           const uid = (p?.userId ?? "").toString().trim();
           if (!uid) continue;
+          if (uid === hostId) continue;
+          const status = (p?.status ?? "pending").toString().trim().toLowerCase();
+          if (status !== "accepted") continue;
           const arrival = (p?.arrivalStatus ?? "on_the_way")
             .toString()
             .trim()

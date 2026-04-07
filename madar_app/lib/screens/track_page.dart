@@ -3234,10 +3234,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                       ],
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      'Location updated • ${locationUpdatedAt != null ? _timeAgo(locationUpdatedAt) : 'Unknown'}',
-                      style: TextStyle(fontSize: 13, color: Colors.grey[600]),
-                    ),
+                    if (!isArrived)
+                      Text(
+                        'Location updated • ${locationUpdatedAt != null ? _timeAgo(locationUpdatedAt) : 'Unknown'}',
+                        style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                      ),
                   ],
                 ),
               ),
@@ -3394,7 +3395,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                               color: Colors.grey[600],
                             ),
                           )
-                        else
+                        else if (!isArrived)
                           Text(
                             'Location updated • ${() {
                               final live = _meetingUpdatedAtByUser[p.userId];

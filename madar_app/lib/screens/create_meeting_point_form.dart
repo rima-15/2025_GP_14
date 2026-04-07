@@ -1004,6 +1004,8 @@ class MeetingPointService {
     final payload = <String, dynamic>{
       'updatedAt': FieldValue.serverTimestamp(),
     };
+    final shouldUpdateLocation = arrivalStatus == 'arrived';
+    final locationAt = arrivedAt ?? DateTime.now();
 
     // ── Compute new arrival states ─────────────────────────────────────────
     String newHostArrivalStatus = meeting.hostArrivalStatus;
@@ -1016,12 +1018,16 @@ class MeetingPointService {
       payload['hostArrivedAt'] = arrivedAt == null
           ? null
           : Timestamp.fromDate(arrivedAt);
+      if (shouldUpdateLocation) {
+        payload['hostLocationUpdatedAt'] = Timestamp.fromDate(locationAt);
+      }
     } else {
       final idx = newParticipants.indexWhere((p) => p.userId == userId);
       if (idx < 0) return;
       newParticipants[idx] = newParticipants[idx].copyWith(
         arrivalStatus: arrivalStatus,
         arrivedAt: arrivedAt,
+        locationUpdatedAt: shouldUpdateLocation ? locationAt : null,
       );
       payload['participants'] = newParticipants.map((p) => p.toMap()).toList();
     }

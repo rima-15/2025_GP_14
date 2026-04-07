@@ -143,6 +143,11 @@ class _TrackPageState extends State<TrackPage> {
   String? _expandedArrivalParticipantId; // userId of expanded participant card
   final Set<String> _favoriteParticipantIds = {};
   DateTime? _lastMeetingMaintainAttemptAt;
+  static const double _autoArriveDistanceMeters = 10.0;
+  static const Duration _autoArriveCooldown = Duration(seconds: 15);
+  DateTime? _lastAutoArriveAttemptAt;
+  String? _lastAutoArriveMeetingId;
+  bool _autoArriveInFlight = false;
 
   /// IDs of meeting invitations the user locally declined — hidden immediately
   /// in the UI before Firestore confirms the write.
@@ -919,6 +924,15 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     return {'x': x, 'y': z, 'z': -y};
   }
 
+  Map<String, double> _gltfToBlender({
+    required double x,
+    required double y,
+    required double z,
+  }) {
+    // glTF (Y up) -> Blender (Z up)
+    return {'x': x, 'y': -z, 'z': y};
+  }
+
   void _listenToActiveTrackedUsers() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -1293,6 +1307,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             _meetingPosBlenderByUser[id] = {'x': bx, 'y': by, 'z': bz};
             _meetingFloorByUser[id] = floorRaw;
             unawaited(_recomputeMeetingPathForUser(id));
+            if (currentUid.isNotEmpty && id == currentUid) {
+              unawaited(_maybeAutoArriveForCurrentUser());
+            }
             _applyAllTrackedPinsToViewer();
           });
     }
@@ -1848,6 +1865,13 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     return false;
   }
 
+  bool _floorsMatchStrict(String aRaw, String bRaw) {
+    final a = _normalizeTrackedFloorLabel(aRaw);
+    final b = _normalizeTrackedFloorLabel(bRaw);
+    if (a.isEmpty || b.isEmpty) return false;
+    return a == b;
+  }
+
   String _toFNumber(String? raw) {
     if (raw == null) return '';
     var s = raw.trim();
@@ -2166,9 +2190,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           !_isTrackingView &&
           _meetingPointPosGltf != null &&
           (_meetingArrivalStatusByUser[userId] ?? '') == 'arrived';
-      final displayFloorLabel = isArrived
-          ? _meetingPointFloorLabel
-          : trackedFloorLabel;
+      final displayFloorLabel = trackedFloorLabel;
       final ok = _floorsMatch(displayFloorLabel, currentLabel);
 
       if (!ok) {
@@ -2204,15 +2226,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       double y = (pos['y'] ?? 0).toDouble();
       double z = (pos['z'] ?? 0).toDouble();
 
-      if (isArrived) {
-        final arrivedPos = _offsetMeetingPointForUser(
-          userId,
-          _meetingPointPosGltf!,
-        );
-        x = (arrivedPos['x'] ?? x).toDouble();
-        y = (arrivedPos['y'] ?? y).toDouble();
-        z = (arrivedPos['z'] ?? z).toDouble();
-      }
+      // Keep the user's actual stored location even when arrived.
 
       final label = (activeNameByUser[userId] ?? 'User').replaceAll("'", "\\'");
 
@@ -3774,6 +3788,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     MeetingPointRecord meeting, {
     required bool isHost,
     required String uid,
+    bool persistUserLocation = true,
   }) async {
     final now = DateTime.now();
     final willComplete = _willCompleteAfterArrive(meeting, isHost, uid);
@@ -3796,6 +3811,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         arrivalStatus: 'arrived',
         arrivedAt: now,
       );
+      if (persistUserLocation) {
+        await _saveArrivedLocationToUserDoc(meeting, uid);
+      }
       if (mounted) {
         _meetingArrivalStatusByUser[uid] = 'arrived';
         _applyAllTrackedPinsToViewer();
@@ -3818,6 +3836,128 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           context,
         ).showSnackBar(SnackBar(content: Text('Failed to mark arrived: $e')));
       }
+    }
+  }
+
+  Future<void> _maybeAutoArriveForCurrentUser() async {
+    if (!mounted) return;
+    final meeting = _lastKnownConfirmedMeeting;
+    if (meeting == null || !meeting.isConfirmed) return;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || uid.trim().isEmpty) return;
+
+    if (_autoArriveInFlight) return;
+    final now = DateTime.now();
+    if (_lastAutoArriveAttemptAt != null &&
+        now.difference(_lastAutoArriveAttemptAt!) < _autoArriveCooldown) {
+      return;
+    }
+    if (_lastAutoArriveMeetingId != null &&
+        _lastAutoArriveMeetingId != meeting.id &&
+        _lastAutoArriveAttemptAt != null &&
+        now.difference(_lastAutoArriveAttemptAt!) < _autoArriveCooldown) {
+      return;
+    }
+
+    final arrivalStatus = _meetingArrivalStatusByUser[uid] ??
+        (meeting.isHost(uid)
+            ? meeting.hostArrivalStatus
+            : meeting.participantFor(uid)?.arrivalStatus ?? 'on_the_way');
+    if (arrivalStatus == 'arrived' || arrivalStatus == 'cancelled') return;
+
+    final userFloor = _meetingFloorByUser[uid] ?? '';
+    final meetingFloor = _meetingPointFloorLabel;
+    if (!_floorsMatchStrict(userFloor, meetingFloor)) return;
+
+    final locationUpdatedAt = _meetingUpdatedAtByUser[uid];
+    final meetingStartAt =
+        meeting.confirmedAt ?? meeting.updatedAt ?? meeting.createdAt;
+    if (locationUpdatedAt == null || meetingStartAt == null) return;
+    if (locationUpdatedAt.isBefore(meetingStartAt)) return;
+
+    final userPos = _meetingPosByUser[uid];
+    final meetingPos = _meetingPointPosGltf;
+    if (userPos == null || meetingPos == null) return;
+
+    final dx = (userPos['x'] ?? 0) - (meetingPos['x'] ?? 0);
+    final dz = (userPos['z'] ?? 0) - (meetingPos['z'] ?? 0);
+    final distUnits = math.sqrt((dx * dx) + (dz * dz));
+    final distMeters = distUnits * _unitToMeters;
+    if (distMeters > _autoArriveDistanceMeters) return;
+
+    _autoArriveInFlight = true;
+    _lastAutoArriveAttemptAt = now;
+    _lastAutoArriveMeetingId = meeting.id;
+    try {
+      await _markArrived(
+        meeting,
+        isHost: meeting.isHost(uid),
+        uid: uid,
+        persistUserLocation: false,
+      );
+    } finally {
+      _autoArriveInFlight = false;
+    }
+  }
+
+  Future<void> _saveArrivedLocationToUserDoc(
+    MeetingPointRecord meeting,
+    String uid,
+  ) async {
+    Map<String, double>? blender = _meetingPointPosBlender;
+    Map<String, double>? gltf = _meetingPointPosGltf;
+    String floorLabel = _meetingPointFloorLabel;
+
+    if (blender == null || blender.isEmpty) {
+      if (meeting.suggestedCandidates.isNotEmpty) {
+        final raw = meeting.suggestedCandidates.first;
+        final entrance = raw['entrance'];
+        if (entrance is Map) {
+          final ex = (entrance['x'] as num?)?.toDouble();
+          final ey = (entrance['y'] as num?)?.toDouble();
+          final ez = (entrance['z'] as num?)?.toDouble();
+          final floor = (entrance['floor'] ?? '').toString();
+          if (ex != null && ey != null && ez != null) {
+            blender = {'x': ex, 'y': ey, 'z': ez};
+            if (floorLabel.isEmpty) floorLabel = floor;
+          }
+        }
+      }
+    }
+
+    if (blender == null || blender.isEmpty) return;
+    if (floorLabel.isEmpty) {
+      floorLabel = _meetingFloorByUser[uid] ?? '';
+    }
+    if (gltf == null || gltf.isEmpty) {
+      gltf = _blenderToGltf(
+        x: (blender['x'] ?? 0),
+        y: (blender['y'] ?? 0),
+        z: (blender['z'] ?? 0),
+      );
+    }
+
+    if (gltf != null && gltf.isNotEmpty) {
+      final offsetGltf = _offsetMeetingPointForUser(uid, gltf);
+      blender = _gltfToBlender(
+        x: (offsetGltf['x'] ?? 0),
+        y: (offsetGltf['y'] ?? 0),
+        z: (offsetGltf['z'] ?? 0),
+      );
+    }
+
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(uid).update({
+        'location.blenderPosition': {
+          'x': blender['x'],
+          'y': blender['y'],
+          'z': blender['z'],
+          'floor': floorLabel,
+        },
+        'location.updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      debugPrint('[TRACK] Failed to save arrived location: $e');
     }
   }
 

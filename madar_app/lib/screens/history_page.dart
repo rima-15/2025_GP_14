@@ -58,6 +58,12 @@ class HistoryMeetingPoint {
   final String hostName;
   final String hostPhone;
   final bool isHost;
+
+  /// True when the host confirmed the suggested point (meeting reached the
+  /// arrival phase). Used to distinguish "all left at step 5 before
+  /// confirmation" (hide suggested point) vs "all left during arrival"
+  /// (show suggested point).
+  final bool wasConfirmed;
   final DateTime createdAt;
   final DateTime updatedAt;
   final List<HistoryMeetingPointParticipant> participants;
@@ -72,6 +78,7 @@ class HistoryMeetingPoint {
     required this.hostName,
     required this.hostPhone,
     required this.isHost,
+    this.wasConfirmed = false,
     required this.createdAt,
     required this.updatedAt,
     required this.participants,
@@ -83,6 +90,9 @@ class HistoryPage extends StatefulWidget {
     super.key,
     this.initialFilterIndex,
     this.initialHighlightRequestId,
+    this.initialMainTabIndex,
+    this.initialMeetingFilterIndex,
+    this.initialMeetingPointId,
   });
 
   /// 0 = Sent, 1 = Received
@@ -90,6 +100,9 @@ class HistoryPage extends StatefulWidget {
 
   /// When set, scroll to and briefly highlight this request.
   final String? initialHighlightRequestId;
+  final int? initialMainTabIndex;
+  final int? initialMeetingFilterIndex;
+  final String? initialMeetingPointId;
 
   @override
   State<HistoryPage> createState() => _HistoryPageState();
@@ -103,6 +116,14 @@ class _HistoryPageState extends State<HistoryPage> {
   final GlobalKey _highlightKey = GlobalKey();
   Timer? _highlightClearTimer;
   bool _highlightClearScheduled = false;
+  final ScrollController _historyScrollController = ScrollController();
+  Timer? _historyScrollTimer;
+  String? _highlightMeetingPointId;
+  final GlobalKey _meetingHighlightKey = GlobalKey();
+  Timer? _meetingHighlightClearTimer;
+  bool _meetingHighlightClearScheduled = false;
+  final ScrollController _meetingScrollController = ScrollController();
+  Timer? _meetingScrollTimer;
   final Set<String> _expandedCards = {};
 
   static const List<String> _mainTabs = ['Tracking', 'Meeting point'];
@@ -120,6 +141,7 @@ class _HistoryPageState extends State<HistoryPage> {
     'cancelled',
     'completed',
     'active',
+    'terminated', // written by auto-expiry logic
   ];
 
   late final Stream<List<HistoryTrackingRequest>> _sentStream;
@@ -129,10 +151,21 @@ class _HistoryPageState extends State<HistoryPage> {
   @override
   void initState() {
     super.initState();
+    if (widget.initialMainTabIndex != null) {
+      _mainTabIndex = widget.initialMainTabIndex!;
+    }
     if (widget.initialFilterIndex != null) {
       _trackingFilterIndex = widget.initialFilterIndex!;
     }
+    if (widget.initialMeetingFilterIndex != null) {
+      _meetingFilterIndex = widget.initialMeetingFilterIndex!;
+    }
     _highlightRequestId = widget.initialHighlightRequestId;
+    _highlightMeetingPointId = widget.initialMeetingPointId;
+    if (_highlightMeetingPointId != null &&
+        _highlightMeetingPointId!.trim().isNotEmpty) {
+      _expandedCards.add(_highlightMeetingPointId!);
+    }
     _sentStream = _createSentHistoryStream();
     _receivedStream = _createReceivedHistoryStream();
     _meetingPointHistoryStream = _createMeetingPointHistoryStream();
@@ -142,6 +175,11 @@ class _HistoryPageState extends State<HistoryPage> {
   @override
   void dispose() {
     _highlightClearTimer?.cancel();
+    _historyScrollTimer?.cancel();
+    _historyScrollController.dispose();
+    _meetingHighlightClearTimer?.cancel();
+    _meetingScrollTimer?.cancel();
+    _meetingScrollController.dispose();
     super.dispose();
   }
 
@@ -309,24 +347,18 @@ class _HistoryPageState extends State<HistoryPage> {
     final hostId = (data['hostId'] ?? '').toString();
     final venueName = (data['venueName'] ?? '').toString();
     final suggestedPoint = (data['suggestedPoint'] ?? '').toString();
-    final cancellationReason = _deriveCancellationReason(data, uid);
     final hostName = (data['hostName'] ?? '').toString();
     final hostPhone = (data['hostPhone'] ?? '').toString();
     final createdAt = _parseTimestamp(data['createdAt']) ?? DateTime.now();
     final updatedAt = _parseTimestamp(data['updatedAt']) ?? createdAt;
     final participants = _parseParticipants(data['participants']);
+    final wasConfirmed = data['confirmedAt'] != null;
 
     // ── Still-pending meeting ─────────────────────────────────────────────
-    // Only show in history for a participant who has already declined.
+    // Show immediately in history when this user declined, cancelled
+    // participation, or their invitation window has already closed (expired).
     if (status == 'pending') {
       if (hostId == uid) return null; // host still has an active meeting
-      for (final p in participants) {
-        if (p.userId == uid) {
-          // participant found — only show if they declined
-          return null; // still pending for this user (non-declined)
-        }
-      }
-      // check raw for declined
       final rawParticipants = data['participants'];
       if (rawParticipants is List) {
         for (final p in rawParticipants) {
@@ -337,13 +369,14 @@ class _HistoryPageState extends State<HistoryPage> {
                   .toString()
                   .trim()
                   .toLowerCase();
-              if (pStatus == 'declined') {
+              // Declined at invitation OR cancelled participation in step 2/3.
+              if (pStatus == 'declined' || pStatus == 'cancelled') {
                 return HistoryMeetingPoint(
                   id: d.id,
                   status: 'declined',
                   venueName: venueName,
                   suggestedPoint: suggestedPoint,
-                  cancellationReason: cancellationReason,
+                  cancellationReason: 'You declined this invitation',
                   hostId: hostId,
                   hostName: hostName,
                   hostPhone: hostPhone,
@@ -353,16 +386,106 @@ class _HistoryPageState extends State<HistoryPage> {
                   participants: participants,
                 );
               }
-              break;
+              // Invitation window closed (timer expired or host already proceeded).
+              final waitDeadline = _parseTimestamp(data['waitDeadline']);
+              final hostStep = (data['hostStep'] is num)
+                  ? (data['hostStep'] as num).toInt()
+                  : 4;
+              if (pStatus == 'pending' &&
+                  (hostStep >= 5 ||
+                      (waitDeadline != null &&
+                          !waitDeadline.isAfter(DateTime.now())))) {
+                return HistoryMeetingPoint(
+                  id: d.id,
+                  status: 'expired',
+                  venueName: venueName,
+                  suggestedPoint: suggestedPoint,
+                  cancellationReason: 'This meeting ended before you responded',
+                  hostId: hostId,
+                  hostName: hostName,
+                  hostPhone: hostPhone,
+                  isHost: false,
+                  createdAt: createdAt,
+                  updatedAt: updatedAt,
+                  participants: participants,
+                );
+              }
+              return null; // invitation still active for this user
             }
           }
         }
       }
-      return null; // still pending for this user
+      return null; // user not found in participants list
     }
 
     // ── Terminal meeting ──────────────────────────────────────────────────
     if (!_meetingPointHistoryStatuses.contains(status)) return null;
+
+    // ── Active meeting: only appear in history if the user personally left ─
+    // If the overall meeting is still active but this user cancelled their
+    // arrival (clicked Cancel in the track page), show it as "Terminated".
+    // If the user is still an active participant, exclude from history.
+    if (status == 'active') {
+      bool userCancelledArrival = false;
+      if (hostId == uid) {
+        final hostArrival = (data['hostArrivalStatus'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
+        userCancelledArrival = hostArrival == 'cancelled';
+      } else {
+        final rawParts = data['participants'];
+        if (rawParts is List) {
+          for (final p in rawParts) {
+            if (p is Map) {
+              final pUid = (p['userId'] ?? '').toString();
+              if (pUid == uid) {
+                final pArrival = (p['arrivalStatus'] ?? '')
+                    .toString()
+                    .trim()
+                    .toLowerCase();
+                userCancelledArrival = pArrival == 'cancelled';
+                break;
+              }
+            }
+          }
+        }
+      }
+      if (!userCancelledArrival) return null; // still active for this user
+      return HistoryMeetingPoint(
+        id: d.id,
+        status: 'terminated',
+        venueName: venueName,
+        suggestedPoint: suggestedPoint,
+        cancellationReason: 'You left the meeting',
+        hostId: hostId,
+        hostName: hostName,
+        hostPhone: hostPhone,
+        isHost: hostId == uid,
+        createdAt: createdAt,
+        updatedAt: updatedAt,
+        participants: participants,
+      );
+    }
+
+    // ── Auto-expired meeting (system terminated, not host action) ───────────
+    if (status == 'terminated') {
+      return HistoryMeetingPoint(
+        id: d.id,
+        status: 'auto_closed',
+        venueName: venueName,
+        suggestedPoint: suggestedPoint,
+        cancellationReason: 'Auto-closed after time limit',
+        hostId: hostId,
+        hostName: hostName,
+        hostPhone: hostPhone,
+        isHost: hostId == uid,
+        wasConfirmed: wasConfirmed,
+        createdAt: createdAt,
+        updatedAt: updatedAt,
+        participants: participants,
+      );
+    }
 
     // For non-host participants, derive a personal display status.
     String displayStatus = status;
@@ -377,12 +500,71 @@ class _HistoryPageState extends State<HistoryPage> {
                   .toString()
                   .trim()
                   .toLowerCase();
-              if (pStatus == 'pending') displayStatus = 'expired';
-              if (pStatus == 'declined') displayStatus = 'declined';
+              // 'cancelled' = participant used "Cancel participation" in step 2/3.
+              if (pStatus == 'declined' || pStatus == 'cancelled')
+                displayStatus = 'declined';
+              // Only treat as 'expired' when the timer actually ran out.
+              // If the host cancelled before the deadline, keep 'cancelled'
+              // so the reason shows as "Cancelled by host".
+              if (pStatus == 'pending' && status == 'cancelled') {
+                final waitDeadline = _parseTimestamp(data['waitDeadline']);
+                final hostStep = (data['hostStep'] is num)
+                    ? (data['hostStep'] as num).toInt()
+                    : 4;
+                final timerExpired =
+                    waitDeadline != null &&
+                    !waitDeadline.isAfter(DateTime.now());
+                if (timerExpired || hostStep >= 5) displayStatus = 'expired';
+                // else: displayStatus stays 'cancelled' → "Cancelled by host"
+              }
               break;
             }
           }
         }
+      }
+    }
+
+    // ── Arrival-phase personal status override ────────────────────────────
+    // A participant who cancelled their own arrival is shown as "Terminated"
+    // regardless of the overall meeting outcome.
+    if (status == 'cancelled' || status == 'completed') {
+      if (hostId == uid) {
+        final hostArrival = (data['hostArrivalStatus'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
+        if (hostArrival == 'cancelled') displayStatus = 'terminated';
+      } else {
+        final rawParts = data['participants'];
+        if (rawParts is List) {
+          for (final p in rawParts) {
+            if (p is Map) {
+              final pUid = (p['userId'] ?? '').toString();
+              if (pUid == uid) {
+                final pArrival = (p['arrivalStatus'] ?? '')
+                    .toString()
+                    .trim()
+                    .toLowerCase();
+                if (pArrival == 'cancelled') displayStatus = 'terminated';
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    final String cancellationReason;
+    if (displayStatus == 'terminated') {
+      cancellationReason = 'You left the meeting';
+    } else if (displayStatus == 'declined') {
+      cancellationReason = 'You declined this invitation';
+    } else {
+      final derived = _deriveCancellationReason(data, uid);
+      if (displayStatus == 'expired' && derived.isEmpty) {
+        cancellationReason = 'This meeting ended before you responded';
+      } else {
+        cancellationReason = derived;
       }
     }
 
@@ -396,6 +578,7 @@ class _HistoryPageState extends State<HistoryPage> {
       hostName: hostName,
       hostPhone: hostPhone,
       isHost: hostId == uid,
+      wasConfirmed: wasConfirmed,
       createdAt: createdAt,
       updatedAt: updatedAt,
       participants: participants,
@@ -408,31 +591,56 @@ class _HistoryPageState extends State<HistoryPage> {
     final status = (data['status'] ?? '').toString().trim().toLowerCase();
     if (status != 'cancelled') return '';
 
+    // Explicit reason stored by the arrival-phase auto-cancel logic.
+    final storedReason = (data['cancellationReason'] ?? '').toString().trim();
+    if (storedReason == 'all_participants_left') {
+      return 'All participants left the meeting';
+    }
+
     final hostId = (data['hostId'] ?? '').toString();
     final isHost = hostId == uid;
-    final hostStep =
-        (data['hostStep'] is num) ? (data['hostStep'] as num).toInt() : 4;
+    final hostStep = (data['hostStep'] is num)
+        ? (data['hostStep'] as num).toInt()
+        : 4;
+
+    // If the meeting reached the arrival phase, the host-step-5 condition no
+    // longer means "rejected suggestion" — distinguish via confirmedAt.
+    final wasInArrivalPhase = data['confirmedAt'] != null;
 
     final rawParticipants = data['participants'];
     final parts = (rawParticipants is List)
         ? rawParticipants.whereType<Map>().toList()
         : <Map>[];
 
-    final allDeclined = parts.isNotEmpty &&
-        parts.every(
-          (p) => (p['status'] ?? '').toString().toLowerCase() == 'declined',
-        );
     final anyAccepted = parts.any(
       (p) => (p['status'] ?? '').toString().toLowerCase() == 'accepted',
     );
 
     if (isHost) {
-      if (allDeclined) return 'All participants declined the request';
-      if (hostStep == 5) return 'Host (me) rejected the suggested meeting point';
-      if (!anyAccepted) return 'None of participants respond';
-      return 'You cancelled this request';
+      if (storedReason == 'host_rejected_suggestion') {
+        return 'Host (you) rejected the suggested meeting point';
+      }
+      if (storedReason == 'host_cancelled') {
+        return 'You cancelled this request for all participants';
+      }
+      if (hostStep == 5 && !wasInArrivalPhase)
+        return 'Host (you) rejected the suggested meeting point';
+      // 'all_participants_declined' is written by the auto-cancel logic when
+      // the timer expired or everyone declined/left — nobody accepted at all.
+      // An empty storedReason means the host manually cancelled before anyone
+      // had a chance to respond.
+      if (!anyAccepted && storedReason == 'all_participants_declined')
+        return 'None of participants accept';
+      return 'You cancelled this request for all participants';
     } else {
-      if (hostStep == 5) return 'Host rejected the suggested meeting point';
+      if (storedReason == 'host_rejected_suggestion') {
+        return 'Host rejected the suggested meeting point';
+      }
+      if (storedReason == 'host_cancelled') {
+        return 'Cancelled by host';
+      }
+      if (hostStep == 5 && !wasInArrivalPhase)
+        return 'Host rejected the suggested meeting point';
       return 'Cancelled by host';
     }
   }
@@ -638,29 +846,28 @@ class _HistoryPageState extends State<HistoryPage> {
               if (!mounted) return;
               final ctx = _highlightKey.currentContext;
               if (ctx != null) {
-                Scrollable.ensureVisible(
-                  ctx,
-                  alignment: 0.15,
-                  duration: const Duration(milliseconds: 450),
-                  curve: Curves.easeInOutCubic,
-                );
+                try {
+                  Scrollable.ensureVisible(
+                    ctx,
+                    alignment: 0.15,
+                    duration: const Duration(milliseconds: 450),
+                    curve: Curves.easeInOutCubic,
+                  ).whenComplete(() {
+                    if (!mounted) return;
+                    _scheduleHistoryHighlightClear();
+                  });
+                } catch (_) {}
               }
             });
-            if (!_highlightClearScheduled) {
-              _highlightClearScheduled = true;
-              _highlightClearTimer?.cancel();
-              _highlightClearTimer = Timer(const Duration(seconds: 3), () {
-                if (!mounted) return;
-                setState(() {
-                  _highlightRequestId = null;
-                  _highlightClearScheduled = false;
-                });
-              });
+            if (_historyScrollTimer == null &&
+                _highlightKey.currentContext == null) {
+              _startScrollToHistoryWhenReady(targetIdx, list.length);
             }
           }
         }
         return ListView.builder(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+          controller: _historyScrollController,
           itemCount: list.length,
           itemBuilder: (context, i) => Padding(
             key: list[i].id == _highlightRequestId ? _highlightKey : null,
@@ -713,6 +920,12 @@ class _HistoryPageState extends State<HistoryPage> {
     final timeStr = '${r.startTime} - ${r.endTime}';
     final userLabel = r.isSent ? 'Tracked User' : 'Sender';
     final isHighlighted = _highlightRequestId == r.id;
+    if (isHighlighted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _scheduleHistoryHighlightClear();
+      });
+    }
 
     return Container(
       decoration: BoxDecoration(
@@ -868,6 +1081,11 @@ class _HistoryPageState extends State<HistoryPage> {
         text = AppColors.kError;
         label = 'Terminated';
         break;
+      case 'auto_closed':
+        bg = Colors.amber.withOpacity(0.15);
+        text = Colors.amber[800]!;
+        label = 'Terminated';
+        break;
       case 'cancelled':
         bg = Colors.grey.withOpacity(0.15);
         text = Colors.grey[700]!;
@@ -943,108 +1161,7 @@ class _HistoryPageState extends State<HistoryPage> {
                 );
               }
 
-              // ── Static demo entries ────────────────────────────────────
-              final dummyParticipants = [
-                HistoryMeetingPointParticipant(
-                  userId: 'dp1',
-                  name: 'Razan Saeedf',
-                  phone: '+966503349694',
-                ),
-                HistoryMeetingPointParticipant(
-                  userId: 'dp2',
-                  name: 'Mona Saleh',
-                  phone: '+966557225235',
-                ),
-              ];
-              final dummySent = [
-                HistoryMeetingPoint(
-                  id: 'demo_sent_1',
-                  status: 'cancelled',
-                  cancellationReason: 'All participants declined the request',
-                  venueName: 'King Khalid International Airport',
-                  hostId: 'demo_me',
-                  hostName: 'ar saeed',
-                  hostPhone: '+966334333333',
-                  isHost: true,
-                  createdAt: DateTime(2026, 3, 15, 10, 0),
-                  updatedAt: DateTime(2026, 3, 15, 10, 0),
-                  participants: dummyParticipants,
-                ),
-                HistoryMeetingPoint(
-                  id: 'demo_sent_2',
-                  status: 'cancelled',
-                  cancellationReason: 'None of participants respond',
-                  venueName: 'King Khalid International Airport',
-                  hostId: 'demo_me',
-                  hostName: 'ar saeed',
-                  hostPhone: '+966334333333',
-                  isHost: true,
-                  createdAt: DateTime(2026, 3, 14, 9, 0),
-                  updatedAt: DateTime(2026, 3, 14, 9, 0),
-                  participants: dummyParticipants,
-                ),
-                HistoryMeetingPoint(
-                  id: 'demo_sent_3',
-                  status: 'cancelled',
-                  cancellationReason:
-                      'Host (me) rejected the suggested meeting point',
-                  venueName: 'King Khalid International Airport',
-                  hostId: 'demo_me',
-                  hostName: 'ar saeed',
-                  hostPhone: '+966334333333',
-                  isHost: true,
-                  createdAt: DateTime(2026, 3, 13, 8, 0),
-                  updatedAt: DateTime(2026, 3, 13, 8, 0),
-                  participants: dummyParticipants,
-                ),
-                HistoryMeetingPoint(
-                  id: 'demo_sent_4',
-                  status: 'cancelled',
-                  cancellationReason: 'You cancelled this request',
-                  venueName: 'King Khalid International Airport',
-                  hostId: 'demo_me',
-                  hostName: 'ar saeed',
-                  hostPhone: '+966334333333',
-                  isHost: true,
-                  createdAt: DateTime(2026, 3, 12, 7, 0),
-                  updatedAt: DateTime(2026, 3, 12, 7, 0),
-                  participants: dummyParticipants,
-                ),
-              ];
-              final dummyReceived = [
-                HistoryMeetingPoint(
-                  id: 'demo_rcv_1',
-                  status: 'cancelled',
-                  cancellationReason:
-                      'Host rejected the suggested meeting point',
-                  venueName: 'King Khalid International Airport',
-                  hostId: 'demo_host',
-                  hostName: 'Sara Ahmed',
-                  hostPhone: '+966500000001',
-                  isHost: false,
-                  createdAt: DateTime(2026, 3, 11, 14, 0),
-                  updatedAt: DateTime(2026, 3, 11, 14, 0),
-                  participants: dummyParticipants,
-                ),
-                HistoryMeetingPoint(
-                  id: 'demo_rcv_2',
-                  status: 'cancelled',
-                  cancellationReason: 'Cancelled by host',
-                  venueName: 'King Khalid International Airport',
-                  hostId: 'demo_host',
-                  hostName: 'Sara Ahmed',
-                  hostPhone: '+966500000001',
-                  isHost: false,
-                  createdAt: DateTime(2026, 3, 10, 13, 0),
-                  updatedAt: DateTime(2026, 3, 10, 13, 0),
-                  participants: dummyParticipants,
-                ),
-              ];
-
-              final allList = [
-                ...(_meetingFilterIndex == 0 ? dummySent : dummyReceived),
-                ...(snapshot.data ?? []),
-              ];
+              final allList = [...(snapshot.data ?? [])];
               final list = _meetingFilterIndex == 0
                   ? allList.where((m) => m.isHost).toList()
                   : allList.where((m) => !m.isHost).toList();
@@ -1062,12 +1179,48 @@ class _HistoryPageState extends State<HistoryPage> {
                 );
               }
 
+              if (_highlightMeetingPointId != null) {
+                final targetIdx = list.indexWhere(
+                  (m) => m.id == _highlightMeetingPointId,
+                );
+                if (targetIdx >= 0) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (!mounted) return;
+                    final ctx = _meetingHighlightKey.currentContext;
+                    if (ctx != null) {
+                      try {
+                        Scrollable.ensureVisible(
+                          ctx,
+                          alignment: 0.15,
+                          duration: const Duration(milliseconds: 450),
+                          curve: Curves.easeInOutCubic,
+                        ).whenComplete(() {
+                          if (!mounted) return;
+                          _scheduleMeetingHighlightClear();
+                        });
+                      } catch (_) {}
+                    }
+                  });
+                  if (_meetingScrollTimer == null &&
+                      _meetingHighlightKey.currentContext == null) {
+                    _startScrollToMeetingPointWhenReady(targetIdx, list.length);
+                  }
+                } else if (_meetingScrollTimer == null) {
+                  _startScrollToMeetingPointWhenReady(targetIdx, list.length);
+                }
+              }
+
               return ListView.separated(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                controller: _meetingScrollController,
                 itemCount: list.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 12),
-                itemBuilder: (context, index) =>
-                    _buildMeetingPointTile(list[index]),
+                itemBuilder: (context, index) => KeyedSubtree(
+                  key: list[index].id == _highlightMeetingPointId
+                      ? _meetingHighlightKey
+                      : null,
+                  child: _buildMeetingPointTile(list[index]),
+                ),
               );
             },
           ),
@@ -1116,6 +1269,13 @@ class _HistoryPageState extends State<HistoryPage> {
   Widget _buildMeetingPointTile(HistoryMeetingPoint item) {
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
     final isExpanded = _expandedCards.contains(item.id);
+    final isHighlighted = _highlightMeetingPointId == item.id;
+    if (isHighlighted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _scheduleMeetingHighlightClear();
+      });
+    }
 
     // Participants list: exclude host (already shown in header)
     // Current user first, then others
@@ -1143,9 +1303,14 @@ class _HistoryPageState extends State<HistoryPage> {
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isHighlighted
+            ? AppColors.kGreen.withOpacity(0.05)
+            : Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(
+          color: isHighlighted ? AppColors.kGreen : Colors.grey.shade200,
+          width: isHighlighted ? 2 : 1,
+        ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.05),
@@ -1226,7 +1391,9 @@ class _HistoryPageState extends State<HistoryPage> {
               ],
             ),
             // ── Cancellation reason banner ────────────────────────────────
-            if (item.cancellationReason.isNotEmpty) ...[
+            if (item.cancellationReason.isNotEmpty &&
+                (item.status == 'cancelled' ||
+                    item.status == 'auto_closed')) ...[
               const SizedBox(height: 10),
               Container(
                 width: double.infinity,
@@ -1283,13 +1450,18 @@ class _HistoryPageState extends State<HistoryPage> {
                           'Venue: ',
                           item.venueName.isEmpty ? '—' : item.venueName,
                         ),
-                        const SizedBox(height: 4),
-                        _labeledDetail(
-                          'Suggested point: ',
-                          item.suggestedPoint.isEmpty
-                              ? 'JOE & THE JUICE'
-                              : item.suggestedPoint,
-                        ),
+                        if (item.suggestedPoint.isNotEmpty &&
+                            item.status != 'declined' &&
+                            item.status != 'expired' &&
+                            (item.wasConfirmed ||
+                                item.cancellationReason !=
+                                    'All participants left the meeting')) ...[
+                          const SizedBox(height: 4),
+                          _labeledDetail(
+                            'Suggested point: ',
+                            item.suggestedPoint,
+                          ),
+                        ],
                         const SizedBox(height: 4),
                         _labeledDetail(
                           'Date: ',
@@ -1346,6 +1518,146 @@ class _HistoryPageState extends State<HistoryPage> {
         ),
       ),
     );
+  }
+
+  void _startScrollToMeetingPointWhenReady(int targetIdx, int itemCount) {
+    int attempts = 0;
+    const maxAttempts = 60; // ~7 seconds
+    _meetingScrollTimer?.cancel();
+    _meetingScrollTimer = Timer.periodic(const Duration(milliseconds: 120), (
+      _,
+    ) {
+      if (!mounted || attempts >= maxAttempts) {
+        _meetingScrollTimer?.cancel();
+        _meetingScrollTimer = null;
+        return;
+      }
+      attempts++;
+      final ctx = _meetingHighlightKey.currentContext;
+      if (ctx != null) {
+        _meetingScrollTimer?.cancel();
+        _meetingScrollTimer = null;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          try {
+            Scrollable.ensureVisible(
+              ctx,
+              alignment: 0.15,
+              duration: const Duration(milliseconds: 450),
+              curve: Curves.easeInOutCubic,
+            ).whenComplete(() {
+              if (!mounted) return;
+              _scheduleMeetingHighlightClear();
+            });
+          } catch (_) {}
+        });
+        return;
+      }
+
+      if (_meetingScrollController.hasClients) {
+        final position = _meetingScrollController.position;
+        final max = position.maxScrollExtent;
+        final viewport = position.viewportDimension;
+        final totalItems = itemCount <= 0 ? 1 : itemCount;
+        final contentExtent = max + viewport;
+        final avgExtent = contentExtent > 0
+            ? (contentExtent / totalItems)
+            : 0.0;
+        final estimatedItemExtent = avgExtent > 0 ? avgExtent : 240.0;
+        final targetOffset = estimatedItemExtent * targetIdx;
+        final clamped = targetOffset.clamp(0.0, max);
+        _meetingScrollController.animateTo(
+          clamped,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeInOutCubic,
+        );
+      }
+    });
+  }
+
+  void _startScrollToHistoryWhenReady(int targetIdx, int itemCount) {
+    int attempts = 0;
+    const maxAttempts = 60; // ~7 seconds
+    _historyScrollTimer?.cancel();
+    _historyScrollTimer = Timer.periodic(const Duration(milliseconds: 120), (
+      _,
+    ) {
+      if (!mounted || attempts >= maxAttempts) {
+        _historyScrollTimer?.cancel();
+        _historyScrollTimer = null;
+        return;
+      }
+      attempts++;
+      final ctx = _highlightKey.currentContext;
+      if (ctx != null) {
+        _historyScrollTimer?.cancel();
+        _historyScrollTimer = null;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          try {
+            Scrollable.ensureVisible(
+              ctx,
+              alignment: 0.15,
+              duration: const Duration(milliseconds: 450),
+              curve: Curves.easeInOutCubic,
+            ).whenComplete(() {
+              if (!mounted) return;
+              _scheduleHistoryHighlightClear();
+            });
+          } catch (_) {}
+        });
+        return;
+      }
+
+      if (_historyScrollController.hasClients) {
+        final position = _historyScrollController.position;
+        final max = position.maxScrollExtent;
+        final viewport = position.viewportDimension;
+        final totalItems = itemCount <= 0 ? 1 : itemCount;
+        final contentExtent = max + viewport;
+        final avgExtent = contentExtent > 0
+            ? (contentExtent / totalItems)
+            : 0.0;
+        final estimatedItemExtent = avgExtent > 0 ? avgExtent : 210.0;
+        final targetOffset = estimatedItemExtent * targetIdx;
+        final clamped = targetOffset.clamp(0.0, max);
+        _historyScrollController.animateTo(
+          clamped,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeInOutCubic,
+        );
+      }
+    });
+  }
+
+  void _scheduleHistoryHighlightClear() {
+    if (_highlightClearScheduled) return;
+    _highlightClearScheduled = true;
+    _highlightClearTimer?.cancel();
+    _highlightClearTimer = Timer(const Duration(seconds: 3), () {
+      if (!mounted) return;
+      setState(() {
+        _highlightRequestId = null;
+        _highlightClearScheduled = false;
+      });
+      _historyScrollTimer?.cancel();
+      _historyScrollTimer = null;
+    });
+  }
+
+  void _scheduleMeetingHighlightClear() {
+    if (_meetingHighlightClearScheduled) return;
+    _meetingHighlightClearScheduled = true;
+    _meetingHighlightClearTimer?.cancel();
+    _meetingHighlightClearTimer = Timer(const Duration(seconds: 3), () {
+      if (!mounted) return;
+      setState(() {
+        _highlightMeetingPointId = null;
+        _meetingHighlightClearScheduled = false;
+      });
+      _meetingScrollTimer?.cancel();
+      _meetingScrollTimer = null;
+    });
   }
 
   Widget _buildParticipantRow(

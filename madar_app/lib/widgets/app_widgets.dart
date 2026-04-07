@@ -3,6 +3,33 @@ import 'package:flutter/services.dart';
 import 'package:madar_app/theme/theme.dart';
 
 // ----------------------------------------------------------------------------
+// Meeting Point Popup Guard
+// ----------------------------------------------------------------------------
+
+/// Suppresses the background "Action needed in meeting point" popup when the
+/// user is already on a screen that handles step-5 actions:
+///   • CreateMeetingPointForm is open (any step — it will auto-advance to 5)
+///   • TrackPage is showing the Meeting Point tab (_isTrackingView == false)
+///
+/// Uses a [ValueNotifier] so MainLayout can listen and show the popup
+/// immediately after suppression is lifted (e.g. the form closes).
+class MeetingPointPopupGuard {
+  MeetingPointPopupGuard._();
+
+  static final ValueNotifier<bool> _notifier = ValueNotifier(false);
+
+  /// True → popup is suppressed.
+  static bool get suppress => _notifier.value;
+  static set suppress(bool value) {
+    if (_notifier.value != value) _notifier.value = value;
+  }
+
+  /// Listen for guard changes. Call [removeListener] when done.
+  static void addListener(VoidCallback cb) => _notifier.addListener(cb);
+  static void removeListener(VoidCallback cb) => _notifier.removeListener(cb);
+}
+
+// ----------------------------------------------------------------------------
 // App Colors
 // ----------------------------------------------------------------------------
 class AppColors {
@@ -55,6 +82,50 @@ class InlineLoadingIndicator extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Badges
+// ----------------------------------------------------------------------------
+
+/// Green timer badge used across meeting point countdowns.
+class MeetingTimerBadge extends StatelessWidget {
+  final String label;
+
+  const MeetingTimerBadge({super.key, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.timer_outlined, size: 14, color: AppColors.kGreen),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              color: AppColors.kGreen,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -516,6 +587,7 @@ class SecondaryButton extends StatelessWidget {
   final String text;
   final VoidCallback? onPressed;
   final bool isLoading;
+  final Color? disabledColor;
   final IconData? icon; // Optional icon
   final double iconSize; // Optional icon size
   final double iconSpacing; // Space between icon and text
@@ -525,6 +597,7 @@ class SecondaryButton extends StatelessWidget {
     required this.text,
     required this.onPressed,
     this.isLoading = false,
+    this.disabledColor,
     this.icon, // Nullable by default
     this.iconSize = 20.0,
     this.iconSpacing = 12.0,
@@ -532,17 +605,32 @@ class SecondaryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final Color enabledColor = AppColors.kGreen;
+    final Color disabledColorResolved = disabledColor ?? Colors.grey;
     return SizedBox(
       width: double.infinity,
       height: _kButtonHeight,
       child: OutlinedButton(
         onPressed: isLoading ? null : onPressed,
-        style: OutlinedButton.styleFrom(
-          side: const BorderSide(color: AppColors.kGreen, width: 2),
-          foregroundColor: AppColors.kGreen,
-          padding: EdgeInsets.zero,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
+        style: ButtonStyle(
+          side: MaterialStateProperty.resolveWith(
+            (states) => BorderSide(
+              color: states.contains(MaterialState.disabled)
+                  ? disabledColorResolved
+                  : enabledColor,
+              width: 2,
+            ),
+          ),
+          foregroundColor: MaterialStateProperty.resolveWith(
+            (states) => states.contains(MaterialState.disabled)
+                ? disabledColorResolved
+                : enabledColor,
+          ),
+          padding: MaterialStateProperty.all(EdgeInsets.zero),
+          shape: MaterialStateProperty.all(
+            RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
+            ),
           ),
         ),
         child: isLoading

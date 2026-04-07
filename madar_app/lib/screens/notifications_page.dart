@@ -10,6 +10,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:madar_app/services/notification_service.dart';
 import 'package:madar_app/screens/navigation_flow_complete.dart';
+import 'package:madar_app/screens/create_meeting_point_form.dart';
 
 // ----------------------------------------------------------------------------
 // Notifications Page
@@ -122,6 +123,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
   final List<String> _respondedNotifications = [];
   final Map<String, double> _notificationOffsets = {};
   Timer? _uiRefreshTimer;
+  Timer? _tickTimer;
+  final ValueNotifier<int> _tick = ValueNotifier<int>(0);
   bool _freezeReadUI = true; // Keep true while the page is open
   bool _initialFreezeReady = false;
   Map<String, bool> _frozenReadMap = {};
@@ -129,6 +132,14 @@ class _NotificationsPageState extends State<NotificationsPage> {
   bool _exitReadTriggered = false;
   bool _autoMarkRunning = false;
   final Set<String> _expiredActionDocIdsThisVisit = {};
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
+  _activeTrackSessionSub;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
+  _activeMeetingSessionSub;
+  bool _hasActiveTrackSession = false;
+  bool _hasActiveMeetingSession = false;
+  bool _activeMeetingSessionReady = false;
+  Set<String> _activeMeetingIds = {};
 
   // Cache across page opens (app still alive)
   static List<NotificationItem> _cachedMerged = [];
@@ -136,6 +147,11 @@ class _NotificationsPageState extends State<NotificationsPage> {
   static String? _cacheUserId;
   final Map<String, bool> _localReadOverride =
       {}; // For items that should disappear immediately
+  final Map<String, String> _localStatusOverride = {};
+  final Set<String> _autoCancelledMeetingNotifIds = {};
+  final Map<String, String> _meetingStatusCache = {};
+  final Map<String, int> _meetingHostStepCache = {};
+  final Set<String> _autoExpiredMeetingNotifIds = {};
 
   // Read or Unread notifications
   @override
@@ -143,9 +159,15 @@ class _NotificationsPageState extends State<NotificationsPage> {
     super.initState();
     _ensureCacheUser();
     _initialFreezeReady = false;
+    _listenForActiveSessions();
 
     _uiRefreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (mounted) setState(() {});
+    });
+    _tickTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) {
+        _tick.value++;
+      }
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -157,7 +179,105 @@ class _NotificationsPageState extends State<NotificationsPage> {
   void dispose() {
     unawaited(_markReadOnExit());
     _uiRefreshTimer?.cancel();
+    _tickTimer?.cancel();
+    _activeTrackSessionSub?.cancel();
+    _activeMeetingSessionSub?.cancel();
+    _tick.dispose();
     super.dispose();
+  }
+
+  bool get _hasAnyActiveSession =>
+      _hasActiveTrackSession || _hasActiveMeetingSession;
+
+  void _listenForActiveSessions() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    _activeTrackSessionSub?.cancel();
+    _activeMeetingSessionSub?.cancel();
+
+    _activeTrackSessionSub = FirebaseFirestore.instance
+        .collection('trackRequests')
+        .where('receiverId', isEqualTo: uid)
+        .where('status', isEqualTo: 'accepted')
+        .snapshots()
+        .listen((snap) {
+          final now = DateTime.now();
+          bool hasActive = false;
+          for (final doc in snap.docs) {
+            final data = doc.data();
+            final startAt = (data['startAt'] as Timestamp?)?.toDate();
+            final endAt = (data['endAt'] as Timestamp?)?.toDate();
+            if (startAt == null || endAt == null) continue;
+            final started = !now.isBefore(startAt);
+            final notEnded = now.isBefore(endAt);
+            if (started && notEnded) {
+              hasActive = true;
+              break;
+            }
+          }
+          if (mounted) {
+            if (_hasActiveTrackSession != hasActive) {
+              setState(() => _hasActiveTrackSession = hasActive);
+            }
+          } else {
+            _hasActiveTrackSession = hasActive;
+          }
+        });
+
+    _activeMeetingSessionSub = FirebaseFirestore.instance
+        .collection('meetingPoints')
+        .where('participantUserIds', arrayContains: uid)
+        .where('status', isEqualTo: 'active')
+        .snapshots()
+        .listen((snap) {
+          bool hasActive = false;
+          final nextActiveIds = <String>{};
+          for (final doc in snap.docs) {
+            final data = doc.data();
+            final meetingId = doc.id;
+            final hostId = (data['hostId'] ?? '').toString().trim();
+            if (uid == hostId) {
+              final hostArrival = (data['hostArrivalStatus'] ?? 'on_the_way')
+                  .toString()
+                  .trim()
+                  .toLowerCase();
+              if (hostArrival != 'cancelled') {
+                hasActive = true;
+                nextActiveIds.add(meetingId);
+              }
+            } else {
+              final participants = data['participants'];
+              if (participants is List) {
+                for (final p in participants) {
+                  if (p is! Map) continue;
+                  final pid = (p['userId'] ?? '').toString().trim();
+                  if (pid != uid) continue;
+                  final arrival = (p['arrivalStatus'] ?? 'on_the_way')
+                      .toString()
+                      .trim()
+                      .toLowerCase();
+                  if (arrival != 'cancelled') {
+                    hasActive = true;
+                    nextActiveIds.add(meetingId);
+                  }
+                  break;
+                }
+              }
+            }
+          }
+          if (mounted) {
+            setState(() {
+              _hasActiveMeetingSession = hasActive;
+              _activeMeetingIds = nextActiveIds;
+              _activeMeetingSessionReady = true;
+            });
+          } else {
+            _hasActiveMeetingSession = hasActive;
+            _activeMeetingIds = nextActiveIds;
+            _activeMeetingSessionReady = true;
+          }
+        });
   }
 
   void _ensureCacheUser() {
@@ -259,26 +379,38 @@ class _NotificationsPageState extends State<NotificationsPage> {
         _notificationDocMap().first,
         _notificationsReadMap().first,
         _incomingTrackRequestsStream().first,
+        _meetingPointRequestsStream().first,
         _senderResponsesStream().first,
         _trackStartedStream().first,
         _trackTerminatedStream().first,
         _trackCompletedStream().first,
         _trackCancelledStream().first,
+        _meetingPointCancelledStream().first,
+        _meetingPointStartedStream().first,
+        _meetingPointCompletedStream().first,
         _locationRefreshStream().first,
       ]);
 
       final notifDocMap = results[0] as Map<String, String>;
       final readMap = results[1] as Map<String, bool>;
       final incomingTrack = results[2] as List<NotificationItem>;
-      final senderResponses = results[3] as List<NotificationItem>;
-      final trackStarted = results[4] as List<NotificationItem>;
-      final trackTerminated = results[5] as List<NotificationItem>;
-      final trackCompleted = results[6] as List<NotificationItem>;
-      final trackCancelled = results[7] as List<NotificationItem>;
-      final locationRefresh = results[8] as List<NotificationItem>;
+      final meetingPointRequests = results[3] as List<NotificationItem>;
+      final senderResponses = results[4] as List<NotificationItem>;
+      final trackStarted = results[5] as List<NotificationItem>;
+      final trackTerminated = results[6] as List<NotificationItem>;
+      final trackCompleted = results[7] as List<NotificationItem>;
+      final trackCancelled = results[8] as List<NotificationItem>;
+      final meetingPointCancelled = results[9] as List<NotificationItem>;
+      final meetingPointStarted = results[10] as List<NotificationItem>;
+      final meetingPointCompleted = results[11] as List<NotificationItem>;
+      final locationRefresh = results[12] as List<NotificationItem>;
 
       final merged = _mergeNotifications(
         incomingTrack: incomingTrack,
+        meetingPointRequests: meetingPointRequests,
+        meetingPointCancelled: meetingPointCancelled,
+        meetingPointStarted: meetingPointStarted,
+        meetingPointCompleted: meetingPointCompleted,
         senderResponses: senderResponses,
         trackStarted: trackStarted,
         trackTerminated: trackTerminated,
@@ -426,6 +558,160 @@ class _NotificationsPageState extends State<NotificationsPage> {
             );
           }).toList();
         });
+  }
+
+  Stream<List<NotificationItem>> _meetingPointRequestsStream() {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return const Stream.empty();
+
+    return FirebaseFirestore.instance
+        .collection('notifications')
+        .where('userId', isEqualTo: user.uid)
+        .where('type', isEqualTo: 'meetingPointRequest')
+        .snapshots()
+        .asyncMap((snap) async {
+          final items = await Future.wait(
+            snap.docs.map((doc) async {
+              final d = doc.data();
+              final createdAtTs = d['createdAt'] as Timestamp?;
+              final ts = createdAtTs?.toDate() ?? DateTime.now();
+              final data = d['data'] as Map<String, dynamic>? ?? {};
+              final meetingPointId =
+                  (data['meetingPointId'] ?? data['requestId'] ?? doc.id)
+                      .toString()
+                      .trim();
+              var requestStatus =
+                  (d['requestStatus'] ?? data['requestStatus'] ?? 'pending')
+                      .toString()
+                      .toLowerCase();
+              DateTime? waitDeadline =
+                  (data['waitDeadline'] as Timestamp?)?.toDate();
+              if (waitDeadline == null &&
+                  createdAtTs != null &&
+                  data['waitDurationSeconds'] is num) {
+                final secs = (data['waitDurationSeconds'] as num).toInt();
+                if (secs > 0) {
+                  waitDeadline = createdAtTs.toDate().add(
+                        Duration(seconds: secs),
+                      );
+                }
+              }
+
+              String? actionLabel;
+              if (requestStatus == 'accepted') actionLabel = 'Accepted';
+              if (requestStatus == 'declined') actionLabel = 'Declined';
+              if (requestStatus == 'cancelled') actionLabel = 'Cancelled';
+
+              var isExpired = requestStatus == 'expired';
+
+              if (requestStatus == 'pending') {
+                final meetingStatus = await _getMeetingStatusCached(
+                  meetingPointId,
+                );
+                final hostStep = _meetingHostStepCache[meetingPointId] ?? 0;
+                if (meetingStatus == 'cancelled' ||
+                    meetingStatus == 'completed') {
+                  requestStatus = 'cancelled';
+                  actionLabel = 'Cancelled';
+                  if (!_autoCancelledMeetingNotifIds.contains(doc.id)) {
+                    _autoCancelledMeetingNotifIds.add(doc.id);
+                    unawaited(_markMeetingPointNotificationCancelled(doc.id));
+                  }
+                } else if (hostStep >= 5) {
+                  requestStatus = 'expired';
+                  isExpired = true;
+                  if (!_autoExpiredMeetingNotifIds.contains(doc.id)) {
+                    _autoExpiredMeetingNotifIds.add(doc.id);
+                    unawaited(_markMeetingPointNotificationExpired(doc.id));
+                  }
+                }
+              }
+
+              if (!isExpired) {
+                isExpired =
+                    waitDeadline != null &&
+                    DateTime.now().isAfter(waitDeadline) &&
+                    requestStatus == 'pending';
+              }
+              final requiresActionRaw =
+                  d['requiresAction'] ?? (requestStatus == 'pending');
+
+            return NotificationItem(
+              id: meetingPointId,
+              notificationDocId: doc.id,
+              type: NotificationType.meetingPointRequest,
+              meetingPointId: meetingPointId,
+              title: (d['title'] ?? 'Meeting Point Request').toString(),
+                message: (d['body'] ?? '').toString(),
+                timestamp: ts,
+                isRead: d['isRead'] ?? false,
+                actionTaken: d['actionTaken'] == true,
+                requiresAction:
+                    requiresActionRaw == true &&
+                    !isExpired &&
+                    actionLabel == null &&
+                    requestStatus == 'pending',
+                isExpired: isExpired,
+                requestStatus: requestStatus,
+                endAt: waitDeadline,
+                senderId: (data['senderId'] ?? '').toString(),
+                senderName: (data['senderName'] ?? '').toString(),
+                senderPhone: (data['senderPhone'] ?? '').toString(),
+                venueName: (data['venueName'] ?? '').toString(),
+                actionLabel: actionLabel,
+              );
+            }).toList(),
+          );
+          return items;
+        });
+  }
+
+  Future<String?> _getMeetingStatusCached(String meetingPointId) async {
+    final id = meetingPointId.trim();
+    if (id.isEmpty) return null;
+    final cached = _meetingStatusCache[id];
+    if (cached != null && cached != 'pending' && cached != 'active') {
+      return cached;
+    }
+    try {
+      final meeting = await MeetingPointService.getById(id);
+      final status = meeting?.status.toString().trim().toLowerCase();
+      if (meeting != null) {
+        _meetingHostStepCache[id] = meeting.hostStep;
+      }
+      if (status != null && status.isNotEmpty) {
+        _meetingStatusCache[id] = status;
+      }
+      return status;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _markMeetingPointNotificationExpired(String docId) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('notifications')
+          .doc(docId)
+          .update({
+            'requestStatus': 'expired',
+            'requiresAction': false,
+            'actionTaken': true,
+          });
+    } catch (_) {}
+  }
+
+  Future<void> _markMeetingPointNotificationCancelled(String docId) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('notifications')
+          .doc(docId)
+          .update({
+            'requestStatus': 'cancelled',
+            'requiresAction': false,
+            'actionTaken': true,
+          });
+    } catch (_) {}
   }
 
   Stream<List<NotificationItem>> _senderResponsesStream() {
@@ -590,6 +876,114 @@ class _NotificationsPageState extends State<NotificationsPage> {
         });
   }
 
+  Stream<List<NotificationItem>> _meetingPointCancelledStream() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return const Stream.empty();
+
+    return FirebaseFirestore.instance
+        .collection('notifications')
+        .where('userId', isEqualTo: uid)
+        .where('type', isEqualTo: 'meetingPointCancelled')
+        .snapshots()
+        .map((snap) {
+          return snap.docs.map((doc) {
+            final d = doc.data();
+            final ts =
+                (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+            final data = d['data'] as Map<String, dynamic>? ?? {};
+            final requestId = (data['requestId'] ?? doc.id).toString();
+            final meetingPointId =
+                (data['meetingPointId'] ?? '').toString().trim();
+
+            return NotificationItem(
+              id: requestId,
+              notificationDocId: doc.id,
+              type: NotificationType.meetingPointCancelled,
+              meetingPointId:
+                  meetingPointId.isEmpty ? null : meetingPointId,
+              title: d['title'] ?? 'Meeting Point Cancelled',
+              message: d['body'] ?? '',
+              timestamp: ts,
+              isRead: d['isRead'] ?? false,
+              requiresAction: d['requiresAction'] == true,
+              actionTaken: d['actionTaken'] == true,
+            );
+          }).toList();
+        });
+  }
+
+  Stream<List<NotificationItem>> _meetingPointStartedStream() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return const Stream.empty();
+
+    return FirebaseFirestore.instance
+        .collection('notifications')
+        .where('userId', isEqualTo: uid)
+        .where('type', isEqualTo: 'meetingPointStarted')
+        .snapshots()
+        .map((snap) {
+          return snap.docs.map((doc) {
+            final d = doc.data();
+            final ts =
+                (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+            final data = d['data'] as Map<String, dynamic>? ?? {};
+            final requestId = (data['requestId'] ?? doc.id).toString();
+            final meetingPointId =
+                (data['meetingPointId'] ?? '').toString().trim();
+
+            return NotificationItem(
+              id: requestId,
+              notificationDocId: doc.id,
+              type: NotificationType.meetingPointStarted,
+              meetingPointId:
+                  meetingPointId.isEmpty ? null : meetingPointId,
+              title: d['title'] ?? 'Meeting point started',
+              message: d['body'] ?? '',
+              timestamp: ts,
+              isRead: d['isRead'] ?? false,
+              requiresAction: d['requiresAction'] == true,
+              actionTaken: d['actionTaken'] == true,
+            );
+          }).toList();
+        });
+  }
+
+  Stream<List<NotificationItem>> _meetingPointCompletedStream() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return const Stream.empty();
+
+    return FirebaseFirestore.instance
+        .collection('notifications')
+        .where('userId', isEqualTo: uid)
+        .where('type', isEqualTo: 'meetingPointCompleted')
+        .snapshots()
+        .map((snap) {
+          return snap.docs.map((doc) {
+            final d = doc.data();
+            final ts =
+                (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+            final data = d['data'] as Map<String, dynamic>? ?? {};
+            final requestId = (data['requestId'] ?? doc.id).toString();
+            final meetingPointId =
+                (data['meetingPointId'] ?? '').toString().trim();
+
+            return NotificationItem(
+              id: requestId,
+              notificationDocId: doc.id,
+              type: NotificationType.meetingPointCompleted,
+              meetingPointId:
+                  meetingPointId.isEmpty ? null : meetingPointId,
+              title: d['title'] ?? 'Meeting Point Completed',
+              message: d['body'] ?? '',
+              timestamp: ts,
+              isRead: d['isRead'] ?? false,
+              requiresAction: d['requiresAction'] == true,
+              actionTaken: d['actionTaken'] == true,
+            );
+          }).toList();
+        });
+  }
+
   Stream<List<NotificationItem>> _locationRefreshStream() {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return const Stream.empty();
@@ -602,15 +996,23 @@ class _NotificationsPageState extends State<NotificationsPage> {
         .map((snap) {
           return snap.docs.map((doc) {
             final d = doc.data();
+            final data = d['data'] as Map<String, dynamic>? ?? {};
             final ts =
                 (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
+            final rawTrackRequestId =
+                (data['trackRequestId'] ?? '').toString().trim();
+            final rawMeetingPointId =
+                (data['meetingPointId'] ?? '').toString().trim();
 
             return NotificationItem(
-              id: d['data']?['requestId'],
+              id: (data['requestId'] ?? doc.id).toString(),
               notificationDocId: doc.id,
-              trackRequestId: d['data']?['trackRequestId'],
-              senderId: (d['data']?['senderId'] ?? '').toString(),
-              isSystem: d['data']?['system'] == true || d['system'] == true,
+              trackRequestId:
+                  rawTrackRequestId.isEmpty ? null : rawTrackRequestId,
+              meetingPointId:
+                  rawMeetingPointId.isEmpty ? null : rawMeetingPointId,
+              senderId: (data['senderId'] ?? '').toString(),
+              isSystem: data['system'] == true || d['system'] == true,
               type: NotificationType.locationRefresh,
               title: d['title'] ?? 'Refresh Location Request',
               message: d['body'] ?? '',
@@ -618,9 +1020,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
               isRead: d['isRead'] ?? false,
               requiresAction: d['requiresAction'] == true,
               actionTaken: d['actionTaken'] == true,
-              endAt: (d['data']?['endAt'] as Timestamp?)?.toDate(),
-              senderName: d['data']?['senderName'],
-              senderPhone: d['data']?['senderPhone'],
+              endAt: (data['endAt'] as Timestamp?)?.toDate(),
+              senderName: data['senderName'],
+              senderPhone: data['senderPhone'],
+              venueName: data['venueName'],
             );
           }).toList();
         });
@@ -703,85 +1106,185 @@ class _NotificationsPageState extends State<NotificationsPage> {
                     final incomingTrack = incomingSnap.data ?? [];
 
                     return StreamBuilder<List<NotificationItem>>(
-                      stream: _senderResponsesStream(),
-                      builder: (context, senderSnap) {
-                        final senderResponses = senderSnap.data ?? [];
+                      stream: _meetingPointRequestsStream(),
+                      builder: (context, meetingSnap) {
+                        final meetingPointRequests = meetingSnap.data ?? [];
 
                         return StreamBuilder<List<NotificationItem>>(
-                          stream: _trackStartedStream(),
-                          builder: (context, trackStartedSnap) {
-                            final trackStarted = trackStartedSnap.data ?? [];
+                          stream: _senderResponsesStream(),
+                          builder: (context, senderSnap) {
+                            final senderResponses = senderSnap.data ?? [];
 
                             return StreamBuilder<List<NotificationItem>>(
-                              stream: _trackTerminatedStream(),
-                              builder: (context, trackTerminatedSnap) {
-                                final trackTerminated =
-                                    trackTerminatedSnap.data ?? [];
+                              stream: _trackStartedStream(),
+                              builder: (context, trackStartedSnap) {
+                                final trackStarted =
+                                    trackStartedSnap.data ?? [];
 
                                 return StreamBuilder<List<NotificationItem>>(
-                                  stream: _trackCompletedStream(),
-                                  builder: (context, trackCompletedSnap) {
-                                    final trackCompleted =
-                                        trackCompletedSnap.data ?? [];
+                                  stream: _trackTerminatedStream(),
+                                  builder: (context, trackTerminatedSnap) {
+                                    final trackTerminated =
+                                        trackTerminatedSnap.data ?? [];
 
                                     return StreamBuilder<
                                       List<NotificationItem>
                                     >(
-                                      stream: _trackCancelledStream(),
-                                      builder: (context, trackCancelledSnap) {
-                                        final trackCancelled =
-                                            trackCancelledSnap.data ?? [];
+                                      stream: _trackCompletedStream(),
+                                      builder: (context, trackCompletedSnap) {
+                                        final trackCompleted =
+                                            trackCompletedSnap.data ?? [];
 
                                         return StreamBuilder<
                                           List<NotificationItem>
                                         >(
-                                          stream: _locationRefreshStream(),
-                                          builder: (context, locationRefreshSnap) {
-                                            final locationRefresh =
-                                                locationRefreshSnap.data ?? [];
+                                          stream: _trackCancelledStream(),
+                                          builder: (context, trackCancelledSnap) {
+                                            final trackCancelled =
+                                                trackCancelledSnap.data ?? [];
 
-                                            final hasAllData =
-                                                docMapSnap.hasData &&
-                                                notifSnap.hasData &&
-                                                incomingSnap.hasData &&
-                                                senderSnap.hasData &&
-                                                trackStartedSnap.hasData &&
-                                                trackTerminatedSnap.hasData &&
-                                                trackCompletedSnap.hasData &&
-                                                trackCancelledSnap.hasData &&
-                                                locationRefreshSnap.hasData;
+                                            return StreamBuilder<
+                                              List<NotificationItem>
+                                            >(
+                                              stream:
+                                                  _meetingPointCancelledStream(),
+                                              builder: (
+                                                context,
+                                                meetingPointCancelledSnap,
+                                              ) {
+                                                final meetingPointCancelled =
+                                                    meetingPointCancelledSnap
+                                                            .data ??
+                                                        [];
 
-                                            if (!hasAllData) {
-                                              if (_cacheReady &&
-                                                  _initialFreezeReady) {
-                                                _applyDerivedStateForCache(
-                                                  _cachedMerged,
+                                                return StreamBuilder<
+                                                  List<NotificationItem>
+                                                >(
+                                                  stream:
+                                                      _meetingPointStartedStream(),
+                                                  builder: (
+                                                    context,
+                                                    meetingPointStartedSnap,
+                                                  ) {
+                                                    final meetingPointStarted =
+                                                        meetingPointStartedSnap
+                                                                .data ??
+                                                            [];
+
+                                                    return StreamBuilder<
+                                                      List<NotificationItem>
+                                                    >(
+                                                      stream:
+                                                          _meetingPointCompletedStream(),
+                                                      builder: (
+                                                        context,
+                                                        meetingPointCompletedSnap,
+                                                      ) {
+                                                        final meetingPointCompleted =
+                                                            meetingPointCompletedSnap
+                                                                    .data ??
+                                                                [];
+
+                                                        return StreamBuilder<
+                                                          List<NotificationItem>
+                                                        >(
+                                                          stream:
+                                                              _locationRefreshStream(),
+                                                          builder: (
+                                                            context,
+                                                            locationRefreshSnap,
+                                                          ) {
+                                                            final locationRefresh =
+                                                                locationRefreshSnap
+                                                                        .data ??
+                                                                    [];
+
+                                                            final hasAllData =
+                                                                docMapSnap.hasData &&
+                                                                notifSnap.hasData &&
+                                                                incomingSnap.hasData &&
+                                                                meetingSnap.hasData &&
+                                                                senderSnap.hasData &&
+                                                                trackStartedSnap
+                                                                    .hasData &&
+                                                                trackTerminatedSnap
+                                                                    .hasData &&
+                                                                trackCompletedSnap
+                                                                    .hasData &&
+                                                                trackCancelledSnap
+                                                                    .hasData &&
+                                                                meetingPointCancelledSnap
+                                                                    .hasData &&
+                                                                meetingPointStartedSnap
+                                                                    .hasData &&
+                                                                meetingPointCompletedSnap
+                                                                    .hasData &&
+                                                                locationRefreshSnap
+                                                                    .hasData;
+
+                                                            if (!hasAllData) {
+                                                              final cacheHasMeetingPoints =
+                                                                  _cacheHasMeetingPointRequests();
+                                                              final meetingReady =
+                                                                  meetingSnap.hasData;
+                                                              if (_cacheReady &&
+                                                                  _initialFreezeReady &&
+                                                                  (!cacheHasMeetingPoints ||
+                                                                      meetingReady)) {
+                                                                _applyDerivedStateForCache(
+                                                                  _cachedMerged,
+                                                                );
+                                                                return _buildNotificationsList(
+                                                                  merged:
+                                                                      _cachedMerged,
+                                                                  readMap: readMap,
+                                                                );
+                                                              }
+                                                              return _buildInitialLoader();
+                                                            }
+
+                                                            final merged =
+                                                                _mergeNotifications(
+                                                                  incomingTrack:
+                                                                      incomingTrack,
+                                                                  meetingPointRequests:
+                                                                      meetingPointRequests,
+                                                                  meetingPointCancelled:
+                                                                      meetingPointCancelled,
+                                                                  meetingPointStarted:
+                                                                      meetingPointStarted,
+                                                                  meetingPointCompleted:
+                                                                      meetingPointCompleted,
+                                                                  senderResponses:
+                                                                      senderResponses,
+                                                                  trackStarted:
+                                                                      trackStarted,
+                                                                  trackTerminated:
+                                                                      trackTerminated,
+                                                                  trackCompleted:
+                                                                      trackCompleted,
+                                                                  trackCancelled:
+                                                                      trackCancelled,
+                                                                  locationRefresh:
+                                                                      locationRefresh,
+                                                                  notifDocMap:
+                                                                      notifDocMap,
+                                                                );
+
+                                                            _cachedMerged = merged;
+                                                            _cacheReady = true;
+
+                                                            return _buildNotificationsList(
+                                                              merged: merged,
+                                                              readMap: readMap,
+                                                            );
+                                                          },
+                                                        );
+                                                      },
+                                                    );
+                                                  },
                                                 );
-                                                return _buildNotificationsList(
-                                                  merged: _cachedMerged,
-                                                  readMap: readMap,
-                                                );
-                                              }
-                                              return _buildInitialLoader();
-                                            }
-
-                                            final merged = _mergeNotifications(
-                                              incomingTrack: incomingTrack,
-                                              senderResponses: senderResponses,
-                                              trackStarted: trackStarted,
-                                              trackTerminated: trackTerminated,
-                                              trackCompleted: trackCompleted,
-                                              trackCancelled: trackCancelled,
-                                              locationRefresh: locationRefresh,
-                                              notifDocMap: notifDocMap,
-                                            );
-
-                                            _cachedMerged = merged;
-                                            _cacheReady = true;
-
-                                            return _buildNotificationsList(
-                                              merged: merged,
-                                              readMap: readMap,
+                                              },
                                             );
                                           },
                                         );
@@ -813,6 +1316,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
   List<NotificationItem> _mergeNotifications({
     required List<NotificationItem> incomingTrack,
+    required List<NotificationItem> meetingPointRequests,
+    required List<NotificationItem> meetingPointCancelled,
+    required List<NotificationItem> meetingPointStarted,
+    required List<NotificationItem> meetingPointCompleted,
     required List<NotificationItem> senderResponses,
     required List<NotificationItem> trackStarted,
     required List<NotificationItem> trackTerminated,
@@ -823,6 +1330,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
   }) {
     final merged = [
       ...incomingTrack,
+      ...meetingPointRequests,
+      ...meetingPointCancelled,
+      ...meetingPointStarted,
+      ...meetingPointCompleted,
       ...senderResponses,
       ...trackStarted,
       ...trackTerminated,
@@ -857,6 +1368,16 @@ class _NotificationsPageState extends State<NotificationsPage> {
           n.isExpired = now.isAfter(n.endAt!);
         }
       }
+      if (n.type == NotificationType.meetingPointRequest) {
+        final status = (n.requestStatus ?? '').toLowerCase().trim();
+        if (status == 'expired') {
+          n.isExpired = true;
+          continue;
+        }
+        if (status == 'pending' && n.endAt != null) {
+          n.isExpired = now.isAfter(n.endAt!);
+        }
+      }
     }
   }
 
@@ -872,13 +1393,43 @@ class _NotificationsPageState extends State<NotificationsPage> {
     return map;
   }
 
+  bool _cacheHasMeetingPointRequests() {
+    for (final n in _cachedMerged) {
+      if (n.type == NotificationType.meetingPointRequest) return true;
+    }
+    return false;
+  }
+
   Widget _buildNotificationsList({
     required List<NotificationItem> merged,
     required Map<String, bool> readMap,
   }) {
+    final now = DateTime.now();
+    for (final n in merged) {
+      if (n.type == NotificationType.trackRequest) {
+        final status = (n.requestStatus ?? '').toLowerCase().trim();
+        if (status == 'pending' && n.endAt != null) {
+          n.isExpired = now.isAfter(n.endAt!);
+        }
+      }
+      if (n.type == NotificationType.meetingPointRequest) {
+        final status = (n.requestStatus ?? '').toLowerCase().trim();
+        if (status == 'pending' && n.endAt != null) {
+          n.isExpired = now.isAfter(n.endAt!);
+        }
+      }
+    }
+
     final trackRequestStatusById = _buildTrackRequestStatusMap(merged);
     unawaited(_collectExpiredActionsForExit(merged, trackRequestStatusById));
     final visible = _showAll ? merged : merged.take(5).toList();
+    for (final n in visible) {
+      final overrideStatus = _localStatusOverride[n.id];
+      if (overrideStatus != null &&
+          (n.actionLabel == null || n.actionLabel!.isEmpty)) {
+        n.actionLabel = overrideStatus == 'accepted' ? 'Accepted' : 'Declined';
+      }
+    }
 
     if (merged.isEmpty) {
       return RefreshIndicator(
@@ -953,8 +1504,18 @@ class _NotificationsPageState extends State<NotificationsPage> {
       return notification.isExpired || notPending;
     }
 
+    if (notification.type == NotificationType.meetingPointRequest) {
+      final status = (notification.requestStatus ?? '').toLowerCase();
+      final notPending = status.isNotEmpty && status != 'pending';
+      return notification.isExpired || notPending;
+    }
+
     if (notification.type == NotificationType.trackStarted ||
         notification.type == NotificationType.locationRefresh) {
+      if (notification.type == NotificationType.locationRefresh &&
+          _isSystemLocationRefresh(notification)) {
+        return notification.actionTaken || !_hasAnyActiveSession;
+      }
       final status = notification.trackRequestId == null
           ? null
           : trackRequestStatusById[notification.trackRequestId!];
@@ -967,7 +1528,15 @@ class _NotificationsPageState extends State<NotificationsPage> {
       final endedByTime =
           notification.endAt != null &&
           DateTime.now().isAfter(notification.endAt!);
-      return endedByStatus || endedByTime;
+      bool meetingEnded = false;
+      if (notification.type == NotificationType.locationRefresh &&
+          !_isSystemLocationRefresh(notification)) {
+        final meetingId = notification.meetingPointId?.trim() ?? '';
+        if (meetingId.isNotEmpty && _activeMeetingSessionReady) {
+          meetingEnded = !_activeMeetingIds.contains(meetingId);
+        }
+      }
+      return endedByStatus || endedByTime || meetingEnded;
     }
 
     return false;
@@ -984,6 +1553,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
       for (final n in merged) {
         final isActionType =
             n.type == NotificationType.trackRequest ||
+            n.type == NotificationType.meetingPointRequest ||
             ((n.type == NotificationType.trackStarted ||
                     n.type == NotificationType.locationRefresh) &&
                 n.requiresAction);
@@ -1197,7 +1767,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                             ),
                                           ),
                                         ),
-                                        // Status Labels (Expired, Accepted, or Declined)
+                                        // Status Labels or Meeting Timer
                                         if (notification.isExpired ||
                                             notification.actionLabel != null)
                                           _notificationStatusBadge(
@@ -1206,6 +1776,21 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                                 : (notification.actionLabel ??
                                                           '')
                                                       .toLowerCase(),
+                                          )
+                                        else if (_shouldShowMeetingPointTimer(
+                                          notification,
+                                        ))
+                                          ValueListenableBuilder<int>(
+                                            valueListenable: _tick,
+                                            builder: (context, _, __) {
+                                              final timerLabel =
+                                                  _meetingPointTimerLabel(
+                                                notification.endAt!,
+                                              );
+                                              return MeetingTimerBadge(
+                                                label: timerLabel,
+                                              );
+                                            },
                                           ),
                                       ],
                                     ),
@@ -1249,6 +1834,31 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                   ),
                                   const TextSpan(
                                     text: 'is asking to track your location',
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ] else if (notification.type ==
+                              NotificationType.meetingPointRequest) ...[
+                            RichText(
+                              text: TextSpan(
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.grey[700],
+                                  height: 1.4,
+                                ),
+                                children: [
+                                  TextSpan(
+                                    text:
+                                        (notification.senderName ?? '')
+                                            .trim()
+                                            .isNotEmpty
+                                        ? notification.senderName!.trim()
+                                        : 'Someone',
+                                  ),
+                                  const TextSpan(
+                                    text:
+                                        ' invites you to a shared meeting point',
                                   ),
                                 ],
                               ),
@@ -1416,6 +2026,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
                             Builder(
                               builder: (_) {
+                                final isSystem = _isSystemLocationRefresh(
+                                  notification,
+                                );
                                 final trackStatus =
                                     notification.trackRequestId == null
                                     ? null
@@ -1432,7 +2045,20 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                     isTerminated ||
                                     isCompleted;
                                 final actionTaken = notification.actionTaken;
-                                final disabled = expired || actionTaken;
+                                bool meetingEnded = false;
+                                if (!isSystem &&
+                                    notification.meetingPointId != null &&
+                                    notification.meetingPointId!
+                                        .trim()
+                                        .isNotEmpty &&
+                                    _activeMeetingSessionReady) {
+                                  meetingEnded = !_activeMeetingIds.contains(
+                                    notification.meetingPointId!.trim(),
+                                  );
+                                }
+                                final disabled = isSystem
+                                    ? (actionTaken || !_hasAnyActiveSession)
+                                    : (expired || actionTaken || meetingEnded);
 
                                 return AbsorbPointer(
                                   absorbing: disabled,
@@ -1548,13 +2174,18 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                     color: Colors.orange[700],
                                   ),
                                   const SizedBox(width: 6),
-                                  Text(
-                                    'Auto-accept in ${_getTimeRemaining(notification.autoAcceptTime!)}',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w500,
-                                      color: Colors.orange[700],
-                                    ),
+                                  ValueListenableBuilder<int>(
+                                    valueListenable: _tick,
+                                    builder: (context, _, __) {
+                                      return Text(
+                                        'Auto-accept in ${_getTimeRemaining(notification.autoAcceptTime!)}',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w500,
+                                          color: Colors.orange[700],
+                                        ),
+                                      );
+                                    },
                                   ),
                                 ],
                               ),
@@ -1698,7 +2329,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
         return Row(
           children: [
             InkWell(
-              onTap: () => _handleReject(notification),
+              onTap: () => _handleDeclineMeetingPointRequest(notification),
               borderRadius: BorderRadius.circular(8),
               child: Container(
                 padding: const EdgeInsets.symmetric(
@@ -1724,7 +2355,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
             ),
             const SizedBox(width: 8),
             InkWell(
-              onTap: () => _handleAcceptMeetingPoint(notification),
+              onTap: () => _handleAcceptMeetingPointRequest(notification),
               borderRadius: BorderRadius.circular(8),
               child: Container(
                 padding: const EdgeInsets.symmetric(
@@ -1834,6 +2465,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
   // ---------- Helper Functions ----------
 
   bool _shouldShowActions(NotificationItem notification) {
+    if (notification.actionTaken == true) {
+      return false;
+    }
+
     // Hide if already has a label or in responded list
     if (notification.actionLabel != null ||
         _respondedNotifications.contains(notification.id)) {
@@ -1844,6 +2479,19 @@ class _NotificationsPageState extends State<NotificationsPage> {
     if (notification.type == NotificationType.trackRequest &&
         notification.isExpired) {
       return false;
+    }
+
+    // Don't show actions for expired meeting point requests
+    if (notification.type == NotificationType.meetingPointRequest &&
+        notification.isExpired) {
+      return false;
+    }
+
+    if (notification.type == NotificationType.meetingPointRequest) {
+      final status = (notification.requestStatus ?? '').toLowerCase();
+      if (status.isNotEmpty && status != 'pending') {
+        return false;
+      }
     }
 
     // Don't show actions for expired meeting confirmations
@@ -1900,6 +2548,13 @@ class _NotificationsPageState extends State<NotificationsPage> {
       case NotificationType.navigateRequest:
         return Icons.navigation_outlined;
       case NotificationType.meetingPointRequest:
+        return Icons.people_outline;
+      case NotificationType.meetingPointCancelled:
+        return Icons.cancel_outlined;
+      case NotificationType.meetingPointStarted:
+        return Icons.play_circle_outline;
+      case NotificationType.meetingPointCompleted:
+        return Icons.check_circle_outline;
       case NotificationType.meetingPointConfirmation:
         return Icons.place_outlined;
       case NotificationType.meetingLocationRefresh:
@@ -1920,13 +2575,16 @@ class _NotificationsPageState extends State<NotificationsPage> {
       case NotificationType.trackAccepted:
       case NotificationType.participantAccepted:
       case NotificationType.trackStarted:
+      case NotificationType.meetingPointStarted:
       case NotificationType.trackCompleted:
+      case NotificationType.meetingPointCompleted:
       case NotificationType.allArrived:
         return AppColors.kGreen;
       case NotificationType.trackRejected:
       case NotificationType.trackTerminated:
       case NotificationType.participantRejected:
       case NotificationType.participantCancelled:
+      case NotificationType.meetingPointCancelled:
         return AppColors.kError;
       case NotificationType.trackCancelled:
         return AppColors.kError;
@@ -1985,10 +2643,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
   bool _isSystemLocationRefresh(NotificationItem notification) {
     if (notification.isSystem) return true;
     final senderId = notification.senderId?.trim() ?? '';
-    final hasSenderName =
-        notification.senderName?.trim().isNotEmpty == true;
-    final hasSenderPhone =
-        notification.senderPhone?.trim().isNotEmpty == true;
+    final hasSenderName = notification.senderName?.trim().isNotEmpty == true;
+    final hasSenderPhone = notification.senderPhone?.trim().isNotEmpty == true;
     if (senderId.toLowerCase() == 'system') return true;
     if (senderId.isEmpty) {
       return !hasSenderName && !hasSenderPhone;
@@ -2012,7 +2668,181 @@ class _NotificationsPageState extends State<NotificationsPage> {
       return;
     }
 
-    final hasTrackRequestId = notification.trackRequestId != null &&
+    if (notification.type == NotificationType.locationRefresh) {
+      final rawMeetingPointId = notification.meetingPointId?.trim() ?? '';
+      if (rawMeetingPointId.isNotEmpty) {
+        MeetingPointRecord? meeting;
+        if (rawMeetingPointId.isNotEmpty) {
+          meeting = await MeetingPointService.getById(rawMeetingPointId);
+        }
+        final uid = FirebaseAuth.instance.currentUser?.uid;
+        final status = (meeting?.status ?? '').toString().trim().toLowerCase();
+        final isHost =
+            meeting == null ? true : (uid != null && meeting.isHost(uid));
+        final isTrackStatus =
+            status.isEmpty || status == 'pending' || status == 'active';
+
+        if (!mounted) return;
+        if (meeting != null && isTrackStatus) {
+          Navigator.pop(context, {
+            'page': 'track',
+            'meetingPointId': rawMeetingPointId,
+            'openMeetingTab': true,
+          });
+        } else {
+          Navigator.pop(context, {
+            'page': 'history',
+            'meetingPointId': rawMeetingPointId,
+            'historyMainTabIndex': 1,
+            'meetingFilterIndex': isHost ? 0 : 1,
+          });
+        }
+        return;
+      }
+    }
+
+    if (notification.type == NotificationType.meetingPointRequest) {
+      final targetMeetingPointId =
+          (notification.meetingPointId ?? notification.id).trim();
+      final notifStatus =
+          (notification.requestStatus ?? '').toLowerCase().trim();
+      final notifExpired = notification.isExpired || notifStatus == 'expired';
+      final meeting = await _fetchMeetingPointForNotification(notification);
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      final status = (meeting?.status ?? '').toString().trim().toLowerCase();
+      final isHost = uid != null && meeting?.isHost(uid) == true;
+      final me = (uid != null && meeting != null)
+          ? meeting.participantFor(uid)
+          : null;
+      final inviteExpiredByHostProceed =
+          !isHost && me != null && me.isPending && meeting!.hostStep >= 5;
+      // Pending (setup) and Active (confirmed) should open Track page.
+      final isTrackStatus =
+          status.isEmpty || status == 'pending' || status == 'active';
+
+      if (!mounted) return;
+      if (meeting != null) {
+        if (notifExpired || inviteExpiredByHostProceed) {
+          Navigator.pop(context, {
+            'page': 'history',
+            'meetingPointId':
+                targetMeetingPointId.isNotEmpty ? targetMeetingPointId : meeting.id,
+            'historyMainTabIndex': 1,
+            'meetingFilterIndex': isHost ? 0 : 1,
+          });
+        } else if (isTrackStatus) {
+          Navigator.pop(context, {
+            'page': 'track',
+            'meetingPointId':
+                targetMeetingPointId.isNotEmpty ? targetMeetingPointId : meeting.id,
+            'openMeetingTab': true,
+          });
+        } else {
+          Navigator.pop(context, {
+            'page': 'history',
+            'meetingPointId':
+                targetMeetingPointId.isNotEmpty ? targetMeetingPointId : meeting.id,
+            'historyMainTabIndex': 1,
+            'meetingFilterIndex': isHost ? 0 : 1,
+          });
+        }
+      } else {
+        // Fallback: if meeting doc is missing, send to history.
+        final fallbackMeetingPointId =
+            (notification.meetingPointId ?? notification.id).trim();
+        Navigator.pop(context, {
+          'page': 'history',
+          'meetingPointId': fallbackMeetingPointId.isNotEmpty
+              ? fallbackMeetingPointId
+              : notification.id,
+          'historyMainTabIndex': 1,
+          'meetingFilterIndex': isHost ? 0 : 1,
+        });
+      }
+      return;
+    }
+
+    if (notification.type == NotificationType.meetingPointCancelled) {
+      final rawMeetingPointId = notification.meetingPointId?.trim() ?? '';
+      final meetingPointId = rawMeetingPointId.isNotEmpty
+          ? rawMeetingPointId
+          : notification.id.trim();
+      MeetingPointRecord? meeting;
+      if (meetingPointId.isNotEmpty) {
+        meeting = await MeetingPointService.getById(meetingPointId);
+      }
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      final isHost =
+          meeting == null ? true : (uid != null && meeting.isHost(uid));
+
+      if (!mounted) return;
+      Navigator.pop(context, {
+        'page': 'history',
+        'meetingPointId': meetingPointId,
+        'historyMainTabIndex': 1,
+        'meetingFilterIndex': isHost ? 0 : 1,
+      });
+      return;
+    }
+
+    if (notification.type == NotificationType.meetingPointCompleted) {
+      final rawMeetingPointId = notification.meetingPointId?.trim() ?? '';
+      final meetingPointId = rawMeetingPointId.isNotEmpty
+          ? rawMeetingPointId
+          : notification.id.trim();
+      MeetingPointRecord? meeting;
+      if (meetingPointId.isNotEmpty) {
+        meeting = await MeetingPointService.getById(meetingPointId);
+      }
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      final isHost =
+          meeting == null ? true : (uid != null && meeting.isHost(uid));
+
+      if (!mounted) return;
+      Navigator.pop(context, {
+        'page': 'history',
+        'meetingPointId': meetingPointId,
+        'historyMainTabIndex': 1,
+        'meetingFilterIndex': isHost ? 0 : 1,
+      });
+      return;
+    }
+
+    if (notification.type == NotificationType.meetingPointStarted) {
+      final rawMeetingPointId = notification.meetingPointId?.trim() ?? '';
+      final meetingPointId = rawMeetingPointId.isNotEmpty
+          ? rawMeetingPointId
+          : notification.id.trim();
+      MeetingPointRecord? meeting;
+      if (meetingPointId.isNotEmpty) {
+        meeting = await MeetingPointService.getById(meetingPointId);
+      }
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      final status = (meeting?.status ?? '').toString().trim().toLowerCase();
+      final isHost = uid != null && meeting?.isHost(uid) == true;
+      final isTrackStatus =
+          status.isEmpty || status == 'pending' || status == 'active';
+
+      if (!mounted) return;
+      if (meeting != null && isTrackStatus) {
+        Navigator.pop(context, {
+          'page': 'track',
+          'meetingPointId': meetingPointId,
+          'openMeetingTab': true,
+        });
+      } else {
+        Navigator.pop(context, {
+          'page': 'history',
+          'meetingPointId': meetingPointId,
+          'historyMainTabIndex': 1,
+          'meetingFilterIndex': isHost ? 0 : 1,
+        });
+      }
+      return;
+    }
+
+    final hasTrackRequestId =
+        notification.trackRequestId != null &&
         notification.trackRequestId!.trim().isNotEmpty;
     String requestId = notification.id;
 
@@ -2049,7 +2879,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
           .toString()
           .toLowerCase()
           .trim();
-      final endedByTime = notification.endAt != null &&
+      final endedByTime =
+          notification.endAt != null &&
           DateTime.now().isAfter(notification.endAt!);
       final isHistory =
           historyStatuses.contains(rawStatus) ||
@@ -2111,11 +2942,13 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
     if (filterIndex == null) return;
 
-    final rawStatus = (requestData?['status'] ?? notification.requestStatus ?? '')
-        .toString()
-        .toLowerCase()
-        .trim();
-    final endedByTime = notification.endAt != null &&
+    final rawStatus =
+        (requestData?['status'] ?? notification.requestStatus ?? '')
+            .toString()
+            .toLowerCase()
+            .trim();
+    final endedByTime =
+        notification.endAt != null &&
         DateTime.now().isAfter(notification.endAt!);
 
     bool isHistory =
@@ -2479,24 +3312,382 @@ class _NotificationsPageState extends State<NotificationsPage> {
     }
   }
 
-  void _handleAcceptMeetingPoint(NotificationItem notification) async {
-    final confirmed = await ConfirmationDialog.showPositiveConfirmation(
-      context,
-      title: 'Join Meeting Point',
-      message: 'Do you want to join this meeting point and start scanning?',
-      confirmText: 'Join',
-    );
+  Future<void> _handleAcceptMeetingPointRequest(
+    NotificationItem notification,
+  ) async {
+    if (notification.isExpired) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This invitation has expired.')),
+      );
+      return;
+    }
 
-    if (confirmed && mounted) {
+    final meeting = await _fetchMeetingPointForNotification(notification);
+    if (meeting == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Meeting point not found.')));
+      return;
+    }
+
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    final me = meeting.participantFor(uid);
+    if (me == null || me.isDeclined) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You are not invited to this meeting.')),
+      );
+      return;
+    }
+    if (!me.isPending) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Invitation already handled.')),
+      );
+      return;
+    }
+
+    final blocking =
+        await MeetingPointService.getBlockingMeetingForCurrentUser();
+    final hadConflict = blocking != null && blocking.id != meeting.id;
+    if (blocking != null && blocking.id != meeting.id) {
+      if (!mounted) return;
+      final proceed = await _showMeetingPointConflictDialog();
+      if (!mounted || proceed != true) return;
+
+      try {
+        if (blocking.isHost(uid)) {
+          if (blocking.isConfirmed) {
+            await MeetingPointService.cancelMeetingForAll(blocking.id);
+          } else {
+            await MeetingPointService.markHostDecision(
+              meetingPointId: blocking.id,
+              accepted: false,
+            );
+          }
+        } else {
+          if (blocking.isConfirmed) {
+            await MeetingPointService.updateArrivalStatus(
+              meetingPointId: blocking.id,
+              isHost: false,
+              userId: uid,
+              arrivalStatus: 'cancelled',
+            );
+          } else {
+            await MeetingPointService.respondToInvitation(
+              meetingPointId: blocking.id,
+              accepted: false,
+            );
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (!hadConflict) {
+      final confirmed = await ConfirmationDialog.showPositiveConfirmation(
+        context,
+        title: 'Accept Invitation',
+        message:
+            'Are you sure you want to accept this meeting point invitation?',
+        confirmText: 'Accept',
+      );
+      if (confirmed != true) return;
+    }
+
+    if (!mounted) return;
+
+    final navChoice = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _buildMeetingAcceptLocationChoiceSheet(ctx),
+    );
+    if (!mounted || navChoice == null) return;
+
+    final locationResult = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => SetYourLocationDialog(
+        shopName: meeting.venueName.isEmpty
+            ? 'Meeting Point'
+            : meeting.venueName,
+        shopId: meeting.id,
+        returnResultOnly: true,
+        venueId: meeting.venueId.isEmpty ? null : meeting.venueId,
+        headerTitle: 'Set your location',
+      ),
+    );
+    if (!mounted || locationResult == null) return;
+
+    try {
+      await MeetingPointService.respondToInvitation(
+        meetingPointId: meeting.id,
+        accepted: true,
+      );
+      if (!mounted) return;
+      SnackbarHelper.showSuccess(context, 'Invitation accepted.');
+      await _updateMeetingPointNotificationStatus(notification, 'accepted');
       setState(() {
-        notification.actionLabel = "Accepted";
-        notification.isRead = true; // Mark as read on interaction
+        notification.actionLabel = 'Accepted';
+        notification.isRead = true;
+        _localStatusOverride[notification.id] = 'accepted';
+        _localReadOverride[notification.id] = true;
         _respondedNotifications.add(notification.id);
       });
+    } catch (_) {
+      if (!mounted) return;
+      SnackbarHelper.showError(
+        context,
+        'Failed to accept invitation. Please try again.',
+      );
+    }
+  }
 
-      Future.delayed(const Duration(milliseconds: 300), () {
-        _openCameraForScan(context);
+  Future<void> _handleDeclineMeetingPointRequest(
+    NotificationItem notification,
+  ) async {
+    if (notification.isExpired) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This invitation has expired.')),
+      );
+      return;
+    }
+
+    final meeting = await _fetchMeetingPointForNotification(notification);
+    if (meeting == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Meeting point not found.')));
+      return;
+    }
+
+    final confirmed = await ConfirmationDialog.showDeleteConfirmation(
+      context,
+      title: 'Decline Invitation',
+      message:
+          'Are you sure you want to decline this meeting point invitation?',
+      confirmText: 'Decline',
+    );
+    if (confirmed != true) return;
+
+    try {
+      await MeetingPointService.respondToInvitation(
+        meetingPointId: meeting.id,
+        accepted: false,
+      );
+      if (!mounted) return;
+      SnackbarHelper.showSuccess(context, 'Invitation declined.');
+      await _updateMeetingPointNotificationStatus(notification, 'declined');
+      setState(() {
+        notification.actionLabel = 'Declined';
+        notification.isRead = true;
+        _localStatusOverride[notification.id] = 'declined';
+        _localReadOverride[notification.id] = true;
+        _respondedNotifications.add(notification.id);
       });
+    } catch (_) {
+      if (!mounted) return;
+      SnackbarHelper.showError(
+        context,
+        'Failed to decline invitation. Please try again.',
+      );
+    }
+  }
+
+  Future<MeetingPointRecord?> _fetchMeetingPointForNotification(
+    NotificationItem notification,
+  ) async {
+    final meetingPointId =
+        (notification.meetingPointId ?? notification.id).trim();
+    if (meetingPointId.isEmpty) return null;
+    try {
+      return await MeetingPointService.getById(meetingPointId);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool?> _showMeetingPointConflictDialog() async {
+    return showDialog<bool>(
+      context: context,
+      barrierColor: Colors.black54,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Already in a Meeting Point',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
+        ),
+        content: const Text(
+          'You\'re already part of an active meeting point. '
+          'Would you like to leave it and accept this new invitation instead?',
+          style: TextStyle(fontSize: 15),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            style: TextButton.styleFrom(
+              backgroundColor: Colors.grey[200],
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: const Text(
+              'Undo',
+              style: TextStyle(
+                color: Colors.black87,
+                fontWeight: FontWeight.w600,
+                fontSize: 15,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(
+              backgroundColor: AppColors.kGreen,
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: const Text(
+              'Proceed',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 15,
+              ),
+            ),
+          ),
+        ],
+        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      ),
+    );
+  }
+
+  Widget _buildMeetingAcceptLocationChoiceSheet(BuildContext ctx) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(24),
+          topRight: Radius.circular(24),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 12),
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.grey[300],
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Set your current location',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.kGreen,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'As step 1, set your location to find suitable meeting point for all participants',
+                  style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 28),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: SecondaryButton(
+              text: 'Pin on Map',
+              icon: Icons.location_on_outlined,
+              onPressed: () => Navigator.pop(ctx, 'map'),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: PrimaryButton(
+              text: 'Scan With Camera',
+              icon: Icons.camera_alt_outlined,
+              onPressed: () => Navigator.pop(ctx, 'camera'),
+            ),
+          ),
+          SizedBox(height: MediaQuery.of(ctx).padding.bottom + 35),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _updateMeetingPointNotificationStatus(
+    NotificationItem notification,
+    String status,
+  ) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    final requestId = notification.id.trim();
+    if (requestId.isEmpty) return;
+
+    final updates = {'isRead': true, 'actionTaken': true};
+
+    try {
+      final batch = FirebaseFirestore.instance.batch();
+      int matched = 0;
+
+      final snap = await FirebaseFirestore.instance
+          .collection('notifications')
+          .where('userId', isEqualTo: uid)
+          .where('type', isEqualTo: 'meetingPointRequest')
+          .get();
+
+      for (final doc in snap.docs) {
+        final data = doc.data();
+        final payload = data['data'] as Map<String, dynamic>? ?? {};
+        final docRequestId =
+            (payload['requestId'] ?? payload['meetingPointId'] ?? '')
+                .toString();
+        if (docRequestId != requestId) continue;
+        batch.update(doc.reference, updates);
+        matched++;
+      }
+
+      if (matched == 0) {
+        final docId = notification.notificationDocId;
+        if (docId != null && docId.trim().isNotEmpty) {
+          batch.update(
+            FirebaseFirestore.instance.collection('notifications').doc(docId),
+            updates,
+          );
+          matched = 1;
+        }
+      }
+
+      if (matched > 0) {
+        await batch.commit();
+      }
+    } catch (e) {
+      debugPrint('Failed to update meeting notification: $e');
     }
   }
 
@@ -2536,7 +3727,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
     String? dialogSubtitle,
   }) async {
     final trackRequestId = notification.trackRequestId;
-    if (trackRequestId == null || trackRequestId.isEmpty) {
+    final meetingPointId = notification.meetingPointId;
+    if ((trackRequestId == null || trackRequestId.isEmpty) &&
+        (meetingPointId == null || meetingPointId.isEmpty)) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Tracking request not found.')),
@@ -2547,14 +3740,26 @@ class _NotificationsPageState extends State<NotificationsPage> {
     String venueId = '';
     String venueName = '';
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('trackRequests')
-          .doc(trackRequestId)
-          .get();
-      final data = doc.data();
-      if (data != null) {
-        venueId = (data['venueId'] ?? '').toString().trim();
-        venueName = (data['venueName'] ?? '').toString().trim();
+      if (trackRequestId != null && trackRequestId.isNotEmpty) {
+        final doc = await FirebaseFirestore.instance
+            .collection('trackRequests')
+            .doc(trackRequestId)
+            .get();
+        final data = doc.data();
+        if (data != null) {
+          venueId = (data['venueId'] ?? '').toString().trim();
+          venueName = (data['venueName'] ?? '').toString().trim();
+        }
+      } else if (meetingPointId != null && meetingPointId.isNotEmpty) {
+        final doc = await FirebaseFirestore.instance
+            .collection('meetingPoints')
+            .doc(meetingPointId)
+            .get();
+        final data = doc.data();
+        if (data != null) {
+          venueId = (data['venueId'] ?? '').toString().trim();
+          venueName = (data['venueName'] ?? '').toString().trim();
+        }
       }
     } catch (e) {
       debugPrint('Failed to load track request for location dialog: $e');
@@ -2571,10 +3776,19 @@ class _NotificationsPageState extends State<NotificationsPage> {
         ? dialogSubtitle.trim()
         : 'Choose how to set your location.';
 
+    final targetId = (trackRequestId != null && trackRequestId.isNotEmpty)
+        ? trackRequestId
+        : meetingPointId!;
+    final targetLabel = venueName.isNotEmpty
+        ? venueName
+        : (meetingPointId != null && meetingPointId.isNotEmpty)
+        ? 'Meeting point'
+        : 'Set Location';
+
     showNavigationDialog(
       context,
-      venueName.isNotEmpty ? venueName : 'Set Location',
-      trackRequestId,
+      targetLabel,
+      targetId,
       returnResultOnly: true,
       dialogTitle: effectiveTitle,
       dialogSubtitle: effectiveSubtitle,
@@ -2584,6 +3798,24 @@ class _NotificationsPageState extends State<NotificationsPage> {
           ? (notification.notificationDocId ?? notification.id)
           : null,
     );
+  }
+
+  bool _shouldShowMeetingPointTimer(NotificationItem notification) {
+    if (notification.type != NotificationType.meetingPointRequest) return false;
+    if (notification.isExpired) return false;
+    final status = (notification.requestStatus ?? '').toLowerCase().trim();
+    if (status.isNotEmpty && status != 'pending') return false;
+    return notification.endAt != null;
+  }
+
+  String _meetingPointTimerLabel(DateTime deadline) {
+    final seconds = deadline
+        .difference(MeetingPointService.serverNow)
+        .inSeconds
+        .clamp(0, 3600);
+    final mm = (seconds ~/ 60).toString().padLeft(2, '0');
+    final ss = (seconds % 60).toString().padLeft(2, '0');
+    return '$mm:$ss';
   }
 
   Widget _notificationStatusBadge(String status) {
@@ -2718,6 +3950,9 @@ enum NotificationType {
   locationRefresh,
   navigateRequest,
   meetingPointRequest,
+  meetingPointCancelled,
+  meetingPointStarted,
+  meetingPointCompleted,
   meetingLocationRefresh,
   meetingPointConfirmation,
   allArrived,
@@ -2732,6 +3967,7 @@ class NotificationItem {
   final bool isSystem;
   String? notificationDocId; // ?? New
   final String? trackRequestId;
+  final String? meetingPointId;
   final String? requestStatus;
   final DateTime? endAt;
   final bool requiresAction;
@@ -2758,6 +3994,7 @@ class NotificationItem {
     this.isSystem = false,
     this.notificationDocId,
     this.trackRequestId,
+    this.meetingPointId,
     this.requestStatus,
     this.endAt,
 
@@ -2785,8 +4022,5 @@ class _TrackRequestLookupResult {
   final String id;
   final Map<String, dynamic> data;
 
-  _TrackRequestLookupResult({
-    required this.id,
-    required this.data,
-  });
+  _TrackRequestLookupResult({required this.id, required this.data});
 }

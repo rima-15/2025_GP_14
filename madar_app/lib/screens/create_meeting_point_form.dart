@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -18,7 +20,8 @@ import 'package:share_plus/share_plus.dart';
 // ── DEV FLAG ──────────────────────────────────────────────────────────────────
 /// Set to true so the full wizard can be tested even outside a real venue.
 const bool forceVenueForTesting = true;
-const String _kTestVenueName = 'King Khalid International Airport';
+const String _kTestVenueName = 'Solitaire';
+const String _kTestVenueId = 'ChIJcYTQDwDjLj4RZEiboV6gZzM';
 const String _kFallbackMapVenueId = 'ChIJcYTQDwDjLj4RZEiboV6gZzM';
 
 /// Geofence radius in metres – user must be this close to a venue centre.
@@ -32,6 +35,10 @@ class MeetingPointParticipant {
     required this.status,
     this.respondedAt,
     this.updatedAt,
+    this.arrivalStatus = 'on_the_way',
+    this.arrivedAt,
+    this.estimatedArrivalMinutes = 3,
+    this.locationUpdatedAt,
   });
 
   final String userId;
@@ -41,14 +48,29 @@ class MeetingPointParticipant {
   final DateTime? respondedAt;
   final DateTime? updatedAt;
 
+  // ── Arrival tracking (populated when meeting status becomes 'active') ──────
+  final String arrivalStatus; // on_the_way | arrived | cancelled
+  final DateTime? arrivedAt;
+  final int estimatedArrivalMinutes; // 1-5 (random)
+  final DateTime? locationUpdatedAt;
+
   bool get isPending => status == 'pending';
   bool get isAccepted => status == 'accepted';
   bool get isDeclined => status == 'declined';
+  bool get isCancelledParticipation => status == 'cancelled';
+
+  bool get isOnTheWay => arrivalStatus == 'on_the_way';
+  bool get isArrived => arrivalStatus == 'arrived';
+  bool get isCancelledArrival => arrivalStatus == 'cancelled';
 
   MeetingPointParticipant copyWith({
     String? status,
     DateTime? respondedAt,
     DateTime? updatedAt,
+    String? arrivalStatus,
+    DateTime? arrivedAt,
+    int? estimatedArrivalMinutes,
+    DateTime? locationUpdatedAt,
   }) {
     return MeetingPointParticipant(
       userId: userId,
@@ -57,6 +79,11 @@ class MeetingPointParticipant {
       status: status ?? this.status,
       respondedAt: respondedAt ?? this.respondedAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      arrivalStatus: arrivalStatus ?? this.arrivalStatus,
+      arrivedAt: arrivedAt ?? this.arrivedAt,
+      estimatedArrivalMinutes:
+          estimatedArrivalMinutes ?? this.estimatedArrivalMinutes,
+      locationUpdatedAt: locationUpdatedAt ?? this.locationUpdatedAt,
     );
   }
 
@@ -70,6 +97,12 @@ class MeetingPointParticipant {
           ? null
           : Timestamp.fromDate(respondedAt!),
       'updatedAt': updatedAt == null ? null : Timestamp.fromDate(updatedAt!),
+      'arrivalStatus': arrivalStatus,
+      'arrivedAt': arrivedAt == null ? null : Timestamp.fromDate(arrivedAt!),
+      'estimatedArrivalMinutes': estimatedArrivalMinutes,
+      'locationUpdatedAt': locationUpdatedAt == null
+          ? null
+          : Timestamp.fromDate(locationUpdatedAt!),
     };
   }
 
@@ -85,9 +118,20 @@ class MeetingPointParticipant {
       case 'declined':
         status = 'declined';
         break;
+      case 'cancelled':
+        status = 'cancelled';
+        break;
       default:
         status = 'pending';
     }
+    final arrivalStatusRaw = (raw['arrivalStatus'] ?? 'on_the_way')
+        .toString()
+        .trim();
+    final arrivalStatus =
+        const {'on_the_way', 'arrived', 'cancelled'}.contains(arrivalStatusRaw)
+        ? arrivalStatusRaw
+        : 'on_the_way';
+    final estMins = raw['estimatedArrivalMinutes'];
     return MeetingPointParticipant(
       userId: userId,
       name: (raw['name'] ?? '').toString(),
@@ -95,6 +139,12 @@ class MeetingPointParticipant {
       status: status,
       respondedAt: _meetingPointAsDateTime(raw['respondedAt']),
       updatedAt: _meetingPointAsDateTime(raw['updatedAt']),
+      arrivalStatus: arrivalStatus,
+      arrivedAt: _meetingPointAsDateTime(raw['arrivedAt']),
+      estimatedArrivalMinutes: (estMins is num)
+          ? estMins.toInt().clamp(1, 5)
+          : 3,
+      locationUpdatedAt: _meetingPointAsDateTime(raw['locationUpdatedAt']),
     );
   }
 }
@@ -117,6 +167,15 @@ class MeetingPointRecord {
     this.updatedAt,
     this.waitDeadline,
     this.suggestDeadline,
+    this.confirmedAt,
+    this.suggestedPoint = '',
+    this.suggestedCandidates = const [],
+    this.suggestionsComputed = false,
+    this.hostArrivalStatus = 'on_the_way',
+    this.hostArrivedAt,
+    this.hostEstimatedMinutes = 3,
+    this.hostLocationUpdatedAt,
+    this.expiresAt,
   });
 
   final String id;
@@ -136,8 +195,22 @@ class MeetingPointRecord {
   final DateTime? waitDeadline;
   final DateTime? suggestDeadline;
 
-  /// Derived from status: the meeting is live (pending) when status == 'pending'.
+  // ── Arrival tracking (populated when status becomes 'active') ─────────────
+  final DateTime? confirmedAt;
+  final String suggestedPoint;
+  final List<Map<String, dynamic>> suggestedCandidates;
+  final bool suggestionsComputed;
+  final String hostArrivalStatus; // on_the_way | arrived | cancelled
+  final DateTime? hostArrivedAt;
+  final int hostEstimatedMinutes; // 1-5 (random)
+  final DateTime? hostLocationUpdatedAt;
+  final DateTime? expiresAt;
+
+  /// Derived from status: the meeting is in setup phase when status == 'pending'.
   bool get isActive => status.trim().toLowerCase() == 'pending';
+
+  /// Meeting confirmed — everyone heading to venue.
+  bool get isConfirmed => status.trim().toLowerCase() == 'active';
 
   /// Sub-state: host is waiting for invitees to respond.
   bool get isWaitingParticipants =>
@@ -159,7 +232,9 @@ class MeetingPointRecord {
   int get invitedCount => participants.length;
   int get acceptedCount => participants.where((p) => p.isAccepted).length;
   int get pendingCount => participants.where((p) => p.isPending).length;
-  int get declinedCount => participants.where((p) => p.isDeclined).length;
+  int get declinedCount => participants
+      .where((p) => p.isDeclined || p.isCancelledParticipation)
+      .length;
 
   DateTime? get activeDeadline {
     if (hostStep == 4) return waitDeadline;
@@ -208,6 +283,16 @@ class MeetingPointRecord {
     final hostStepRaw = data['hostStep'];
     final hostStep = (hostStepRaw is num) ? hostStepRaw.toInt() : 4;
 
+    final suggestedPoint = (data['suggestedPoint'] ?? '').toString();
+    final suggestionsComputed = data['suggestionsComputed'] == true;
+    final suggestedCandidatesRaw = data['suggestedCandidates'];
+    final suggestedCandidates = (suggestedCandidatesRaw is List)
+        ? suggestedCandidatesRaw
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList()
+        : <Map<String, dynamic>>[];
+
     return MeetingPointRecord(
       id: doc.id,
       hostId: hostId,
@@ -227,6 +312,19 @@ class MeetingPointRecord {
       updatedAt: _meetingPointAsDateTime(data['updatedAt']),
       waitDeadline: _meetingPointAsDateTime(data['waitDeadline']),
       suggestDeadline: _meetingPointAsDateTime(data['suggestDeadline']),
+      confirmedAt: _meetingPointAsDateTime(data['confirmedAt']),
+      suggestedPoint: suggestedPoint,
+      suggestedCandidates: suggestedCandidates,
+      suggestionsComputed: suggestionsComputed,
+      hostArrivalStatus: (data['hostArrivalStatus'] ?? 'on_the_way').toString(),
+      hostArrivedAt: _meetingPointAsDateTime(data['hostArrivedAt']),
+      hostEstimatedMinutes: (data['hostEstimatedMinutes'] is num)
+          ? (data['hostEstimatedMinutes'] as num).toInt().clamp(1, 5)
+          : 3,
+      hostLocationUpdatedAt: _meetingPointAsDateTime(
+        data['hostLocationUpdatedAt'],
+      ),
+      expiresAt: _meetingPointAsDateTime(data['expiresAt']),
     );
   }
 }
@@ -238,6 +336,33 @@ class MeetingPointService {
       FirebaseFirestore.instance.collection(collectionName);
 
   static const Duration _kSuggestDuration = Duration(minutes: 5);
+
+  // ── Server-clock calibration ───────────────────────────────────────────────
+  // Estimated offset: serverTime − localTime. Updated from every live
+  // Firestore snapshot so all deadline maths use a consistent clock.
+  static Duration _serverClockOffset = Duration.zero;
+
+  /// Estimated current server time. Use this instead of [DateTime.now()]
+  /// for every deadline computation and display so devices with skewed
+  /// local clocks (e.g. emulators) still show consistent countdowns.
+  static DateTime get serverNow => DateTime.now().add(_serverClockOffset);
+
+  /// Call with the `updatedAt` server timestamp from any live Firestore
+  /// snapshot to keep the estimated offset accurate.
+  ///
+  /// Only accepts timestamps that are close to the current local time.
+  /// A large difference (> 5 min) means the snapshot came from an old/stale
+  /// document, not from a live write — using such a timestamp would corrupt
+  /// the offset and make every deadline appear to be in the past or future.
+  static void calibrateFromServerTime(DateTime serverTimestamp) {
+    final candidate = serverTimestamp.difference(DateTime.now());
+    // Real server–client clock skew is typically < 30 s.  If the candidate
+    // offset is larger than 30 seconds the timestamp is from an old document
+    // (e.g. a meeting updated a few minutes ago), not a live write.
+    if (candidate.abs() <= const Duration(seconds: 30)) {
+      _serverClockOffset = candidate;
+    }
+  }
 
   static bool _isFullyDeclinedActive(MeetingPointRecord meeting) {
     if (!meeting.isActive) return false;
@@ -251,7 +376,16 @@ class MeetingPointService {
     MeetingPointRecord meeting,
     String uid,
   ) {
-    // isActive is derived: status == 'pending'.
+    // ── Arrival phase (status == 'active') ────────────────────────────────
+    if (meeting.isConfirmed) {
+      if (meeting.hostId == uid) {
+        return meeting.hostArrivalStatus != 'cancelled';
+      }
+      final me = meeting.participantFor(uid);
+      return me != null && me.isAccepted && me.arrivalStatus != 'cancelled';
+    }
+
+    // ── Setup phase (status == 'pending') ─────────────────────────────────
     if (!meeting.isActive) return false;
     if (_isFullyDeclinedActive(meeting)) return false;
     if (meeting.hostId == uid) return true;
@@ -259,11 +393,14 @@ class MeetingPointService {
     if (me == null) return false;
     if (me.isDeclined) return false;
     // A pending invitee whose response window has closed should no longer
-    // see the invitation on the track page — it will appear as "Expired"
-    // in history once the meeting ends.
+    // see the invitation on the track page. This covers two cases:
+    // 1. The 2-min wait timer expired naturally.
+    // 2. The host clicked Proceed early (hostStep jumped to 5 while
+    //    waitDeadline was still in the future).
+    if (me.isPending && meeting.hostStep >= 5) return false;
     if (me.isPending &&
         meeting.waitDeadline != null &&
-        !meeting.waitDeadline!.isAfter(DateTime.now())) {
+        !meeting.waitDeadline!.isAfter(MeetingPointService.serverNow)) {
       return false;
     }
     return true;
@@ -279,6 +416,21 @@ class MeetingPointService {
             .map(MeetingPointRecord.fromDoc)
             .whereType<MeetingPointRecord>()
             .toList();
+
+        // Calibrate server clock only from ACTIVE/CONFIRMED meetings whose
+        // timestamps are fresh. Old cancelled meetings have stale updatedAt
+        // values that would corrupt _serverClockOffset.
+        if (!snap.metadata.isFromCache) {
+          final anchor = meetings
+              .where((m) => m.isActive || m.isConfirmed)
+              .map((m) => m.updatedAt ?? m.createdAt)
+              .whereType<DateTime>()
+              .fold<DateTime?>(
+                null,
+                (best, t) => best == null || t.isAfter(best) ? t : best,
+              );
+          if (anchor != null) calibrateFromServerTime(anchor);
+        }
 
         meetings.sort((a, b) {
           final at = a.updatedAt ?? a.createdAt ?? DateTime(1970);
@@ -301,24 +453,36 @@ class MeetingPointService {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null || uid.trim().isEmpty) return Stream.value([]);
 
-    return _col.where('participantUserIds', arrayContains: uid).snapshots().map(
-      (snap) {
-        final meetings = snap.docs
-            .map(MeetingPointRecord.fromDoc)
-            .whereType<MeetingPointRecord>()
-            .toList();
+    return _col.where('participantUserIds', arrayContains: uid).snapshots().map((
+      snap,
+    ) {
+      final meetings = snap.docs
+          .map(MeetingPointRecord.fromDoc)
+          .whereType<MeetingPointRecord>()
+          .toList();
 
-        meetings.sort((a, b) {
-          final at = a.updatedAt ?? a.createdAt ?? DateTime(1970);
-          final bt = b.updatedAt ?? b.createdAt ?? DateTime(1970);
-          return bt.compareTo(at);
-        });
+      // Same calibration as watchActiveForCurrentUser: only use fresh
+      // ACTIVE/CONFIRMED meetings to avoid stale cancelled-meeting timestamps.
+      if (!snap.metadata.isFromCache) {
+        final anchor = meetings
+            .where((m) => m.isActive || m.isConfirmed)
+            .map((m) => m.updatedAt ?? m.createdAt)
+            .whereType<DateTime>()
+            .fold<DateTime?>(
+              null,
+              (best, t) => best == null || t.isAfter(best) ? t : best,
+            );
+        if (anchor != null) calibrateFromServerTime(anchor);
+      }
 
-        return meetings
-            .where((m) => _isMeetingBlockingForUser(m, uid))
-            .toList();
-      },
-    );
+      meetings.sort((a, b) {
+        final at = a.updatedAt ?? a.createdAt ?? DateTime(1970);
+        final bt = b.updatedAt ?? b.createdAt ?? DateTime(1970);
+        return bt.compareTo(at);
+      });
+
+      return meetings.where((m) => _isMeetingBlockingForUser(m, uid)).toList();
+    });
   }
 
   /// Keep the meeting point flow consistent even when the host closes the form.
@@ -332,7 +496,7 @@ class MeetingPointService {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null || uid.trim().isEmpty) return;
 
-    final now = DateTime.now();
+    final now = MeetingPointService.serverNow;
 
     // If everyone declined, end it (prevents ghost active meetings).
     final allDeclined =
@@ -342,23 +506,65 @@ class MeetingPointService {
       try {
         await _col.doc(meeting.id).update({
           'status': 'cancelled',
+          'cancellationReason': 'all_participants_declined',
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+        await _markPendingNotificationsCancelled(meeting);
+      } catch (_) {}
+      return;
+    }
+
+    // Step 5: all previously-accepted participants cancelled their participation.
+    // Nobody is left — cancel the meeting so the host isn't stuck at step 5.
+    if (meeting.hostStep >= 5 &&
+        meeting.participants.isNotEmpty &&
+        !meeting.participants.any((p) => p.isAccepted)) {
+      try {
+        await _col.doc(meeting.id).update({
+          'status': 'cancelled',
+          'cancellationReason': 'all_participants_left',
           'updatedAt': FieldValue.serverTimestamp(),
         });
       } catch (_) {}
       return;
     }
 
-    // Host-only timed transitions.
-    if (meeting.hostId != uid) return;
+    // Early advance: all participants responded + at least one accepted.
+    // No need to wait for the timer — advance to step 5 immediately.
+    // Any signed-in user can trigger this write so it works even when the
+    // host is offline (write will fail silently for non-host users due to
+    // Firestore rules, but will succeed as soon as the host's device is live).
+    if (meeting.hostStep == 4 &&
+        meeting.participants.isNotEmpty &&
+        meeting.pendingCount == 0 &&
+        meeting.acceptedCount > 0) {
+      try {
+        await _col.doc(meeting.id).update({
+          'hostStep': 5,
+          'suggestDeadline': Timestamp.fromDate(now.add(_kSuggestDuration)),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      } catch (_) {}
+      return;
+    }
 
+    // Timed transitions: any signed-in user can trigger them so the flow
+    // continues even when the host has the app closed / logged out.
     if (meeting.hostStep == 4 && meeting.waitDeadline != null) {
       if (!meeting.waitDeadline!.isAfter(now)) {
         if (meeting.acceptedCount <= 0) {
+          final anyCancelledParticipation = meeting.participants.any(
+            (p) => p.isCancelledParticipation,
+          );
           try {
             await _col.doc(meeting.id).update({
               'status': 'cancelled',
+              'cancellationReason': anyCancelledParticipation
+                  ? 'all_participants_left'
+                  : 'all_participants_declined',
               'updatedAt': FieldValue.serverTimestamp(),
             });
+            await _markPendingNotificationsExpired(meeting);
           } catch (_) {}
         } else {
           try {
@@ -382,6 +588,86 @@ class MeetingPointService {
       }
       return;
     }
+  }
+
+  static Future<void> _markPendingNotificationsCancelled(
+    MeetingPointRecord meeting,
+  ) async {
+    final pendingIds = meeting.participants
+        .where((p) => p.isPending)
+        .map((p) => p.userId)
+        .toSet();
+    if (pendingIds.isEmpty) return;
+
+    try {
+      final batch = FirebaseFirestore.instance.batch();
+      bool hasUpdates = false;
+
+      for (final uid in pendingIds) {
+        final snap = await FirebaseFirestore.instance
+            .collection('notifications')
+            .where('userId', isEqualTo: uid)
+            .where('type', isEqualTo: 'meetingPointRequest')
+            .get();
+        for (final doc in snap.docs) {
+          final payload = doc.data()['data'] as Map<String, dynamic>? ?? {};
+          final docRequestId =
+              (payload['meetingPointId'] ?? payload['requestId'] ?? '')
+                  .toString();
+          if (docRequestId != meeting.id) continue;
+          batch.update(doc.reference, {
+            'requestStatus': 'cancelled',
+            'requiresAction': false,
+            'actionTaken': true,
+          });
+          hasUpdates = true;
+        }
+      }
+
+      if (hasUpdates) {
+        await batch.commit();
+      }
+    } catch (_) {}
+  }
+
+  static Future<void> _markPendingNotificationsExpired(
+    MeetingPointRecord meeting,
+  ) async {
+    final pendingIds = meeting.participants
+        .where((p) => p.isPending)
+        .map((p) => p.userId)
+        .toSet();
+    if (pendingIds.isEmpty) return;
+
+    try {
+      final batch = FirebaseFirestore.instance.batch();
+      bool hasUpdates = false;
+
+      for (final uid in pendingIds) {
+        final snap = await FirebaseFirestore.instance
+            .collection('notifications')
+            .where('userId', isEqualTo: uid)
+            .where('type', isEqualTo: 'meetingPointRequest')
+            .get();
+        for (final doc in snap.docs) {
+          final payload = doc.data()['data'] as Map<String, dynamic>? ?? {};
+          final docRequestId =
+              (payload['meetingPointId'] ?? payload['requestId'] ?? '')
+                  .toString();
+          if (docRequestId != meeting.id) continue;
+          batch.update(doc.reference, {
+            'requestStatus': 'expired',
+            'requiresAction': false,
+            'actionTaken': true,
+          });
+          hasUpdates = true;
+        }
+      }
+
+      if (hasUpdates) {
+        await batch.commit();
+      }
+    } catch (_) {}
   }
 
   static Future<MeetingPointRecord?> getById(String meetingPointId) async {
@@ -412,6 +698,7 @@ class MeetingPointService {
         try {
           await _col.doc(meeting.id).update({
             'status': 'cancelled',
+            'cancellationReason': 'all_participants_declined',
             'updatedAt': FieldValue.serverTimestamp(),
           });
         } catch (_) {}
@@ -446,6 +733,7 @@ class MeetingPointService {
         try {
           await _col.doc(meeting.id).update({
             'status': 'cancelled',
+            'cancellationReason': 'all_participants_declined',
             'updatedAt': FieldValue.serverTimestamp(),
           });
         } catch (_) {}
@@ -456,7 +744,7 @@ class MeetingPointService {
     return null;
   }
 
-  static Future<String> createMeetingPoint({
+  static Future<(String, DateTime)> createMeetingPoint({
     required String hostId,
     required String hostName,
     required String hostPhone,
@@ -465,7 +753,7 @@ class MeetingPointService {
     required List<String> placeCategories,
     required Map<String, dynamic>? hostLocation,
     required List<MeetingPointParticipant> participants,
-    required DateTime waitDeadline,
+    required Duration waitDuration,
   }) async {
     final docRef = _col.doc();
     final invitedUserIds = participants.map((p) => p.userId).toSet().toList();
@@ -485,14 +773,40 @@ class MeetingPointService {
       'participants': participants.map((p) => p.toMap()).toList(),
       'invitedUserIds': invitedUserIds,
       'participantUserIds': participantUserIds,
-      'waitDeadline': Timestamp.fromDate(waitDeadline),
+      // waitDeadline is NOT set here — it is computed from the confirmed
+      // server-side createdAt after the commit so that all devices (host and
+      // participants) share the exact same Firestore-server-time-based deadline
+      // regardless of their local clock.
+      'waitDurationSeconds': waitDuration.inSeconds,
+      'waitDeadline': null,
       'suggestDeadline': null,
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     });
 
     await batch.commit();
-    return docRef.id;
+
+    // Read back the confirmed server timestamp for createdAt, then write the
+    // final waitDeadline = createdAt + waitDuration.  This ensures every
+    // client sees a deadline anchored to Firestore server time.
+    final snap = await docRef.get();
+    final serverCreatedAt = (snap.data()?['createdAt'] as Timestamp?)?.toDate();
+    if (serverCreatedAt != null) {
+      final deadline = serverCreatedAt.add(waitDuration);
+      await docRef.update({
+        'waitDeadline': Timestamp.fromDate(deadline),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      return (docRef.id, deadline);
+    }
+
+    // Fallback: server timestamp not yet available in cache, use local time.
+    final fallback = DateTime.now().add(waitDuration);
+    await docRef.update({
+      'waitDeadline': Timestamp.fromDate(fallback),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    return (docRef.id, fallback);
   }
 
   static Future<void> updateHostProgress({
@@ -525,16 +839,232 @@ class MeetingPointService {
     required String meetingPointId,
     required bool accepted,
   }) async {
+    if (!accepted) {
+      await _col.doc(meetingPointId).update({
+        'status': 'cancelled',
+        'updatedAt': FieldValue.serverTimestamp(),
+        'hostStep': 5,
+        'cancellationReason': 'host_rejected_suggestion',
+      });
+      return;
+    }
+
+    // Fetch current meeting to initialize per-participant arrival data.
+    final doc = await _col.doc(meetingPointId).get();
+    final meeting = MeetingPointRecord.fromDoc(doc);
+    if (meeting == null) return;
+
+    final rng = math.Random();
+    final hostMins = rng.nextInt(5) + 1;
+    final now = DateTime.now();
+
+    // Initialize arrivalStatus + random estimatedArrivalMinutes for all
+    // participants who accepted the invitation.
+    final updatedParticipants = meeting.participants.map((p) {
+      if (!p.isAccepted) return p;
+      return p.copyWith(
+        arrivalStatus: 'on_the_way',
+        estimatedArrivalMinutes: rng.nextInt(5) + 1,
+        locationUpdatedAt: now,
+      );
+    }).toList();
+
+    // Write an initial expiresAt using the random estimatedArrivalMinutes as a
+    // guaranteed safety baseline — this ensures auto-expiry always works even if
+    // the host device never completes navmesh path calculation.
+    // The host device will overwrite this with a more accurate real-path-based
+    // value once _maybeWriteExpiresAtFromRealEtas() runs.
+    final acceptedETAs = updatedParticipants
+        .where((p) => p.isAccepted)
+        .map((p) => p.estimatedArrivalMinutes);
+    final allETAs = [hostMins, ...acceptedETAs];
+    final largestMins = allETAs.reduce(math.max);
+    final rawSession = Duration(minutes: largestMins * 3);
+    const kMinSession = Duration(minutes: 10);
+    final sessionDuration = rawSession < kMinSession ? kMinSession : rawSession;
+    final expiresAt = now.add(sessionDuration);
+
     await _col.doc(meetingPointId).update({
-      'status': accepted ? 'active' : 'cancelled',
-      'updatedAt': FieldValue.serverTimestamp(),
+      'status': 'active',
       'hostStep': 5,
+      'updatedAt': FieldValue.serverTimestamp(),
+      'confirmedAt': FieldValue.serverTimestamp(),
+      'hostArrivalStatus': 'on_the_way',
+      'hostEstimatedMinutes': hostMins,
+      'hostArrivedAt': null,
+      'hostLocationUpdatedAt': Timestamp.fromDate(now),
+      'expiresAt': Timestamp.fromDate(expiresAt),
+      'participants': updatedParticipants.map((p) => p.toMap()).toList(),
     });
+  }
+
+  /// Writes the session expiry timestamp once real path ETAs are available.
+  /// Called from the host device after navmesh path calculation completes.
+  static Future<void> updateExpiresAt(
+    String meetingId,
+    DateTime expiresAt,
+  ) async {
+    await _col.doc(meetingId).update({
+      'expiresAt': Timestamp.fromDate(expiresAt),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Reconciles a confirmed (arrival-phase) meeting that may be stuck due to
+  /// old app code that didn't write meeting-level status transitions.
+  /// Safe to call repeatedly — only writes to Firestore when a change is needed.
+  static Future<void> reconcileArrivalPhase(MeetingPointRecord meeting) async {
+    if (!meeting.isConfirmed) return;
+
+    // Session time limit: auto-terminate if expiresAt has passed.
+    // Uses 'terminated' (not 'cancelled') so history shows this as a system
+    // action, never as "You cancelled this request".
+    if (meeting.expiresAt != null &&
+        !meeting.expiresAt!.isAfter(MeetingPointService.serverNow)) {
+      try {
+        await _col.doc(meeting.id).update({
+          'status': 'terminated',
+          'cancellationReason': 'Auto-closed after time limit',
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      } catch (_) {}
+      return;
+    }
+
+    final hostActive = meeting.hostArrivalStatus != 'cancelled';
+    final activeParticipants = meeting.participants
+        .where((p) => p.isAccepted && !p.isCancelledArrival)
+        .toList();
+    final totalActive = (hostActive ? 1 : 0) + activeParticipants.length;
+
+    final payload = <String, dynamic>{
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+    bool needsUpdate = false;
+
+    if (totalActive < 2) {
+      payload['status'] = 'cancelled';
+      payload['cancellationReason'] = 'all_participants_left';
+      needsUpdate = true;
+    } else {
+      final hostDone = !hostActive || meeting.hostArrivalStatus == 'arrived';
+      final allActiveArrived =
+          hostDone && activeParticipants.every((p) => p.isArrived);
+      if (allActiveArrived) {
+        payload['status'] = 'completed';
+        needsUpdate = true;
+      }
+    }
+
+    if (!needsUpdate) return;
+    try {
+      await _col.doc(meeting.id).update(payload);
+    } catch (_) {}
+  }
+
+  /// Cancel the entire meeting for all participants (host only action).
+  static Future<void> cancelMeetingForAll(String meetingPointId) async {
+    MeetingPointRecord? meeting;
+    try {
+      final doc = await _col.doc(meetingPointId).get();
+      meeting = MeetingPointRecord.fromDoc(doc);
+    } catch (_) {}
+
+    final payload = <String, dynamic>{
+      'status': 'cancelled',
+      'updatedAt': FieldValue.serverTimestamp(),
+      'cancellationReason': 'host_cancelled',
+    };
+
+    await _col.doc(meetingPointId).update(payload);
+
+    if (meeting != null) {
+      try {
+        await _markPendingNotificationsCancelled(meeting);
+      } catch (_) {}
+    }
+  }
+
+  /// Update a participant's (or host's) arrival status during the confirmed phase.
+  /// Also auto-transitions the meeting to 'completed' when all active participants
+  /// have arrived, or to 'cancelled' (with reason 'all_participants_left') when
+  /// fewer than two active participants remain.
+  static Future<void> updateArrivalStatus({
+    required String meetingPointId,
+    required bool isHost,
+    required String userId,
+    required String arrivalStatus, // 'on_the_way' | 'arrived' | 'cancelled'
+    DateTime? arrivedAt,
+  }) async {
+    // Always read the full document so we can evaluate meeting-level transitions.
+    final doc = await _col.doc(meetingPointId).get();
+    final meeting = MeetingPointRecord.fromDoc(doc);
+    if (meeting == null) return;
+
+    final payload = <String, dynamic>{
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+    final shouldUpdateLocation = arrivalStatus == 'arrived';
+    final locationAt = arrivedAt ?? DateTime.now();
+
+    // ── Compute new arrival states ─────────────────────────────────────────
+    String newHostArrivalStatus = meeting.hostArrivalStatus;
+    List<MeetingPointParticipant> newParticipants =
+        List<MeetingPointParticipant>.from(meeting.participants);
+
+    if (isHost) {
+      newHostArrivalStatus = arrivalStatus;
+      payload['hostArrivalStatus'] = arrivalStatus;
+      payload['hostArrivedAt'] = arrivedAt == null
+          ? null
+          : Timestamp.fromDate(arrivedAt);
+      if (shouldUpdateLocation) {
+        payload['hostLocationUpdatedAt'] = Timestamp.fromDate(locationAt);
+      }
+    } else {
+      final idx = newParticipants.indexWhere((p) => p.userId == userId);
+      if (idx < 0) return;
+      newParticipants[idx] = newParticipants[idx].copyWith(
+        arrivalStatus: arrivalStatus,
+        arrivedAt: arrivedAt,
+        locationUpdatedAt: shouldUpdateLocation ? locationAt : null,
+      );
+      payload['participants'] = newParticipants.map((p) => p.toMap()).toList();
+    }
+
+    // ── Meeting-level status transitions (only during arrival phase) ──────
+    if (meeting.isConfirmed) {
+      // "Active" = host or accepted participant who hasn't cancelled their arrival.
+      final hostActive = newHostArrivalStatus != 'cancelled';
+      final activeParticipants = newParticipants
+          .where((p) => p.isAccepted && !p.isCancelledArrival)
+          .toList();
+      final totalActive = (hostActive ? 1 : 0) + activeParticipants.length;
+
+      if (totalActive < 2) {
+        // Not enough people left — auto-cancel the meeting.
+        payload['status'] = 'cancelled';
+        payload['cancellationReason'] = 'all_participants_left';
+      } else {
+        // Complete when every *active* person has arrived.
+        // If the host cancelled ("cancel for me") they are not active,
+        // so we don't require them to arrive.
+        final hostDone = !hostActive || newHostArrivalStatus == 'arrived';
+        final allActiveArrived =
+            hostDone && activeParticipants.every((p) => p.isArrived);
+        if (allActiveArrived) {
+          payload['status'] = 'completed';
+        }
+      }
+    }
+
+    await _col.doc(meetingPointId).update(payload);
   }
 
   static Future<void> respondToInvitation({
     required String meetingPointId,
     required bool accepted,
+    bool cancelParticipation = false,
   }) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null || uid.trim().isEmpty) return;
@@ -548,7 +1078,13 @@ class MeetingPointService {
     if (index < 0) return;
 
     final now = DateTime.now();
-    final newStatus = accepted ? 'accepted' : 'declined';
+    final treatCancelAsDeclined =
+        cancelParticipation && meeting.hostStep >= 5 && !meeting.isConfirmed;
+    final newStatus = accepted
+        ? 'accepted'
+        : (treatCancelAsDeclined
+              ? 'declined'
+              : (cancelParticipation ? 'cancelled' : 'declined'));
     final updatedParticipants = List<MeetingPointParticipant>.from(
       meeting.participants,
     );
@@ -563,11 +1099,46 @@ class MeetingPointService {
       'updatedAt': FieldValue.serverTimestamp(),
     };
 
-    final allDeclined =
-        updatedParticipants.isNotEmpty &&
-        updatedParticipants.every((p) => p.isDeclined);
-    if (allDeclined) {
+    final noPendingLeft = updatedParticipants.every((p) => !p.isPending);
+    final anyAccepted = updatedParticipants.any((p) => p.isAccepted);
+    final anyCancelledParticipation = updatedParticipants.any(
+      (p) => p.isCancelledParticipation,
+    );
+
+    // Cancel immediately when no invitee is still deciding and nobody accepted.
+    // Covers: all declined, all cancelled participation, or a mix of both.
+    // At step 4: only fires once every invitee has given their answer.
+    // At step 5: invitees should have all responded already (no pending left).
+    if (noPendingLeft && !anyAccepted) {
       payload['status'] = 'cancelled';
+      payload['cancellationReason'] = anyCancelledParticipation
+          ? 'all_participants_left'
+          : 'all_participants_declined';
+    }
+
+    // Edge case at step 5: some invitees may still be 'pending' (invitation
+    // expired mid-flow) yet no accepted participants remain — cancel now.
+    if (!payload.containsKey('status') &&
+        cancelParticipation &&
+        meeting.hostStep >= 5 &&
+        !anyAccepted) {
+      payload['status'] = 'cancelled';
+      payload['cancellationReason'] = meeting.isConfirmed
+          ? 'all_participants_left'
+          : 'all_participants_declined';
+    }
+
+    // Auto-advance to step 5 when every invitee has responded and at least
+    // one accepted — host no longer needs to manually tap "Proceed", and the
+    // transition works even if the host is offline.
+    if (!payload.containsKey('status') &&
+        noPendingLeft &&
+        anyAccepted &&
+        meeting.hostStep == 4) {
+      payload['hostStep'] = 5;
+      payload['suggestDeadline'] = Timestamp.fromDate(
+        MeetingPointService.serverNow.add(_kSuggestDuration),
+      );
     }
 
     try {
@@ -597,10 +1168,15 @@ class CreateMeetingPointForm extends StatefulWidget {
     super.key,
     this.resumeDraft = false,
     this.meetingPointId,
+    this.autoAdvanceToStep5 = false,
   });
 
   final bool resumeDraft;
   final String? meetingPointId;
+
+  /// When true and the restored meeting is at step 4, automatically advance
+  /// to step 5 (skipping the manual Proceed tap inside the form).
+  final bool autoAdvanceToStep5;
 
   @override
   State<CreateMeetingPointForm> createState() => _CreateMeetingPointFormState();
@@ -651,9 +1227,11 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   /// Simulated participant list built from _selectedFriends at step 4 entry.
   List<_Participant> _participants = [];
 
-  /// Step-4 10-minute countdown.
+  /// Step-4 2-minute countdown.
   Timer? _waitTimer;
-  int _waitSecondsLeft = 10; // 10 min
+  int _waitSecondsLeft = 120; // 2 min
+  DateTime?
+  _pendingWaitDeadline; // deadline computed once before the Firestore commit
 
   /// Proceed button unlock delay (5 s) before checking real acceptance.
   bool _proceedUnlocked = false;
@@ -661,17 +1239,30 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   DateTime? _proceedUnlockAt;
   DateTime? _waitDeadline;
 
+  /// Delay before auto-advancing to step 5 so the host can see accepted state.
+  static const Duration _kAutoAdvanceDelay = Duration(seconds: 2);
+  Timer? _autoAdvanceTimer;
+
   // ── Step 5: Suggested meeting point ──────────────────────────────────────
   /// 5-minute timer for host to accept/reject.
   Timer? _suggestTimer;
   int _suggestSecondsLeft = 300; // 5 min
   DateTime? _suggestDeadline;
+  String _suggestedPointName = '';
+  List<Map<String, dynamic>> _suggestedCandidates = [];
+  bool _suggestionsComputed = false;
+  Map<String, int> _step5DistMap = {};
+  bool _step5DistComputing = false;
+
+  /// Persists across widget rebuilds for the lifetime of the app process.
+  static final Map<String, Map<String, int>> _distCache = {};
 
   // ── Cached current user ───────────────────────────────────────────────────
   String? _myPhone;
   String? _myName;
   bool _shouldManageDraft = false;
   bool _allowDisposeDraftSave = true;
+  bool _closeHandled = false;
   bool _isInitializing = false;
   bool _isSendingInvites = false;
   String? _meetingPointId;
@@ -679,6 +1270,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
   // ─── In-session state persistence (steps 1–3) ────────────────────────────
   static bool _hasSavedEarlyState = false;
+  static String? _memEarlyUserId;
   static List<_Friend> _memEarlyFriends = [];
   static Set<String> _memEarlyCategories = {'Any'};
   static _HostLocation? _memEarlyHostLocation;
@@ -688,6 +1280,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   void _saveEarlyStepsToMemory() {
     if (_step >= 4) return;
     _hasSavedEarlyState = true;
+    _memEarlyUserId = FirebaseAuth.instance.currentUser?.uid;
     _memEarlyFriends = List.from(_selectedFriends);
     _memEarlyCategories = Set.from(_selectedPlaceCategories);
     _memEarlyHostLocation = _hostLocation;
@@ -699,6 +1292,11 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   /// restores location and step only if the detected venue matches the saved one.
   void _tryRestoreEarlyState() {
     if (!_hasSavedEarlyState || _shouldManageDraft || _step >= 4) return;
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
+    if (currentUid == null || currentUid != _memEarlyUserId) {
+      _clearEarlyMemory();
+      return;
+    }
     if (_memEarlyFriends.isNotEmpty) {
       _selectedFriends
         ..clear()
@@ -718,6 +1316,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
   static void _clearEarlyMemory() {
     _hasSavedEarlyState = false;
+    _memEarlyUserId = null;
     _memEarlyFriends = [];
     _memEarlyCategories = {'Any'};
     _memEarlyHostLocation = null;
@@ -729,6 +1328,8 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   @override
   void initState() {
     super.initState();
+    // Suppress the background popup while this form is open.
+    MeetingPointPopupGuard.suppress = true;
     _phoneFocus.addListener(() {
       setState(() => _isPhoneFocused = _phoneFocus.hasFocus);
     });
@@ -740,9 +1341,15 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     if (_meetingPointId != null && _meetingPointId!.isNotEmpty) {
       _isInitializing = true;
       _shouldManageDraft = true;
-      _restoreFromMeetingPoint(_meetingPointId!).whenComplete(() {
-        if (mounted) setState(() => _isInitializing = false);
-      });
+      _restoreFromMeetingPoint(_meetingPointId!)
+          .then((_) {
+            if (mounted && widget.autoAdvanceToStep5 && _step == 4) {
+              _goNext(); // cancels step-4 timers, inits step-5, sets _step = 5
+            }
+          })
+          .whenComplete(() {
+            if (mounted) setState(() => _isInitializing = false);
+          });
     } else if (widget.resumeDraft) {
       _isInitializing = true;
       _shouldManageDraft = true;
@@ -754,6 +1361,8 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
   @override
   void dispose() {
+    // Restore popup guard when the form closes.
+    MeetingPointPopupGuard.suppress = false;
     _saveEarlyStepsToMemory();
     if (_allowDisposeDraftSave && _shouldManageDraft) {
       unawaited(_persistDraftIfNeeded());
@@ -763,6 +1372,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     _waitTimer?.cancel();
     _proceedTimer?.cancel();
     _suggestTimer?.cancel();
+    _autoAdvanceTimer?.cancel();
     _meetingPointSub?.cancel();
     super.dispose();
   }
@@ -803,11 +1413,26 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         _venueName = matched.name;
       } else if (forceVenueForTesting && venues.isNotEmpty) {
         // DEV override: prefer a stable 24h test venue.
-        final expected = _kTestVenueName.toLowerCase();
-        final testVenue = venues.firstWhere((v) {
-          final name = v.name.toLowerCase();
-          return name == expected || name.contains(expected);
-        }, orElse: () => venues.first);
+        _VenueOption? testVenue;
+        if (_kTestVenueId.trim().isNotEmpty) {
+          for (final v in venues) {
+            if (v.id == _kTestVenueId) {
+              testVenue = v;
+              break;
+            }
+          }
+        }
+        if (testVenue == null) {
+          final expected = _kTestVenueName.toLowerCase();
+          for (final v in venues) {
+            final name = v.name.toLowerCase();
+            if (name == expected || name.contains(expected)) {
+              testVenue = v;
+              break;
+            }
+          }
+        }
+        testVenue ??= venues.first;
         _venueId = testVenue.id;
         _venueName = testVenue.name; // no "(DEV)" label shown to user
       } else {
@@ -1355,7 +1980,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
                 .toList()
           : restoredParticipants;
 
-      _waitSecondsLeft = restoredWaitLeft.clamp(0, 600).toInt();
+      _waitSecondsLeft = restoredWaitLeft.clamp(0, 120).toInt();
       _suggestSecondsLeft = restoredSuggestLeft.clamp(0, 300).toInt();
       _proceedUnlocked = _boolFromDynamic(snap.data['proceedUnlocked'], true);
       _waitDeadline = _dateFromEpoch(snap.data['waitDeadlineMs']);
@@ -1402,13 +2027,13 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     final waitLeft = meeting.waitDeadline == null
         ? _waitSecondsLeft
         : meeting.waitDeadline!
-              .difference(DateTime.now())
+              .difference(MeetingPointService.serverNow)
               .inSeconds
               .clamp(0, 600);
     final suggestLeft = meeting.suggestDeadline == null
         ? _suggestSecondsLeft
         : meeting.suggestDeadline!
-              .difference(DateTime.now())
+              .difference(MeetingPointService.serverNow)
               .inSeconds
               .clamp(0, 300);
 
@@ -1432,12 +2057,22 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       _waitSecondsLeft = waitLeft.toInt();
       _suggestSecondsLeft = suggestLeft.toInt();
       _proceedUnlocked = true;
+      _suggestedPointName = meeting.suggestedPoint;
+      _suggestedCandidates = meeting.suggestedCandidates;
+      _suggestionsComputed = meeting.suggestionsComputed;
     });
 
     if (_step == 4) {
       _startStep4WaitCountdown();
     } else if (_step == 5) {
       _startStep5SuggestCountdown();
+      final mid = _meetingPointId;
+      if (mid != null && _distCache.containsKey(mid)) {
+        // Already computed in a previous session — show instantly.
+        _step5DistMap = Map.of(_distCache[mid]!);
+      } else if (_suggestionsComputed) {
+        unawaited(_computeStep5Distances());
+      }
     }
 
     _startMeetingSubscription(meeting.id);
@@ -1455,6 +2090,23 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           final uid = FirebaseAuth.instance.currentUser?.uid;
           if (uid == null || !meeting.isHost(uid)) return;
 
+          // Calibrate server clock from live snapshot.
+          if (!doc.metadata.isFromCache && meeting.updatedAt != null) {
+            MeetingPointService.calibrateFromServerTime(meeting.updatedAt!);
+          }
+
+          // If the meeting was cancelled (all declined, timer expired with no
+          // accepts, or host rejected), close the form immediately.
+          if (!meeting.isActive && !meeting.isConfirmed) {
+            unawaited(
+              _completeAndClose(
+                success: false,
+                message: 'Meeting point was cancelled.',
+              ),
+            );
+            return;
+          }
+
           final participants = meeting.participants
               .map(_participantFromCloud)
               .toList();
@@ -1462,31 +2114,95 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           final waitLeft = meeting.waitDeadline == null
               ? _waitSecondsLeft
               : meeting.waitDeadline!
-                    .difference(DateTime.now())
+                    .difference(MeetingPointService.serverNow)
                     .inSeconds
-                    .clamp(0, 600);
+                    .clamp(0, 120);
           final suggestLeft = meeting.suggestDeadline == null
               ? _suggestSecondsLeft
               : meeting.suggestDeadline!
-                    .difference(DateTime.now())
+                    .difference(MeetingPointService.serverNow)
                     .inSeconds
                     .clamp(0, 300);
 
+          // Never let a stale cached snapshot downgrade a step we've already
+          // advanced past locally (e.g. auto-advance race with Firestore cache).
+          final prevStep = _step;
+          final effectiveStep = nextStep >= _step ? nextStep : _step;
+          final prevWaitDeadline = _waitDeadline;
+          final prevSuggestDeadline = _suggestDeadline;
           setState(() {
             _participants = participants;
             _waitDeadline = meeting.waitDeadline;
             _suggestDeadline = meeting.suggestDeadline;
             _waitSecondsLeft = waitLeft.toInt();
             _suggestSecondsLeft = suggestLeft.toInt();
-            _step = nextStep;
+            _step = effectiveStep;
+            _suggestedPointName = meeting.suggestedPoint;
+            _suggestedCandidates = meeting.suggestedCandidates;
+            _suggestionsComputed = meeting.suggestionsComputed;
           });
 
-          if (_step == 4) {
+          // Compute client-side distances whenever step 5 has suggestions
+          // but no distances yet (covers first delivery and any retry case).
+          if (_step == 5 &&
+              _suggestionsComputed &&
+              _step5DistMap.isEmpty &&
+              !_step5DistComputing) {
+            unawaited(_computeStep5Distances());
+          }
+
+          // If Firestore advanced us from step 4 → 5 (e.g. the last participant
+          // accepted and their device wrote hostStep=5 via respondToInvitation),
+          // cancel the local wait-phase timers so they don't fire
+          // _onWaitTimerExpired and reset the step-5 countdown.
+          if (prevStep == 4 && _step >= 5) {
+            _waitTimer?.cancel();
+            _proceedTimer?.cancel();
+          }
+
+          // Only restart countdowns when the deadline itself changed (e.g.
+          // step transition) — NOT on every participant accept/decline update.
+          if (_step == 4 &&
+              meeting.waitDeadline != null &&
+              meeting.waitDeadline != prevWaitDeadline) {
             _startStep4WaitCountdown();
-          } else if (_step == 5) {
+          } else if (_step == 5 &&
+              meeting.suggestDeadline != null &&
+              meeting.suggestDeadline != prevSuggestDeadline) {
             _startStep5SuggestCountdown();
           }
+
+          // Auto-advance after a short delay so the host can see who accepted.
+          final shouldAutoAdvance =
+              _step == 4 &&
+              _participants.isNotEmpty &&
+              _participants.every(
+                (p) => p.status != _ParticipantStatus.pending,
+              ) &&
+              _participants.any((p) => p.status == _ParticipantStatus.accepted);
+          if (shouldAutoAdvance) {
+            _scheduleAutoAdvance();
+          } else {
+            _autoAdvanceTimer?.cancel();
+            _autoAdvanceTimer = null;
+          }
         });
+  }
+
+  void _scheduleAutoAdvance() {
+    if (_autoAdvanceTimer != null) return;
+    _autoAdvanceTimer = Timer(_kAutoAdvanceDelay, () {
+      _autoAdvanceTimer = null;
+      if (!mounted) return;
+      final shouldAdvance =
+          _step == 4 &&
+          _participants.isNotEmpty &&
+          _participants.every((p) => p.status != _ParticipantStatus.pending) &&
+          _participants.any((p) => p.status == _ParticipantStatus.accepted);
+      if (shouldAdvance) {
+        _goNext();
+      }
+    });
   }
 
   Future<void> _persistDraftIfNeeded() async {
@@ -1538,6 +2254,8 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     required bool success,
     required String message,
   }) async {
+    if (_closeHandled) return;
+    _closeHandled = true;
     _allowDisposeDraftSave = false;
     await _clearManagedDraft();
     if (success) _clearEarlyMemory();
@@ -1575,11 +2293,15 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
   void _startStep4WaitCountdown() {
     _waitTimer?.cancel();
-    _waitDeadline ??= DateTime.now().add(Duration(seconds: _waitSecondsLeft));
+    _waitDeadline ??= MeetingPointService.serverNow.add(
+      Duration(seconds: _waitSecondsLeft),
+    );
 
     void onTick() {
       if (!mounted) return;
-      final left = _waitDeadline!.difference(DateTime.now()).inSeconds;
+      final left = _waitDeadline!
+          .difference(MeetingPointService.serverNow)
+          .inSeconds;
       if (left <= 0) {
         _waitTimer?.cancel();
         setState(() => _waitSecondsLeft = 0);
@@ -1595,13 +2317,15 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
   void _startStep5SuggestCountdown() {
     _suggestTimer?.cancel();
-    _suggestDeadline ??= DateTime.now().add(
+    _suggestDeadline ??= MeetingPointService.serverNow.add(
       Duration(seconds: _suggestSecondsLeft),
     );
 
     void onTick() {
       if (!mounted) return;
-      final left = _suggestDeadline!.difference(DateTime.now()).inSeconds;
+      final left = _suggestDeadline!
+          .difference(MeetingPointService.serverNow)
+          .inSeconds;
       if (left <= 0) {
         _suggestTimer?.cancel();
         setState(() => _suggestSecondsLeft = 0);
@@ -1613,6 +2337,238 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
     onTick();
     _suggestTimer = Timer.periodic(const Duration(seconds: 1), (_) => onTick());
+  }
+
+  // ── Step-5 client-side distance computation (same algorithm as path_overview) ─
+
+  /// Converts navmesh floor number string ("0","1") to the asset file label
+  /// ("GF","F1") used in navmesh_<label>.json.  Handles both numeric and label
+  /// inputs so it works whatever format Firestore stored the floor in.
+  static String _s5FNumToLabel(String fNum) {
+    switch (fNum) {
+      case '0':
+        return 'GF';
+      case '1':
+        return 'F1';
+      case '2':
+        return 'F2';
+      default:
+        // Already a label (e.g. "GF", "F1") — return as-is.
+        return fNum;
+    }
+  }
+
+  static String _s5FloorToFNum(String label) {
+    final up = label.toUpperCase().trim();
+    if (up == 'G' || up == 'GF' || up.contains('GROUND')) return '0';
+    final n = up.replaceAll(RegExp(r'[^0-9]'), '');
+    return n.isEmpty ? label : n;
+  }
+
+  static double? _s5ToDouble(dynamic v) {
+    if (v == null) return null;
+    if (v is num) return v.toDouble();
+    return double.tryParse(v.toString());
+  }
+
+  static double _s5PathLen(List<List<double>> pts) {
+    double sum = 0;
+    for (int i = 1; i < pts.length; i++) {
+      final dx = pts[i][0] - pts[i - 1][0];
+      final dy = pts[i][1] - pts[i - 1][1];
+      sum += math.sqrt(dx * dx + dy * dy);
+    }
+    return sum;
+  }
+
+  static String? _s5EpFNum(Map ep) {
+    if (ep['floorNumber'] != null) return ep['floorNumber'].toString();
+    if (ep['f_number'] != null) return ep['f_number'].toString();
+    final floor = ep['floor']?.toString();
+    if (floor != null) {
+      if (int.tryParse(floor) != null) return floor;
+      return _s5FloorToFNum(floor);
+    }
+    final lbl = ep['floorLabel'] ?? ep['floor_label'] ?? ep['label'];
+    if (lbl != null) return _s5FloorToFNum(lbl.toString());
+    return null;
+  }
+
+  Future<void> _computeStep5Distances() async {
+    if (_step5DistComputing) return;
+    if (_suggestedCandidates.isEmpty) return;
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    if (uid.isEmpty) return;
+
+    if (mounted) setState(() => _step5DistComputing = true);
+
+    final raw = _suggestedCandidates.first;
+    final entranceMap = raw['entrance'];
+    if (entranceMap is! Map) {
+      if (mounted) setState(() => _step5DistComputing = false);
+      return;
+    }
+
+    final entX = _s5ToDouble(entranceMap['x']) ?? 0.0;
+    final entY = _s5ToDouble(entranceMap['y']) ?? 0.0;
+    final entZ = _s5ToDouble(entranceMap['z']) ?? 0.0;
+    final entFloorRaw = (entranceMap['floor'] ?? '').toString().trim();
+    if (entFloorRaw.isEmpty) {
+      if (mounted) setState(() => _step5DistComputing = false);
+      return;
+    }
+    // Normalise: "0" → "GF", "1" → "F1", so navmesh asset loads correctly.
+    final entFNum = _s5FloorToFNum(entFloorRaw);
+    final entNavLabel = _s5FNumToLabel(entFNum);
+
+    // All users to compute for: host + accepted participants.
+    final accepted = _participants.where(
+      (p) => p.status == _ParticipantStatus.accepted,
+    );
+    final allUserIds = [uid, ...accepted.map((p) => p.friend.id)];
+
+    // Fetch each user's Blender position from Firestore.
+    final db = FirebaseFirestore.instance;
+    final Map<String, Map<String, dynamic>> positions = {};
+    for (final userId in allUserIds) {
+      try {
+        final doc = await db.collection('users').doc(userId).get();
+        final data = doc.data() ?? {};
+        final bp =
+            ((data['location'] as Map?)?['blenderPosition'] as Map?) ?? {};
+        final x = _s5ToDouble(bp['x']);
+        final y = _s5ToDouble(bp['y']);
+        final z = _s5ToDouble(bp['z']);
+        final floor = (bp['floor'] ?? '').toString().trim();
+        if (x != null && y != null && z != null && floor.isNotEmpty) {
+          positions[userId] = {'x': x, 'y': y, 'z': z, 'floor': floor};
+        }
+      } catch (_) {}
+    }
+
+    // Cache loaded navmeshes by asset label ("GF", "F1", …).
+    final Map<String, NavMesh> nmCache = {};
+    Future<NavMesh?> getNm(String navLabel) async {
+      if (nmCache.containsKey(navLabel)) return nmCache[navLabel];
+      try {
+        final nm = await NavMesh.loadAsset(
+          'assets/nav_cor/navmesh_$navLabel.json',
+        );
+        nmCache[navLabel] = nm;
+        return nm;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    // Load connectors (needed only for cross-floor paths).
+    List<dynamic> connectorList = const [];
+    try {
+      final connRaw = await rootBundle.loadString(
+        'assets/connectors/connectors_merged_local.json',
+      );
+      final decoded = jsonDecode(connRaw);
+      connectorList = (decoded is List)
+          ? decoded
+          : (decoded is Map && decoded['connectors'] is List)
+          ? decoded['connectors'] as List
+          : const [];
+    } catch (_) {}
+
+    const double unitToMeters = 69.32;
+    final Map<String, int> result = {};
+
+    for (final userId in allUserIds) {
+      final pos = positions[userId];
+      if (pos == null) continue;
+
+      final userFloorRaw = pos['floor'] as String;
+      final userFNum = _s5FloorToFNum(userFloorRaw);
+      final userNavLabel = _s5FNumToLabel(userFNum);
+      final userPt = [
+        pos['x'] as double,
+        pos['y'] as double,
+        pos['z'] as double,
+      ];
+      final entPt = [entX, entY, entZ];
+
+      double? rawDist;
+
+      if (userFNum == entFNum) {
+        // Same floor — direct funneled path.
+        final nm = await getNm(entNavLabel);
+        if (nm != null) {
+          final pts = nm.findPathFunnelBlenderXY(start: userPt, goal: entPt);
+          rawDist = _s5PathLen(pts);
+        }
+      } else {
+        // Cross-floor — find best connector between the two floors.
+        double best = double.infinity;
+        for (final c in connectorList) {
+          if (c is! Map) continue;
+          final endpoints = c['endpoints'] ?? c['floors'] ?? c['nodes'];
+          if (endpoints is! List) continue;
+
+          Map? epA, epB;
+          for (final ep in endpoints) {
+            if (ep is! Map) continue;
+            final f = _s5EpFNum(ep);
+            if (f == userFNum) epA = ep;
+            if (f == entFNum) epB = ep;
+          }
+          if (epA == null || epB == null) continue;
+
+          (double?, double?, double?) epXYZ(Map ep) {
+            final posMap = ep['position'] is Map ? ep['position'] as Map : null;
+            return (
+              _s5ToDouble(posMap?['x'] ?? ep['x']),
+              _s5ToDouble(posMap?['y'] ?? ep['y']),
+              _s5ToDouble(posMap?['z'] ?? ep['z']),
+            );
+          }
+
+          final (ax, ay, az) = epXYZ(epA);
+          final (bx, by, bz) = epXYZ(epB);
+          if (ax == null ||
+              ay == null ||
+              az == null ||
+              bx == null ||
+              by == null ||
+              bz == null) {
+            continue;
+          }
+
+          final nmA = await getNm(userNavLabel);
+          final nmB = await getNm(entNavLabel);
+          if (nmA == null || nmB == null) continue;
+
+          final ptsA = nmA.findPathFunnelBlenderXY(
+            start: userPt,
+            goal: [ax, ay, az],
+          );
+          final ptsB = nmB.findPathFunnelBlenderXY(
+            start: [bx, by, bz],
+            goal: entPt,
+          );
+          final total = _s5PathLen(ptsA) + _s5PathLen(ptsB);
+          if (total < best) best = total;
+        }
+        if (best.isFinite) rawDist = best;
+      }
+
+      if (rawDist != null) {
+        result[userId] = (rawDist * unitToMeters).round();
+      }
+    }
+
+    if (mounted) {
+      final mid = _meetingPointId;
+      if (mid != null) _distCache[mid] = result;
+      setState(() {
+        _step5DistMap = result;
+        _step5DistComputing = false;
+      });
+    }
   }
 
   DateTime? _dateFromEpoch(dynamic value) {
@@ -1743,15 +2699,23 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
   void _goNext() {
     if (_step == 3) {
-      // Step 3 → 4: build participant list and start timers.
-      _initStep4();
+      // Step 3 → 4 is handled exclusively by _sendInvitesAndAdvance.
+      // _goNext should never be called for step 3 from the UI.
+      return;
     } else if (_step == 4) {
       // Step 4 → 5: cancel wait timer, start suggestion timer.
+      // Increment _step FIRST so _syncMeetingPointProgress writes hostStep:5.
+      _autoAdvanceTimer?.cancel();
+      _autoAdvanceTimer = null;
       _waitTimer?.cancel();
       _proceedTimer?.cancel();
+      _step = 5;
       _initStep5();
+      setState(() {});
+    } else {
+      // Steps 1 → 2 and 2 → 3: simple increment.
+      setState(() => _step++);
     }
-    setState(() => _step++);
     unawaited(_persistDraftIfNeeded());
   }
 
@@ -1779,14 +2743,20 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           .toList();
     }
 
-    // 10-minute countdown.
-    _waitSecondsLeft = 60;
-    _waitDeadline = DateTime.now().add(const Duration(minutes: 10));
+    // 2-minute countdown.  Use the deadline that was already committed to
+    // Firestore so the local timer and the Firestore field are identical.
+    _waitSecondsLeft = 120;
+    _waitDeadline =
+        _pendingWaitDeadline ??
+        MeetingPointService.serverNow.add(const Duration(minutes: 2));
+    _pendingWaitDeadline = null; // consumed
     _startStep4WaitCountdown();
 
     // Unlock "Proceed" after 5 seconds (UI demo).
     _proceedUnlocked = false;
-    _proceedUnlockAt = DateTime.now().add(const Duration(seconds: 5));
+    _proceedUnlockAt = MeetingPointService.serverNow.add(
+      const Duration(seconds: 5),
+    );
     _startProceedUnlockTimer();
 
     if (_meetingPointId != null) {
@@ -1816,10 +2786,10 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       }
     } else {
       // At least one accepted → advance to step 5.
+      // Set _step FIRST so _syncMeetingPointProgress writes hostStep:5.
+      _step = 5;
       _initStep5();
-      if (mounted) {
-        setState(() => _step = 5);
-      }
+      if (mounted) setState(() {});
       // status stays 'pending'; hostStep=5 signals waiting_host_confirmation sub-state
       unawaited(_persistDraftIfNeeded());
     }
@@ -1827,7 +2797,12 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
   void _initStep5() {
     _suggestSecondsLeft = 300;
-    _suggestDeadline = DateTime.now().add(const Duration(minutes: 5));
+    _suggestDeadline = MeetingPointService.serverNow.add(
+      const Duration(minutes: 5),
+    );
+    _suggestedPointName = '';
+    _suggestedCandidates = [];
+    _suggestionsComputed = false;
     _startStep5SuggestCountdown();
     // status stays 'pending'; hostStep=5 signals waiting_host_confirmation sub-state
     unawaited(_syncMeetingPointProgress());
@@ -1849,7 +2824,16 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     );
   }
 
-  void _rejectSuggestedMeetingPoint() {
+  Future<void> _rejectSuggestedMeetingPoint() async {
+    final confirmed = await ConfirmationDialog.showDeleteConfirmation(
+      context,
+      title: 'Reject Meeting Point',
+      message:
+          'Are you sure you want to reject this meeting point? The meeting will be cancelled for all participants.',
+      cancelText: 'Keep',
+      confirmText: 'Reject',
+    );
+    if (confirmed != true) return;
     _suggestTimer?.cancel();
     if (_meetingPointId != null) {
       unawaited(
@@ -1895,9 +2879,10 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         if (blockingMeeting.hostId == host.uid) {
           throw Exception('You already have an active meeting point.');
         }
-        throw Exception(
-          'Respond to your current meeting invitation before creating a new meeting point.',
-        );
+        final me = blockingMeeting.participantFor(host.uid);
+        if (me != null && me.isAccepted) {
+          throw Exception('You already have an active meeting point.');
+        }
       }
     } on FirebaseException catch (e) {
       // Some rule setups reject the pre-check query. Do not block invite sending
@@ -1943,7 +2928,14 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         ? _myName!.trim()
         : (host.displayName ?? '').trim();
 
-    final meetingPointId = await MeetingPointService.createMeetingPoint(
+    // createMeetingPoint now returns the server-time-based deadline alongside
+    // the document ID.  We use it as _pendingWaitDeadline so the local timer
+    // is anchored to the same Firestore server timestamp that every participant
+    // also reads — eliminating host/participant clock disagreements.
+    final (
+      meetingPointId,
+      serverDeadline,
+    ) = await MeetingPointService.createMeetingPoint(
       hostId: host.uid,
       hostName: hostName.isNotEmpty ? hostName : 'Host',
       hostPhone: (_myPhone ?? '').trim(),
@@ -1952,10 +2944,12 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       placeCategories: _selectedPlaceCategories.toList(),
       hostLocation: _hostLocation?.toMap(),
       participants: participants,
-      waitDeadline: DateTime.now().add(const Duration(minutes: 10)),
+      waitDuration: const Duration(minutes: 2),
     );
+    _pendingWaitDeadline = serverDeadline;
 
     _meetingPointId = meetingPointId;
+
     _selectedFriends
       ..clear()
       ..addAll(
@@ -2026,14 +3020,30 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
             ? const Center(child: CircularProgressIndicator())
             : Column(
                 children: [
-                  _buildHeader(),
-                  _buildProgressBar(),
-                  Expanded(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
-                      child: _buildStepBody(),
+                  // Drag handle
+                  const SizedBox(height: 12),
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey[300],
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
                   ),
+                  _buildHeader(),
+                  _buildProgressBar(),
+                  if (_step == 5)
+                    Expanded(child: _buildStepBody())
+                  else
+                    Expanded(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+                        child: _buildStepBody(),
+                      ),
+                    ),
+                  if (_step == 5) _buildStep5FixedButtons(),
                   _buildFooter(),
                 ],
               ),
@@ -2049,25 +3059,41 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       'Set your location',
       'Review & send',
       'Waiting for participants',
-      'Suggested meeting point',
+      'Confirm suggested meeting point',
     ];
+
+    // Timer badge shown on steps 4 and 5 (same rows as subtitle — mirrors
+    // non-host "View details" sheet where timer sits next to the step label).
+    String? timerLabel;
+    if (_step == 4) {
+      final mm = (_waitSecondsLeft ~/ 60).toString().padLeft(2, '0');
+      final ss = (_waitSecondsLeft % 60).toString().padLeft(2, '0');
+      timerLabel = '$mm:$ss';
+    } else if (_step == 5) {
+      final mm = (_suggestSecondsLeft ~/ 60).toString().padLeft(2, '0');
+      final ss = (_suggestSecondsLeft % 60).toString().padLeft(2, '0');
+      timerLabel = '$mm:$ss';
+    }
+
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            padding: const EdgeInsets.all(8),
+            width: 42,
+            height: 42,
             decoration: BoxDecoration(
               color: Colors.grey[100],
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(10),
             ),
             child: const Icon(
-              Icons.place_outlined,
+              Icons.people_outline,
               color: AppColors.kGreen,
-              size: 24,
+              size: 22,
             ),
           ),
           const SizedBox(width: 12),
@@ -2078,21 +3104,30 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
                 const Text(
                   'Create Meeting Point',
                   style: TextStyle(
-                    fontSize: 18,
+                    fontSize: 17,
                     fontWeight: FontWeight.w700,
                     color: Colors.black87,
                   ),
                 ),
-                Text(
-                  subtitles[_step - 1],
-                  style: const TextStyle(fontSize: 13, color: Colors.black54),
+                const SizedBox(height: 3),
+                // Subtitle row: step description + timer badge
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        subtitles[_step - 1],
+                        style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                      ),
+                    ),
+                    if (timerLabel != null) ...[
+                      const SizedBox(width: 8),
+                      MeetingTimerBadge(label: timerLabel),
+                    ],
+                  ],
                 ),
               ],
             ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.close, color: Colors.black54),
-            onPressed: _handleExitRequested,
           ),
         ],
       ),
@@ -2110,7 +3145,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           ClipRRect(
             borderRadius: BorderRadius.circular(4),
             child: LinearProgressIndicator(
-              value: _step / 5,
+              value: (_step - 1) / 5,
               minHeight: 3,
               backgroundColor: Colors.grey.shade200,
               valueColor: const AlwaysStoppedAnimation(AppColors.kGreen),
@@ -2964,6 +3999,63 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     setState(() {
       _hostLocation = _HostLocation(latitude: x!, longitude: z!, label: label);
     });
+
+    // Persist the picked location to users/{doc}.location.blenderPosition
+    // so suggestions can use the latest saved location.
+    await _saveUserLocationFromResult(result);
+  }
+
+  Map<String, double>? _extractBlenderFromResult(Map<String, dynamic> result) {
+    final blender = result['blender'];
+    if (blender is Map) {
+      final x = (blender['x'] as num?)?.toDouble();
+      final y = (blender['y'] as num?)?.toDouble();
+      final z = (blender['z'] as num?)?.toDouble();
+      if (x != null && y != null && z != null) {
+        return {'x': x, 'y': y, 'z': z};
+      }
+    }
+
+    final gltf = result['gltf'];
+    if (gltf is Map) {
+      final x = (gltf['x'] as num?)?.toDouble();
+      final y = (gltf['y'] as num?)?.toDouble();
+      final z = (gltf['z'] as num?)?.toDouble();
+      if (x != null && y != null && z != null) {
+        // glTF (Y up) -> Blender (Z up)
+        return {'x': x, 'y': -z, 'z': y};
+      }
+    }
+
+    return null;
+  }
+
+  Future<void> _saveUserLocationFromResult(Map<String, dynamic> result) async {
+    final blender = _extractBlenderFromResult(result);
+    if (blender == null) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final floorLabel = (result['floorLabel'] ?? '').toString().trim();
+    final floorValue = floorLabel.isNotEmpty
+        ? floorLabel
+        : (_step2InitialFloorLabel ?? '');
+
+    try {
+      final userDocRef = await _resolveUserDocRef(user);
+      await userDocRef.update({
+        'location.blenderPosition': {
+          'x': blender['x'],
+          'y': blender['y'],
+          'z': blender['z'],
+          'floor': floorValue,
+        },
+        'location.updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      debugPrint('❌ Failed to save user location from meeting form: $e');
+    }
   }
 
   Future<DocumentReference<Map<String, dynamic>>> _resolveUserDocRef(
@@ -2974,6 +4066,14 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     final email = user.email;
     if (email != null && email.isNotEmpty) {
       final snap = await users.where('email', isEqualTo: email).limit(1).get();
+      if (snap.docs.isNotEmpty) {
+        return snap.docs.first.reference;
+      }
+    }
+
+    final phone = user.phoneNumber;
+    if (phone != null && phone.isNotEmpty) {
+      final snap = await users.where('phone', isEqualTo: phone).limit(1).get();
       if (snap.docs.isNotEmpty) {
         return snap.docs.first.reference;
       }
@@ -3188,42 +4288,10 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   // ─────────────────────────────────────────────────────────────────────────
 
   Widget _buildStep4() {
-    final mm = (_waitSecondsLeft ~/ 60).toString().padLeft(2, '0');
-    final ss = (_waitSecondsLeft % 60).toString().padLeft(2, '0');
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            _sectionLabel('Waiting for participants'),
-            const Spacer(),
-            // Small grey timer in top-right corner
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(
-                color: Colors.grey[100],
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: Colors.grey.shade300),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.timer_outlined, size: 13, color: Colors.grey[500]),
-                  const SizedBox(width: 4),
-                  Text(
-                    '$mm:$ss',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[600],
-                      fontWeight: FontWeight.w600,
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+        _sectionLabel('Waiting for participants'),
         const SizedBox(height: 16),
 
         // Participant rows
@@ -3235,7 +4303,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         Align(
           alignment: Alignment.centerLeft,
           child: Text(
-            'Note: you can proceed with accepted participants',
+            'Note: you can proceed with participants who accepted, or cancel the meeting point for all.',
             textAlign: TextAlign.left,
             style: TextStyle(fontSize: 12, color: Colors.grey[400]),
           ),
@@ -3333,110 +4401,388 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   // ─────────────────────────────────────────────────────────────────────────
 
   Widget _buildStep5() {
-    final mm = (_suggestSecondsLeft ~/ 60).toString().padLeft(2, '0');
-    final ss = (_suggestSecondsLeft % 60).toString().padLeft(2, '0');
+    final hasSuggestion = _suggestedPointName.trim().isNotEmpty;
+    final showEmpty = !hasSuggestion && _suggestionsComputed;
+    final primaryName = hasSuggestion
+        ? _suggestedPointName.trim()
+        : (showEmpty ? 'No suitable meeting point found' : 'Calculating...');
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        const SizedBox(height: 10),
-        // Timer at top
-        Align(
-          alignment: Alignment.centerRight,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // Big pin icon centred
+          Container(
+            width: 96,
+            height: 96,
             decoration: BoxDecoration(
-              color: Colors.grey[100],
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.grey.shade300),
+              color: AppColors.kGreen.withOpacity(0.1),
+              shape: BoxShape.circle,
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.timer_outlined, size: 13, color: Colors.grey[500]),
-                const SizedBox(width: 4),
-                Text(
-                  '$mm:$ss',
+            child: const Icon(Icons.place, color: AppColors.kGreen, size: 52),
+          ),
+          const SizedBox(height: 20),
+
+          const Text(
+            'The most suitable meeting point is',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 14, color: Colors.black54),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '"$primaryName"',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.w700,
+              color: hasSuggestion ? Colors.black87 : Colors.grey[500],
+            ),
+          ),
+          const SizedBox(height: 8),
+          if (hasSuggestion)
+            Text(
+              'If you don\'t decide, it will be auto-accepted when the timer runs out.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+            ),
+          if (showEmpty) ...[
+            const SizedBox(height: 10),
+            Text(
+              'Try different categories or make sure everyone\'s location is available.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            ),
+          ],
+
+          const SizedBox(height: 24),
+
+          // ── Participants with distances ────────────────────────────────────
+          Expanded(child: _buildStep5ParticipantList()),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStep5FixedButtons() {
+    final hasSuggestion = _suggestedPointName.trim().isNotEmpty;
+    return Container(
+      padding: EdgeInsets.fromLTRB(
+        20,
+        12,
+        20,
+        MediaQuery.of(context).padding.bottom + 12,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(top: BorderSide(color: Colors.grey.shade200)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: ElevatedButton(
+              onPressed: hasSuggestion ? _acceptSuggestedMeetingPoint : null,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.kGreen,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              child: const Text(
+                'Confirm',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          SecondaryButton(
+            text: 'Reject',
+            onPressed: hasSuggestion ? _rejectSuggestedMeetingPoint : null,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStep5ParticipantList() {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+
+    // Use client-side funneled distances (same algorithm as path_overview).
+    final Map<String, int> distMap = _step5DistMap;
+
+    String formatTime(int meters) {
+      final secs = meters / 1.4;
+      if (secs < 60) return '~1 min';
+      return '~${(secs / 60).ceil()} min';
+    }
+
+    // Accepted non-host participants + those who declined during step 5.
+    final accepted = _participants
+        .where((p) => p.status == _ParticipantStatus.accepted)
+        .toList();
+    final declined = _participants
+        .where((p) => p.status == _ParticipantStatus.declined)
+        .toList();
+
+    if (accepted.isEmpty && uid.isEmpty) return const SizedBox.shrink();
+
+    final isComputing = _step5DistComputing;
+
+    Widget participantTile({
+      required String name,
+      required String phone,
+      required bool isHost,
+      required bool isDeclined,
+      int? distMeters,
+    }) {
+      final statusColor = isDeclined ? AppColors.kError : AppColors.kGreen;
+      final statusText = isDeclined ? 'Declined' : 'Accepted';
+
+      // Time label: shown inline with name, or a tiny spinner while computing.
+      Widget? timeWidget;
+      if (!isDeclined) {
+        if (distMeters != null) {
+          timeWidget = Text(
+            formatTime(distMeters),
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey[500],
+              fontWeight: FontWeight.w500,
+            ),
+          );
+        } else if (isComputing) {
+          timeWidget = SizedBox(
+            width: 10,
+            height: 10,
+            child: CircularProgressIndicator(
+              strokeWidth: 1.5,
+              color: Colors.grey[400],
+            ),
+          );
+        }
+      }
+
+      return Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.grey[50],
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: Colors.grey[200],
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.person, color: Colors.grey[600], size: 20),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Name + time on the same row
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          isHost ? 'Me (Host)' : name,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black87,
+                          ),
+                        ),
+                      ),
+                      if (timeWidget != null) ...[
+                        const SizedBox(width: 6),
+                        timeWidget,
+                      ],
+                    ],
+                  ),
+                  // Phone below name (skip for host)
+                  if (!isHost && phone.isNotEmpty)
+                    Text(
+                      phone,
+                      style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            if (!isHost)
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: statusColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  statusText,
                   style: TextStyle(
                     fontSize: 12,
-                    color: Colors.grey[600],
+                    color: statusColor,
                     fontWeight: FontWeight.w600,
-                    fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
+              ),
+          ],
+        ),
+      );
+    }
+
+    // Build the flat tile list.
+    final tiles = <Widget>[
+      if (uid.isNotEmpty)
+        participantTile(
+          name: _myName ?? '',
+          phone: '',
+          isHost: true,
+          isDeclined: false,
+          distMeters: distMap[uid],
+        ),
+      ...accepted.map(
+        (p) => participantTile(
+          name: p.friend.name,
+          phone: p.friend.phone,
+          isHost: false,
+          isDeclined: false,
+          distMeters: distMap[p.friend.id],
+        ),
+      ),
+      ...declined.map(
+        (p) => participantTile(
+          name: p.friend.name,
+          phone: p.friend.phone,
+          isHost: false,
+          isDeclined: true,
+          distMeters: null,
+        ),
+      ),
+    ];
+
+    // ≤2 tiles: natural height (no scroll, no fixed box).
+    // 3+ tiles: capped at ~2.4 tiles tall with a visible scrollbar.
+    const double tileHeight = 76; // name + phone + margin
+    final isScrollable = tiles.length > 2;
+
+    final listWidget = isScrollable
+        ? Scrollbar(
+            thumbVisibility: true,
+            radius: const Radius.circular(4),
+            child: SizedBox(
+              height: tileHeight * 2.4,
+              child: ListView(
+                padding: EdgeInsets.zero,
+                physics: const ClampingScrollPhysics(),
+                children: tiles,
+              ),
+            ),
+          )
+        : Column(children: tiles);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              'Participants',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey[700],
+              ),
+            ),
+            if (isScrollable) ...[
+              const SizedBox(width: 6),
+              Icon(Icons.expand_more, size: 14, color: Colors.grey[400]),
+            ],
+          ],
+        ),
+        const SizedBox(height: 8),
+        ScrollConfiguration(
+          behavior: ScrollConfiguration.of(context).copyWith(scrollbars: true),
+          child: listWidget,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSuggestedCandidateTile(Map<String, dynamic> raw, int index) {
+    final name = (raw['placeName'] ?? '').toString().trim();
+    final entrance = raw['entrance'] is Map ? raw['entrance'] as Map : null;
+    final floor = entrance?['floor']?.toString().trim() ?? '';
+    final rank = index + 1;
+    if (name.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 26,
+            height: 26,
+            decoration: BoxDecoration(
+              color: AppColors.kGreen.withOpacity(0.15),
+              shape: BoxShape.circle,
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              '$rank',
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: AppColors.kGreen,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black87,
+                  ),
+                ),
+                if (floor.isNotEmpty)
+                  Text(
+                    'Floor: $floor',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  ),
               ],
             ),
           ),
-        ),
-        const SizedBox(height: 30),
-
-        // Big pin icon centred
-        Container(
-          width: 96,
-          height: 96,
-          decoration: BoxDecoration(
-            color: AppColors.kGreen.withOpacity(0.1),
-            shape: BoxShape.circle,
-          ),
-          child: const Icon(Icons.place, color: AppColors.kGreen, size: 52),
-        ),
-        const SizedBox(height: 20),
-
-        const Text(
-          'The most suitable meeting point is',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 14, color: Colors.black54),
-        ),
-        const SizedBox(height: 8),
-        const Text(
-          '"Adidas"',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.w700,
-            color: Colors.black87,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'If you don\'t decide, it will be auto-accepted when the timer runs out.',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-        ),
-
-        const SizedBox(height: 36),
-
-        // Accept button
-        SizedBox(
-          width: double.infinity,
-          height: 52,
-          child: ElevatedButton(
-            onPressed: _acceptSuggestedMeetingPoint,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.kGreen,
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
-            ),
-            child: const Text(
-              'Accept',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-
-        SecondaryButton(
-          text: 'Reject',
-          onPressed: _rejectSuggestedMeetingPoint,
-        ),
-        const SizedBox(height: 20),
-      ],
+        ],
+      ),
     );
   }
 
@@ -3479,8 +4825,26 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     );
   }
 
+  Future<void> _cancelMeetingPointFromForm() async {
+    final confirmed = await ConfirmationDialog.showDeleteConfirmation(
+      context,
+      title: 'Cancel Meeting Point',
+      message:
+          'Are you sure you want to cancel this meeting point for all participants?',
+      cancelText: 'Keep',
+      confirmText: 'Cancel Meeting',
+    );
+    if (confirmed != true) return;
+    _waitTimer?.cancel();
+    unawaited(_syncMeetingPointProgress(status: 'cancelled'));
+    await _completeAndClose(
+      success: false,
+      message: 'Meeting point cancelled.',
+    );
+  }
+
   Widget _buildPrimaryFooterButton() {
-    // Step 4: "Proceed"
+    // Step 4: "Proceed" above, "Cancel" below
     if (_step == 4) {
       final enabled = _step4CanProceed;
       return Column(
@@ -3506,6 +4870,15 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
                   fontWeight: FontWeight.w600,
                 ),
               ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: SecondaryButton(
+              text: 'Cancel',
+              onPressed: _cancelMeetingPointFromForm,
             ),
           ),
         ],

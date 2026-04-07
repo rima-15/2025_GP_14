@@ -1,5 +1,7 @@
 import * as admin from "firebase-admin";
 
+import { computeMeetingPointSuggestions } from "./meeting_point_suggester";
+
 import { setGlobalOptions } from "firebase-functions";
 
 import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
@@ -242,10 +244,1546 @@ export const onTrackRequestCreated = onDocumentCreated(
 
 /* ------------------------------------------------------------------
 
+   Meeting Point Request Notification (Created)
+
+-------------------------------------------------------------------*/
+
+export const onMeetingPointCreated = onDocumentCreated(
+  "meetingPoints/{meetingPointId}",
+  async (event) => {
+    try {
+      const data = event.data?.data();
+      if (!data) return;
+
+      const meetingPointId = event.params.meetingPointId;
+      const hostId = (data.hostId ?? "").toString().trim();
+      const hostName =
+        (data.hostName ?? "Someone").toString().trim() || "Someone";
+      const hostPhone = (data.hostPhone ?? "").toString().trim();
+      const venueId = (data.venueId ?? "").toString().trim();
+      const venueName = (data.venueName ?? "").toString().trim();
+      const waitDeadline = data.waitDeadline ?? null;
+
+      const invitedIds: string[] = Array.isArray(data.invitedUserIds)
+        ? data.invitedUserIds.map((v: any) => (v ?? "").toString().trim())
+        : [];
+      const participantIds: string[] = Array.isArray(data.participants)
+        ? data.participants
+            .map((p: any) => (p?.userId ?? "").toString().trim())
+            .filter((v: string) => v.length > 0)
+        : [];
+
+      const targetIds = Array.from(
+        new Set([...invitedIds, ...participantIds])
+      ).filter((id) => id && id !== hostId);
+
+      if (targetIds.length === 0) {
+        console.log("No invited users for meeting point");
+        return;
+      }
+
+      const title = "Meeting Point Request";
+      const body = `${hostName} invites you to a shared meeting point`;
+
+      const batch = db.batch();
+
+      for (const uid of targetIds) {
+        const userDoc = await db.collection("users").doc(uid).get();
+        if (!userDoc.exists) continue;
+
+        const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
+
+        if (tokens.length > 0) {
+          try {
+            await admin.messaging().sendEachForMulticast({
+              notification: {
+                title,
+                body,
+              },
+              data: {
+                type: "meetingPointRequest",
+                requestId: meetingPointId,
+                meetingPointId: meetingPointId,
+              },
+              tokens,
+            });
+          } catch (err) {
+            console.error(`Failed to send meeting point push to ${uid}`, err);
+          }
+        } else {
+          console.log(`No FCM tokens for user ${uid}`);
+        }
+
+        const notifRef = db.collection("notifications").doc();
+        batch.set(notifRef, {
+          userId: uid,
+          type: "meetingPointRequest",
+          requiresAction: true,
+          actionTaken: false,
+          isRead: false,
+          requestStatus: "pending",
+          title,
+          body,
+          data: {
+            requestId: meetingPointId,
+            meetingPointId: meetingPointId,
+            senderId: hostId || null,
+            senderName: hostName || null,
+            senderPhone: hostPhone || null,
+            venueId: venueId || null,
+            venueName: venueName || null,
+            waitDeadline: waitDeadline || null,
+            waitDurationSeconds: data.waitDurationSeconds ?? null,
+          },
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+
+      await batch.commit();
+    } catch (error) {
+      console.error("Error sending meeting point notifications:", error);
+    }
+  }
+);
+
+/* ------------------------------------------------------------------
+
+   Meeting Point Request Notification (Wait Deadline Set)
+
+   - When waitDeadline becomes available (or changes), push it into the
+     pending invite notifications so the countdown appears immediately
+     without extra client reads.
+
+-------------------------------------------------------------------*/
+
+export const onMeetingPointWaitDeadlineSet = onDocumentUpdated(
+  "meetingPoints/{meetingPointId}",
+  async (event) => {
+    try {
+      const before = event.data?.before.data();
+      const after = event.data?.after.data();
+      if (!before || !after) return;
+
+      const beforeMs = before.waitDeadline?.toMillis?.() ?? null;
+      const afterMs = after.waitDeadline?.toMillis?.() ?? null;
+      if (afterMs == null || afterMs === beforeMs) return;
+
+      const meetingPointId = event.params.meetingPointId;
+      if (!meetingPointId) return;
+
+      const hostId = (after.hostId ?? "").toString().trim();
+      const participants: any[] = Array.isArray(after.participants)
+        ? after.participants
+        : [];
+      const targetIds = participants
+        .map((p: any) => (p?.userId ?? "").toString().trim())
+        .filter((uid: string) => uid && uid !== hostId);
+
+      if (targetIds.length === 0) return;
+
+      let batch = db.batch();
+      let ops = 0;
+      const commits: Promise<any>[] = [];
+
+      for (const uid of targetIds) {
+        const snap = await db
+          .collection("notifications")
+          .where("userId", "==", uid)
+          .where("type", "==", "meetingPointRequest")
+          .get();
+
+        for (const doc of snap.docs) {
+          const data: any = doc.data() ?? {};
+          const payload: any = data.data ?? {};
+          const requestId = (payload.meetingPointId ??
+            payload.requestId ??
+            "").toString();
+          if (requestId !== meetingPointId) continue;
+
+          batch.update(doc.ref, {
+            "data.waitDeadline": after.waitDeadline,
+          });
+
+          ops++;
+          if (ops >= 450) {
+            commits.push(batch.commit());
+            batch = db.batch();
+            ops = 0;
+          }
+        }
+      }
+
+      if (ops > 0) commits.push(batch.commit());
+      if (commits.length > 0) await Promise.all(commits);
+    } catch (error) {
+      console.error("Error updating waitDeadline in notifications:", error);
+    }
+  }
+);
+
+/* ------------------------------------------------------------------
+
+   Meeting Point Request Notification (Status Update)
+
+   - When a participant accepts/declines, update their notification
+     to reflect the new status.
+
+-------------------------------------------------------------------*/
+
+export const onMeetingPointParticipantStatusChanged = onDocumentUpdated(
+  "meetingPoints/{meetingPointId}",
+  async (event) => {
+    try {
+      const before = event.data?.before.data();
+      const after = event.data?.after.data();
+      if (!before || !after) return;
+
+      const meetingPointId = event.params.meetingPointId;
+      if (!meetingPointId) return;
+
+      const hostId = (after.hostId ?? "").toString().trim();
+
+      const normalizeStatus = (raw: any) => {
+        const s = (raw ?? "pending").toString().trim().toLowerCase();
+        return s === "accepted" || s === "declined" || s === "pending"
+          ? s
+          : "pending";
+      };
+
+      const buildMap = (list: any[]) => {
+        const map = new Map<string, string>();
+        for (const p of list) {
+          const uid = (p?.userId ?? "").toString().trim();
+          if (!uid) continue;
+          map.set(uid, normalizeStatus(p?.status));
+        }
+        return map;
+      };
+
+      const beforeParticipants: any[] = Array.isArray(before.participants)
+        ? before.participants
+        : [];
+      const afterParticipants: any[] = Array.isArray(after.participants)
+        ? after.participants
+        : [];
+
+      const beforeMap = buildMap(beforeParticipants);
+      const afterMap = buildMap(afterParticipants);
+
+      const changed: Array<{ uid: string; status: string }> = [];
+      for (const [uid, status] of afterMap.entries()) {
+        if (!uid || uid === hostId) continue;
+        const prev = beforeMap.get(uid) ?? "pending";
+        if (status === prev) continue;
+        if (status !== "accepted" && status !== "declined") continue;
+        changed.push({ uid, status });
+      }
+
+      if (changed.length === 0) return;
+
+      let batch = db.batch();
+      let ops = 0;
+      const commits: Promise<any>[] = [];
+
+      for (const item of changed) {
+        const snap = await db
+          .collection("notifications")
+          .where("userId", "==", item.uid)
+          .where("type", "==", "meetingPointRequest")
+          .get();
+
+        for (const doc of snap.docs) {
+          const data: any = doc.data() ?? {};
+          const payload: any = data.data ?? {};
+          const requestId = (payload.meetingPointId ??
+            payload.requestId ??
+            "").toString();
+          if (requestId !== meetingPointId) continue;
+
+          batch.update(doc.ref, {
+            requestStatus: item.status,
+            "data.requestStatus": item.status,
+            actionTaken: true,
+            requiresAction: false,
+            actionTakenAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          ops++;
+          if (ops >= 450) {
+            commits.push(batch.commit());
+            batch = db.batch();
+            ops = 0;
+          }
+        }
+      }
+
+      if (ops > 0) commits.push(batch.commit());
+      if (commits.length > 0) await Promise.all(commits);
+    } catch (error) {
+      console.error(
+        "Error updating meeting point notification status:",
+        error
+      );
+    }
+  }
+);
+
+/* ------------------------------------------------------------------
+
+   Meeting Point Request Notification (Cancelled)
+
+   - When the meeting is cancelled, mark PENDING invitees as cancelled
+     so their notifications show "Cancelled" and buttons are hidden.
+
+-------------------------------------------------------------------*/
+
+export const onMeetingPointCancelled = onDocumentUpdated(
+  "meetingPoints/{meetingPointId}",
+  async (event) => {
+    try {
+      const before = event.data?.before.data();
+      const after = event.data?.after.data();
+      if (!before || !after) return;
+
+      const normalizeStatus = (raw: any) => {
+        const s = (raw ?? "pending").toString().trim().toLowerCase();
+        return s === "cancelled" || s === "completed" || s === "active"
+          ? s
+          : "pending";
+      };
+
+      const beforeStatus = normalizeStatus(before.status);
+      const afterStatus = normalizeStatus(after.status);
+
+      if (beforeStatus === afterStatus) return;
+      if (afterStatus !== "cancelled") return;
+
+      const meetingPointId = event.params.meetingPointId;
+      if (!meetingPointId) return;
+
+      const hostId = (after.hostId ?? "").toString().trim();
+      const cancellationReason = (after.cancellationReason ?? "")
+        .toString()
+        .trim();
+      const hostStep = Number(after.hostStep ?? 0);
+      const hasConfirmedAt =
+        after.confirmedAt != null &&
+        typeof after.confirmedAt?.toDate === "function";
+      const wasActiveBefore = beforeStatus === "active";
+
+      const participants: any[] = Array.isArray(after.participants)
+        ? after.participants
+        : [];
+      const beforeParticipants: any[] = Array.isArray(before.participants)
+        ? before.participants
+        : [];
+
+      const statusOf = (p: any) =>
+        (p?.status ?? "pending").toString().trim().toLowerCase();
+      const arrivalStatusOf = (p: any) =>
+        (p?.arrivalStatus ?? "on_the_way").toString().trim().toLowerCase();
+
+      const allDeclined =
+        participants.length > 0 &&
+        participants.every((p: any) => statusOf(p) === "declined");
+      const anyAccepted = participants.some(
+        (p: any) => statusOf(p) === "accepted"
+      );
+      const hadAcceptedBefore = beforeParticipants.some(
+        (p: any) => statusOf(p) === "accepted"
+      );
+      const hostArrivalStatus = (after.hostArrivalStatus ?? "on_the_way")
+        .toString()
+        .trim()
+        .toLowerCase();
+      const hostActive = hostArrivalStatus !== "cancelled";
+      const activeAccepted = participants.filter(
+        (p: any) =>
+          statusOf(p) === "accepted" && arrivalStatusOf(p) !== "cancelled"
+      );
+      const waitDeadline =
+        typeof after.waitDeadline?.toDate === "function"
+          ? after.waitDeadline.toDate()
+          : null;
+      const waitExpired = waitDeadline
+        ? waitDeadline.getTime() <= Date.now()
+        : false;
+      const preActive = !hasConfirmedAt;
+      const expirePending = preActive && hostStep === 4 && waitExpired;
+
+      // Notify host only when no one accepted (all declined OR time expired with
+      // no accept). This matches "all_participants_declined" cancellation.
+      if (
+        hostId &&
+        preActive &&
+        !anyAccepted &&
+        (allDeclined ||
+          waitExpired ||
+          cancellationReason === "all_participants_declined" ||
+          cancellationReason === "all_participants_left")
+      ) {
+        try {
+          const hostDoc = await db.collection("users").doc(hostId).get();
+          if (hostDoc.exists) {
+            const tokens: string[] = hostDoc.data()?.fcmTokens ?? [];
+            const venueName = (after.venueName ?? "").toString().trim();
+            const locationLabel = venueName ? ` at ${venueName}` : "";
+            const title = "Meeting Point Cancelled";
+            const body =
+              hadAcceptedBefore && hostStep >= 5
+                ? `No more participants left to proceed the meeting point${locationLabel}.`
+                : `No one accepted the meeting point invitation${locationLabel}.`;
+
+            const notifRef = db.collection("notifications").doc();
+            const notifId = notifRef.id;
+
+            if (tokens.length > 0) {
+              await admin.messaging().sendEachForMulticast({
+                notification: { title, body },
+                data: {
+                  type: "meetingPointCancelled",
+                  requestId: notifId,
+                  meetingPointId: meetingPointId,
+                },
+                tokens,
+              });
+            }
+
+              await notifRef.set({
+                userId: hostId,
+                type: "meetingPointCancelled",
+                requiresAction: false,
+                data: {
+                requestId: notifId,
+                meetingPointId: meetingPointId,
+                reason: "no_accepts",
+              },
+              title,
+              body,
+              isRead: false,
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+          }
+        } catch (notifyError) {
+          console.error(
+            "Error sending host meeting point cancelled notification:",
+            notifyError
+          );
+        }
+      }
+
+      // Active meeting: only one active user remains (host or participant).
+      if (
+        hostId &&
+        (hasConfirmedAt || wasActiveBefore) &&
+        cancellationReason === "all_participants_left"
+      ) {
+        const remainingIds = [
+          ...(hostActive ? [hostId] : []),
+          ...activeAccepted
+            .map((p: any) => (p?.userId ?? "").toString().trim())
+            .filter((uid: string) => uid && uid !== hostId),
+        ];
+
+        if (remainingIds.length === 1) {
+          const targetId = remainingIds[0];
+          try {
+            const userDoc = await db.collection("users").doc(targetId).get();
+            if (userDoc.exists) {
+              const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
+              const venueName = (after.venueName ?? "").toString().trim();
+              const locationLabel = venueName ? ` at ${venueName}` : "";
+              const title = "Meeting Point Cancelled";
+              const body = `No more participants left to proceed the meeting point${locationLabel}.`;
+
+              const notifRef = db.collection("notifications").doc();
+              const notifId = notifRef.id;
+
+              if (tokens.length > 0) {
+                await admin.messaging().sendEachForMulticast({
+                  notification: { title, body },
+                  data: {
+                    type: "meetingPointCancelled",
+                    requestId: notifId,
+                    meetingPointId: meetingPointId,
+                  },
+                  tokens,
+                });
+              }
+
+              await notifRef.set({
+                userId: targetId,
+                type: "meetingPointCancelled",
+                requiresAction: false,
+                data: {
+                  requestId: notifId,
+                  meetingPointId: meetingPointId,
+                  reason: "all_participants_left",
+                },
+                title,
+                body,
+                isRead: false,
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+              });
+            }
+          } catch (notifyError) {
+            console.error(
+              "Error sending active meeting remaining-user notification:",
+              notifyError
+            );
+          }
+        }
+      }
+
+      // Host cancelled for all during active meeting: notify active participants.
+      if (
+        hostId &&
+        (hasConfirmedAt || wasActiveBefore) &&
+        cancellationReason === "host_cancelled"
+      ) {
+        const acceptedIds = activeAccepted
+          .map((p: any) => (p?.userId ?? "").toString().trim())
+          .filter((uid: string) => uid && uid !== hostId);
+
+        if (acceptedIds.length > 0) {
+          const hostName =
+            (after.hostName ?? "Host").toString().trim() || "Host";
+          const venueName = (after.venueName ?? "").toString().trim();
+          const locationLabel = venueName ? ` at ${venueName}` : "";
+          const title = "Meeting Point Cancelled";
+          const body = `${hostName} cancelled the meeting point${locationLabel}.`;
+
+          let batch = db.batch();
+          let ops = 0;
+          const commits: Promise<any>[] = [];
+
+          for (const uid of acceptedIds) {
+            const userDoc = await db.collection("users").doc(uid).get();
+            if (!userDoc.exists) continue;
+
+            const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
+            const notifRef = db.collection("notifications").doc();
+            const notifId = notifRef.id;
+
+            if (tokens.length > 0) {
+              try {
+                await admin.messaging().sendEachForMulticast({
+                  notification: { title, body },
+                  data: {
+                    type: "meetingPointCancelled",
+                    requestId: notifId,
+                    meetingPointId: meetingPointId,
+                  },
+                  tokens,
+                });
+              } catch (err) {
+                console.error(
+                  `Failed to send meeting point cancel to ${uid}`,
+                  err
+                );
+              }
+            }
+
+            batch.set(notifRef, {
+              userId: uid,
+              type: "meetingPointCancelled",
+              requiresAction: false,
+              data: {
+                requestId: notifId,
+                meetingPointId: meetingPointId,
+                reason: "host_cancelled",
+                senderId: hostId,
+                senderName: hostName,
+                venueName: venueName || null,
+              },
+              title,
+              body,
+              isRead: false,
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+
+            ops++;
+            if (ops >= 450) {
+              commits.push(batch.commit());
+              batch = db.batch();
+              ops = 0;
+            }
+          }
+
+          if (ops > 0) commits.push(batch.commit());
+          if (commits.length > 0) await Promise.all(commits);
+        }
+      }
+
+      // Host cancelled during step 4: notify only accepted participants.
+      if (hostStep === 4) {
+        const acceptedIds = participants
+          .filter((p: any) => statusOf(p) === "accepted")
+          .map((p: any) => (p?.userId ?? "").toString().trim())
+          .filter((uid: string) => uid && uid !== hostId);
+
+        if (acceptedIds.length > 0 && hostId) {
+          const hostName =
+            (after.hostName ?? "Host").toString().trim() || "Host";
+          const venueName = (after.venueName ?? "").toString().trim();
+          const locationLabel = venueName ? ` at ${venueName}` : "";
+          const title = "Meeting Point Cancelled";
+          const body = `${hostName} cancelled the meeting point${locationLabel}.`;
+
+          let batch = db.batch();
+          let ops = 0;
+          const commits: Promise<any>[] = [];
+
+          for (const uid of acceptedIds) {
+            const userDoc = await db.collection("users").doc(uid).get();
+            if (!userDoc.exists) continue;
+
+            const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
+            const notifRef = db.collection("notifications").doc();
+            const notifId = notifRef.id;
+
+            if (tokens.length > 0) {
+              try {
+                await admin.messaging().sendEachForMulticast({
+                  notification: { title, body },
+                  data: {
+                    type: "meetingPointCancelled",
+                    requestId: notifId,
+                    meetingPointId: meetingPointId,
+                  },
+                  tokens,
+                });
+              } catch (err) {
+                console.error(
+                  `Failed to send meeting point cancel to ${uid}`,
+                  err
+                );
+              }
+            }
+
+            batch.set(notifRef, {
+              userId: uid,
+              type: "meetingPointCancelled",
+              requiresAction: false,
+              data: {
+                requestId: notifId,
+                meetingPointId: meetingPointId,
+                reason: "host_cancelled",
+                senderId: hostId,
+                senderName: hostName,
+                venueName: venueName || null,
+              },
+              title,
+              body,
+              isRead: false,
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+
+            ops++;
+            if (ops >= 450) {
+              commits.push(batch.commit());
+              batch = db.batch();
+              ops = 0;
+            }
+          }
+
+          if (ops > 0) commits.push(batch.commit());
+          if (commits.length > 0) await Promise.all(commits);
+        }
+      }
+
+      // All accepted participants cancelled at step 5 (setup phase):
+      // notify the host that everyone left.
+      if (
+        hostStep === 5 &&
+        !hasConfirmedAt &&
+        cancellationReason === "all_participants_left" &&
+        hostId
+      ) {
+        try {
+          const hostDoc = await db.collection("users").doc(hostId).get();
+          if (hostDoc.exists) {
+            const tokens: string[] = hostDoc.data()?.fcmTokens ?? [];
+            const venueName = (after.venueName ?? "").toString().trim();
+            const locationLabel = venueName ? ` at ${venueName}` : "";
+            const title = "Meeting Point Cancelled";
+            const body = `All participants cancelled their participation in the meeting point${locationLabel}.`;
+
+            const notifRef = db.collection("notifications").doc();
+            const notifId = notifRef.id;
+
+            if (tokens.length > 0) {
+              await admin.messaging().sendEachForMulticast({
+                notification: { title, body },
+                data: {
+                  type: "meetingPointCancelled",
+                  requestId: notifId,
+                  meetingPointId: meetingPointId,
+                },
+                tokens,
+              });
+            }
+
+            await notifRef.set({
+              userId: hostId,
+              type: "meetingPointCancelled",
+              requiresAction: false,
+              data: {
+                requestId: notifId,
+                meetingPointId: meetingPointId,
+                reason: "all_participants_left",
+              },
+              title,
+              body,
+              isRead: false,
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+          }
+        } catch (notifyError) {
+          console.error(
+            "Error sending host all-participants-left notification:",
+            notifyError
+          );
+        }
+      }
+
+      // Host cancelled during step 5 before confirmation:
+      // notify accepted participants (not a rejection case).
+      if (
+        hostStep === 5 &&
+        !hasConfirmedAt &&
+        cancellationReason === "host_cancelled"
+      ) {
+        const acceptedIds = participants
+          .filter((p: any) => statusOf(p) === "accepted")
+          .map((p: any) => (p?.userId ?? "").toString().trim())
+          .filter((uid: string) => uid && uid !== hostId);
+
+        if (acceptedIds.length > 0 && hostId) {
+          const hostName =
+            (after.hostName ?? "Host").toString().trim() || "Host";
+          const venueName = (after.venueName ?? "").toString().trim();
+          const locationLabel = venueName ? ` at ${venueName}` : "";
+          const title = "Meeting Point Cancelled";
+          const body = `${hostName} cancelled the meeting point${locationLabel}.`;
+
+          let batch = db.batch();
+          let ops = 0;
+          const commits: Promise<any>[] = [];
+
+          for (const uid of acceptedIds) {
+            const userDoc = await db.collection("users").doc(uid).get();
+            if (!userDoc.exists) continue;
+
+            const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
+            const notifRef = db.collection("notifications").doc();
+            const notifId = notifRef.id;
+
+            if (tokens.length > 0) {
+              try {
+                await admin.messaging().sendEachForMulticast({
+                  notification: { title, body },
+                  data: {
+                    type: "meetingPointCancelled",
+                    requestId: notifId,
+                    meetingPointId: meetingPointId,
+                  },
+                  tokens,
+                });
+              } catch (err) {
+                console.error(
+                  `Failed to send meeting point cancel to ${uid}`,
+                  err
+                );
+              }
+            }
+
+            batch.set(notifRef, {
+              userId: uid,
+              type: "meetingPointCancelled",
+              requiresAction: false,
+              data: {
+                requestId: notifId,
+                meetingPointId: meetingPointId,
+                reason: "host_cancelled",
+                senderId: hostId,
+                senderName: hostName,
+                venueName: venueName || null,
+              },
+              title,
+              body,
+              isRead: false,
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+
+            ops++;
+            if (ops >= 450) {
+              commits.push(batch.commit());
+              batch = db.batch();
+              ops = 0;
+            }
+          }
+
+          if (ops > 0) commits.push(batch.commit());
+          if (commits.length > 0) await Promise.all(commits);
+        }
+      }
+
+      // Host rejected suggested point (step 5, not confirmed yet):
+      // notify accepted participants.
+      if (
+        hostStep === 5 &&
+        !hasConfirmedAt &&
+        cancellationReason === "host_rejected_suggestion"
+      ) {
+        const acceptedIds = participants
+          .filter((p: any) => statusOf(p) === "accepted")
+          .map((p: any) => (p?.userId ?? "").toString().trim())
+          .filter((uid: string) => uid && uid !== hostId);
+
+        if (acceptedIds.length > 0 && hostId) {
+          const hostName =
+            (after.hostName ?? "Host").toString().trim() || "Host";
+          const title = "Meeting Point Cancelled";
+          const body = `${hostName} rejected the suggested meeting point.`;
+
+          let batch = db.batch();
+          let ops = 0;
+          const commits: Promise<any>[] = [];
+
+          for (const uid of acceptedIds) {
+            const userDoc = await db.collection("users").doc(uid).get();
+            if (!userDoc.exists) continue;
+
+            const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
+            const notifRef = db.collection("notifications").doc();
+            const notifId = notifRef.id;
+
+            if (tokens.length > 0) {
+              try {
+                await admin.messaging().sendEachForMulticast({
+                  notification: { title, body },
+                  data: {
+                    type: "meetingPointCancelled",
+                    requestId: notifId,
+                    meetingPointId: meetingPointId,
+                  },
+                  tokens,
+                });
+              } catch (err) {
+                console.error(
+                  `Failed to send meeting point rejected to ${uid}`,
+                  err
+                );
+              }
+            }
+
+            batch.set(notifRef, {
+              userId: uid,
+              type: "meetingPointCancelled",
+              requiresAction: false,
+              data: {
+                requestId: notifId,
+                meetingPointId: meetingPointId,
+                reason: "host_rejected_suggestion",
+                senderId: hostId,
+                senderName: hostName,
+              },
+              title,
+              body,
+              isRead: false,
+              createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+
+            ops++;
+            if (ops >= 450) {
+              commits.push(batch.commit());
+              batch = db.batch();
+              ops = 0;
+            }
+          }
+
+          if (ops > 0) commits.push(batch.commit());
+          if (commits.length > 0) await Promise.all(commits);
+        }
+      }
+
+      const pendingIds = participants
+        .filter((p: any) => {
+          return statusOf(p) === "pending";
+        })
+        .map((p: any) => (p?.userId ?? "").toString().trim())
+        .filter((uid: string) => uid && uid !== hostId);
+
+      if (pendingIds.length === 0) return;
+
+      let batch = db.batch();
+      let ops = 0;
+      const commits: Promise<any>[] = [];
+
+      const pendingStatus = expirePending ? "expired" : "cancelled";
+
+      for (const uid of pendingIds) {
+        const snap = await db
+          .collection("notifications")
+          .where("userId", "==", uid)
+          .where("type", "==", "meetingPointRequest")
+          .get();
+
+        for (const doc of snap.docs) {
+          const data: any = doc.data() ?? {};
+          const payload: any = data.data ?? {};
+          const requestId = (payload.meetingPointId ??
+            payload.requestId ??
+            "").toString();
+          if (requestId !== meetingPointId) continue;
+
+          const currentStatus = (data.requestStatus ??
+            payload.requestStatus ??
+            "pending")
+            .toString()
+            .trim()
+            .toLowerCase();
+          if (currentStatus !== "pending") {
+            continue;
+          }
+
+          batch.update(doc.ref, {
+            requestStatus: pendingStatus,
+            "data.requestStatus": pendingStatus,
+            actionTaken: true,
+            requiresAction: false,
+            actionTakenAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          ops++;
+          if (ops >= 450) {
+            commits.push(batch.commit());
+            batch = db.batch();
+            ops = 0;
+          }
+        }
+      }
+
+      if (ops > 0) commits.push(batch.commit());
+      if (commits.length > 0) await Promise.all(commits);
+    } catch (error) {
+      console.error("Error updating cancelled meeting notifications:", error);
+    }
+  }
+);
+
+/* ------------------------------------------------------------------
+
+   Meeting Point Request Notification (Expired)
+
+   - When host moves from step 4 → 5, any PENDING invitees should
+     be marked as expired (no more accept/decline).
+
+-------------------------------------------------------------------*/
+
+export const onMeetingPointInviteWindowClosed = onDocumentUpdated(
+  "meetingPoints/{meetingPointId}",
+  async (event) => {
+    try {
+      const before = event.data?.before.data();
+      const after = event.data?.after.data();
+      if (!before || !after) return;
+
+      const beforeStep = Number(before.hostStep ?? 0);
+      const afterStep = Number(after.hostStep ?? 0);
+      if (!(beforeStep === 4 && afterStep === 5)) return;
+
+      const status = (after.status ?? "").toString().trim().toLowerCase();
+      if (status && status !== "pending") return;
+
+      const meetingPointId = event.params.meetingPointId;
+      if (!meetingPointId) return;
+
+      const hostId = (after.hostId ?? "").toString().trim();
+
+      const participants: any[] = Array.isArray(after.participants)
+        ? after.participants
+        : [];
+
+      const pendingIds = participants
+        .filter((p: any) => {
+          const s = (p?.status ?? "pending").toString().trim().toLowerCase();
+          return s === "pending";
+        })
+        .map((p: any) => (p?.userId ?? "").toString().trim())
+        .filter((uid: string) => uid && uid !== hostId);
+
+      if (pendingIds.length === 0) return;
+
+      let batch = db.batch();
+      let ops = 0;
+      const commits: Promise<any>[] = [];
+
+      for (const uid of pendingIds) {
+        const snap = await db
+          .collection("notifications")
+          .where("userId", "==", uid)
+          .where("type", "==", "meetingPointRequest")
+          .get();
+
+        for (const doc of snap.docs) {
+          const data: any = doc.data() ?? {};
+          const payload: any = data.data ?? {};
+          const requestId = (payload.meetingPointId ??
+            payload.requestId ??
+            "").toString();
+          if (requestId !== meetingPointId) continue;
+
+          batch.update(doc.ref, {
+            requestStatus: "expired",
+            "data.requestStatus": "expired",
+            actionTaken: true,
+            requiresAction: false,
+            actionTakenAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          ops++;
+          if (ops >= 450) {
+            commits.push(batch.commit());
+            batch = db.batch();
+            ops = 0;
+          }
+        }
+      }
+
+      if (ops > 0) commits.push(batch.commit());
+      if (commits.length > 0) await Promise.all(commits);
+    } catch (error) {
+      console.error("Error marking meeting invites as expired:", error);
+    }
+  }
+);
+
+/* ------------------------------------------------------------------
+
+   Meeting Point Started Notification (Active)
+
+   - When a meeting point becomes active, notify accepted participants.
+
+-------------------------------------------------------------------*/
+
+export const onMeetingPointStarted = onDocumentUpdated(
+  "meetingPoints/{meetingPointId}",
+  async (event) => {
+    try {
+      const before = event.data?.before.data();
+      const after = event.data?.after.data();
+      if (!before || !after) return;
+
+      const normalizeStatus = (raw: any) => {
+        const s = (raw ?? "pending").toString().trim().toLowerCase();
+        return s === "active" ||
+          s === "pending" ||
+          s === "cancelled" ||
+          s === "completed"
+          ? s
+          : "pending";
+      };
+
+      const beforeStatus = normalizeStatus(before.status);
+      const afterStatus = normalizeStatus(after.status);
+      if (afterStatus !== "active" || beforeStatus === "active") return;
+
+      const meetingPointId = event.params.meetingPointId;
+      if (!meetingPointId) return;
+
+      const hostId = (after.hostId ?? "").toString().trim();
+      const hostName =
+        (after.hostName ?? "Someone").toString().trim() || "Someone";
+      const venueName = (after.venueName ?? "").toString().trim();
+      const pointName = (after.suggestedPoint ?? "").toString().trim();
+      const locationName = pointName || venueName || "the meeting point";
+
+      const participants: any[] = Array.isArray(after.participants)
+        ? after.participants
+        : [];
+      const statusOf = (p: any) =>
+        (p?.status ?? "pending").toString().trim().toLowerCase();
+      const acceptedIds = participants
+        .filter((p: any) => statusOf(p) === "accepted")
+        .map((p: any) => (p?.userId ?? "").toString().trim())
+        .filter((uid: string) => uid && uid !== hostId);
+
+      if (acceptedIds.length === 0) return;
+
+      const title = "Meeting point started";
+      const body = `${hostName} will meet you at ${locationName}.`;
+
+      let batch = db.batch();
+      let ops = 0;
+      const commits: Promise<any>[] = [];
+
+      for (const uid of acceptedIds) {
+        const userDoc = await db.collection("users").doc(uid).get();
+        if (!userDoc.exists) continue;
+
+        const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
+        const notifRef = db.collection("notifications").doc();
+        const notifId = notifRef.id;
+
+        if (tokens.length > 0) {
+          try {
+            await admin.messaging().sendEachForMulticast({
+              notification: { title, body },
+              data: {
+                type: "meetingPointStarted",
+                requestId: notifId,
+                meetingPointId: meetingPointId,
+              },
+              tokens,
+            });
+          } catch (err) {
+            console.error(
+              `Failed to send meeting point started to ${uid}`,
+              err
+            );
+          }
+        }
+
+        batch.set(notifRef, {
+          userId: uid,
+          type: "meetingPointStarted",
+          requiresAction: false,
+          data: {
+            requestId: notifId,
+            meetingPointId: meetingPointId,
+            senderId: hostId,
+            senderName: hostName,
+            pointName: pointName || null,
+            venueName: venueName || null,
+          },
+          title,
+          body,
+          isRead: false,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        ops++;
+        if (ops >= 450) {
+          commits.push(batch.commit());
+          batch = db.batch();
+          ops = 0;
+        }
+      }
+
+      if (ops > 0) commits.push(batch.commit());
+      if (commits.length > 0) await Promise.all(commits);
+    } catch (error) {
+      console.error("Error sending meeting point started notifications:", error);
+    }
+  }
+);
+
+/* ------------------------------------------------------------------
+
+   Meeting Point Completed Notification
+
+   - When a meeting point becomes completed, notify arrived participants
+     who did not leave the session.
+
+-------------------------------------------------------------------*/
+
+export const onMeetingPointCompleted = onDocumentUpdated(
+  "meetingPoints/{meetingPointId}",
+  async (event) => {
+    try {
+      const before = event.data?.before.data();
+      const after = event.data?.after.data();
+      if (!before || !after) return;
+
+      const normalizeStatus = (raw: any) => {
+        const s = (raw ?? "pending").toString().trim().toLowerCase();
+        return s === "active" ||
+          s === "pending" ||
+          s === "cancelled" ||
+          s === "completed"
+          ? s
+          : "pending";
+      };
+
+      const beforeStatus = normalizeStatus(before.status);
+      const afterStatus = normalizeStatus(after.status);
+      if (afterStatus !== "completed" || beforeStatus === "completed") return;
+
+      const meetingPointId = event.params.meetingPointId;
+      if (!meetingPointId) return;
+
+      const hostId = (after.hostId ?? "").toString().trim();
+      const hostName =
+        (after.hostName ?? "Someone").toString().trim() || "Someone";
+      const venueName = (after.venueName ?? "").toString().trim();
+      const pointName = (after.suggestedPoint ?? "").toString().trim();
+      const locationName = pointName || venueName || "meeting point";
+
+      const hostArrival = (after.hostArrivalStatus ?? "on_the_way")
+        .toString()
+        .trim()
+        .toLowerCase();
+
+      const participants: any[] = Array.isArray(after.participants)
+        ? after.participants
+        : [];
+      const statusOf = (p: any) =>
+        (p?.status ?? "pending").toString().trim().toLowerCase();
+      const arrivalOf = (p: any) =>
+        (p?.arrivalStatus ?? "on_the_way").toString().trim().toLowerCase();
+
+      const targetIds = new Set<string>();
+      if (hostId && hostArrival === "arrived") targetIds.add(hostId);
+      for (const p of participants) {
+        if (statusOf(p) !== "accepted") continue;
+        if (arrivalOf(p) !== "arrived") continue;
+        const uid = (p?.userId ?? "").toString().trim();
+        if (uid) targetIds.add(uid);
+      }
+
+      if (targetIds.size === 0) return;
+
+      const title = "Meeting Point Completed";
+      const body = `All participants arrived at "${locationName}".`;
+
+      let batch = db.batch();
+      let ops = 0;
+      const commits: Promise<any>[] = [];
+
+      for (const uid of targetIds) {
+        const userDoc = await db.collection("users").doc(uid).get();
+        if (!userDoc.exists) continue;
+
+        const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
+        const notifRef = db.collection("notifications").doc();
+        const notifId = notifRef.id;
+
+        if (tokens.length > 0) {
+          try {
+            await admin.messaging().sendEachForMulticast({
+              notification: { title, body },
+              data: {
+                type: "meetingPointCompleted",
+                requestId: notifId,
+                meetingPointId: meetingPointId,
+              },
+              tokens,
+            });
+          } catch (err) {
+            console.error(
+              `Failed to send meeting point completed to ${uid}`,
+              err
+            );
+          }
+        }
+
+        batch.set(notifRef, {
+          userId: uid,
+          type: "meetingPointCompleted",
+          requiresAction: false,
+          data: {
+            requestId: notifId,
+            meetingPointId: meetingPointId,
+            senderId: hostId || null,
+            senderName: hostName || null,
+            pointName: pointName || null,
+            venueName: venueName || null,
+          },
+          title,
+          body,
+          isRead: false,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        ops++;
+        if (ops >= 450) {
+          commits.push(batch.commit());
+          batch = db.batch();
+          ops = 0;
+        }
+      }
+
+      if (ops > 0) commits.push(batch.commit());
+      if (commits.length > 0) await Promise.all(commits);
+    } catch (error) {
+      console.error("Error sending meeting point completed notifications:", error);
+    }
+  }
+);
+
+/* ------------------------------------------------------------------
+
+   Meeting Point Refresh Location Request (Manual)
+
+   - When a participant requests a location refresh, notify the target user.
+   - If the same requester sends again while the previous request is pending,
+     reuse the existing notification (replace it with the latest).
+
+-------------------------------------------------------------------*/
+
+export const onMeetingPointLocationRefreshRequested = onDocumentUpdated(
+  "meetingPoints/{meetingPointId}",
+  async (event) => {
+    try {
+      const before = event.data?.before.data();
+      const after = event.data?.after.data();
+      if (!before || !after) return;
+
+      const meetingPointId = event.params.meetingPointId;
+      if (!meetingPointId) return;
+
+      const toMap = (v: any) =>
+        v && typeof v === "object" && !Array.isArray(v) ? v : {};
+
+      const beforeTokens: Record<string, any> = toMap(
+        before.locationRefreshTokens
+      );
+      const afterTokens: Record<string, any> = toMap(
+        after.locationRefreshTokens
+      );
+
+      const changedEntries = Object.entries(afterTokens).filter(
+        ([uid, token]) => {
+          const id = (uid ?? "").toString().trim();
+          if (!id) return false;
+          const nextToken = (token ?? "").toString().trim();
+          if (!nextToken) return false;
+          const prevToken = (beforeTokens[id] ?? "").toString().trim();
+          return nextToken !== prevToken;
+        }
+      );
+
+      if (changedEntries.length === 0) return;
+
+      const requestedBy: Record<string, any> = toMap(
+        after.locationRefreshRequestedBy
+      );
+
+      const hostId = (after.hostId ?? "").toString().trim();
+      const hostName =
+        (after.hostName ?? "Someone").toString().trim() || "Someone";
+      const hostPhone = (after.hostPhone ?? "").toString().trim();
+      const venueId = (after.venueId ?? "").toString().trim();
+      const venueName = (after.venueName ?? "").toString().trim();
+
+      const participants: any[] = Array.isArray(after.participants)
+        ? after.participants
+        : [];
+      const participantInfo = new Map<
+        string,
+        { name: string; phone: string }
+      >();
+      for (const p of participants) {
+        const uid = (p?.userId ?? "").toString().trim();
+        if (!uid) continue;
+        participantInfo.set(uid, {
+          name: (p?.name ?? "").toString().trim(),
+          phone: (p?.phone ?? "").toString().trim(),
+        });
+      }
+
+      const resolveSenderInfo = (senderId: string) => {
+        if (senderId === hostId) {
+          return { name: hostName || "Someone", phone: hostPhone || "" };
+        }
+        const info = participantInfo.get(senderId);
+        if (info) {
+          return {
+            name: info.name || "Someone",
+            phone: info.phone || "",
+          };
+        }
+        return { name: "Someone", phone: "" };
+      };
+
+      for (const [rawReceiverId, rawToken] of changedEntries) {
+        const receiverId = (rawReceiverId ?? "").toString().trim();
+        if (!receiverId) continue;
+
+        let senderId = (requestedBy[receiverId] ?? "").toString().trim();
+        if (!senderId) {
+          const tokenStr = (rawToken ?? "").toString();
+          const splitAt = tokenStr.indexOf("_");
+          if (splitAt > 0) senderId = tokenStr.substring(0, splitAt).trim();
+        }
+
+        if (!senderId || senderId === receiverId) continue;
+
+        const { name: senderName, phone: senderPhone } =
+          resolveSenderInfo(senderId);
+
+        const receiverDoc = await db.collection("users").doc(receiverId).get();
+        if (!receiverDoc.exists) continue;
+
+        const tokens: string[] = receiverDoc.data()?.fcmTokens ?? [];
+        const title = "Refresh Location Request";
+        const body = `${senderName} asked to refresh your location`;
+
+        let notifRef = db.collection("notifications").doc();
+        try {
+          const existingSnap = await db
+            .collection("notifications")
+            .where("userId", "==", receiverId)
+            .where("type", "==", "locationRefresh")
+            .get();
+
+          for (const doc of existingSnap.docs) {
+            const data: any = doc.data() ?? {};
+            const payload: any = data.data ?? {};
+            const payloadMeetingId = (payload.meetingPointId ?? "")
+              .toString()
+              .trim();
+            const payloadSenderId = (payload.senderId ?? "")
+              .toString()
+              .trim();
+            const pending = data.actionTaken !== true;
+            const isSystem = payload.system === true || data.system === true;
+            if (
+              pending &&
+              !isSystem &&
+              payloadMeetingId === meetingPointId &&
+              payloadSenderId === senderId
+            ) {
+              notifRef = doc.ref;
+              break;
+            }
+          }
+        } catch (err) {
+          console.error("Error finding existing refresh notification:", err);
+        }
+
+        const notifId = notifRef.id;
+
+        if (tokens.length > 0) {
+          await admin.messaging().sendEachForMulticast({
+            notification: { title, body },
+            data: {
+              type: "locationRefresh",
+              requestId: notifId,
+              meetingPointId: meetingPointId,
+            },
+            tokens,
+          });
+        }
+
+        await notifRef.set({
+          userId: receiverId,
+          type: "locationRefresh",
+          requiresAction: true,
+          actionTaken: false,
+          isRead: false,
+          title,
+          body,
+          data: {
+            requestId: notifId,
+            meetingPointId: meetingPointId,
+            senderId,
+            senderName,
+            senderPhone: senderPhone || null,
+            venueId: venueId || null,
+            venueName: venueName || null,
+            system: false,
+          },
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+    } catch (error) {
+      console.error(
+        "Error sending meeting point refresh location notifications:",
+        error
+      );
+    }
+  }
+);
+
+/* ------------------------------------------------------------------
+
+   Meeting Point Suggestions (Computed)
+
+   - When hostStep becomes 5 (manual or auto), compute suggested meeting
+     point candidates using entrances + navmesh + connectors.
+
+-------------------------------------------------------------------*/
+
+export const onMeetingPointSuggest = onDocumentUpdated(
+  "meetingPoints/{meetingPointId}",
+  async (event) => {
+    try {
+      const after = event.data?.after.data();
+      if (!after) return;
+
+      const meetingPointId = event.params.meetingPointId;
+      if (!meetingPointId) return;
+
+      const afterStep = Number(after.hostStep ?? 0);
+
+      const status = (after.status ?? "").toString().trim().toLowerCase();
+      if (status && status !== "pending") return;
+
+      const alreadySuggested =
+        (after.suggestedPoint ?? "").toString().trim().length > 0;
+      if (alreadySuggested || after.suggestionsComputed === true) return;
+
+      const participants: any[] = Array.isArray(after.participants)
+        ? after.participants
+        : [];
+      const anyAccepted = participants.some(
+        (p: any) =>
+          (p?.status ?? "").toString().trim().toLowerCase() === "accepted"
+      );
+      if (!anyAccepted) return;
+
+      const allResponded = participants.every(
+        (p: any) =>
+          (p?.status ?? "").toString().trim().toLowerCase() !== "pending"
+      );
+      const toDate = (v: any) =>
+        v && typeof v.toDate === "function" ? v.toDate() : null;
+      const waitDeadline = toDate(after.waitDeadline);
+      const waitExpired = waitDeadline
+        ? waitDeadline.getTime() <= Date.now()
+        : false;
+
+      // Compute suggestions when host is on step 5 OR everyone responded OR
+      // the wait timer expired (auto-advance safety net).
+      if (!(afterStep === 5 || allResponded || waitExpired)) return;
+
+      const result = await computeMeetingPointSuggestions(
+        meetingPointId,
+        after
+      );
+
+      if (!result) {
+        await db.collection("meetingPoints").doc(meetingPointId).update({
+          suggestionsComputed: true,
+          suggestionError: "no_candidates",
+          suggestedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        return;
+      }
+
+      await db.collection("meetingPoints").doc(meetingPointId).update({
+        suggestedPoint: result.suggestedPoint,
+        suggestedCandidates: result.suggestedCandidates,
+        suggestionsComputed: true,
+        suggestedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    } catch (error) {
+      console.error("Error computing meeting point suggestions:", error);
+    }
+  }
+);
+
+/* ------------------------------------------------------------------
+
    Auto Refresh Location (Scheduled)
 
-   - If tracking is active and receiver hasn't updated location for 1 hour,
-     send "Refresh Your Location" notification from system.
+   - If user has any active session (track or meeting point) and hasn't
+     updated location for 1 hour, send a single system refresh notification.
 
 -------------------------------------------------------------------*/
 
@@ -254,41 +1792,20 @@ export const onAutoLocationRefresh = onSchedule(
   async () => {
     try {
       const now = admin.firestore.Timestamp.now();
+      const cutoff = new Date(now.toDate().getTime() - 60 * 60 * 1000);
 
-      const snap = await db
+      const activeUsers = new Map<
+        string,
+        { endAt: admin.firestore.Timestamp | null }
+      >();
+
+      const trackSnap = await db
         .collection("trackRequests")
         .where("status", "==", "accepted")
         .where("startAt", "<=", now)
         .get();
 
-      if (snap.empty) return;
-
-      const userCache = new Map<
-        string,
-        { tokens: string[]; updatedAt: admin.firestore.Timestamp | null }
-      >();
-
-      const getUserInfo = async (uid: string) => {
-        if (userCache.has(uid)) return userCache.get(uid)!;
-        const userDoc = await db.collection("users").doc(uid).get();
-        if (!userDoc.exists) {
-          const info = { tokens: [] as string[], updatedAt: null };
-          userCache.set(uid, info);
-          return info;
-        }
-        const data = userDoc.data() ?? {};
-        const tokens: string[] = data.fcmTokens ?? [];
-        const updatedAt: admin.firestore.Timestamp | null =
-          data.location?.updatedAt ?? null;
-        const info = { tokens, updatedAt };
-        userCache.set(uid, info);
-        return info;
-      };
-
-      const cutoff = new Date(now.toDate().getTime() - 60 * 60 * 1000);
-      const batch = db.batch();
-
-      for (const doc of snap.docs) {
+      for (const doc of trackSnap.docs) {
         const data = doc.data();
         const endAt = data.endAt;
         const endAtDate =
@@ -298,52 +1815,153 @@ export const onAutoLocationRefresh = onSchedule(
         const receiverId = (data.receiverId ?? "").toString().trim();
         if (!receiverId) continue;
 
-        const userInfo = await getUserInfo(receiverId);
+        const existing = activeUsers.get(receiverId);
+        const currentEndAt = existing?.endAt ?? null;
+        const candidateEndAt =
+          endAt && typeof endAt.toDate === "function"
+            ? (endAt as admin.firestore.Timestamp)
+            : null;
+        const shouldReplace =
+          !!candidateEndAt &&
+          (!currentEndAt ||
+            candidateEndAt.toMillis() > currentEndAt.toMillis());
+
+        if (!existing || shouldReplace) {
+          activeUsers.set(receiverId, { endAt: candidateEndAt });
+        }
+      }
+
+      const meetingSnap = await db
+        .collection("meetingPoints")
+        .where("status", "==", "active")
+        .get();
+
+      for (const doc of meetingSnap.docs) {
+        const data = doc.data();
+        const hostId = (data.hostId ?? "").toString().trim();
+        const hostArrival = (data.hostArrivalStatus ?? "on_the_way")
+          .toString()
+          .trim()
+          .toLowerCase();
+        if (hostId && hostArrival !== "cancelled") {
+          if (!activeUsers.has(hostId)) {
+            activeUsers.set(hostId, { endAt: null });
+          }
+        }
+
+        const participants: any[] = Array.isArray(data.participants)
+          ? data.participants
+          : [];
+        for (const p of participants) {
+          const uid = (p?.userId ?? "").toString().trim();
+          if (!uid) continue;
+          const arrival = (p?.arrivalStatus ?? "on_the_way")
+            .toString()
+            .trim()
+            .toLowerCase();
+          if (arrival === "cancelled") continue;
+          if (!activeUsers.has(uid)) {
+            activeUsers.set(uid, { endAt: null });
+          }
+        }
+      }
+
+      if (activeUsers.size === 0) return;
+
+      const userCache = new Map<
+        string,
+        {
+          tokens: string[];
+          updatedAt: admin.firestore.Timestamp | null;
+          lastAutoRefreshAt: admin.firestore.Timestamp | null;
+          lastAutoRefreshNotifId: string | null;
+          exists: boolean;
+          ref: FirebaseFirestore.DocumentReference;
+        }
+      >();
+
+      const getUserInfo = async (uid: string) => {
+        if (userCache.has(uid)) return userCache.get(uid)!;
+        const userRef = db.collection("users").doc(uid);
+        const userDoc = await userRef.get();
+        if (!userDoc.exists) {
+          const info = {
+            tokens: [] as string[],
+            updatedAt: null,
+            lastAutoRefreshAt: null,
+            lastAutoRefreshNotifId: null,
+            exists: false,
+            ref: userRef,
+          };
+          userCache.set(uid, info);
+          return info;
+        }
+        const data = userDoc.data() ?? {};
+        const tokens: string[] = data.fcmTokens ?? [];
+        const updatedAt: admin.firestore.Timestamp | null =
+          data.location?.updatedAt ?? null;
+        const lastAutoRefreshAt: admin.firestore.Timestamp | null =
+          data.lastAutoRefreshAt ?? null;
+        const lastAutoRefreshNotifId =
+          (data.lastAutoRefreshNotifId ?? "").toString().trim() || null;
+        const info = {
+          tokens,
+          updatedAt,
+          lastAutoRefreshAt,
+          lastAutoRefreshNotifId,
+          exists: true,
+          ref: userRef,
+        };
+        userCache.set(uid, info);
+        return info;
+      };
+
+      let batch = db.batch();
+      let ops = 0;
+      const commits: Promise<any>[] = [];
+
+      for (const [uid, meta] of activeUsers.entries()) {
+        const userInfo = await getUserInfo(uid);
+        if (!userInfo.exists) continue;
         const lastUpdate =
           userInfo.updatedAt &&
           typeof userInfo.updatedAt.toDate === "function"
             ? userInfo.updatedAt.toDate()
             : null;
 
-        const lastAuto =
-          data.lastAutoRefreshAt &&
-          typeof data.lastAutoRefreshAt.toDate === "function"
-            ? data.lastAutoRefreshAt.toDate()
-            : null;
-
         const isStale = !lastUpdate || lastUpdate <= cutoff;
-        const cooldownPassed = !lastAuto || lastAuto <= cutoff;
+        if (!isStale) continue;
 
-        // Send every hour while stale
-        if (!isStale || !cooldownPassed) continue;
+        const lastAuto =
+          userInfo.lastAutoRefreshAt &&
+          typeof userInfo.lastAutoRefreshAt.toDate === "function"
+            ? userInfo.lastAutoRefreshAt.toDate()
+            : null;
+        if (lastAuto && lastAuto > cutoff) continue;
 
         const title = "Refresh Location Request";
         const body = "You are in an active session, Please refresh your location for better accuracy";
 
-        // Replace previous pending system refresh notification (same session)
-        const lastNotifId = (data.lastAutoRefreshNotifId ?? "").toString();
-        let notifRef = lastNotifId
-          ? db.collection("notifications").doc(lastNotifId)
-          : db.collection("notifications").doc();
-        let reuseExisting = false;
-
-        if (lastNotifId) {
-          const lastSnap = await notifRef.get();
+        let notifRef = db.collection("notifications").doc();
+        if (userInfo.lastAutoRefreshNotifId) {
+          const lastSnap = await db
+            .collection("notifications")
+            .doc(userInfo.lastAutoRefreshNotifId)
+            .get();
           if (lastSnap.exists) {
             const lastData: any = lastSnap.data() ?? {};
             const lastPayload: any = lastData.data ?? {};
-            const matchesSession =
-              lastData.userId === receiverId &&
-              lastData.type === "locationRefresh" &&
-              lastPayload.trackRequestId === doc.id &&
-              lastPayload.system === true;
             const pending = lastData.actionTaken !== true;
-            if (matchesSession && pending) reuseExisting = true;
+            const isSystem =
+              lastPayload.system === true || lastData.system === true;
+            const matches =
+              lastData.userId === uid &&
+              lastData.type === "locationRefresh" &&
+              isSystem;
+            if (matches && pending) {
+              notifRef = lastSnap.ref;
+            }
           }
-        }
-
-        if (!reuseExisting) {
-          notifRef = db.collection("notifications").doc();
         }
         const notifId = notifRef.id;
 
@@ -356,14 +1974,13 @@ export const onAutoLocationRefresh = onSchedule(
             data: {
               type: "locationRefresh",
               requestId: notifId,
-              trackRequestId: doc.id,
             },
             tokens: userInfo.tokens,
           });
         }
 
         batch.set(notifRef, {
-          userId: receiverId,
+          userId: uid,
           type: "locationRefresh",
           requiresAction: true,
           actionTaken: false,
@@ -372,25 +1989,27 @@ export const onAutoLocationRefresh = onSchedule(
           body,
           data: {
             requestId: notifId,
-            trackRequestId: doc.id,
-            senderId: data.senderId ?? null,
-            senderName: data.senderName ?? null,
-            senderPhone: data.senderPhone ?? null,
-            venueId: data.venueId ?? null,
-            venueName: data.venueName ?? null,
-            endAt: data.endAt ?? null,
+            endAt: meta.endAt ?? null,
             system: true,
           },
           createdAt: admin.firestore.FieldValue.serverTimestamp(),
         });
 
-        batch.update(doc.ref, {
+        batch.update(userInfo.ref, {
           lastAutoRefreshAt: admin.firestore.FieldValue.serverTimestamp(),
           lastAutoRefreshNotifId: notifId,
         });
+
+        ops++;
+        if (ops >= 450) {
+          commits.push(batch.commit());
+          batch = db.batch();
+          ops = 0;
+        }
       }
 
-      await batch.commit();
+      if (ops > 0) commits.push(batch.commit());
+      if (commits.length > 0) await Promise.all(commits);
     } catch (error) {
       console.error("Error sending auto refresh notification:", error);
     }

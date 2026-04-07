@@ -1387,6 +1387,15 @@ const timer = setInterval(function() {
       }
     }
 
+    // Fallback: try phone (for phone-auth users with auto-generated doc IDs)
+    final phone = user.phoneNumber;
+    if (phone != null && phone.isNotEmpty) {
+      final snap = await users.where('phone', isEqualTo: phone).limit(1).get();
+      if (snap.docs.isNotEmpty) {
+        return snap.docs.first.reference;
+      }
+    }
+
     // Fallback: use uid as doc id.
     return users.doc(user.uid);
   }

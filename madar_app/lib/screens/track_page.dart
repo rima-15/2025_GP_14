@@ -747,6 +747,11 @@ window.upsertMeetingPointPin = function(x,y,z,label){
   }
   hs.innerHTML = "";
   buildMeetingPointPin(hs, label || "Meeting Point");
+  // Force refresh to ensure the hotspot position updates immediately.
+  if (hs.parentElement) {
+    hs.parentElement.removeChild(hs);
+    viewer.appendChild(hs);
+  }
   hs.setAttribute('data-position', `${Number(x)} ${Number(y)} ${Number(z)}`);
   hs.setAttribute('data-normal', '0 1 0');
   hs.style.display = 'block';

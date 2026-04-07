@@ -141,6 +141,20 @@ class _NotificationsPageState extends State<NotificationsPage> {
   bool _activeMeetingSessionReady = false;
   Set<String> _activeMeetingIds = {};
 
+  static const double _notificationTitleFontSize = 15;
+  static const double _notificationBodyFontSize = 14;
+  static const TextStyle _notificationTitleStyle = TextStyle(
+    fontSize: _notificationTitleFontSize,
+    fontWeight: FontWeight.w600,
+    color: Colors.black87,
+  );
+
+  TextStyle _notificationBodyStyle() => TextStyle(
+    fontSize: _notificationBodyFontSize,
+    color: Colors.grey[700],
+    height: 1.4,
+  );
+
   // Cache across page opens (app still alive)
   static List<NotificationItem> _cachedMerged = [];
   static bool _cacheReady = false;
@@ -1760,11 +1774,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                         Expanded(
                                           child: Text(
                                             notification.title,
-                                            style: const TextStyle(
-                                              fontSize: 15,
-                                              fontWeight: FontWeight.w600,
-                                              color: Colors.black87,
-                                            ),
+                                            style: _notificationTitleStyle,
                                           ),
                                         ),
                                         // Status Labels or Meeting Timer
@@ -1815,15 +1825,11 @@ class _NotificationsPageState extends State<NotificationsPage> {
                               NotificationType.trackRequest) ...[
                             RichText(
                               text: TextSpan(
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  color: Colors.grey[700],
-                                  height: 1.4,
-                                ),
+                                style: _notificationBodyStyle(),
                                 children: [
                                   TextSpan(
                                     text: notification.senderName ?? '',
-                                    style: const TextStyle(
+                                    style: _notificationBodyStyle().copyWith(
                                       fontWeight: FontWeight.w600,
                                       color: Colors.black87,
                                     ),
@@ -1842,11 +1848,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                               NotificationType.meetingPointRequest) ...[
                             RichText(
                               text: TextSpan(
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  color: Colors.grey[700],
-                                  height: 1.4,
-                                ),
+                                style: _notificationBodyStyle(),
                                 children: [
                                   TextSpan(
                                     text:
@@ -1872,21 +1874,13 @@ class _NotificationsPageState extends State<NotificationsPage> {
                               notification.message.trim().isNotEmpty
                                   ? notification.message.trim()
                                   : _formatAcceptDeclineMessage(notification),
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: Colors.grey[700],
-                                height: 1.4,
-                              ),
+                              style: _notificationBodyStyle(),
                             ),
                           ] else ...[
                             // STYLE 3: All other simple notifications
                             Text(
                               notification.message,
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: Colors.grey[700],
-                                height: 1.4,
-                              ),
+                              style: _notificationBodyStyle(),
                             ),
                           ],
                           if (notification.type ==

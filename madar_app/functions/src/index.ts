@@ -1312,7 +1312,7 @@ export const onMeetingPointStarted = onDocumentUpdated(
 
       if (acceptedIds.length === 0) return;
 
-      const title = "Meeting point started";
+      const title = "Meeting Point Started";
       const body = `${hostName} will meet you at ${locationName}.`;
 
       let batch = db.batch();

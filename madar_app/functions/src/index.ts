@@ -55,41 +55,46 @@ export const onUserLocationUpdated = onDocumentUpdated(
       const userId = event.params.userId;
       if (!userId) return;
 
-      const snap = await db
-        .collection("notifications")
-        .where("userId", "==", userId)
-        .where("type", "==", "locationRefresh")
-        .get();
+      const updateNotificationsByType = async (type: string) => {
+        const snap = await db
+          .collection("notifications")
+          .where("userId", "==", userId)
+          .where("type", "==", type)
+          .get();
 
-      if (snap.empty) return;
+        if (snap.empty) return;
 
-      let batch = db.batch();
-      let ops = 0;
-      const commits: Promise<any>[] = [];
+        let batch = db.batch();
+        let ops = 0;
+        const commits: Promise<any>[] = [];
 
-      for (const doc of snap.docs) {
-        const data: any = doc.data() ?? {};
-        const createdAt = toDate(data.createdAt);
-        if (!createdAt) continue;
-        if (createdAt > afterUpdatedAt) continue;
-        if (data.actionTaken === true) continue;
+        for (const doc of snap.docs) {
+          const data: any = doc.data() ?? {};
+          const createdAt = toDate(data.createdAt);
+          if (!createdAt) continue;
+          if (createdAt > afterUpdatedAt) continue;
+          if (data.actionTaken === true) continue;
 
-        batch.update(doc.ref, {
-          actionTaken: true,
-          isRead: true,
-          actionTakenAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
+          batch.update(doc.ref, {
+            actionTaken: true,
+            isRead: true,
+            actionTakenAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
 
-        ops++;
-        if (ops >= 450) {
-          commits.push(batch.commit());
-          batch = db.batch();
-          ops = 0;
+          ops++;
+          if (ops >= 450) {
+            commits.push(batch.commit());
+            batch = db.batch();
+            ops = 0;
+          }
         }
-      }
 
-      if (ops > 0) commits.push(batch.commit());
-      if (commits.length > 0) await Promise.all(commits);
+        if (ops > 0) commits.push(batch.commit());
+        if (commits.length > 0) await Promise.all(commits);
+      };
+
+      await updateNotificationsByType("locationRefresh");
+      await updateNotificationsByType("meetingLateArrival");
     } catch (error) {
       console.error("Error marking refresh notifications as read:", error);
     }
@@ -1978,7 +1983,6 @@ export const onMeetingPointLateArrival = onSchedule(
           isHost: boolean
         ) => {
           if (!uid) return;
-          if (notifiedMap && notifiedMap[uid]) return;
 
           const userInfo = await getUserInfo(uid);
           if (!userInfo.exists) return;
@@ -1996,6 +2000,11 @@ export const onMeetingPointLateArrival = onSchedule(
             }
           }
           if (!baseTime) baseTime = nowDate;
+
+          const lastNotifiedAt = toDate(
+            notifiedMap && notifiedMap[uid] ? notifiedMap[uid] : null
+          );
+          if (lastNotifiedAt && lastNotifiedAt >= baseTime) return;
 
           const etaDeadline = new Date(
             baseTime.getTime() + etaMinutes * 60 * 1000

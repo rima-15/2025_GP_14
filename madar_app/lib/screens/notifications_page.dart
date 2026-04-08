@@ -2453,54 +2453,50 @@ class _NotificationsPageState extends State<NotificationsPage> {
         final isDisabled = _isLateArrivalActionDisabled(notification);
         final disabledBorder = Colors.grey[400]!;
         final disabledText = Colors.grey[600]!;
-        final disabledFill = Colors.grey[400]!;
+        final disabledFill = Colors.grey[300]!;
         return Column(
           children: [
             SizedBox(
               width: double.infinity,
-              child: Opacity(
-                opacity: isDisabled ? 0.5 : 1,
-                child: InkWell(
-                  onTap: isDisabled
-                      ? null
-                      : () => _handleLateArrivalArrive(notification),
-                  borderRadius: BorderRadius.circular(8),
-                  child: Container(
-                    alignment: Alignment.center,
-                    height: 44,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
+              child: InkWell(
+                onTap: isDisabled
+                    ? null
+                    : () => _handleLateArrivalArrive(notification),
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  alignment: Alignment.center,
+                  height: 44,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border: Border.all(
+                      color: isDisabled ? disabledBorder : AppColors.kGreen,
+                      width: 1.5,
                     ),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      border: Border.all(
-                        color: isDisabled ? disabledBorder : AppColors.kGreen,
-                        width: 1.5,
-                      ),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      mainAxisSize: MainAxisSize.max,
-                      children: [
-                        Flexible(
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text(
-                              'Arrive',
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w600,
-                                color: isDisabled
-                                    ? disabledText
-                                    : AppColors.kGreen,
-                              ),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.max,
+                    children: [
+                      Flexible(
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            'Arrive',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color:
+                                  isDisabled ? disabledText : AppColors.kGreen,
                             ),
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -2508,69 +2504,64 @@ class _NotificationsPageState extends State<NotificationsPage> {
             const SizedBox(height: 8),
             SizedBox(
               width: double.infinity,
-              child: Opacity(
-                opacity: isDisabled ? 0.5 : 1,
-                child: InkWell(
-                  onTap: isDisabled
-                      ? null
-                      : () async {
-                          await _markNotificationActionTaken(notification);
-                          if (!mounted) return;
-                          setState(() {
-                            notification.isRead = true;
-                            _localReadOverride[notification.id] = true;
-                            _respondedNotifications.add(notification.id);
-                          });
-                          _openSetLocationForTracking(
-                            notification,
-                            dialogTitle: 'Refresh My Location',
-                            dialogSubtitle:
-                                'Choose how to refresh your location.',
-                          );
-                        },
-                  borderRadius: BorderRadius.circular(8),
-                  child: Container(
-                    alignment: Alignment.center,
-                    height: 44,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 5,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: isDisabled ? disabledFill : AppColors.kGreen,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      mainAxisSize: MainAxisSize.max,
-                      children: [
-                        Icon(
-                          Icons.location_on_outlined,
-                          size: 22,
-                          color: isDisabled ? Colors.grey[200] : Colors.white,
-                        ),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text(
-                              'Refresh My Location',
-                              maxLines: 1,
-                              softWrap: false,
-                              overflow: TextOverflow.ellipsis,
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: isDisabled
-                                    ? Colors.grey[200]
-                                    : Colors.white,
-                              ),
+              child: InkWell(
+                onTap: isDisabled
+                    ? null
+                    : () async {
+                        await _markNotificationActionTaken(notification);
+                        if (!mounted) return;
+                        setState(() {
+                          notification.isRead = true;
+                          _localReadOverride[notification.id] = true;
+                          _respondedNotifications.add(notification.id);
+                        });
+                        _openSetLocationForTracking(
+                          notification,
+                          dialogTitle: 'Refresh My Location',
+                          dialogSubtitle:
+                              'Choose how to refresh your location.',
+                        );
+                      },
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  alignment: Alignment.center,
+                  height: 44,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 5,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isDisabled ? disabledFill : AppColors.kGreen,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.max,
+                    children: [
+                      Icon(
+                        Icons.location_on_outlined,
+                        size: 22,
+                        color: isDisabled ? disabledText : Colors.white,
+                      ),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            'Refresh My Location',
+                            maxLines: 1,
+                            softWrap: false,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: isDisabled ? disabledText : Colors.white,
                             ),
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
               ),

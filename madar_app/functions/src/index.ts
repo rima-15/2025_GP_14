@@ -1299,7 +1299,6 @@ export const onMeetingPointStarted = onDocumentUpdated(
       const venueName = (after.venueName ?? "").toString().trim();
       const pointName = (after.suggestedPoint ?? "").toString().trim();
       const locationName = pointName || venueName || "the meeting point";
-
       const participants: any[] = Array.isArray(after.participants)
         ? after.participants
         : [];
@@ -1446,7 +1445,7 @@ export const onMeetingPointCompleted = onDocumentUpdated(
       if (targetIds.size === 0) return;
 
       const title = "Meeting Point Completed";
-      const body = `All participants arrived at "${locationName}".`;
+      const body = `All participants arrived at ${locationName}.`;
 
       let batch = db.batch();
       let ops = 0;
@@ -1738,6 +1737,285 @@ export const onMeetingPointLocationRefreshRequested = onDocumentUpdated(
         "Error sending meeting point refresh location notifications:",
         error
       );
+    }
+  }
+);
+
+/* ------------------------------------------------------------------
+
+   Meeting Point Late Arrival Notification (Scheduled)
+
+   - When a meeting point is active and a user's ETA has passed (plus
+     a short grace period), and they are still "on_the_way" and not
+     close enough to auto-arrive, send a "Late Arrival" notification.
+
+-------------------------------------------------------------------*/
+
+export const onMeetingPointLateArrival = onSchedule(
+  "every 1 minutes",
+  async () => {
+    try {
+      const now = admin.firestore.Timestamp.now();
+      const nowDate = now.toDate();
+
+      const toDate = (v: any) =>
+        v && typeof v.toDate === "function" ? v.toDate() : null;
+
+      const toFNumber = (raw?: string | null): string => {
+        if (!raw) return "";
+        let s = raw.trim();
+        if (!s) return "";
+        const up0 = s.toUpperCase();
+        if (
+          up0 === "G" ||
+          up0 === "GF" ||
+          up0.includes("GROUND") ||
+          up0.includes("أرض") ||
+          up0.includes("ارضي") ||
+          up0.includes("أرضي")
+        ) {
+          return "0";
+        }
+        let up = up0.replace(/[\s_\-]+/g, "");
+        up = up
+          .replace("FLOOR", "")
+          .replace("LEVEL", "")
+          .replace("LVL", "")
+          .replace("FL", "");
+        const m1 = /^(?:F|L)?(-?\d+)$/.exec(up);
+        if (m1) return m1[1];
+        const m2 = /(-?\d+)/.exec(up);
+        if (m2) return m2[1];
+        return "";
+      };
+
+      const floorsMatchStrict = (aRaw: string, bRaw: string) => {
+        const a = toFNumber(aRaw);
+        const b = toFNumber(bRaw);
+        if (!a || !b) return false;
+        return a === b;
+      };
+
+      const entranceFromMeeting = (data: any) => {
+        const list = Array.isArray(data.suggestedCandidates)
+          ? data.suggestedCandidates
+          : [];
+        const first = list.length > 0 ? list[0] : null;
+        const ent = first?.entrance ?? null;
+        if (!ent || typeof ent !== "object") return null;
+        const x = Number(ent.x);
+        const y = Number(ent.y);
+        const floor = (ent.floor ?? "").toString().trim();
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+        return { x, y, floor };
+      };
+
+      const UNITS_TO_METERS = 69.32; // matches Flutter _unitToMeters
+      const AUTO_ARRIVE_DISTANCE_METERS = 10;
+      const LATE_ARRIVAL_GRACE_MS = 60 * 1000;
+
+      const meetingSnap = await db
+        .collection("meetingPoints")
+        .where("status", "==", "active")
+        .get();
+
+      if (meetingSnap.empty) return;
+
+      const userCache = new Map<
+        string,
+        {
+          exists: boolean;
+          tokens: string[];
+          location: { x: number; y: number; floor: string } | null;
+          updatedAt: Date | null;
+        }
+      >();
+
+      const getUserInfo = async (uid: string) => {
+        if (userCache.has(uid)) return userCache.get(uid)!;
+        const ref = db.collection("users").doc(uid);
+        const snap = await ref.get();
+        if (!snap.exists) {
+          const info = {
+            exists: false,
+            tokens: [] as string[],
+            location: null,
+            updatedAt: null as Date | null,
+          };
+          userCache.set(uid, info);
+          return info;
+        }
+        const data: any = snap.data() ?? {};
+        const tokens: string[] = Array.isArray(data.fcmTokens)
+          ? data.fcmTokens.filter((t: any) => typeof t === "string")
+          : [];
+        const loc: any = data.location ?? {};
+        const bp: any = loc.blenderPosition ?? {};
+        const x = Number(bp.x);
+        const y = Number(bp.y);
+        const floor = (bp.floor ?? "").toString().trim();
+        const location =
+          Number.isFinite(x) && Number.isFinite(y)
+            ? { x, y, floor }
+            : null;
+        const updatedAt = toDate(loc.updatedAt);
+        const info = {
+          exists: true,
+          tokens,
+          location,
+          updatedAt,
+        };
+        userCache.set(uid, info);
+        return info;
+      };
+
+      for (const doc of meetingSnap.docs) {
+        const data: any = doc.data() ?? {};
+        const meetingStatus = (data.status ?? "active")
+          .toString()
+          .trim()
+          .toLowerCase();
+        if (meetingStatus !== "active") continue;
+
+        const expiresAt =
+          data.expiresAt && typeof data.expiresAt.toDate === "function"
+            ? data.expiresAt.toDate()
+            : null;
+        if (expiresAt && expiresAt <= nowDate) continue;
+
+        const meetingStartAt =
+          toDate(data.confirmedAt) ??
+          toDate(data.updatedAt) ??
+          toDate(data.createdAt) ??
+          null;
+
+        const pointName = (data.suggestedPoint ?? "").toString().trim();
+        const venueName = (data.venueName ?? "").toString().trim();
+        const locationName = pointName || venueName || "the meeting point";
+        const entrance = entranceFromMeeting(data);
+        const notifiedMap =
+          data.lateArrivalNotifiedAt &&
+          typeof data.lateArrivalNotifiedAt === "object"
+            ? data.lateArrivalNotifiedAt
+            : {};
+
+        const pendingUpdates: Record<string, any> = {};
+
+        const maybeNotify = async (uid: string, rawEta: any) => {
+          if (!uid) return;
+          if (notifiedMap && notifiedMap[uid]) return;
+
+          const userInfo = await getUserInfo(uid);
+          if (!userInfo.exists) return;
+
+          const etaNum = Number(rawEta);
+          const etaMinutes =
+            Number.isFinite(etaNum) && etaNum > 0
+              ? Math.min(Math.max(Math.round(etaNum), 1), 60)
+              : 3;
+
+          let baseTime: Date | null = meetingStartAt;
+          if (userInfo.updatedAt) {
+            if (!baseTime || userInfo.updatedAt > baseTime) {
+              baseTime = userInfo.updatedAt;
+            }
+          }
+          if (!baseTime) baseTime = nowDate;
+
+          const etaDeadline = new Date(
+            baseTime.getTime() + etaMinutes * 60 * 1000
+          );
+          if (nowDate.getTime() < etaDeadline.getTime() + LATE_ARRIVAL_GRACE_MS)
+            return;
+
+          const userLoc = userInfo.location;
+          const canAutoArrive =
+            !!entrance &&
+            !!userLoc &&
+            floorsMatchStrict(userLoc.floor, entrance.floor) &&
+            Math.sqrt(
+              Math.pow(userLoc.x - entrance.x, 2) +
+                Math.pow(userLoc.y - entrance.y, 2)
+            ) *
+              UNITS_TO_METERS <=
+              AUTO_ARRIVE_DISTANCE_METERS;
+
+          if (canAutoArrive) return;
+          const title = "Arrival Not Confirmed";
+          const body = `Your estimated arrival time to ${locationName} has passed. Please tap "Arrive" or refresh your location.`;
+
+          const notifRef = db.collection("notifications").doc();
+          const notifId = notifRef.id;
+
+          if (userInfo.tokens.length > 0) {
+            try {
+              await admin.messaging().sendEachForMulticast({
+                notification: { title, body },
+                data: {
+                  type: "meetingLateArrival",
+                  requestId: notifId,
+                  meetingPointId: doc.id,
+                },
+                tokens: userInfo.tokens,
+              });
+            } catch (err) {
+              console.error(`Failed to send late arrival push to ${uid}`, err);
+            }
+          }
+
+          await notifRef.set({
+            userId: uid,
+            type: "meetingLateArrival",
+            requiresAction: true,
+            actionTaken: false,
+            isRead: false,
+            title,
+            body,
+            data: {
+              requestId: notifId,
+              meetingPointId: doc.id,
+            },
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          pendingUpdates[`lateArrivalNotifiedAt.${uid}`] =
+            admin.firestore.FieldValue.serverTimestamp();
+        };
+
+        const hostId = (data.hostId ?? "").toString().trim();
+        const hostArrival = (data.hostArrivalStatus ?? "on_the_way")
+          .toString()
+          .trim()
+          .toLowerCase();
+        if (hostId && hostArrival === "on_the_way") {
+          await maybeNotify(hostId, data.hostEstimatedMinutes ?? 3);
+        }
+
+        const participants: any[] = Array.isArray(data.participants)
+          ? data.participants
+          : [];
+        for (const p of participants) {
+          const status = (p?.status ?? "pending")
+            .toString()
+            .trim()
+            .toLowerCase();
+          if (status !== "accepted") continue;
+          const arrival = (p?.arrivalStatus ?? "on_the_way")
+            .toString()
+            .trim()
+            .toLowerCase();
+          if (arrival !== "on_the_way") continue;
+          const uid = (p?.userId ?? "").toString().trim();
+          if (!uid || uid === hostId) continue;
+          await maybeNotify(uid, p?.estimatedArrivalMinutes ?? 3);
+        }
+
+        if (Object.keys(pendingUpdates).length > 0) {
+          await doc.ref.update(pendingUpdates);
+        }
+      }
+    } catch (error) {
+      console.error("Error sending late arrival notifications:", error);
     }
   }
 );
@@ -2938,6 +3216,10 @@ export const setUserLocation = onRequest({ cors: true }, async (req, res) => {
   }
 
 });
+
+
+
+
 
 
 

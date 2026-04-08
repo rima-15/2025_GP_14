@@ -1314,16 +1314,19 @@ export const onMeetingPointStarted = onDocumentUpdated(
         .map((p: any) => (p?.userId ?? "").toString().trim())
         .filter((uid: string) => uid && uid !== hostId);
 
-      if (acceptedIds.length === 0) return;
+      const targetIds = new Set<string>(acceptedIds);
+      if (hostId) targetIds.add(hostId);
+
+      if (targetIds.size === 0) return;
 
       const title = "Meeting Point Started";
-      const body = `${hostName} will meet you at ${locationName}.`;
+      const body = `You will meet with other participants at ${locationName}.`;
 
       let batch = db.batch();
       let ops = 0;
       const commits: Promise<any>[] = [];
 
-      for (const uid of acceptedIds) {
+      for (const uid of targetIds) {
         const userDoc = await db.collection("users").doc(uid).get();
         if (!userDoc.exists) continue;
 

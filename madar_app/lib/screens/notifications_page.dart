@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
 import 'package:madar_app/theme/theme.dart';
@@ -3794,6 +3795,91 @@ class _NotificationsPageState extends State<NotificationsPage> {
     }
   }
 
+  Map<String, double> _blenderToGltf({
+    required double x,
+    required double y,
+    required double z,
+  }) {
+    // Blender (Z-up) -> glTF (Y-up)
+    return {'x': x, 'y': z, 'z': -y};
+  }
+
+  Map<String, double> _gltfToBlender({
+    required double x,
+    required double y,
+    required double z,
+  }) {
+    // glTF (Y up) -> Blender (Z up)
+    return {'x': x, 'y': -z, 'z': y};
+  }
+
+  Map<String, double> _offsetMeetingPointForUser(
+    String userId,
+    Map<String, double> base,
+  ) {
+    final hash = userId.codeUnits.fold<int>(0, (a, b) => a + b);
+    final angle = (hash % 360) * (math.pi / 180.0);
+    const radius = 0.065;
+    final dx = math.cos(angle) * radius;
+    final dz = math.sin(angle) * radius;
+    return {
+      'x': (base['x'] ?? 0) + dx,
+      'y': (base['y'] ?? 0),
+      'z': (base['z'] ?? 0) + dz,
+    };
+  }
+
+  Future<void> _saveArrivedLocationToUserDoc(
+    MeetingPointRecord meeting,
+    String uid,
+  ) async {
+    Map<String, double>? blender;
+    String floorLabel = '';
+
+    if (meeting.suggestedCandidates.isNotEmpty) {
+      final raw = meeting.suggestedCandidates.first;
+      final entrance = raw['entrance'];
+      if (entrance is Map) {
+        final ex = (entrance['x'] as num?)?.toDouble();
+        final ey = (entrance['y'] as num?)?.toDouble();
+        final ez = (entrance['z'] as num?)?.toDouble();
+        final floor = (entrance['floor'] ?? '').toString();
+        if (ex != null && ey != null && ez != null) {
+          blender = {'x': ex, 'y': ey, 'z': ez};
+          floorLabel = floor;
+        }
+      }
+    }
+
+    if (blender == null || blender.isEmpty) return;
+
+    final gltf = _blenderToGltf(
+      x: blender['x'] ?? 0,
+      y: blender['y'] ?? 0,
+      z: blender['z'] ?? 0,
+    );
+    final offsetGltf = _offsetMeetingPointForUser(uid, gltf);
+    blender = _gltfToBlender(
+      x: offsetGltf['x'] ?? 0,
+      y: offsetGltf['y'] ?? 0,
+      z: offsetGltf['z'] ?? 0,
+    );
+
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(uid).update({
+        'location.blenderPosition': {
+          'x': blender['x'],
+          'y': blender['y'],
+          'z': blender['z'],
+          'floor': floorLabel,
+        },
+        'location.updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      debugPrint('[NOTIF] Failed to save arrived location: $e');
+    }
+  }
+
   Future<void> _handleLateArrivalArrive(NotificationItem notification) async {
     if (notification.actionTaken == true ||
         _respondedNotifications.contains(notification.id)) {
@@ -3844,6 +3930,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
         arrivalStatus: 'arrived',
         arrivedAt: DateTime.now(),
       );
+      await _saveArrivedLocationToUserDoc(meeting, uid);
       await _markNotificationActionTaken(notification);
       if (!mounted) return;
       setState(() {

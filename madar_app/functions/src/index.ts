@@ -1901,7 +1901,82 @@ export const onMeetingPointLateArrival = onSchedule(
 
         const pendingUpdates: Record<string, any> = {};
 
-        const maybeNotify = async (uid: string, rawEta: any) => {
+        const normalizeStatus = (raw: any) =>
+          (raw ?? "pending").toString().trim().toLowerCase();
+        const normalizeArrival = (raw: any) =>
+          (raw ?? "on_the_way").toString().trim().toLowerCase();
+
+        const participants: any[] = Array.isArray(data.participants)
+          ? data.participants
+          : [];
+
+        const autoArriveUser = async (uid: string, isHost: boolean) => {
+          try {
+            const arrivedAt = admin.firestore.Timestamp.fromDate(nowDate);
+            const updates: Record<string, any> = {
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            };
+
+            let nextHostArrival = normalizeArrival(data.hostArrivalStatus);
+            let updatedParticipants = participants;
+
+            if (isHost) {
+              nextHostArrival = "arrived";
+              updates.hostArrivalStatus = "arrived";
+              updates.hostArrivedAt = arrivedAt;
+              updates.hostLocationUpdatedAt = arrivedAt;
+            } else {
+              const idx = participants.findIndex(
+                (p: any) =>
+                  (p?.userId ?? "").toString().trim() === uid
+              );
+              if (idx < 0) return false;
+              updatedParticipants = participants.map((p: any, i: number) => {
+                if (i !== idx) return p;
+                return {
+                  ...p,
+                  arrivalStatus: "arrived",
+                  arrivedAt: arrivedAt,
+                  locationUpdatedAt: arrivedAt,
+                };
+              });
+              updates.participants = updatedParticipants;
+            }
+
+            const isConfirmed =
+              data.confirmedAt &&
+              typeof data.confirmedAt.toDate === "function";
+            if (isConfirmed) {
+              const activeParticipants = updatedParticipants.filter(
+                (p: any) =>
+                  normalizeStatus(p?.status) === "accepted" &&
+                  normalizeArrival(p?.arrivalStatus) !== "cancelled"
+              );
+              const hostActive = nextHostArrival !== "cancelled";
+              const hostDone = !hostActive || nextHostArrival === "arrived";
+              const allActiveArrived =
+                hostDone &&
+                activeParticipants.every(
+                  (p: any) => normalizeArrival(p?.arrivalStatus) === "arrived"
+                );
+              if (allActiveArrived) {
+                updates.status = "completed";
+              }
+            }
+
+            await doc.ref.update(updates);
+            return true;
+          } catch (err) {
+            console.error(`Failed to auto-arrive ${uid}`, err);
+            return false;
+          }
+        };
+
+        const maybeNotify = async (
+          uid: string,
+          rawEta: any,
+          isHost: boolean
+        ) => {
           if (!uid) return;
           if (notifiedMap && notifiedMap[uid]) return;
 
@@ -1940,7 +2015,10 @@ export const onMeetingPointLateArrival = onSchedule(
               UNITS_TO_METERS <=
               AUTO_ARRIVE_DISTANCE_METERS;
 
-          if (canAutoArrive) return;
+          if (canAutoArrive) {
+            const didAutoArrive = await autoArriveUser(uid, isHost);
+            if (didAutoArrive) return;
+          }
           const title = "Arrival Not Confirmed";
           const body = `Your estimated arrival time to ${locationName} has passed. Please tap "Arrive" or refresh your location.`;
 
@@ -1988,12 +2066,9 @@ export const onMeetingPointLateArrival = onSchedule(
           .trim()
           .toLowerCase();
         if (hostId && hostArrival === "on_the_way") {
-          await maybeNotify(hostId, data.hostEstimatedMinutes ?? 3);
+          await maybeNotify(hostId, data.hostEstimatedMinutes ?? 3, true);
         }
 
-        const participants: any[] = Array.isArray(data.participants)
-          ? data.participants
-          : [];
         for (const p of participants) {
           const status = (p?.status ?? "pending")
             .toString()
@@ -2007,7 +2082,7 @@ export const onMeetingPointLateArrival = onSchedule(
           if (arrival !== "on_the_way") continue;
           const uid = (p?.userId ?? "").toString().trim();
           if (!uid || uid === hostId) continue;
-          await maybeNotify(uid, p?.estimatedArrivalMinutes ?? 3);
+          await maybeNotify(uid, p?.estimatedArrivalMinutes ?? 3, false);
         }
 
         if (Object.keys(pendingUpdates).length > 0) {

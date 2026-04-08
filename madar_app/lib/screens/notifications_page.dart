@@ -2454,9 +2454,60 @@ class _NotificationsPageState extends State<NotificationsPage> {
         final disabledBorder = Colors.grey[400]!;
         final disabledText = Colors.grey[600]!;
         final disabledFill = Colors.grey[400]!;
-        return Row(
+        return Column(
           children: [
-            Expanded(
+            SizedBox(
+              width: double.infinity,
+              child: Opacity(
+                opacity: isDisabled ? 0.5 : 1,
+                child: InkWell(
+                  onTap: isDisabled
+                      ? null
+                      : () => _handleLateArrivalArrive(notification),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    alignment: Alignment.center,
+                    height: 44,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      border: Border.all(
+                        color: isDisabled ? disabledBorder : AppColors.kGreen,
+                        width: 1.5,
+                      ),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.max,
+                      children: [
+                        Flexible(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              'Arrive',
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                                color: isDisabled
+                                    ? disabledText
+                                    : AppColors.kGreen,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
               child: Opacity(
                 opacity: isDisabled ? 0.5 : 1,
                 child: InkWell(
@@ -2482,15 +2533,11 @@ class _NotificationsPageState extends State<NotificationsPage> {
                     alignment: Alignment.center,
                     height: 44,
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
+                      horizontal: 5,
+                      vertical: 6,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.white,
-                      border: Border.all(
-                        color: isDisabled ? disabledBorder : AppColors.kGreen,
-                        width: 1.5,
-                      ),
+                      color: isDisabled ? disabledFill : AppColors.kGreen,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Row(
@@ -2500,7 +2547,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                         Icon(
                           Icons.location_on_outlined,
                           size: 22,
-                          color: isDisabled ? disabledText : AppColors.kGreen,
+                          color: isDisabled ? Colors.grey[200] : Colors.white,
                         ),
                         const SizedBox(width: 6),
                         Flexible(
@@ -2513,52 +2560,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                               overflow: TextOverflow.ellipsis,
                               textAlign: TextAlign.center,
                               style: TextStyle(
-                                fontSize: 19,
-                                fontWeight: FontWeight.w600,
-                                color: isDisabled
-                                    ? disabledText
-                                    : AppColors.kGreen,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Opacity(
-                opacity: isDisabled ? 0.5 : 1,
-                child: InkWell(
-                  onTap: isDisabled
-                      ? null
-                      : () => _handleLateArrivalArrive(notification),
-                  borderRadius: BorderRadius.circular(8),
-                  child: Container(
-                    alignment: Alignment.center,
-                    height: 44,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: isDisabled ? disabledFill : AppColors.kGreen,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      mainAxisSize: MainAxisSize.max,
-                      children: [
-                        Flexible(
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text(
-                              'Arrive',
-                              style: TextStyle(
-                                fontSize: 15,
+                                fontSize: 14,
                                 fontWeight: FontWeight.w600,
                                 color: isDisabled
                                     ? Colors.grey[200]

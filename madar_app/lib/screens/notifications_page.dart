@@ -1494,7 +1494,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
     final trackRequestStatusById = _buildTrackRequestStatusMap(merged);
     unawaited(_collectExpiredActionsForExit(merged, trackRequestStatusById));
-    final visible = _showAll ? merged : merged.take(5).toList();
+    final visible = _showAll ? merged : merged.take(10).toList();
     for (final n in visible) {
       final overrideStatus = _localStatusOverride[n.id];
       if (overrideStatus != null &&
@@ -1545,7 +1545,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
               trackRequestStatusById: trackRequestStatusById,
             );
           }),
-          if (!_showAll && merged.length > 5)
+          if (!_showAll && merged.length > 10)
             Padding(
               padding: const EdgeInsets.all(5),
               child: TextButton(

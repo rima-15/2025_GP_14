@@ -164,6 +164,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
   final Map<String, bool> _localReadOverride =
       {}; // For items that should disappear immediately
   final Map<String, String> _localStatusOverride = {};
+  final Set<String> _pendingDeleteIds = {};
   final Set<String> _autoCancelledMeetingNotifIds = {};
   final Map<String, String> _meetingStatusCache = {};
   final Map<String, int> _meetingHostStepCache = {};
@@ -1424,6 +1425,11 @@ class _NotificationsPageState extends State<NotificationsPage> {
       }
     }
 
+    if (_pendingDeleteIds.isNotEmpty) {
+      final mergedIds = merged.map((n) => n.id).toSet();
+      _pendingDeleteIds.removeWhere((id) => !mergedIds.contains(id));
+    }
+
     return merged;
   }
 
@@ -1477,7 +1483,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
     required Map<String, bool> readMap,
   }) {
     final now = DateTime.now();
-    for (final n in merged) {
+    final filteredMerged =
+        merged.where((n) => !_pendingDeleteIds.contains(n.id)).toList();
+    for (final n in filteredMerged) {
       if (n.type == NotificationType.trackRequest) {
         final status = (n.requestStatus ?? '').toLowerCase().trim();
         if (status == 'pending' && n.endAt != null) {
@@ -1492,9 +1500,12 @@ class _NotificationsPageState extends State<NotificationsPage> {
       }
     }
 
-    final trackRequestStatusById = _buildTrackRequestStatusMap(merged);
-    unawaited(_collectExpiredActionsForExit(merged, trackRequestStatusById));
-    final visible = _showAll ? merged : merged.take(10).toList();
+    final trackRequestStatusById = _buildTrackRequestStatusMap(filteredMerged);
+    unawaited(
+      _collectExpiredActionsForExit(filteredMerged, trackRequestStatusById),
+    );
+    final visible =
+        _showAll ? filteredMerged : filteredMerged.take(10).toList();
     for (final n in visible) {
       final overrideStatus = _localStatusOverride[n.id];
       if (overrideStatus != null &&
@@ -1503,7 +1514,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
       }
     }
 
-    if (merged.isEmpty) {
+    if (filteredMerged.isEmpty) {
       return RefreshIndicator(
         color: AppColors.kGreen,
         backgroundColor: Colors.white,
@@ -1545,7 +1556,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
               trackRequestStatusById: trackRequestStatusById,
             );
           }),
-          if (!_showAll && merged.length > 10)
+          if (!_showAll && filteredMerged.length > 10)
             Padding(
               padding: const EdgeInsets.all(5),
               child: TextButton(
@@ -1750,18 +1761,52 @@ class _NotificationsPageState extends State<NotificationsPage> {
                         notification,
                       );
 
-                      if (confirmed && notification.notificationDocId != null) {
-                        await FirebaseFirestore.instance
-                            .collection('notifications')
-                            .doc(notification.notificationDocId!)
-                            .delete();
-                      } else {
+                      if (!confirmed) {
                         // Only reset if it was swiped and user cancelled
                         if (wasSwiped && mounted) {
                           setState(() {
                             _notificationOffsets[notification.id] = 0.0;
                           });
                         }
+                        return;
+                      }
+
+                      if (mounted) {
+                        setState(() {
+                          _pendingDeleteIds.add(notification.id);
+                          _notificationOffsets.remove(notification.id);
+                        });
+                      }
+
+                      final docId = notification.notificationDocId;
+                      if (docId == null) {
+                        if (mounted) {
+                          setState(() {
+                            _pendingDeleteIds.remove(notification.id);
+                          });
+                        }
+                        SnackbarHelper.showError(
+                          context,
+                          'Failed to delete notification. Please try again.',
+                        );
+                        return;
+                      }
+
+                      try {
+                        await FirebaseFirestore.instance
+                            .collection('notifications')
+                            .doc(docId)
+                            .delete();
+                      } catch (_) {
+                        if (mounted) {
+                          setState(() {
+                            _pendingDeleteIds.remove(notification.id);
+                          });
+                        }
+                        SnackbarHelper.showError(
+                          context,
+                          'Failed to delete notification. Please try again.',
+                        );
                       }
                     },
                     borderRadius: BorderRadius.only(

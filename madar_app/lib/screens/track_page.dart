@@ -84,6 +84,8 @@ class _TrackPageState extends State<TrackPage> {
   final Map<String, String> _meetingNameByUser = {};
   final Map<String, DateTime> _meetingUpdatedAtByUser = {};
   final Map<String, String> _meetingArrivalStatusByUser = {};
+  final Map<String, String> _arrivalOverrideByUser = {};
+  final Map<String, DateTime> _arrivalOverrideAtByUser = {};
   Map<String, double>? _meetingPointPosGltf;
   Map<String, double>? _meetingPointPosBlender;
   String _meetingPointFloorLabel = '';
@@ -1093,6 +1095,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     _meetingNameByUser.clear();
     _meetingUpdatedAtByUser.clear();
     _meetingArrivalStatusByUser.clear();
+    _arrivalOverrideByUser.clear();
+    _arrivalOverrideAtByUser.clear();
     _meetingPointPosGltf = null;
     _meetingPointPosBlender = null;
     _meetingPointFloorLabel = '';
@@ -1208,6 +1212,27 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       _meetingArrivalStatusByUser[p.userId] = p.arrivalStatus;
     }
 
+    // Preserve local "arrived" overrides until Firestore catches up.
+    for (final entry in _arrivalOverrideByUser.entries.toList()) {
+      final id = entry.key;
+      if (!ids.contains(id)) {
+        _arrivalOverrideByUser.remove(id);
+        _arrivalOverrideAtByUser.remove(id);
+        continue;
+      }
+      final overrideStatus = entry.value;
+      final meetingStatus = _meetingArrivalStatusByUser[id];
+      if (meetingStatus == null) continue;
+      if (meetingStatus == 'arrived' || meetingStatus == 'cancelled') {
+        _arrivalOverrideByUser.remove(id);
+        _arrivalOverrideAtByUser.remove(id);
+        continue;
+      }
+      if (overrideStatus == 'arrived') {
+        _meetingArrivalStatusByUser[id] = 'arrived';
+      }
+    }
+
     _maybeStartCompletionHoldFromStream(meeting);
 
     _meetingPointPosGltf = null;
@@ -1248,6 +1273,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       _meetingNameByUser.remove(id);
       _meetingUpdatedAtByUser.remove(id);
       _meetingArrivalStatusByUser.remove(id);
+      _arrivalOverrideByUser.remove(id);
+      _arrivalOverrideAtByUser.remove(id);
       _trackMapController?.runJavaScript("removeTrackedPin('$id');");
       _trackMapController?.runJavaScript("clearMeetingPathForUser('$id');");
       _meetingPathsByUserFloorGltf.remove(id);
@@ -1479,7 +1506,13 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       final seconds = (totalMeters / 1.4).ceil();
       final baseSeconds = seconds < 60 ? 60 : seconds;
       _meetingEtaBaseSecondsByUser[userId] = baseSeconds;
-      _meetingEtaBaseTimeByUser[userId] = DateTime.now();
+      final updatedAt = _meetingUpdatedAtByUser[userId];
+      final prevBaseTime = _meetingEtaBaseTimeByUser[userId];
+      if (updatedAt != null) {
+        _meetingEtaBaseTimeByUser[userId] = updatedAt;
+      } else if (prevBaseTime == null) {
+        _meetingEtaBaseTimeByUser[userId] = DateTime.now();
+      }
     } else {
       _meetingEtaBaseSecondsByUser.remove(userId);
       _meetingEtaBaseTimeByUser.remove(userId);
@@ -3054,6 +3087,14 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
 
+  String _effectiveArrivalStatus(String userId, String meetingStatus) {
+    return _arrivalOverrideByUser[userId] ?? meetingStatus;
+  }
+
+  DateTime? _effectiveArrivedAt(String userId, DateTime? meetingArrivedAt) {
+    return meetingArrivedAt ?? _arrivalOverrideAtByUser[userId];
+  }
+
   double _meetingPathDistance(
     Map<String, List<Map<String, double>>> pathByFloor,
   ) {
@@ -3075,9 +3116,10 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     final baseSeconds =
         _meetingEtaBaseSecondsByUser[userId] ?? (fallbackMins * 60);
     final baseTime = _meetingEtaBaseTimeByUser[userId];
-    final elapsed = baseTime == null
+    final elapsedRaw = baseTime == null
         ? 0
         : DateTime.now().difference(baseTime).inSeconds;
+    final elapsed = elapsedRaw < 0 ? 0 : elapsedRaw;
     final remaining = baseSeconds - elapsed;
     return remaining < 60 ? 60 : remaining;
   }
@@ -3166,12 +3208,16 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     required String uid,
     required bool isHost,
   }) {
-    final arrivalStatus = isHost
+    final effectiveId = isHost ? meeting.hostId : uid;
+    final baseArrivalStatus = isHost
         ? meeting.hostArrivalStatus
         : meeting.participantFor(uid)?.arrivalStatus ?? 'on_the_way';
-    final arrivedAt = isHost
+    final arrivalStatus =
+        _effectiveArrivalStatus(effectiveId, baseArrivalStatus);
+    final baseArrivedAt = isHost
         ? meeting.hostArrivedAt
         : meeting.participantFor(uid)?.arrivedAt;
+    final arrivedAt = _effectiveArrivedAt(effectiveId, baseArrivedAt);
     final fallbackMins = isHost
         ? meeting.hostEstimatedMinutes
         : (meeting.participantFor(uid)?.estimatedArrivalMinutes ?? 3);
@@ -3253,9 +3299,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
           // ── Timer or arrived-at line ────────────────────────────────────
           if (!isCancelled)
-            if (isArrived && arrivedAt != null)
+            if (isArrived)
               Text(
-                'Arrived at: ${_formatTime(arrivedAt)}',
+                arrivedAt != null
+                    ? 'Arrived at: ${_formatTime(arrivedAt)}'
+                    : 'Arrived',
                 style: TextStyle(
                   fontSize: 13,
                   color: Colors.grey[700],
@@ -3323,8 +3371,10 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     required bool isHostParticipant, // this participant IS the host
   }) {
     final isExpanded = _expandedArrivalParticipantId == p.userId;
-    final isCancelled = p.arrivalStatus == 'cancelled';
-    final isArrived = p.arrivalStatus == 'arrived';
+    final effectiveStatus = _effectiveArrivalStatus(p.userId, p.arrivalStatus);
+    final arrivedAt = _effectiveArrivedAt(p.userId, p.arrivedAt);
+    final isCancelled = effectiveStatus == 'cancelled';
+    final isArrived = effectiveStatus == 'arrived';
     final fallbackMins = p.estimatedArrivalMinutes;
     final secsLeft = _etaSecondsLeftForUser(p.userId, fallbackMins);
 
@@ -3388,7 +3438,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                               ),
                             ),
                             const SizedBox(width: 8),
-                            _arrivalStatusChip(p.arrivalStatus),
+                            _arrivalStatusChip(effectiveStatus),
                           ],
                         ),
                         const SizedBox(height: 4),
@@ -3501,9 +3551,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                               ),
                               const SizedBox(height: 6),
                               // Timer or arrived-at
-                              if (isArrived && p.arrivedAt != null)
+                              if (isArrived)
                                 Text(
-                                  'Arrived at: ${_formatTime(p.arrivedAt!)}',
+                                  arrivedAt != null
+                                      ? 'Arrived at: ${_formatTime(arrivedAt)}'
+                                      : 'Arrived',
                                   style: TextStyle(
                                     fontSize: 13,
                                     color: Colors.grey[600],
@@ -3799,6 +3851,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     final now = DateTime.now();
     final willComplete = _willCompleteAfterArrive(meeting, isHost, uid);
     final prevArrivalStatus = _meetingArrivalStatusByUser[uid];
+    final prevOverrideStatus = _arrivalOverrideByUser[uid];
+    final prevOverrideAt = _arrivalOverrideAtByUser[uid];
     if (mounted) {
       if (willComplete) {
         _pendingCompletionHoldMeetingId = meeting.id;
@@ -3806,6 +3860,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         _lastKnownConfirmedMeeting = meeting;
       }
       _meetingArrivalStatusByUser[uid] = 'arrived';
+      _arrivalOverrideByUser[uid] = 'arrived';
+      _arrivalOverrideAtByUser[uid] = now;
       _applyAllTrackedPinsToViewer();
       unawaited(_clearMeetingPathForUser(uid));
     }
@@ -3835,6 +3891,16 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           _meetingArrivalStatusByUser.remove(uid);
         } else {
           _meetingArrivalStatusByUser[uid] = prevArrivalStatus;
+        }
+        if (prevOverrideStatus == null) {
+          _arrivalOverrideByUser.remove(uid);
+        } else {
+          _arrivalOverrideByUser[uid] = prevOverrideStatus;
+        }
+        if (prevOverrideAt == null) {
+          _arrivalOverrideAtByUser.remove(uid);
+        } else {
+          _arrivalOverrideAtByUser[uid] = prevOverrideAt;
         }
         unawaited(_recomputeMeetingPathForUser(uid));
         _applyAllTrackedPinsToViewer();

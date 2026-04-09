@@ -11,7 +11,11 @@ class UnityCameraPage
   final String? placeId;
   final bool isScanOnly;
 
-  // وضع التوجيه للصديق
+  /// Added: shared navigation preference for both place navigation
+  /// and friend navigation.
+  /// Expected values: stairs / elevator / escalator / any / null
+  final String? navigationPreference;
+
   final bool isFriendNavigation;
   final double? friendX;
   final double? friendY;
@@ -24,6 +28,7 @@ class UnityCameraPage
     this.isNavigation = false,
     this.placeId,
     this.isScanOnly = false,
+    this.navigationPreference,
     this.isFriendNavigation = false,
     this.friendX,
     this.friendY,
@@ -46,6 +51,23 @@ class _UnityCameraPageState
       "Initializing AR...";
 
   String? _cachedUserDocId;
+
+  String _normalizedPreference() {
+    final pref =
+        (widget.navigationPreference ??
+                '')
+            .trim()
+            .toLowerCase();
+
+    if (pref == 'stairs' ||
+        pref == 'elevator' ||
+        pref == 'escalator') {
+      return pref;
+    }
+
+    // no preference => Unity should use normal shortest path
+    return 'none';
+  }
 
   // Resolve Firestore user docId by email (your model: users docId != uid)
   Future<String?>
@@ -176,7 +198,7 @@ class _UnityCameraPageState
 
   // 1) Send USER_DOC_ID
   // 2) Send ID_TOKEN
-  // 3) Then send SCAN_ONLY / NAVIGATION / EXPLORE
+  // 3) Then send SCAN_ONLY / NAVIGATION / EXPLORE / NAVIGATE_TO_USER
   Future<void>
   _sendHandshakeAndMode() async {
     if (!_isUnityReady) return;
@@ -245,24 +267,27 @@ class _UnityCameraPageState
 
     // Send mode
     final String modeMessage;
+    final pref =
+        _normalizedPreference();
+
     if (widget.isFriendNavigation &&
         widget.friendX != null &&
         widget.friendY != null &&
         widget.friendZ != null &&
         widget.friendFloor != null) {
-      // إرسال إحداثيات الصديق مباشرة ليونتي
-      // Encode name to avoid colons breaking the split — replace : with |
+      // Encode name to avoid colons breaking the split
       final safeName =
           (widget.friendName ??
                   'Friend')
               .replaceAll(':', '|');
+
       modeMessage =
-          "NAVIGATE_TO_USER:${widget.friendX}:${widget.friendY}:${widget.friendZ}:${widget.friendFloor}:$safeName";
+          "NAVIGATE_TO_USER:${widget.friendX}:${widget.friendY}:${widget.friendZ}:${widget.friendFloor}:$pref:$safeName";
     } else if (widget.isNavigation &&
         widget.placeId != null &&
         widget.placeId!.isNotEmpty) {
       modeMessage =
-          "NAVIGATION:${widget.placeId}";
+          "NAVIGATION:${widget.placeId}:$pref";
     } else if (widget.isScanOnly) {
       modeMessage = "SCAN_ONLY";
     } else {

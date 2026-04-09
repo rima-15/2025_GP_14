@@ -1391,8 +1391,9 @@ export const onMeetingPointStarted = onDocumentUpdated(
 
    Meeting Point Completed Notification
 
-   - When a meeting point becomes completed, notify arrived participants
-     who did not leave the session.
+   - When a meeting point becomes completed, notify arrived participants.
+   - If completion is due to auto-closure, notify the host + accepted
+     participants who did not cancel their arrival.
 
 -------------------------------------------------------------------*/
 
@@ -1427,6 +1428,15 @@ export const onMeetingPointCompleted = onDocumentUpdated(
       const venueName = (after.venueName ?? "").toString().trim();
       const pointName = (after.suggestedPoint ?? "").toString().trim();
       const locationName = pointName || venueName || "meeting point";
+      const cancellationReason = (after.cancellationReason ?? "")
+        .toString()
+        .trim();
+      const autoClosed =
+        cancellationReason.toLowerCase() === "auto-closed after time limit";
+      const locationLabel =
+        locationName === "meeting point" || locationName === "the meeting point"
+          ? "the meeting point"
+          : locationName;
 
       const hostArrival = (after.hostArrivalStatus ?? "on_the_way")
         .toString()
@@ -1442,18 +1452,30 @@ export const onMeetingPointCompleted = onDocumentUpdated(
         (p?.arrivalStatus ?? "on_the_way").toString().trim().toLowerCase();
 
       const targetIds = new Set<string>();
-      if (hostId && hostArrival === "arrived") targetIds.add(hostId);
-      for (const p of participants) {
-        if (statusOf(p) !== "accepted") continue;
-        if (arrivalOf(p) !== "arrived") continue;
-        const uid = (p?.userId ?? "").toString().trim();
-        if (uid) targetIds.add(uid);
+      if (autoClosed) {
+        if (hostId && hostArrival !== "cancelled") targetIds.add(hostId);
+        for (const p of participants) {
+          if (statusOf(p) !== "accepted") continue;
+          if (arrivalOf(p) === "cancelled") continue;
+          const uid = (p?.userId ?? "").toString().trim();
+          if (uid) targetIds.add(uid);
+        }
+      } else {
+        if (hostId && hostArrival === "arrived") targetIds.add(hostId);
+        for (const p of participants) {
+          if (statusOf(p) !== "accepted") continue;
+          if (arrivalOf(p) !== "arrived") continue;
+          const uid = (p?.userId ?? "").toString().trim();
+          if (uid) targetIds.add(uid);
+        }
       }
 
       if (targetIds.size === 0) return;
 
       const title = "Meeting Point Completed";
-      const body = `All participants arrived at ${locationName}.`;
+      const body = autoClosed
+        ? `The time limit for meeting at ${locationLabel} has ended.`
+        : `All participants arrived at ${locationName}.`;
 
       let batch = db.batch();
       let ops = 0;

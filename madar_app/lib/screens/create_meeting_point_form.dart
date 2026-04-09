@@ -916,14 +916,13 @@ class MeetingPointService {
   static Future<void> reconcileArrivalPhase(MeetingPointRecord meeting) async {
     if (!meeting.isConfirmed) return;
 
-    // Session time limit: auto-terminate if expiresAt has passed.
-    // Uses 'terminated' (not 'cancelled') so history shows this as a system
-    // action, never as "You cancelled this request".
+    // Session time limit: auto-complete if expiresAt has passed.
+    // Uses 'completed' so it is distinct from host cancellation.
     if (meeting.expiresAt != null &&
         !meeting.expiresAt!.isAfter(MeetingPointService.serverNow)) {
       try {
         await _col.doc(meeting.id).update({
-          'status': 'terminated',
+          'status': 'completed',
           'cancellationReason': 'Auto-closed after time limit',
           'updatedAt': FieldValue.serverTimestamp(),
         });

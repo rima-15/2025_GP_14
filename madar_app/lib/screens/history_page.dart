@@ -345,6 +345,7 @@ class _HistoryPageState extends State<HistoryPage> {
     final data = d.data();
     final status = (data['status'] ?? '').toString().trim().toLowerCase();
     final hostId = (data['hostId'] ?? '').toString();
+    final storedReason = (data['cancellationReason'] ?? '').toString().trim();
     final venueName = (data['venueName'] ?? '').toString();
     final suggestedPoint = (data['suggestedPoint'] ?? '').toString();
     final hostName = (data['hostName'] ?? '').toString();
@@ -475,7 +476,9 @@ class _HistoryPageState extends State<HistoryPage> {
         status: 'auto_closed',
         venueName: venueName,
         suggestedPoint: suggestedPoint,
-        cancellationReason: 'Auto-closed after time limit',
+        cancellationReason: storedReason.isNotEmpty
+            ? storedReason
+            : 'Auto-closed after time limit',
         hostId: hostId,
         hostName: hostName,
         hostPhone: hostPhone,
@@ -586,13 +589,18 @@ class _HistoryPageState extends State<HistoryPage> {
   }
 
   /// Derives a human-readable cancellation reason from raw Firestore data.
-  /// Returns empty string if the meeting is not cancelled or reason is unknown.
+  /// Returns empty string if the meeting is not cancelled/completed or reason is unknown.
   String _deriveCancellationReason(Map<String, dynamic> data, String uid) {
     final status = (data['status'] ?? '').toString().trim().toLowerCase();
+    final storedReason = (data['cancellationReason'] ?? '').toString().trim();
+    if (status == 'completed') {
+      return storedReason.toLowerCase() == 'auto-closed after time limit'
+          ? storedReason
+          : '';
+    }
     if (status != 'cancelled') return '';
 
     // Explicit reason stored by the arrival-phase auto-cancel logic.
-    final storedReason = (data['cancellationReason'] ?? '').toString().trim();
     if (storedReason == 'all_participants_left') {
       return 'All participants left the meeting';
     }
@@ -1082,9 +1090,9 @@ class _HistoryPageState extends State<HistoryPage> {
         label = 'Terminated';
         break;
       case 'auto_closed':
-        bg = Colors.amber.withOpacity(0.15);
-        text = Colors.amber[800]!;
-        label = 'Terminated';
+        bg = AppColors.kGreen.withOpacity(0.1);
+        text = AppColors.kGreen;
+        label = 'Completed';
         break;
       case 'cancelled':
         bg = Colors.grey.withOpacity(0.15);
@@ -1393,7 +1401,8 @@ class _HistoryPageState extends State<HistoryPage> {
             // ── Cancellation reason banner ────────────────────────────────
             if (item.cancellationReason.isNotEmpty &&
                 (item.status == 'cancelled' ||
-                    item.status == 'auto_closed')) ...[
+                    item.status == 'auto_closed' ||
+                    item.status == 'completed')) ...[
               const SizedBox(height: 10),
               Container(
                 width: double.infinity,

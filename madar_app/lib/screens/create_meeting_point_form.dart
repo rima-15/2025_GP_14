@@ -916,14 +916,13 @@ class MeetingPointService {
   static Future<void> reconcileArrivalPhase(MeetingPointRecord meeting) async {
     if (!meeting.isConfirmed) return;
 
-    // Session time limit: auto-terminate if expiresAt has passed.
-    // Uses 'terminated' (not 'cancelled') so history shows this as a system
-    // action, never as "You cancelled this request".
+    // Session time limit: auto-complete if expiresAt has passed.
+    // Uses 'completed' so it is distinct from host cancellation.
     if (meeting.expiresAt != null &&
         !meeting.expiresAt!.isAfter(MeetingPointService.serverNow)) {
       try {
         await _col.doc(meeting.id).update({
-          'status': 'terminated',
+          'status': 'completed',
           'cancellationReason': 'Auto-closed after time limit',
           'updatedAt': FieldValue.serverTimestamp(),
         });
@@ -2713,6 +2712,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       _initStep5();
       setState(() {});
     } else {
+      if (_step == 2) {
+        unawaited(_touchStep2LocationOnNext());
+      }
       // Steps 1 → 2 and 2 → 3: simple increment.
       setState(() => _step++);
     }
@@ -4055,6 +4057,32 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       });
     } catch (e) {
       debugPrint('❌ Failed to save user location from meeting form: $e');
+    }
+  }
+
+  Future<void> _touchStep2LocationOnNext() async {
+    if (_hostLocation == null) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final gltf = _step2InitialUserPinGltf;
+    if (gltf != null && gltf.isNotEmpty) {
+      final floorLabel = (_step2InitialFloorLabel ?? '').toString().trim();
+      await _saveUserLocationFromResult({
+        'gltf': gltf,
+        'floorLabel': floorLabel,
+      });
+      return;
+    }
+
+    try {
+      final userDocRef = await _resolveUserDocRef(user);
+      await userDocRef.update({
+        'location.updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      debugPrint('Failed to touch user location timestamp: $e');
     }
   }
 

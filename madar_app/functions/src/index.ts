@@ -55,41 +55,46 @@ export const onUserLocationUpdated = onDocumentUpdated(
       const userId = event.params.userId;
       if (!userId) return;
 
-      const snap = await db
-        .collection("notifications")
-        .where("userId", "==", userId)
-        .where("type", "==", "locationRefresh")
-        .get();
+      const updateNotificationsByType = async (type: string) => {
+        const snap = await db
+          .collection("notifications")
+          .where("userId", "==", userId)
+          .where("type", "==", type)
+          .get();
 
-      if (snap.empty) return;
+        if (snap.empty) return;
 
-      let batch = db.batch();
-      let ops = 0;
-      const commits: Promise<any>[] = [];
+        let batch = db.batch();
+        let ops = 0;
+        const commits: Promise<any>[] = [];
 
-      for (const doc of snap.docs) {
-        const data: any = doc.data() ?? {};
-        const createdAt = toDate(data.createdAt);
-        if (!createdAt) continue;
-        if (createdAt > afterUpdatedAt) continue;
-        if (data.actionTaken === true) continue;
+        for (const doc of snap.docs) {
+          const data: any = doc.data() ?? {};
+          const createdAt = toDate(data.createdAt);
+          if (!createdAt) continue;
+          if (createdAt > afterUpdatedAt) continue;
+          if (data.actionTaken === true) continue;
 
-        batch.update(doc.ref, {
-          actionTaken: true,
-          isRead: true,
-          actionTakenAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
+          batch.update(doc.ref, {
+            actionTaken: true,
+            isRead: true,
+            actionTakenAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
 
-        ops++;
-        if (ops >= 450) {
-          commits.push(batch.commit());
-          batch = db.batch();
-          ops = 0;
+          ops++;
+          if (ops >= 450) {
+            commits.push(batch.commit());
+            batch = db.batch();
+            ops = 0;
+          }
         }
-      }
 
-      if (ops > 0) commits.push(batch.commit());
-      if (commits.length > 0) await Promise.all(commits);
+        if (ops > 0) commits.push(batch.commit());
+        if (commits.length > 0) await Promise.all(commits);
+      };
+
+      await updateNotificationsByType("locationRefresh");
+      await updateNotificationsByType("meetingLateArrival");
     } catch (error) {
       console.error("Error marking refresh notifications as read:", error);
     }
@@ -1299,7 +1304,6 @@ export const onMeetingPointStarted = onDocumentUpdated(
       const venueName = (after.venueName ?? "").toString().trim();
       const pointName = (after.suggestedPoint ?? "").toString().trim();
       const locationName = pointName || venueName || "the meeting point";
-
       const participants: any[] = Array.isArray(after.participants)
         ? after.participants
         : [];
@@ -1310,16 +1314,19 @@ export const onMeetingPointStarted = onDocumentUpdated(
         .map((p: any) => (p?.userId ?? "").toString().trim())
         .filter((uid: string) => uid && uid !== hostId);
 
-      if (acceptedIds.length === 0) return;
+      const targetIds = new Set<string>(acceptedIds);
+      if (hostId) targetIds.add(hostId);
 
-      const title = "Meeting point started";
-      const body = `${hostName} will meet you at ${locationName}.`;
+      if (targetIds.size === 0) return;
+
+      const title = "Meeting Point Started";
+      const body = `You will meet with other participants at ${locationName}.`;
 
       let batch = db.batch();
       let ops = 0;
       const commits: Promise<any>[] = [];
 
-      for (const uid of acceptedIds) {
+      for (const uid of targetIds) {
         const userDoc = await db.collection("users").doc(uid).get();
         if (!userDoc.exists) continue;
 
@@ -1384,8 +1391,9 @@ export const onMeetingPointStarted = onDocumentUpdated(
 
    Meeting Point Completed Notification
 
-   - When a meeting point becomes completed, notify arrived participants
-     who did not leave the session.
+   - When a meeting point becomes completed, notify arrived participants.
+   - If completion is due to auto-closure, notify the host + accepted
+     participants who did not cancel their arrival.
 
 -------------------------------------------------------------------*/
 
@@ -1420,6 +1428,15 @@ export const onMeetingPointCompleted = onDocumentUpdated(
       const venueName = (after.venueName ?? "").toString().trim();
       const pointName = (after.suggestedPoint ?? "").toString().trim();
       const locationName = pointName || venueName || "meeting point";
+      const cancellationReason = (after.cancellationReason ?? "")
+        .toString()
+        .trim();
+      const autoClosed =
+        cancellationReason.toLowerCase() === "auto-closed after time limit";
+      const locationLabel =
+        locationName === "meeting point" || locationName === "the meeting point"
+          ? "the meeting point"
+          : locationName;
 
       const hostArrival = (after.hostArrivalStatus ?? "on_the_way")
         .toString()
@@ -1435,18 +1452,30 @@ export const onMeetingPointCompleted = onDocumentUpdated(
         (p?.arrivalStatus ?? "on_the_way").toString().trim().toLowerCase();
 
       const targetIds = new Set<string>();
-      if (hostId && hostArrival === "arrived") targetIds.add(hostId);
-      for (const p of participants) {
-        if (statusOf(p) !== "accepted") continue;
-        if (arrivalOf(p) !== "arrived") continue;
-        const uid = (p?.userId ?? "").toString().trim();
-        if (uid) targetIds.add(uid);
+      if (autoClosed) {
+        if (hostId && hostArrival !== "cancelled") targetIds.add(hostId);
+        for (const p of participants) {
+          if (statusOf(p) !== "accepted") continue;
+          if (arrivalOf(p) === "cancelled") continue;
+          const uid = (p?.userId ?? "").toString().trim();
+          if (uid) targetIds.add(uid);
+        }
+      } else {
+        if (hostId && hostArrival === "arrived") targetIds.add(hostId);
+        for (const p of participants) {
+          if (statusOf(p) !== "accepted") continue;
+          if (arrivalOf(p) !== "arrived") continue;
+          const uid = (p?.userId ?? "").toString().trim();
+          if (uid) targetIds.add(uid);
+        }
       }
 
       if (targetIds.size === 0) return;
 
       const title = "Meeting Point Completed";
-      const body = `All participants arrived at "${locationName}".`;
+      const body = autoClosed
+        ? `The time limit for meeting at ${locationLabel} has ended.`
+        : `All participants arrived at ${locationName}.`;
 
       let batch = db.batch();
       let ops = 0;
@@ -1534,6 +1563,19 @@ export const onMeetingPointLocationRefreshRequested = onDocumentUpdated(
       const meetingPointId = event.params.meetingPointId;
       if (!meetingPointId) return;
 
+      const meetingStatus = (after.status ?? "pending")
+        .toString()
+        .trim()
+        .toLowerCase();
+      if (meetingStatus !== "active") return;
+
+      const now = new Date();
+      const expiresAt =
+        after.expiresAt && typeof after.expiresAt.toDate === "function"
+          ? after.expiresAt.toDate()
+          : null;
+      if (expiresAt && expiresAt <= now) return;
+
       const toMap = (v: any) =>
         v && typeof v === "object" && !Array.isArray(v) ? v : {};
 
@@ -1565,6 +1607,10 @@ export const onMeetingPointLocationRefreshRequested = onDocumentUpdated(
       const hostName =
         (after.hostName ?? "Someone").toString().trim() || "Someone";
       const hostPhone = (after.hostPhone ?? "").toString().trim();
+      const hostArrival = (after.hostArrivalStatus ?? "on_the_way")
+        .toString()
+        .trim()
+        .toLowerCase();
       const venueId = (after.venueId ?? "").toString().trim();
       const venueName = (after.venueName ?? "").toString().trim();
 
@@ -1573,14 +1619,21 @@ export const onMeetingPointLocationRefreshRequested = onDocumentUpdated(
         : [];
       const participantInfo = new Map<
         string,
-        { name: string; phone: string }
+        { name: string; phone: string; status: string; arrivalStatus: string }
       >();
       for (const p of participants) {
         const uid = (p?.userId ?? "").toString().trim();
         if (!uid) continue;
+        const status = (p?.status ?? "pending").toString().trim().toLowerCase();
+        const arrival = (p?.arrivalStatus ?? "on_the_way")
+          .toString()
+          .trim()
+          .toLowerCase();
         participantInfo.set(uid, {
           name: (p?.name ?? "").toString().trim(),
           phone: (p?.phone ?? "").toString().trim(),
+          status,
+          arrivalStatus: arrival,
         });
       }
 
@@ -1610,6 +1663,26 @@ export const onMeetingPointLocationRefreshRequested = onDocumentUpdated(
         }
 
         if (!senderId || senderId === receiverId) continue;
+
+        const senderIsHost = senderId === hostId;
+        if (senderIsHost) {
+          if (hostArrival === "cancelled") continue;
+        } else {
+          const senderInfo = participantInfo.get(senderId);
+          if (!senderInfo) continue;
+          if (senderInfo.status !== "accepted") continue;
+          if (senderInfo.arrivalStatus === "cancelled") continue;
+        }
+
+        const receiverIsHost = receiverId === hostId;
+        if (receiverIsHost) {
+          if (hostArrival === "cancelled") continue;
+        } else {
+          const receiverInfo = participantInfo.get(receiverId);
+          if (!receiverInfo) continue;
+          if (receiverInfo.status !== "accepted") continue;
+          if (receiverInfo.arrivalStatus === "cancelled") continue;
+        }
 
         const { name: senderName, phone: senderPhone } =
           resolveSenderInfo(senderId);
@@ -1694,6 +1767,364 @@ export const onMeetingPointLocationRefreshRequested = onDocumentUpdated(
         "Error sending meeting point refresh location notifications:",
         error
       );
+    }
+  }
+);
+
+/* ------------------------------------------------------------------
+
+   Meeting Point Late Arrival Notification (Scheduled)
+
+   - When a meeting point is active and a user's ETA has passed (plus
+     a short grace period), and they are still "on_the_way" and not
+     close enough to auto-arrive, send a "Late Arrival" notification.
+
+-------------------------------------------------------------------*/
+
+export const onMeetingPointLateArrival = onSchedule(
+  "every 1 minutes",
+  async () => {
+    try {
+      const now = admin.firestore.Timestamp.now();
+      const nowDate = now.toDate();
+
+      const toDate = (v: any) =>
+        v && typeof v.toDate === "function" ? v.toDate() : null;
+
+      const toFNumber = (raw?: string | null): string => {
+        if (!raw) return "";
+        let s = raw.trim();
+        if (!s) return "";
+        const up0 = s.toUpperCase();
+        if (
+          up0 === "G" ||
+          up0 === "GF" ||
+          up0.includes("GROUND") ||
+          up0.includes("أرض") ||
+          up0.includes("ارضي") ||
+          up0.includes("أرضي")
+        ) {
+          return "0";
+        }
+        let up = up0.replace(/[\s_\-]+/g, "");
+        up = up
+          .replace("FLOOR", "")
+          .replace("LEVEL", "")
+          .replace("LVL", "")
+          .replace("FL", "");
+        const m1 = /^(?:F|L)?(-?\d+)$/.exec(up);
+        if (m1) return m1[1];
+        const m2 = /(-?\d+)/.exec(up);
+        if (m2) return m2[1];
+        return "";
+      };
+
+      const floorsMatchStrict = (aRaw: string, bRaw: string) => {
+        const a = toFNumber(aRaw);
+        const b = toFNumber(bRaw);
+        if (!a || !b) return false;
+        return a === b;
+      };
+
+      const entranceFromMeeting = (data: any) => {
+        const list = Array.isArray(data.suggestedCandidates)
+          ? data.suggestedCandidates
+          : [];
+        const first = list.length > 0 ? list[0] : null;
+        const ent = first?.entrance ?? null;
+        if (!ent || typeof ent !== "object") return null;
+        const x = Number(ent.x);
+        const y = Number(ent.y);
+        const floor = (ent.floor ?? "").toString().trim();
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+        return { x, y, floor };
+      };
+
+      const UNITS_TO_METERS = 69.32; // matches Flutter _unitToMeters
+      const AUTO_ARRIVE_DISTANCE_METERS = 10;
+      const LATE_ARRIVAL_GRACE_MS = 60 * 1000;
+
+      const meetingSnap = await db
+        .collection("meetingPoints")
+        .where("status", "==", "active")
+        .get();
+
+      if (meetingSnap.empty) return;
+
+      const userCache = new Map<
+        string,
+        {
+          exists: boolean;
+          tokens: string[];
+          location: { x: number; y: number; floor: string } | null;
+          updatedAt: Date | null;
+        }
+      >();
+
+      const getUserInfo = async (uid: string) => {
+        if (userCache.has(uid)) return userCache.get(uid)!;
+        const ref = db.collection("users").doc(uid);
+        const snap = await ref.get();
+        if (!snap.exists) {
+          const info = {
+            exists: false,
+            tokens: [] as string[],
+            location: null,
+            updatedAt: null as Date | null,
+          };
+          userCache.set(uid, info);
+          return info;
+        }
+        const data: any = snap.data() ?? {};
+        const tokens: string[] = Array.isArray(data.fcmTokens)
+          ? data.fcmTokens.filter((t: any) => typeof t === "string")
+          : [];
+        const loc: any = data.location ?? {};
+        const bp: any = loc.blenderPosition ?? {};
+        const x = Number(bp.x);
+        const y = Number(bp.y);
+        const floor = (bp.floor ?? "").toString().trim();
+        const location =
+          Number.isFinite(x) && Number.isFinite(y)
+            ? { x, y, floor }
+            : null;
+        const updatedAt = toDate(loc.updatedAt);
+        const info = {
+          exists: true,
+          tokens,
+          location,
+          updatedAt,
+        };
+        userCache.set(uid, info);
+        return info;
+      };
+
+      for (const doc of meetingSnap.docs) {
+        const data: any = doc.data() ?? {};
+        const meetingStatus = (data.status ?? "active")
+          .toString()
+          .trim()
+          .toLowerCase();
+        if (meetingStatus !== "active") continue;
+
+        const expiresAt =
+          data.expiresAt && typeof data.expiresAt.toDate === "function"
+            ? data.expiresAt.toDate()
+            : null;
+        if (expiresAt && expiresAt <= nowDate) continue;
+
+        const meetingStartAt =
+          toDate(data.confirmedAt) ??
+          toDate(data.updatedAt) ??
+          toDate(data.createdAt) ??
+          null;
+
+        const pointName = (data.suggestedPoint ?? "").toString().trim();
+        const venueName = (data.venueName ?? "").toString().trim();
+        const locationName = pointName || venueName || "the meeting point";
+        const entrance = entranceFromMeeting(data);
+        const notifiedMap =
+          data.lateArrivalNotifiedAt &&
+          typeof data.lateArrivalNotifiedAt === "object"
+            ? data.lateArrivalNotifiedAt
+            : {};
+
+        const pendingUpdates: Record<string, any> = {};
+
+        const normalizeStatus = (raw: any) =>
+          (raw ?? "pending").toString().trim().toLowerCase();
+        const normalizeArrival = (raw: any) =>
+          (raw ?? "on_the_way").toString().trim().toLowerCase();
+
+        const participants: any[] = Array.isArray(data.participants)
+          ? data.participants
+          : [];
+
+        const autoArriveUser = async (uid: string, isHost: boolean) => {
+          try {
+            const arrivedAt = admin.firestore.Timestamp.fromDate(nowDate);
+            const updates: Record<string, any> = {
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            };
+
+            let nextHostArrival = normalizeArrival(data.hostArrivalStatus);
+            let updatedParticipants = participants;
+
+            if (isHost) {
+              nextHostArrival = "arrived";
+              updates.hostArrivalStatus = "arrived";
+              updates.hostArrivedAt = arrivedAt;
+              updates.hostLocationUpdatedAt = arrivedAt;
+            } else {
+              const idx = participants.findIndex(
+                (p: any) =>
+                  (p?.userId ?? "").toString().trim() === uid
+              );
+              if (idx < 0) return false;
+              updatedParticipants = participants.map((p: any, i: number) => {
+                if (i !== idx) return p;
+                return {
+                  ...p,
+                  arrivalStatus: "arrived",
+                  arrivedAt: arrivedAt,
+                  locationUpdatedAt: arrivedAt,
+                };
+              });
+              updates.participants = updatedParticipants;
+            }
+
+            const isConfirmed =
+              data.confirmedAt &&
+              typeof data.confirmedAt.toDate === "function";
+            if (isConfirmed) {
+              const activeParticipants = updatedParticipants.filter(
+                (p: any) =>
+                  normalizeStatus(p?.status) === "accepted" &&
+                  normalizeArrival(p?.arrivalStatus) !== "cancelled"
+              );
+              const hostActive = nextHostArrival !== "cancelled";
+              const hostDone = !hostActive || nextHostArrival === "arrived";
+              const allActiveArrived =
+                hostDone &&
+                activeParticipants.every(
+                  (p: any) => normalizeArrival(p?.arrivalStatus) === "arrived"
+                );
+              if (allActiveArrived) {
+                updates.status = "completed";
+              }
+            }
+
+            await doc.ref.update(updates);
+            return true;
+          } catch (err) {
+            console.error(`Failed to auto-arrive ${uid}`, err);
+            return false;
+          }
+        };
+
+        const maybeNotify = async (
+          uid: string,
+          rawEta: any,
+          isHost: boolean
+        ) => {
+          if (!uid) return;
+
+          const userInfo = await getUserInfo(uid);
+          if (!userInfo.exists) return;
+
+          const etaNum = Number(rawEta);
+          const etaMinutes =
+            Number.isFinite(etaNum) && etaNum > 0
+              ? Math.min(Math.max(Math.round(etaNum), 1), 60)
+              : 3;
+
+          let baseTime: Date | null = meetingStartAt;
+          if (userInfo.updatedAt) {
+            if (!baseTime || userInfo.updatedAt > baseTime) {
+              baseTime = userInfo.updatedAt;
+            }
+          }
+          if (!baseTime) baseTime = nowDate;
+
+          const lastNotifiedAt = toDate(
+            notifiedMap && notifiedMap[uid] ? notifiedMap[uid] : null
+          );
+          if (lastNotifiedAt && lastNotifiedAt >= baseTime) return;
+
+          const etaDeadline = new Date(
+            baseTime.getTime() + etaMinutes * 60 * 1000
+          );
+          if (nowDate.getTime() < etaDeadline.getTime() + LATE_ARRIVAL_GRACE_MS)
+            return;
+
+          const userLoc = userInfo.location;
+          const canAutoArrive =
+            !!entrance &&
+            !!userLoc &&
+            floorsMatchStrict(userLoc.floor, entrance.floor) &&
+            Math.sqrt(
+              Math.pow(userLoc.x - entrance.x, 2) +
+                Math.pow(userLoc.y - entrance.y, 2)
+            ) *
+              UNITS_TO_METERS <=
+              AUTO_ARRIVE_DISTANCE_METERS;
+
+          if (canAutoArrive) {
+            const didAutoArrive = await autoArriveUser(uid, isHost);
+            if (didAutoArrive) return;
+          }
+          const title = "Arrival Not Confirmed";
+          const body = `Your estimated arrival time to ${locationName} has passed. Please tap "Arrive" or refresh your location.`;
+
+          const notifRef = db.collection("notifications").doc();
+          const notifId = notifRef.id;
+
+          if (userInfo.tokens.length > 0) {
+            try {
+              await admin.messaging().sendEachForMulticast({
+                notification: { title, body },
+                data: {
+                  type: "meetingLateArrival",
+                  requestId: notifId,
+                  meetingPointId: doc.id,
+                },
+                tokens: userInfo.tokens,
+              });
+            } catch (err) {
+              console.error(`Failed to send late arrival push to ${uid}`, err);
+            }
+          }
+
+          await notifRef.set({
+            userId: uid,
+            type: "meetingLateArrival",
+            requiresAction: true,
+            actionTaken: false,
+            isRead: false,
+            title,
+            body,
+            data: {
+              requestId: notifId,
+              meetingPointId: doc.id,
+            },
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+
+          pendingUpdates[`lateArrivalNotifiedAt.${uid}`] =
+            admin.firestore.FieldValue.serverTimestamp();
+        };
+
+        const hostId = (data.hostId ?? "").toString().trim();
+        const hostArrival = (data.hostArrivalStatus ?? "on_the_way")
+          .toString()
+          .trim()
+          .toLowerCase();
+        if (hostId && hostArrival === "on_the_way") {
+          await maybeNotify(hostId, data.hostEstimatedMinutes ?? 3, true);
+        }
+
+        for (const p of participants) {
+          const status = (p?.status ?? "pending")
+            .toString()
+            .trim()
+            .toLowerCase();
+          if (status !== "accepted") continue;
+          const arrival = (p?.arrivalStatus ?? "on_the_way")
+            .toString()
+            .trim()
+            .toLowerCase();
+          if (arrival !== "on_the_way") continue;
+          const uid = (p?.userId ?? "").toString().trim();
+          if (!uid || uid === hostId) continue;
+          await maybeNotify(uid, p?.estimatedArrivalMinutes ?? 3, false);
+        }
+
+        if (Object.keys(pendingUpdates).length > 0) {
+          await doc.ref.update(pendingUpdates);
+        }
+      }
+    } catch (error) {
+      console.error("Error sending late arrival notifications:", error);
     }
   }
 );
@@ -1792,7 +2223,8 @@ export const onAutoLocationRefresh = onSchedule(
   async () => {
     try {
       const now = admin.firestore.Timestamp.now();
-      const cutoff = new Date(now.toDate().getTime() - 60 * 60 * 1000);
+      const nowDate = now.toDate();
+      const cutoff = new Date(nowDate.getTime() - 60 * 60 * 1000);
 
       const activeUsers = new Map<
         string,
@@ -1810,7 +2242,7 @@ export const onAutoLocationRefresh = onSchedule(
         const endAt = data.endAt;
         const endAtDate =
           endAt && typeof endAt.toDate === "function" ? endAt.toDate() : null;
-        if (!endAtDate || endAtDate <= now.toDate()) continue;
+        if (!endAtDate || endAtDate <= nowDate) continue;
 
         const receiverId = (data.receiverId ?? "").toString().trim();
         if (!receiverId) continue;
@@ -1838,6 +2270,18 @@ export const onAutoLocationRefresh = onSchedule(
 
       for (const doc of meetingSnap.docs) {
         const data = doc.data();
+        const meetingStatus = (data.status ?? "active")
+          .toString()
+          .trim()
+          .toLowerCase();
+        if (meetingStatus !== "active") continue;
+
+        const expiresAt =
+          data.expiresAt && typeof data.expiresAt.toDate === "function"
+            ? data.expiresAt.toDate()
+            : null;
+        if (expiresAt && expiresAt <= nowDate) continue;
+
         const hostId = (data.hostId ?? "").toString().trim();
         const hostArrival = (data.hostArrivalStatus ?? "on_the_way")
           .toString()
@@ -1855,6 +2299,9 @@ export const onAutoLocationRefresh = onSchedule(
         for (const p of participants) {
           const uid = (p?.userId ?? "").toString().trim();
           if (!uid) continue;
+          if (uid === hostId) continue;
+          const status = (p?.status ?? "pending").toString().trim().toLowerCase();
+          if (status !== "accepted") continue;
           const arrival = (p?.arrivalStatus ?? "on_the_way")
             .toString()
             .trim()
@@ -2878,6 +3325,10 @@ export const setUserLocation = onRequest({ cors: true }, async (req, res) => {
   }
 
 });
+
+
+
+
 
 
 

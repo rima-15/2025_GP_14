@@ -3412,6 +3412,59 @@ class _NotificationsPageState extends State<NotificationsPage> {
     return Text(value, style: _acceptDialogLineStyle);
   }
 
+  String? _meetingPointHostLine(
+    MeetingPointRecord meeting,
+    NotificationItem notification,
+  ) {
+    final hostName = meeting.hostName.trim().isNotEmpty
+        ? meeting.hostName.trim()
+        : (notification.senderName ?? '').trim();
+    final hostPhone = meeting.hostPhone.trim().isNotEmpty
+        ? meeting.hostPhone.trim()
+        : (notification.senderPhone ?? '').trim();
+    if (hostName.isEmpty && hostPhone.isEmpty) return null;
+    if (hostName.isNotEmpty && hostPhone.isNotEmpty) {
+      return '$hostName ($hostPhone)';
+    }
+    return hostName.isNotEmpty ? hostName : hostPhone;
+  }
+
+  String? _meetingPointVenueLine(
+    MeetingPointRecord meeting,
+    NotificationItem notification,
+  ) {
+    final venue = meeting.venueName.trim().isNotEmpty
+        ? meeting.venueName.trim()
+        : (notification.venueName ?? '').trim();
+    if (venue.isEmpty) return null;
+    return venue;
+  }
+
+  String? _meetingPointInviteesLine(
+    MeetingPointRecord meeting,
+    String? currentUid,
+  ) {
+    final invitees = meeting.participants
+        .where((p) => currentUid == null || p.userId != currentUid)
+        .toList();
+    if (invitees.isEmpty) return null;
+    var firstName = '';
+    for (final p in invitees) {
+      final candidate = p.name.trim();
+      if (candidate.isNotEmpty) {
+        firstName = candidate;
+        break;
+      }
+    }
+    if (firstName.isEmpty) return null;
+    final othersCount = invitees.length - 1;
+    if (othersCount > 0) {
+      final label = othersCount == 1 ? 'other' : 'others';
+      return 'With $firstName and $othersCount $label';
+    }
+    return 'With $firstName';
+  }
+
   /// Shows Accept Track Request dialog: "Are you sure..." + details with vertical green line (same as Request design).
   Future<bool> _showAcceptTrackRequestDialog(
     NotificationItem notification,
@@ -3482,6 +3535,119 @@ class _NotificationsPageState extends State<NotificationsPage> {
                   ],
                 ),
               ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            style: TextButton.styleFrom(
+              backgroundColor: Colors.grey[200],
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(
+                color: Colors.black87,
+                fontWeight: FontWeight.w600,
+                fontSize: 15,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(
+              backgroundColor: AppColors.kGreen,
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: const Text(
+              'Accept',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 15,
+              ),
+            ),
+          ),
+        ],
+        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      ),
+    );
+    return result ?? false;
+  }
+
+  Future<bool> _showAcceptMeetingPointDialog(
+    NotificationItem notification,
+    MeetingPointRecord meeting,
+    String? currentUid,
+  ) async {
+    final hostLine = _meetingPointHostLine(meeting, notification);
+    final venueLine = _meetingPointVenueLine(meeting, notification);
+    final inviteesLine = _meetingPointInviteesLine(meeting, currentUid);
+
+    final detailLines = <Widget>[];
+    void addLine(String? line) {
+      if (line == null || line.isEmpty) return;
+      if (detailLines.isNotEmpty) {
+        detailLines.add(const SizedBox(height: 8));
+      }
+      detailLines.add(_acceptDialogLine(line));
+    }
+
+    addLine(hostLine);
+    addLine(venueLine);
+    addLine(inviteesLine);
+
+    final result = await showDialog<bool>(
+      context: context,
+      barrierColor: Colors.black54,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Accept Invitation',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Are you sure you want to accept this meeting point invitation?',
+                style: TextStyle(fontSize: 15, height: 1.4),
+              ),
+              if (detailLines.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                // Details with vertical green line (same as track page request design)
+                IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 3,
+                        decoration: BoxDecoration(
+                          color: AppColors.kGreen,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: detailLines,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -3675,12 +3841,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
     }
 
     if (!hadConflict) {
-      final confirmed = await ConfirmationDialog.showPositiveConfirmation(
-        context,
-        title: 'Accept Invitation',
-        message:
-            'Are you sure you want to accept this meeting point invitation?',
-        confirmText: 'Accept',
+      final confirmed = await _showAcceptMeetingPointDialog(
+        notification,
+        meeting,
+        uid,
       );
       if (confirmed != true) return;
     }

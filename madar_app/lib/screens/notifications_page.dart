@@ -122,12 +122,11 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
   bool _showAll = false;
   final List<String> _respondedNotifications = [];
-  final Map<String, double> _notificationOffsets = {};
+  final Map<String, ValueNotifier<double>> _notificationOffsets = {};
   Timer? _uiRefreshTimer;
   Timer? _tickTimer;
   final ValueNotifier<int> _tick = ValueNotifier<int>(0);
   bool _freezeReadUI = true; // Keep true while the page is open
-  bool _initialFreezeReady = false;
   Map<String, bool> _frozenReadMap = {};
   bool _isRefreshing = false;
   bool _exitReadTriggered = false;
@@ -168,6 +167,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
   final Set<String> _autoCancelledMeetingNotifIds = {};
   final Map<String, String> _meetingStatusCache = {};
   final Map<String, int> _meetingHostStepCache = {};
+  final Set<String> _meetingStatusInFlight = {};
   final Set<String> _autoExpiredMeetingNotifIds = {};
 
   // Read or Unread notifications
@@ -175,7 +175,6 @@ class _NotificationsPageState extends State<NotificationsPage> {
   void initState() {
     super.initState();
     _ensureCacheUser();
-    _initialFreezeReady = false;
     _listenForActiveSessions();
 
     _uiRefreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
@@ -200,6 +199,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
     _activeTrackSessionSub?.cancel();
     _activeMeetingSessionSub?.cancel();
     _tick.dispose();
+    for (final notifier in _notificationOffsets.values) {
+      notifier.dispose();
+    }
+    _notificationOffsets.clear();
     super.dispose();
   }
 
@@ -350,7 +353,6 @@ class _NotificationsPageState extends State<NotificationsPage> {
     setState(() {
       _frozenReadMap = map;
       _freezeReadUI = true;
-      _initialFreezeReady = true;
     });
   }
 
@@ -598,100 +600,98 @@ class _NotificationsPageState extends State<NotificationsPage> {
         .where('userId', isEqualTo: user.uid)
         .where('type', isEqualTo: 'meetingPointRequest')
         .snapshots()
-        .asyncMap((snap) async {
-          final items = await Future.wait(
-            snap.docs.map((doc) async {
-              final d = doc.data();
-              final createdAtTs = d['createdAt'] as Timestamp?;
-              final ts = createdAtTs?.toDate() ?? DateTime.now();
-              final data = d['data'] as Map<String, dynamic>? ?? {};
-              final meetingPointId =
-                  (data['meetingPointId'] ?? data['requestId'] ?? doc.id)
-                      .toString()
-                      .trim();
-              var requestStatus =
-                  (d['requestStatus'] ?? data['requestStatus'] ?? 'pending')
-                      .toString()
-                      .toLowerCase();
-              DateTime? waitDeadline = (data['waitDeadline'] as Timestamp?)
-                  ?.toDate();
-              if (waitDeadline == null &&
-                  createdAtTs != null &&
-                  data['waitDurationSeconds'] is num) {
-                final secs = (data['waitDurationSeconds'] as num).toInt();
-                if (secs > 0) {
-                  waitDeadline = createdAtTs.toDate().add(
-                    Duration(seconds: secs),
-                  );
-                }
-              }
-
-              String? actionLabel;
-              if (requestStatus == 'accepted') actionLabel = 'Accepted';
-              if (requestStatus == 'declined') actionLabel = 'Declined';
-              if (requestStatus == 'cancelled') actionLabel = 'Cancelled';
-
-              var isExpired = requestStatus == 'expired';
-
-              if (requestStatus == 'pending') {
-                final meetingStatus = await _getMeetingStatusCached(
-                  meetingPointId,
+        .map((snap) {
+          return snap.docs.map((doc) {
+            final d = doc.data();
+            final createdAtTs = d['createdAt'] as Timestamp?;
+            final ts = createdAtTs?.toDate() ?? DateTime.now();
+            final data = d['data'] as Map<String, dynamic>? ?? {};
+            final meetingPointId =
+                (data['meetingPointId'] ?? data['requestId'] ?? doc.id)
+                    .toString()
+                    .trim();
+            var requestStatus =
+                (d['requestStatus'] ?? data['requestStatus'] ?? 'pending')
+                    .toString()
+                    .toLowerCase();
+            DateTime? waitDeadline = (data['waitDeadline'] as Timestamp?)
+                ?.toDate();
+            if (waitDeadline == null &&
+                createdAtTs != null &&
+                data['waitDurationSeconds'] is num) {
+              final secs = (data['waitDurationSeconds'] as num).toInt();
+              if (secs > 0) {
+                waitDeadline = createdAtTs.toDate().add(
+                  Duration(seconds: secs),
                 );
-                final hostStep = _meetingHostStepCache[meetingPointId] ?? 0;
-                if (meetingStatus == 'cancelled' ||
-                    meetingStatus == 'completed') {
-                  requestStatus = 'cancelled';
-                  actionLabel = 'Cancelled';
-                  if (!_autoCancelledMeetingNotifIds.contains(doc.id)) {
-                    _autoCancelledMeetingNotifIds.add(doc.id);
-                    unawaited(_markMeetingPointNotificationCancelled(doc.id));
-                  }
-                } else if (hostStep >= 5) {
-                  requestStatus = 'expired';
-                  isExpired = true;
-                  if (!_autoExpiredMeetingNotifIds.contains(doc.id)) {
-                    _autoExpiredMeetingNotifIds.add(doc.id);
-                    unawaited(_markMeetingPointNotificationExpired(doc.id));
-                  }
+              }
+            }
+
+            String? actionLabel;
+            if (requestStatus == 'accepted') actionLabel = 'Accepted';
+            if (requestStatus == 'declined') actionLabel = 'Declined';
+            if (requestStatus == 'cancelled') actionLabel = 'Cancelled';
+
+            var isExpired = requestStatus == 'expired';
+
+            if (requestStatus == 'pending') {
+              final cachedStatus =
+                  _meetingStatusCache[meetingPointId]?.toLowerCase();
+              final hostStep = _meetingHostStepCache[meetingPointId] ?? 0;
+
+              if (cachedStatus == 'cancelled' || cachedStatus == 'completed') {
+                requestStatus = 'cancelled';
+                actionLabel = 'Cancelled';
+                if (!_autoCancelledMeetingNotifIds.contains(doc.id)) {
+                  _autoCancelledMeetingNotifIds.add(doc.id);
+                  unawaited(_markMeetingPointNotificationCancelled(doc.id));
                 }
+              } else if (hostStep >= 5) {
+                requestStatus = 'expired';
+                isExpired = true;
+                if (!_autoExpiredMeetingNotifIds.contains(doc.id)) {
+                  _autoExpiredMeetingNotifIds.add(doc.id);
+                  unawaited(_markMeetingPointNotificationExpired(doc.id));
+                }
+              } else if (cachedStatus == null) {
+                _prefetchMeetingStatus(meetingPointId, doc.id);
               }
+            }
 
-              if (!isExpired) {
-                isExpired =
-                    waitDeadline != null &&
-                    DateTime.now().isAfter(waitDeadline) &&
-                    requestStatus == 'pending';
-              }
-              final requiresActionRaw =
-                  d['requiresAction'] ?? (requestStatus == 'pending');
+            if (!isExpired) {
+              isExpired =
+                  waitDeadline != null &&
+                  DateTime.now().isAfter(waitDeadline) &&
+                  requestStatus == 'pending';
+            }
+            final requiresActionRaw =
+                d['requiresAction'] ?? (requestStatus == 'pending');
 
-              return NotificationItem(
-                id: meetingPointId,
-                notificationDocId: doc.id,
-                type: NotificationType.meetingPointRequest,
-                meetingPointId: meetingPointId,
-                title: (d['title'] ?? 'Meeting Point Request').toString(),
-                message: (d['body'] ?? '').toString(),
-                timestamp: ts,
-                isRead: d['isRead'] ?? false,
-                actionTaken: d['actionTaken'] == true,
-                requiresAction:
-                    requiresActionRaw == true &&
-                    !isExpired &&
-                    actionLabel == null &&
-                    requestStatus == 'pending',
-                isExpired: isExpired,
-                requestStatus: requestStatus,
-                endAt: waitDeadline,
-                senderId: (data['senderId'] ?? '').toString(),
-                senderName: (data['senderName'] ?? '').toString(),
-                senderPhone: (data['senderPhone'] ?? '').toString(),
-                venueName: (data['venueName'] ?? '').toString(),
-                actionLabel: actionLabel,
-              );
-            }).toList(),
-          );
-          return items;
+            return NotificationItem(
+              id: meetingPointId,
+              notificationDocId: doc.id,
+              type: NotificationType.meetingPointRequest,
+              meetingPointId: meetingPointId,
+              title: (d['title'] ?? 'Meeting Point Request').toString(),
+              message: (d['body'] ?? '').toString(),
+              timestamp: ts,
+              isRead: d['isRead'] ?? false,
+              actionTaken: d['actionTaken'] == true,
+              requiresAction:
+                  requiresActionRaw == true &&
+                  !isExpired &&
+                  actionLabel == null &&
+                  requestStatus == 'pending',
+              isExpired: isExpired,
+              requestStatus: requestStatus,
+              endAt: waitDeadline,
+              senderId: (data['senderId'] ?? '').toString(),
+              senderName: (data['senderName'] ?? '').toString(),
+              senderPhone: (data['senderPhone'] ?? '').toString(),
+              venueName: (data['venueName'] ?? '').toString(),
+              actionLabel: actionLabel,
+            );
+          }).toList();
         });
   }
 
@@ -715,6 +715,36 @@ class _NotificationsPageState extends State<NotificationsPage> {
     } catch (_) {
       return null;
     }
+  }
+
+  void _prefetchMeetingStatus(String meetingPointId, String notifDocId) {
+    final id = meetingPointId.trim();
+    if (id.isEmpty) return;
+    if (_meetingStatusInFlight.contains(id)) return;
+    _meetingStatusInFlight.add(id);
+
+    unawaited(() async {
+      try {
+        final status = await _getMeetingStatusCached(id);
+        final hostStep = _meetingHostStepCache[id] ?? 0;
+        if (status == 'cancelled' || status == 'completed') {
+          if (!_autoCancelledMeetingNotifIds.contains(notifDocId)) {
+            _autoCancelledMeetingNotifIds.add(notifDocId);
+            await _markMeetingPointNotificationCancelled(notifDocId);
+          }
+        } else if (hostStep >= 5) {
+          if (!_autoExpiredMeetingNotifIds.contains(notifDocId)) {
+            _autoExpiredMeetingNotifIds.add(notifDocId);
+            await _markMeetingPointNotificationExpired(notifDocId);
+          }
+        }
+      } catch (_) {
+        // Ignore fetch failures; we'll try again on next rebuild.
+      } finally {
+        _meetingStatusInFlight.remove(id);
+        if (mounted) setState(() {});
+      }
+    }());
   }
 
   Future<void> _markMeetingPointNotificationExpired(String docId) async {
@@ -930,6 +960,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
               notificationDocId: doc.id,
               type: NotificationType.meetingPointCancelled,
               meetingPointId: meetingPointId.isEmpty ? null : meetingPointId,
+              senderId: (data['senderId'] ?? '').toString(),
               title: d['title'] ?? 'Meeting Point Cancelled',
               message: d['body'] ?? '',
               timestamp: ts,
@@ -966,6 +997,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
               notificationDocId: doc.id,
               type: NotificationType.meetingPointStarted,
               meetingPointId: meetingPointId.isEmpty ? null : meetingPointId,
+              senderId: (data['senderId'] ?? '').toString(),
               title: d['title'] ?? 'Meeting point started',
               message: d['body'] ?? '',
               timestamp: ts,
@@ -1002,6 +1034,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
               notificationDocId: doc.id,
               type: NotificationType.meetingPointCompleted,
               meetingPointId: meetingPointId.isEmpty ? null : meetingPointId,
+              senderId: (data['senderId'] ?? '').toString(),
               title: d['title'] ?? 'Meeting Point Completed',
               message: d['body'] ?? '',
               timestamp: ts,
@@ -1307,12 +1340,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                                                                         meetingLateArrivalSnap.hasData;
 
                                                                                     if (!hasAllData) {
-                                                                                      final cacheHasMeetingPoints = _cacheHasMeetingPointRequests();
-                                                                                      final meetingReady = meetingSnap.hasData;
-                                                                                      if (_cacheReady &&
-                                                                                          _initialFreezeReady &&
-                                                                                          (!cacheHasMeetingPoints ||
-                                                                                              meetingReady)) {
+                                                                                      if (_cacheReady) {
                                                                                         _applyDerivedStateForCache(
                                                                                           _cachedMerged,
                                                                                         );
@@ -1425,9 +1453,16 @@ class _NotificationsPageState extends State<NotificationsPage> {
       }
     }
 
+    final mergedIds = merged.map((n) => n.id).toSet();
     if (_pendingDeleteIds.isNotEmpty) {
-      final mergedIds = merged.map((n) => n.id).toSet();
       _pendingDeleteIds.removeWhere((id) => !mergedIds.contains(id));
+    }
+    if (_notificationOffsets.isNotEmpty) {
+      _notificationOffsets.removeWhere((id, notifier) {
+        if (mergedIds.contains(id)) return false;
+        notifier.dispose();
+        return true;
+      });
     }
 
     return merged;
@@ -1469,13 +1504,6 @@ class _NotificationsPageState extends State<NotificationsPage> {
       }
     }
     return map;
-  }
-
-  bool _cacheHasMeetingPointRequests() {
-    for (final n in _cachedMerged) {
-      if (n.type == NotificationType.meetingPointRequest) return true;
-    }
-    return false;
   }
 
   Widget _buildNotificationsList({
@@ -1530,17 +1558,27 @@ class _NotificationsPageState extends State<NotificationsPage> {
       color: AppColors.kGreen,
       backgroundColor: Colors.white,
       onRefresh: _refreshNotifications,
-      child: ListView(
+      child: ListView.builder(
         physics: const AlwaysScrollableScrollPhysics(),
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 1, 10, 1),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: const [],
-            ),
-          ),
-          ...visible.map((notif) {
+        itemCount:
+            1 +
+            visible.length +
+            ((_showAll || filteredMerged.length <= 10) ? 0 : 1) +
+            1,
+        itemBuilder: (context, index) {
+          if (index == 0) {
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(16, 1, 10, 1),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: const [],
+              ),
+            );
+          }
+
+          final itemIndex = index - 1;
+          if (itemIndex < visible.length) {
+            final notif = visible[itemIndex];
             final override =
                 _localReadOverride[notif.id] ??
                 (notif.actionTaken ? true : null);
@@ -1555,9 +1593,11 @@ class _NotificationsPageState extends State<NotificationsPage> {
               notif,
               trackRequestStatusById: trackRequestStatusById,
             );
-          }),
-          if (!_showAll && filteredMerged.length > 10)
-            Padding(
+          }
+
+          final footerIndex = itemIndex - visible.length;
+          if (!_showAll && filteredMerged.length > 10 && footerIndex == 0) {
+            return Padding(
               padding: const EdgeInsets.all(5),
               child: TextButton(
                 onPressed: () => setState(() => _showAll = true),
@@ -1570,9 +1610,11 @@ class _NotificationsPageState extends State<NotificationsPage> {
                   ),
                 ),
               ),
-            ),
-          const SizedBox(height: 20),
-        ],
+            );
+          }
+
+          return const SizedBox(height: 20);
+        },
       ),
     );
   }
@@ -1711,27 +1753,30 @@ class _NotificationsPageState extends State<NotificationsPage> {
     NotificationItem notification, {
     required Map<String, String> trackRequestStatusById,
   }) {
-    final currentOffset = _notificationOffsets[notification.id] ?? 0.0;
+    final offsetNotifier = _notificationOffsets.putIfAbsent(
+      notification.id,
+      () => ValueNotifier<double>(0.0),
+    );
     final deleteButtonWidth = 70.0;
 
     return GestureDetector(
       onHorizontalDragUpdate: (details) {
-        setState(() {
-          final newOffset = currentOffset + details.delta.dx;
-          _notificationOffsets[notification.id] = newOffset.clamp(
-            -deleteButtonWidth,
-            0.0,
-          );
-        });
+        final newOffset = (offsetNotifier.value + details.delta.dx).clamp(
+          -deleteButtonWidth,
+          0.0,
+        );
+        if (newOffset != offsetNotifier.value) {
+          offsetNotifier.value = newOffset;
+        }
       },
       onHorizontalDragEnd: (details) {
-        setState(() {
-          if (currentOffset < -deleteButtonWidth / 2) {
-            _notificationOffsets[notification.id] = -deleteButtonWidth;
-          } else {
-            _notificationOffsets[notification.id] = 0.0;
-          }
-        });
+        final currentOffset = offsetNotifier.value;
+        final targetOffset = currentOffset < -deleteButtonWidth / 2
+            ? -deleteButtonWidth
+            : 0.0;
+        if (targetOffset != currentOffset) {
+          offsetNotifier.value = targetOffset;
+        }
       },
       child: Stack(
         children: [
@@ -1754,7 +1799,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                   child: InkWell(
                     onTap: () async {
                       // Store the current swipe state before showing dialog
-                      final wasSwiped = currentOffset != 0.0;
+                      final wasSwiped = offsetNotifier.value != 0.0;
 
                       // Show confirmation dialog immediately
                       final confirmed = await _showDeleteConfirmation(
@@ -1764,9 +1809,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                       if (!confirmed) {
                         // Only reset if it was swiped and user cancelled
                         if (wasSwiped && mounted) {
-                          setState(() {
-                            _notificationOffsets[notification.id] = 0.0;
-                          });
+                          offsetNotifier.value = 0.0;
                         }
                         return;
                       }
@@ -1774,9 +1817,11 @@ class _NotificationsPageState extends State<NotificationsPage> {
                       if (mounted) {
                         setState(() {
                           _pendingDeleteIds.add(notification.id);
-                          _notificationOffsets.remove(notification.id);
                         });
                       }
+                      _notificationOffsets
+                          .remove(notification.id)
+                          ?.dispose();
 
                       final docId = notification.notificationDocId;
                       if (docId == null) {
@@ -1827,21 +1872,26 @@ class _NotificationsPageState extends State<NotificationsPage> {
           ),
 
           // Main notification content (can be swiped) - WITH UNREAD INDICATOR
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 100), // FASTER ANIMATION
-            curve: Curves.easeOut,
-            transform: Matrix4.translationValues(
-              _notificationOffsets[notification.id] ?? 0.0,
-              0,
-              0,
-            ),
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          ValueListenableBuilder<double>(
+            valueListenable: offsetNotifier,
+            builder: (context, offset, child) {
+              return AnimatedContainer(
+                duration: const Duration(milliseconds: 100), // FASTER ANIMATION
+                curve: Curves.easeOut,
+                transform: Matrix4.translationValues(offset, 0, 0),
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                child: child,
+              );
+            },
             child: Stack(
               children: [
                 Material(
                   color: Colors.transparent,
                   child: InkWell(
-                    onTap: () => _onNotificationTap(notification),
+                    onTap: () => _onNotificationTap(
+                      notification,
+                      trackRequestStatusById: trackRequestStatusById,
+                    ),
                     borderRadius: BorderRadius.circular(12),
                     child: Container(
                       padding: const EdgeInsets.all(16),
@@ -2908,9 +2958,194 @@ class _NotificationsPageState extends State<NotificationsPage> {
     return false;
   }
 
+  Map<String, dynamic>? _buildFastNavigationTarget(
+    NotificationItem notification,
+    Map<String, String> trackRequestStatusById,
+  ) {
+    String normalize(String? value) =>
+        (value ?? '').toString().trim().toLowerCase();
+
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final historyStatuses = <String>{
+      'declined',
+      'expired',
+      'terminated',
+      'completed',
+      'cancelled',
+    };
+
+    final meetingPointId = (notification.meetingPointId ?? '').trim();
+    final hasMeetingId = meetingPointId.isNotEmpty;
+    final isMeetingRelated =
+        notification.type == NotificationType.meetingPointRequest ||
+        notification.type == NotificationType.meetingPointStarted ||
+        notification.type == NotificationType.meetingPointCompleted ||
+        notification.type == NotificationType.meetingPointCancelled ||
+        notification.type == NotificationType.meetingLateArrival ||
+        (notification.type == NotificationType.locationRefresh && hasMeetingId);
+
+    if (isMeetingRelated) {
+      final id = hasMeetingId
+          ? meetingPointId
+          : (notification.meetingPointId ?? notification.id).trim();
+      if (id.isEmpty) return null;
+
+      final cachedStatus = normalize(_meetingStatusCache[id]);
+      final requestStatus = normalize(notification.requestStatus);
+      final isExpired = notification.isExpired || requestStatus == 'expired';
+
+      bool canFastDecide = false;
+      if (notification.type == NotificationType.meetingPointCancelled ||
+          notification.type == NotificationType.meetingPointCompleted) {
+        canFastDecide = true;
+      } else if (notification.type == NotificationType.meetingPointRequest) {
+        if (isExpired ||
+            requestStatus == 'cancelled' ||
+            requestStatus == 'declined' ||
+            requestStatus == 'completed' ||
+            cachedStatus.isNotEmpty) {
+          canFastDecide = true;
+        }
+      } else {
+        if (cachedStatus.isNotEmpty ||
+            (_activeMeetingSessionReady && id.isNotEmpty)) {
+          canFastDecide = true;
+        }
+      }
+
+      if (!canFastDecide) return null;
+
+      bool goHistory = false;
+      if (notification.type == NotificationType.meetingPointCancelled ||
+          notification.type == NotificationType.meetingPointCompleted) {
+        goHistory = true;
+      } else if (notification.type == NotificationType.meetingPointRequest) {
+        if (isExpired) goHistory = true;
+        if (requestStatus == 'cancelled' ||
+            requestStatus == 'declined' ||
+            requestStatus == 'completed') {
+          goHistory = true;
+        }
+        if (cachedStatus.isNotEmpty &&
+            cachedStatus != 'pending' &&
+            cachedStatus != 'active') {
+          goHistory = true;
+        }
+      } else {
+        if (cachedStatus.isNotEmpty &&
+            cachedStatus != 'pending' &&
+            cachedStatus != 'active') {
+          goHistory = true;
+        }
+        if (_activeMeetingSessionReady && id.isNotEmpty) {
+          if (!_activeMeetingIds.contains(id)) {
+            goHistory = true;
+          }
+        }
+      }
+
+      int? meetingFilterIndex;
+      final senderId = (notification.senderId ?? '').toString().trim();
+      if (uid != null && senderId.isNotEmpty) {
+        meetingFilterIndex = senderId == uid ? 0 : 1;
+      }
+
+      if (goHistory) {
+        return {
+          'page': 'history',
+          'meetingPointId': id,
+          'historyMainTabIndex': 1,
+          'meetingFilterIndex': meetingFilterIndex,
+        };
+      }
+      return {
+        'page': 'track',
+        'meetingPointId': id,
+        'openMeetingTab': true,
+      };
+    }
+
+    final isTrackRelated =
+        notification.type == NotificationType.trackRequest ||
+        notification.type == NotificationType.trackAccepted ||
+        notification.type == NotificationType.trackRejected ||
+        notification.type == NotificationType.trackStarted ||
+        notification.type == NotificationType.trackTerminated ||
+        notification.type == NotificationType.trackCompleted ||
+        notification.type == NotificationType.trackCancelled ||
+        notification.type == NotificationType.locationRefresh;
+
+    if (isTrackRelated) {
+      final rawTrackId = notification.trackRequestId;
+      final requestIdRaw =
+          rawTrackId != null && rawTrackId.trim().isNotEmpty
+          ? rawTrackId.trim()
+          : notification.id.trim();
+      final statusFromMap = trackRequestStatusById[requestIdRaw];
+      final status = normalize(statusFromMap ?? notification.requestStatus);
+      final endedByTime =
+          notification.endAt != null &&
+          DateTime.now().isAfter(notification.endAt!);
+
+      final isTerminalType =
+          notification.type == NotificationType.trackRejected ||
+          notification.type == NotificationType.trackTerminated ||
+          notification.type == NotificationType.trackCompleted ||
+          notification.type == NotificationType.trackCancelled;
+      final canFastDecide =
+          status.isNotEmpty ||
+          isTerminalType ||
+          notification.isExpired ||
+          endedByTime;
+      if (!canFastDecide) return null;
+
+      bool isHistory = false;
+      if (isTerminalType) {
+        isHistory = true;
+      } else if (status.isNotEmpty && historyStatuses.contains(status)) {
+        isHistory = true;
+      } else if (notification.isExpired || endedByTime) {
+        isHistory = true;
+      }
+
+      int? filterIndex;
+      switch (notification.type) {
+        case NotificationType.trackRequest:
+        case NotificationType.trackCancelled:
+        case NotificationType.trackCompleted:
+        case NotificationType.locationRefresh:
+          filterIndex = 0; // Received
+          break;
+        case NotificationType.trackAccepted:
+        case NotificationType.trackRejected:
+        case NotificationType.trackTerminated:
+          filterIndex = 1; // Sent
+          break;
+        case NotificationType.trackStarted:
+          filterIndex =
+              trackRequestStatusById.containsKey(requestIdRaw) ? 0 : 1;
+          break;
+        default:
+          break;
+      }
+
+      return {
+        'page': isHistory ? 'history' : 'track',
+        'tab': isHistory ? null : 2,
+        'expandRequestId': requestIdRaw,
+        'filterIndex': filterIndex,
+      };
+    }
+
+    return null;
+  }
+
   /// Navigate to source: track-related notification → Track page or History page
   /// based on the current request status.
-  void _onNotificationTap(NotificationItem notification) async {
+  void _onNotificationTap(
+    NotificationItem notification, {
+    required Map<String, String> trackRequestStatusById,
+  }) async {
     setState(() {
       _localReadOverride[notification.id] = true;
       notification.isRead = true;
@@ -2918,9 +3153,18 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
     unawaited(_markNotificationAsReadByRequestId(notification.id));
 
-    // System location refresh should not navigate on card tap.
     if (notification.type == NotificationType.locationRefresh &&
         _isSystemLocationRefresh(notification)) {
+      return;
+    }
+
+    final fastTarget = _buildFastNavigationTarget(
+      notification,
+      trackRequestStatusById,
+    );
+    if (fastTarget != null) {
+      if (!mounted) return;
+      Navigator.pop(context, fastTarget);
       return;
     }
 

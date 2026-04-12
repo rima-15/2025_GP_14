@@ -310,143 +310,125 @@ class _HelpSupportPageState extends State<HelpSupportPage>
             ],
           ),
           // Contact us Tab
-          SingleChildScrollView(
-            padding: EdgeInsets.all(horizontalPadding),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: 6),
-                const Text(
-                  'Still need help?',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: [
-                    _buildContactCard(
-                      icon: Icons.email_outlined,
-                      title: 'Email support',
-                      description: 'We reply within 24 hours on business days.',
-                      buttonText: 'madar@gmail.com',
-                      onPressed: _onEmailCardTap,
-                    ),
-                    _buildContactCard(
-                      icon: Icons.bug_report_outlined,
-                      title: 'Report a bug',
-                      description:
-                          'Found something broken? Let us know the details.',
-                      buttonText: 'Report ',
-                      onPressed: _onBugCardTap,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 28),
-                const Text(
-                  'Send us a message',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  value: _selectedTopic,
-                  items: const [
-                    DropdownMenuItem(
-                      value: 'General question',
-                      child: Text('General question'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'AR Navigation issue',
-                      child: Text('AR Navigation issue'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'AR Exploration issue',
-                      child: Text('AR Exploration issue'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'Meeting point / tracking',
-                      child: Text('Meeting point / tracking'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'Account & login',
-                      child: Text('Account & login'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'Bug report',
-                      child: Text('Bug report'),
-                    ),
-                    DropdownMenuItem(value: 'Other', child: Text('Other')),
-                  ],
-                  onChanged: (value) => setState(() => _selectedTopic = value!),
-                  decoration: InputDecoration(
-                    filled: true,
-                    fillColor: Colors.white,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
+          GestureDetector(
+            onTap: () {
+              FocusScope.of(context).unfocus();
+            },
+            behavior: HitTestBehavior.translucent,
+            child: SingleChildScrollView(
+              padding: EdgeInsets.all(horizontalPadding),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Still need help?',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey,
+                      letterSpacing: 0.5,
                     ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _messageController,
-                  focusNode: _messageFocusNode,
-                  maxLines: 4,
-                  decoration: InputDecoration(
-                    hintText: 'Describe your issue or question in detail…',
-                    filled: true,
-                    fillColor: Colors.grey[100],
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      _buildContactCard(
+                        icon: Icons.email_outlined,
+                        title: 'Email support',
+                        description: 'We reply within 24 hours on business days.',
+                        buttonText: 'madar@gmail.com',
+                        onPressed: _onEmailCardTap,
+                      ),
+                      _buildContactCard(
+                        icon: Icons.bug_report_outlined,
+                        title: 'Report a bug',
+                        description:
+                            'Found something broken? Let us know the details.',
+                        buttonText: 'Report',
+                        onPressed: _onBugCardTap,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 28),
+                  const Text(
+                    'Send us a message',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey,
+                      letterSpacing: 0.5,
                     ),
                   ),
-                ),
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  child: PrimaryButton(
-                    text: 'Send message',
-                    onPressed: _onSendMessage,
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    value: _selectedTopic,
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'General question',
+                        child: Text('General question'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'AR Navigation issue',
+                        child: Text('AR Navigation issue'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'AR Exploration issue',
+                        child: Text('AR Exploration issue'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'Meeting point / tracking',
+                        child: Text('Meeting point / tracking'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'Account & login',
+                        child: Text('Account & login'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'Bug report',
+                        child: Text('Bug report'),
+                      ),
+                      DropdownMenuItem(value: 'Other', child: Text('Other')),
+                    ],
+                    onChanged: (value) =>
+                        setState(() => _selectedTopic = value!),
+                    decoration: InputDecoration(
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 28),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSimpleFollowLink({
-    required IconData icon,
-    required String label,
-    required String url,
-  }) {
-    return GestureDetector(
-      onTap: () => _launchUrl(url),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 18, color: AppColors.kGreen),
-          const SizedBox(width: 8),
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-              color: AppColors.kGreen,
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _messageController,
+                    focusNode: _messageFocusNode,
+                    maxLines: 4,
+                    decoration: InputDecoration(
+                      hintText: 'Describe your issue or question in detail…',
+                      filled: true,
+                      fillColor: Colors.grey[100],
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: PrimaryButton(
+                      text: 'Send message',
+                      onPressed: _onSendMessage,
+                    ),
+                  ),
+                  const SizedBox(height: 28),
+                ],
+              ),
             ),
           ),
         ],
@@ -518,38 +500,41 @@ class _HelpSupportPageState extends State<HelpSupportPage>
     required String buttonText,
     required VoidCallback onPressed,
   }) {
-    return GestureDetector(
+    return InkWell(
       onTap: onPressed,
-      child: SizedBox(
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
         width: (MediaQuery.of(context).size.width - 48) / 2,
-        child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.grey[200]!),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(icon, color: AppColors.kGreen, size: 24),
-              const SizedBox(height: 8),
-              Text(
-                title,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.grey[200]!),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: AppColors.kGreen, size: 24),
+            const SizedBox(height: 8),
+            Text(
+              title,
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              description,
+              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              buttonText,
+              style: const TextStyle(
+                fontSize: 12,
+                color: AppColors.kGreen,
+                fontWeight: FontWeight.w500,
               ),
-              const SizedBox(height: 4),
-              Text(
-                description,
-                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                buttonText,
-                style: const TextStyle(fontSize: 12, color: AppColors.kGreen),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

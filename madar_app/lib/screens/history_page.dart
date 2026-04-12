@@ -506,18 +506,15 @@ class _HistoryPageState extends State<HistoryPage> {
               // 'cancelled' = participant used "Cancel participation" in step 2/3.
               if (pStatus == 'declined' || pStatus == 'cancelled')
                 displayStatus = 'declined';
-              // Only treat as 'expired' when the timer actually ran out.
-              // If the host cancelled before the deadline, keep 'cancelled'
-              // so the reason shows as "Cancelled by host".
+              // Only treat as 'expired' when the timer actually ran out with
+              // no one accepting (auto-cancel logic writes 'all_participants_declined').
+              // If the host explicitly cancelled, keep 'cancelled' so the reason
+              // shows as "Cancelled by host" — even after the deadline passes.
               if (pStatus == 'pending' && status == 'cancelled') {
-                final waitDeadline = _parseTimestamp(data['waitDeadline']);
-                final hostStep = (data['hostStep'] is num)
-                    ? (data['hostStep'] as num).toInt()
-                    : 4;
-                final timerExpired =
-                    waitDeadline != null &&
-                    !waitDeadline.isAfter(DateTime.now());
-                if (timerExpired || hostStep >= 5) displayStatus = 'expired';
+                final storedReason =
+                    (data['cancellationReason'] ?? '').toString().trim();
+                if (storedReason == 'all_participants_declined')
+                  displayStatus = 'expired';
                 // else: displayStatus stays 'cancelled' → "Cancelled by host"
               }
               break;

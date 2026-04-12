@@ -1327,8 +1327,6 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   @override
   void initState() {
     super.initState();
-    // Suppress the background popup while this form is open.
-    MeetingPointPopupGuard.suppress = true;
     _phoneFocus.addListener(() {
       setState(() => _isPhoneFocused = _phoneFocus.hasFocus);
     });
@@ -1360,8 +1358,6 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
   @override
   void dispose() {
-    // Restore popup guard when the form closes.
-    MeetingPointPopupGuard.suppress = false;
     _saveEarlyStepsToMemory();
     if (_allowDisposeDraftSave && _shouldManageDraft) {
       unawaited(_persistDraftIfNeeded());
@@ -1988,8 +1984,19 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     });
 
     if (_step == 4) {
-      _startProceedUnlockTimer();
-      _startStep4WaitCountdown();
+      final isWaitExpired =
+          _waitDeadline != null &&
+          !_waitDeadline!.isAfter(MeetingPointService.serverNow);
+      if (isWaitExpired) {
+        // Same guard as in _restoreFromMeetingPoint: the wait timer expired
+        // while the form was closed. Advance to step 5 without calling
+        // _initStep5, which would create a fresh (wrong) suggestDeadline and
+        // write it to Firestore. The subscription delivers the real state.
+        setState(() => _step = 5);
+      } else {
+        _startProceedUnlockTimer();
+        _startStep4WaitCountdown();
+      }
     } else if (_step == 5) {
       _startStep5SuggestCountdown();
     }
@@ -2062,7 +2069,18 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     });
 
     if (_step == 4) {
-      _startStep4WaitCountdown();
+      if (waitLeft > 0) {
+        _startStep4WaitCountdown();
+      } else {
+        // The 2-min wait already expired while the form was closed.
+        // Advance the UI to step 5 now so there is no flicker, but do NOT
+        // call _initStep5() — that would create a fresh suggestDeadline and
+        // write it to Firestore, overwriting the correct deadline that
+        // maybeMaintain already wrote. _startMeetingSubscription (below) will
+        // deliver the real step-5 state (including the correct suggestDeadline)
+        // and _startStep5SuggestCountdown will be triggered from there.
+        setState(() => _step = 5);
+      }
     } else if (_step == 5) {
       _startStep5SuggestCountdown();
       final mid = _meetingPointId;
@@ -2232,7 +2250,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     await MeetingPointDraftStorage.clearForCurrentUser();
   }
 
-  Future<void> _syncMeetingPointProgress({String? status}) async {
+  Future<void> _syncMeetingPointProgress({String? status, bool writeSuggestDeadline = false}) async {
     final id = _meetingPointId;
     if (id == null || id.trim().isEmpty) return;
     try {
@@ -2240,8 +2258,12 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         meetingPointId: id,
         hostStep: _step,
         participants: _participants.map(_participantToCloud).toList(),
-        waitDeadline: _step == 4 ? _waitDeadline : null,
-        suggestDeadline: _step == 5 ? _suggestDeadline : null,
+        // waitDeadline is set once by createMeetingPoint and must never be
+        // re-written here — doing so risks writing a locally-computed value
+        // that diverges from the authoritative Firestore deadline and corrupts
+        // the card timer after form close.
+        waitDeadline: null,
+        suggestDeadline: (writeSuggestDeadline && _step == 5) ? _suggestDeadline : null,
         status: status,
       );
     } catch (e) {
@@ -2316,9 +2338,12 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
   void _startStep5SuggestCountdown() {
     _suggestTimer?.cancel();
-    _suggestDeadline ??= MeetingPointService.serverNow.add(
-      Duration(seconds: _suggestSecondsLeft),
-    );
+    // _suggestDeadline must already be set by the caller (from the Firestore
+    // subscription's setState, or by _initStep5 / _restoreFromMeetingPoint).
+    // Do NOT use ??= here: that would silently keep a stale local deadline
+    // instead of adopting the authoritative Firestore value delivered by the
+    // subscription handler.
+    if (_suggestDeadline == null) return;
 
     void onTick() {
       if (!mounted) return;
@@ -2807,7 +2832,8 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     _suggestionsComputed = false;
     _startStep5SuggestCountdown();
     // status stays 'pending'; hostStep=5 signals waiting_host_confirmation sub-state
-    unawaited(_syncMeetingPointProgress());
+    // writeSuggestDeadline: true — this is the one authoritative write of the deadline
+    unawaited(_syncMeetingPointProgress(writeSuggestDeadline: true));
     unawaited(_persistDraftIfNeeded());
   }
 
@@ -3066,14 +3092,29 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
     // Timer badge shown on steps 4 and 5 (same rows as subtitle — mirrors
     // non-host "View details" sheet where timer sits next to the step label).
+    // Compute directly from the deadline at build time (same approach as the
+    // card's _currentStepTimerLabel) so the two are always in sync. Falling
+    // back to the integer counter only when the deadline isn't set yet.
     String? timerLabel;
     if (_step == 4) {
-      final mm = (_waitSecondsLeft ~/ 60).toString().padLeft(2, '0');
-      final ss = (_waitSecondsLeft % 60).toString().padLeft(2, '0');
+      final seconds = _waitDeadline != null
+          ? _waitDeadline!
+                .difference(MeetingPointService.serverNow)
+                .inSeconds
+                .clamp(0, 600)
+          : _waitSecondsLeft;
+      final mm = (seconds ~/ 60).toString().padLeft(2, '0');
+      final ss = (seconds % 60).toString().padLeft(2, '0');
       timerLabel = '$mm:$ss';
     } else if (_step == 5) {
-      final mm = (_suggestSecondsLeft ~/ 60).toString().padLeft(2, '0');
-      final ss = (_suggestSecondsLeft % 60).toString().padLeft(2, '0');
+      final seconds = _suggestDeadline != null
+          ? _suggestDeadline!
+                .difference(MeetingPointService.serverNow)
+                .inSeconds
+                .clamp(0, 300)
+          : _suggestSecondsLeft;
+      final mm = (seconds ~/ 60).toString().padLeft(2, '0');
+      final ss = (seconds % 60).toString().padLeft(2, '0');
       timerLabel = '$mm:$ss';
     }
 

@@ -9,9 +9,7 @@ import 'package:madar_app/screens/profile_page.dart';
 import 'package:madar_app/screens/settings_page.dart';
 import 'package:madar_app/screens/notifications_page.dart';
 import 'package:madar_app/screens/history_page.dart';
-import 'package:madar_app/screens/create_meeting_point_form.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
-import 'package:madar_app/theme/theme.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'dart:async';
 import 'package:madar_app/services/gps_tracking_service.dart';
@@ -46,17 +44,6 @@ class _MainLayoutState extends State<MainLayout> {
   Timer? _gpsPeriodicTimer;
   bool _hasActiveTrackingRequest = false;
 
-  // ── Step-5 suggestion popup ────────────────────────────────────────────────
-  StreamSubscription<MeetingPointRecord?>? _hostStep5Sub;
-  bool _isMeetingPointPopupShowing = false;
-
-  /// Last step-5 meeting seen from the stream (may have been suppressed).
-  MeetingPointRecord? _pendingStep5Meeting;
-
-  /// Keys we've already shown the popup for (meetingId_deadlineMs).
-  /// Prevents re-showing after the user dismisses with View Details.
-  final Set<String> _dismissedPopupKeys = {};
-
   late final pages = <Widget>[
     HomePage(key: _homeKey),
     const ExplorePage(),
@@ -83,7 +70,6 @@ class _MainLayoutState extends State<MainLayout> {
     _loadUserData();
     _listenForActiveTrackingRequests();
     _listenForActiveMeetingPoints();
-    _listenForHostStep5Meeting();
   }
 
   // ---------- GPS Tracking Service ──────────────────────────────────────────
@@ -295,136 +281,8 @@ class _MainLayoutState extends State<MainLayout> {
   void dispose() {
     _activeTrackingSub?.cancel();
     _activeMeetingPointSub?.cancel();
-    _hostStep5Sub?.cancel();
-    MeetingPointPopupGuard.removeListener(_onGuardChanged);
     _gpsPeriodicTimer?.cancel();
     super.dispose();
-  }
-
-  // ---------- Step-5 Meeting Point Popup ────────────────────────────────────
-
-  void _listenForHostStep5Meeting() {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return;
-
-    // When the form / meeting-point tab closes, suppress lifts → retry popup.
-    MeetingPointPopupGuard.addListener(_onGuardChanged);
-
-    _hostStep5Sub?.cancel();
-    _hostStep5Sub = MeetingPointService.watchActiveForCurrentUser().listen((
-      meeting,
-    ) {
-      if (!mounted) return;
-
-      // Clear state when there is no active meeting.
-      if (meeting == null) {
-        _pendingStep5Meeting = null;
-        _dismissedPopupKeys.clear();
-        return;
-      }
-
-      final isHostStep5 =
-          meeting.isHost(uid) &&
-          meeting.hostStep == 5 &&
-          meeting.suggestedPoint.trim().isNotEmpty &&
-          meeting.isActive &&
-          meeting.suggestDeadline != null;
-
-      if (!isHostStep5) {
-        _pendingStep5Meeting = null;
-        return;
-      }
-
-      // Always keep the latest step-5 meeting so we can show it after the
-      // guard lifts (e.g. when the form closes).
-      _pendingStep5Meeting = meeting;
-      _tryShowStep5Popup(meeting);
-    });
-  }
-
-  /// Called whenever [MeetingPointPopupGuard.suppress] changes.
-  void _onGuardChanged() {
-    if (MeetingPointPopupGuard.suppress) return; // guard just went ON — ignore
-    final meeting = _pendingStep5Meeting;
-    if (meeting == null) return;
-    _tryShowStep5Popup(meeting);
-  }
-
-  void _tryShowStep5Popup(MeetingPointRecord meeting) {
-    if (!mounted) return;
-    if (_isMeetingPointPopupShowing) return;
-    if (MeetingPointPopupGuard.suppress) return;
-
-    // Unique key per (meeting, deadline) so re-suggestions get a fresh popup.
-    final key =
-        '${meeting.id}_${meeting.suggestDeadline!.millisecondsSinceEpoch}';
-    if (_dismissedPopupKeys.contains(key)) return;
-
-    // Deadline already passed — no point showing.
-    if (meeting.suggestDeadline!.isBefore(DateTime.now())) return;
-
-    _dismissedPopupKeys.add(key);
-    unawaited(_showStep5Popup(meeting));
-  }
-
-  Future<void> _showStep5Popup(MeetingPointRecord meeting) async {
-    if (!mounted) return;
-    _isMeetingPointPopupShowing = true;
-
-    final result = await showDialog<_Step5PopupResult>(
-      context: context,
-      barrierDismissible: false,
-      barrierColor: Colors.black54,
-      builder: (_) => _MeetingPointSuggestionDialog(meeting: meeting),
-    );
-
-    _isMeetingPointPopupShowing = false;
-    if (!mounted) return;
-
-    if (result == _Step5PopupResult.confirm) {
-      try {
-        await MeetingPointService.markHostDecision(
-          meetingPointId: meeting.id,
-          accepted: true,
-        );
-        if (mounted) {
-          SnackbarHelper.showSuccess(context, 'Meeting point confirmed!');
-        }
-      } catch (_) {
-        if (mounted) {
-          SnackbarHelper.showError(
-            context,
-            'Failed to confirm. Please try again.',
-          );
-        }
-      }
-    } else if (result == _Step5PopupResult.reject) {
-      try {
-        await MeetingPointService.markHostDecision(
-          meetingPointId: meeting.id,
-          accepted: false,
-        );
-        if (mounted) {
-          SnackbarHelper.showSuccess(context, 'Meeting point rejected.');
-        }
-      } catch (_) {
-        if (mounted) {
-          SnackbarHelper.showError(
-            context,
-            'Failed to reject. Please try again.',
-          );
-        }
-      }
-    } else if (result == _Step5PopupResult.viewDetails) {
-      // Navigate to Social tab → Meeting Point tab.
-      setState(() {
-        _meetingPointExpandId = meeting.id;
-        _trackExpandRequestId = null;
-        _trackFilterIndex = null;
-        pages[2] = _buildTrackPage();
-        _index = 2;
-      });
-    }
   }
 
   // ---------- Data Loading ----------
@@ -791,7 +649,9 @@ class _MainLayoutState extends State<MainLayout> {
                           Navigator.pop(context); // close drawer
                           Navigator.push(
                             context,
-                            MaterialPageRoute(builder: (_) => const HelpSupportPage()),
+                            MaterialPageRoute(
+                              builder: (_) => const HelpSupportPage(),
+                            ),
                           );
                         },
                       ),
@@ -915,229 +775,6 @@ class _MainLayoutState extends State<MainLayout> {
                 fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
               ),
               maxLines: 1,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ── Step-5 popup helpers ──────────────────────────────────────────────────────
-
-enum _Step5PopupResult { confirm, reject, viewDetails }
-
-/// Dialog shown when the host is away from the form / meeting-point tab and a
-/// meeting point suggestion arrives (hostStep == 5).
-class _MeetingPointSuggestionDialog extends StatefulWidget {
-  const _MeetingPointSuggestionDialog({required this.meeting});
-
-  final MeetingPointRecord meeting;
-
-  @override
-  State<_MeetingPointSuggestionDialog> createState() =>
-      _MeetingPointSuggestionDialogState();
-}
-
-class _MeetingPointSuggestionDialogState
-    extends State<_MeetingPointSuggestionDialog> {
-  Timer? _timer;
-  int _secondsLeft = 0;
-  bool _isActing = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _recalcSeconds();
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      _recalcSeconds();
-      if (_secondsLeft <= 0 && mounted) {
-        _timer?.cancel();
-        Navigator.of(context).pop(null); // auto-confirm handled server-side
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  void _recalcSeconds() {
-    final deadline = widget.meeting.suggestDeadline;
-    if (!mounted) return;
-    final left = deadline == null
-        ? 0
-        : deadline.difference(DateTime.now()).inSeconds.clamp(0, 99999);
-    setState(() => _secondsLeft = left);
-  }
-
-  String get _timerLabel {
-    final m = _secondsLeft ~/ 60;
-    final s = _secondsLeft % 60;
-    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
-  }
-
-  Future<void> _handleReject() async {
-    final confirmed = await ConfirmationDialog.showDeleteConfirmation(
-      context,
-      title: 'Reject Meeting Point',
-      message:
-          'Are you sure you want to reject this meeting point? The meeting will be cancelled for all participants.',
-      cancelText: 'Keep',
-      confirmText: 'Reject',
-    );
-    if (!confirmed || !mounted) return;
-    setState(() => _isActing = true);
-    if (mounted) Navigator.of(context).pop(_Step5PopupResult.reject);
-  }
-
-  void _handleConfirm() {
-    setState(() => _isActing = true);
-    Navigator.of(context).pop(_Step5PopupResult.confirm);
-  }
-
-  void _handleViewDetails() {
-    Navigator.of(context).pop(_Step5PopupResult.viewDetails);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final pointName = widget.meeting.suggestedPoint.trim();
-    final venueName = widget.meeting.venueName;
-
-    return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      backgroundColor: Colors.white,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 28, vertical: 40),
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── Title ─────────────────────────────────────────────────────
-            const Text(
-              'Action needed in\nmeeting point',
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                color: Colors.black87,
-                height: 1.25,
-              ),
-            ),
-            const SizedBox(height: 12),
-            const Divider(height: 1, thickness: 1, color: Color(0xFFE0E0E0)),
-            const SizedBox(height: 16),
-
-            // ── Description ───────────────────────────────────────────────
-            const Text(
-              'A meeting point has been suggested. Please confirm or reject it to continue, or it will auto-confirm when the timer ends.',
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.black54,
-                height: 1.55,
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            // ── Suggested point card ───────────────────────────────────────
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-              decoration: BoxDecoration(
-                color: const Color(0xFFEEEFE8),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.location_on,
-                    color: AppColors.kGreen,
-                    size: 22,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          pointName.toUpperCase(),
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.black87,
-                            letterSpacing: 0.3,
-                          ),
-                        ),
-                        if (venueName.isNotEmpty) ...[
-                          const SizedBox(height: 3),
-                          Text(
-                            venueName,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Colors.black45,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
-
-            // ── Countdown row ──────────────────────────────────────────────
-            Row(
-              children: [
-                Icon(
-                  Icons.access_time_outlined,
-                  size: 16,
-                  color: Colors.grey[500],
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  'Auto-confirms in ',
-                  style: TextStyle(fontSize: 13, color: Colors.grey[500]),
-                ),
-                Text(
-                  _timerLabel,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.kGreen,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-
-            // ── Reject + Confirm row ───────────────────────────────────────
-            Row(
-              children: [
-                Expanded(
-                  child: SecondaryButton(
-                    text: 'Reject',
-                    onPressed: _isActing ? null : _handleReject,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: PrimaryButton(
-                    text: 'Confirm',
-                    onPressed: _isActing ? null : _handleConfirm,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-
-            // ── View Details (full width) ──────────────────────────────────
-            SecondaryButton(
-              text: 'View details',
-              onPressed: _isActing ? null : _handleViewDetails,
             ),
           ],
         ),

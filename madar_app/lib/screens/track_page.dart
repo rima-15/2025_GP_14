@@ -889,7 +889,6 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     _loadVenueMaps();
     if (widget.initialMeetingPointId != null) {
       _isTrackingView = false;
-      MeetingPointPopupGuard.suppress = true;
       _expandedMeetingInviteId = widget.initialMeetingPointId;
       _highlightMeetingInviteId = widget.initialMeetingPointId;
       _meetingInviteScrollTargetId = widget.initialMeetingPointId;
@@ -1506,13 +1505,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       final seconds = (totalMeters / 1.4).ceil();
       final baseSeconds = seconds < 60 ? 60 : seconds;
       _meetingEtaBaseSecondsByUser[userId] = baseSeconds;
-      final updatedAt = _meetingUpdatedAtByUser[userId];
-      final prevBaseTime = _meetingEtaBaseTimeByUser[userId];
-      if (updatedAt != null) {
-        _meetingEtaBaseTimeByUser[userId] = updatedAt;
-      } else if (prevBaseTime == null) {
-        _meetingEtaBaseTimeByUser[userId] = DateTime.now();
-      }
+      // Always anchor to local device time so elapsed is computed consistently
+      // using the device clock. Previously we used the Firestore server timestamp
+      // (updatedAt) as the anchor, which caused the timer to run fast/slow on
+      // devices whose clock differs from the server (e.g. Note 9 ~1 min ahead).
+      _meetingEtaBaseTimeByUser[userId] = DateTime.now();
     } else {
       _meetingEtaBaseSecondsByUser.remove(userId);
       _meetingEtaBaseTimeByUser.remove(userId);
@@ -1744,8 +1741,6 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
   @override
   void dispose() {
-    // Release the popup guard if we were on the meeting-point tab.
-    if (!_isTrackingView) MeetingPointPopupGuard.suppress = false;
     _clockTimer?.cancel();
     _meetingPointCardTimer?.cancel();
     _arrivalTimer?.cancel();
@@ -2666,19 +2661,13 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       ),
     );
 
-    // When the form closes (step 4 created or any step), the Firestore stream
-    // may not have delivered the update to the existing StreamBuilder yet.
-    // Reset the streams so the StreamBuilder re-subscribes and immediately
-    // receives the current Firestore state, making the host card appear.
-    if (mounted) {
-      _activeMeetingPointCardStream =
-          MeetingPointService.watchActiveForCurrentUser();
-      _activeMeetingPointCountStream =
-          MeetingPointService.watchActiveForCurrentUser();
-      _activeMeetingPointListStream =
-          MeetingPointService.watchAllBlockingForCurrentUser();
-      setState(() {});
-    }
+    // Do NOT reset streams here. The existing Firestore streams are already
+    // live and hold the correct deadlines. Resetting causes a new subscription
+    // that immediately emits a stale cached snapshot as its first active event,
+    // which makes the card briefly show the wrong timer (~1 second flicker).
+    // The live streams already pick up any Firestore writes the form made, so
+    // a simple setState() is sufficient to refresh the UI.
+    if (mounted) setState(() {});
   }
 
   @override
@@ -2932,7 +2921,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         // hostStep=5+suggestDeadline.
         if (activeMeeting != null &&
             activeMeeting.hostStep == 4 &&
-            activeMeeting.acceptedCount > 0) {
+            activeMeeting.acceptedCount > 0 &&
+            !_observedStep5MeetingIds.contains(activeMeeting.id)) {
+          // Guard: once step 5 has been observed (and the approxStart entry was
+          // removed), a stale cached step-4 event must not re-create the entry
+          // and reset the approximate countdown back to 5:00.
           final waitExpired =
               activeMeeting.waitDeadline != null &&
               !activeMeeting.waitDeadline!.isAfter(
@@ -2977,6 +2970,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         } else {
           _arrivalTimer?.cancel();
           _arrivalTimer = null;
+          // Clear local expiry state so the timer widget disappears with the meeting.
+          if (_localExpiresAt != null || _localExpiresAtComputedForMeetingId != null) {
+            _localExpiresAt = null;
+            _localExpiresAtComputedForMeetingId = null;
+          }
         }
 
         // Disable create when user is in active setup or confirmed arrival phase.
@@ -4947,8 +4945,6 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 setState(() {
                   _isTrackingView = (i == 0);
                   _expandedRequestId = null;
-                  // Update popup guard: meeting-point tab suppresses the popup.
-                  MeetingPointPopupGuard.suppress = !_isTrackingView;
                 });
                 _applyAllTrackedPinsToViewer();
               },

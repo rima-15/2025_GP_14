@@ -299,7 +299,18 @@ class _HelpSupportPageState extends State<HelpSupportPage>
                           ),
                         );
                       }
-                      return _buildFaqTile(_filteredFaqs[index]);
+                      final faq = _filteredFaqs[index];
+                      return Column(
+                        children: [
+                          _buildFaqTile(faq),
+                          if (index != _filteredFaqs.length - 1)
+                            Divider(
+                              height: 0,
+                              thickness: 0.5,
+                              color: Colors.grey[200],
+                            ),
+                        ],
+                      );
                     },
                     childCount:
                         _filteredFaqs.isEmpty ? 1 : _filteredFaqs.length,
@@ -356,65 +367,79 @@ class _HelpSupportPageState extends State<HelpSupportPage>
                   const Text(
                     'Send us a message',
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: 14,
                       fontWeight: FontWeight.w600,
                       color: Colors.grey,
                       letterSpacing: 0.5,
                     ),
                   ),
                   const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    value: _selectedTopic,
-                    items: const [
-                      DropdownMenuItem(
-                        value: 'General question',
-                        child: Text('General question'),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey[300]!),
+                    ),
+                    child: DropdownButtonFormField<String>(
+                      value: _selectedTopic,
+                      isExpanded: true,
+                      items: const [
+                        DropdownMenuItem(
+                          value: 'General question',
+                          child: Text('General question'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'AR Navigation issue',
+                          child: Text('AR Navigation issue'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'AR Exploration issue',
+                          child: Text('AR Exploration issue'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'Meeting point / tracking',
+                          child: Text('Meeting point / tracking'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'Account & login',
+                          child: Text('Account & login'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'Bug report',
+                          child: Text('Bug report'),
+                        ),
+                        DropdownMenuItem(value: 'Other', child: Text('Other')),
+                      ],
+                      onChanged: (value) =>
+                          setState(() => _selectedTopic = value!),
+                      decoration: const InputDecoration(
+                        border: InputBorder.none,
+                        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       ),
-                      DropdownMenuItem(
-                        value: 'AR Navigation issue',
-                        child: Text('AR Navigation issue'),
+                      icon: Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: Icon(Icons.keyboard_arrow_down, color: Colors.grey[600]),
                       ),
-                      DropdownMenuItem(
-                        value: 'AR Exploration issue',
-                        child: Text('AR Exploration issue'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'Meeting point / tracking',
-                        child: Text('Meeting point / tracking'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'Account & login',
-                        child: Text('Account & login'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'Bug report',
-                        child: Text('Bug report'),
-                      ),
-                      DropdownMenuItem(value: 'Other', child: Text('Other')),
-                    ],
-                    onChanged: (value) =>
-                        setState(() => _selectedTopic = value!),
-                    decoration: InputDecoration(
-                      filled: true,
-                      fillColor: Colors.white,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
-                      ),
+                      dropdownColor: Colors.white,
+                      style: const TextStyle(fontSize: 14, color: Colors.black87),
                     ),
                   ),
                   const SizedBox(height: 12),
-                  TextField(
-                    controller: _messageController,
-                    focusNode: _messageFocusNode,
-                    maxLines: 4,
-                    decoration: InputDecoration(
-                      hintText: 'Describe your issue or question in detail…',
-                      filled: true,
-                      fillColor: Colors.grey[100],
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
+                  // Improved text field
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey[300]!),
+                    ),
+                    child: TextField(
+                      controller: _messageController,
+                      focusNode: _messageFocusNode,
+                      maxLines: 4,
+                      decoration: const InputDecoration(
+                        hintText: 'Describe your issue or question in detail…',
+                        border: InputBorder.none,
+                        contentPadding: EdgeInsets.all(16),
                       ),
                     ),
                   ),
@@ -461,34 +486,31 @@ class _HelpSupportPageState extends State<HelpSupportPage>
   }
 
   Widget _buildFaqTile(FaqItem faq) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
-      ),
-      child: Theme(
-        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-        child: ExpansionTile(
-          title: Text(
-            faq.question,
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        tilePadding: const EdgeInsets.symmetric(vertical: 4, horizontal: 0),
+        childrenPadding: const EdgeInsets.fromLTRB(0, 0, 0, 16),
+        title: Text(
+          faq.question,
+          style: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w500,
+            color: Colors.black87,
           ),
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              child: Text(
-                faq.answer,
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: Colors.black54,
-                  height: 1.4,
-                ),
-              ),
-            ),
-          ],
         ),
+        iconColor: AppColors.kGreen,
+        collapsedIconColor: AppColors.kGreen,
+        children: [
+          Text(
+            faq.answer,
+            style: const TextStyle(
+              fontSize: 14,
+              color: Colors.grey,
+              height: 1.5,
+            ),
+          ),
+        ],
       ),
     );
   }

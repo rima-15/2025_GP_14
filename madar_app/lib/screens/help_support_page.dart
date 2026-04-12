@@ -15,6 +15,7 @@ class HelpSupportPage extends StatefulWidget {
 class _HelpSupportPageState extends State<HelpSupportPage>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  final FocusNode _messageFocusNode = FocusNode();
 
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _messageController = TextEditingController();
@@ -144,6 +145,7 @@ class _HelpSupportPageState extends State<HelpSupportPage>
     _tabController.dispose();
     _searchController.dispose();
     _messageController.dispose();
+    _messageFocusNode.dispose();
     super.dispose();
   }
 
@@ -203,35 +205,18 @@ class _HelpSupportPageState extends State<HelpSupportPage>
     SnackbarHelper.showSuccess(context, 'Message sent! We\'ll reply soon.');
   }
 
-  void _reportBug() async {
-    final controller = TextEditingController();
-    final desc = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Report a Bug'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLines: 3,
-          decoration: const InputDecoration(
-            hintText: 'Describe what went wrong...',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, controller.text),
-            child: const Text('Report'),
-          ),
-        ],
-      ),
-    );
-    if (desc != null && desc.trim().isNotEmpty) {
-      _sendEmail(subject: 'Bug Report - Madar', body: desc);
-    }
+  void _onEmailCardTap() {
+    setState(() {
+      _selectedTopic = 'General question';
+    });
+    FocusScope.of(context).requestFocus(_messageFocusNode);
+  }
+
+  void _onBugCardTap() {
+    setState(() {
+      _selectedTopic = 'Bug report';
+    });
+    FocusScope.of(context).requestFocus(_messageFocusNode);
   }
 
   @override
@@ -279,35 +264,6 @@ class _HelpSupportPageState extends State<HelpSupportPage>
                 sliver: SliverList(
                   delegate: SliverChildListDelegate([
                     const SizedBox(height: 16),
-                    // Search bar + Ask button
-                    /*Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _searchController,
-                            onChanged: (value) =>
-                                setState(() => _searchQuery = value),
-                            decoration: InputDecoration(
-                              hintText: 'Search for a topic...',
-                              hintStyle: TextStyle(color: Colors.grey[400]),
-                              prefixIcon: Icon(
-                                Icons.search,
-                                color: Colors.grey[500],
-                              ),
-                              filled: true,
-                              fillColor: Colors.grey[100],
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide.none,
-                              ),
-                              contentPadding:
-                                  const EdgeInsets.symmetric(vertical: 12),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),*/
                     // Category chips
                     SizedBox(
                       height: 40,
@@ -379,10 +335,7 @@ class _HelpSupportPageState extends State<HelpSupportPage>
                       title: 'Email support',
                       description: 'We reply within 24 hours on business days.',
                       buttonText: 'madar@gmail.com',
-                      onPressed: () => _sendEmail(
-                        subject: 'Madar Support Request',
-                        body: '',
-                      ),
+                      onPressed: _onEmailCardTap,
                     ),
                     _buildContactCard(
                       icon: Icons.bug_report_outlined,
@@ -390,7 +343,7 @@ class _HelpSupportPageState extends State<HelpSupportPage>
                       description:
                           'Found something broken? Let us know the details.',
                       buttonText: 'Report ',
-                      onPressed: _reportBug,
+                      onPressed: _onBugCardTap,
                     ),
                   ],
                 ),
@@ -447,6 +400,7 @@ class _HelpSupportPageState extends State<HelpSupportPage>
                 const SizedBox(height: 12),
                 TextField(
                   controller: _messageController,
+                  focusNode: _messageFocusNode,
                   maxLines: 4,
                   decoration: InputDecoration(
                     hintText: 'Describe your issue or question in detail…',
@@ -564,43 +518,38 @@ class _HelpSupportPageState extends State<HelpSupportPage>
     required String buttonText,
     required VoidCallback onPressed,
   }) {
-    return SizedBox(
-      width: (MediaQuery.of(context).size.width - 48) / 2,
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.grey[200]!),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, color: AppColors.kGreen, size: 24),
-            const SizedBox(height: 8),
-            Text(
-              title,
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              description,
-              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-            ),
-            const SizedBox(height: 8),
-            TextButton(
-              onPressed: onPressed,
-              style: TextButton.styleFrom(
-                padding: EdgeInsets.zero,
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    return GestureDetector(
+      onTap: onPressed,
+      child: SizedBox(
+        width: (MediaQuery.of(context).size.width - 48) / 2,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.grey[200]!),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(icon, color: AppColors.kGreen, size: 24),
+              const SizedBox(height: 8),
+              Text(
+                title,
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
               ),
-              child: Text(
+              const SizedBox(height: 4),
+              Text(
+                description,
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              ),
+              const SizedBox(height: 8),
+              Text(
                 buttonText,
                 style: const TextStyle(fontSize: 12, color: AppColors.kGreen),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

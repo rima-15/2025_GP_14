@@ -282,7 +282,7 @@ class _HelpSupportPageState extends State<HelpSupportPage>
                   ]),
                 ),
               ),
-              // FAQ list
+              // FAQ list (restored card style)
               SliverPadding(
                 padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
                 sliver: SliverList(
@@ -299,21 +299,14 @@ class _HelpSupportPageState extends State<HelpSupportPage>
                           ),
                         );
                       }
-                      final faq = _filteredFaqs[index];
-                      return Column(
-                        children: [
-                          _buildFaqTile(faq),
-                          if (index != _filteredFaqs.length - 1)
-                            Divider(
-                              height: 0,
-                              thickness: 0.5,
-                              color: Colors.grey[200],
-                            ),
-                        ],
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _buildFaqTile(_filteredFaqs[index]),
                       );
                     },
-                    childCount:
-                        _filteredFaqs.isEmpty ? 1 : _filteredFaqs.length,
+                    childCount: _filteredFaqs.isEmpty
+                        ? 1
+                        : _filteredFaqs.length,
                   ),
                 ),
               ),
@@ -349,7 +342,8 @@ class _HelpSupportPageState extends State<HelpSupportPage>
                       _buildContactCard(
                         icon: Icons.email_outlined,
                         title: 'Email support',
-                        description: 'We reply within 24 hours on business days.',
+                        description:
+                            'We reply within 24 hours on business days.',
                         buttonText: 'madar@gmail.com',
                         onPressed: _onEmailCardTap,
                       ),
@@ -367,13 +361,14 @@ class _HelpSupportPageState extends State<HelpSupportPage>
                   const Text(
                     'Send us a message',
                     style: TextStyle(
-                      fontSize: 14,
+                      fontSize: 12,
                       fontWeight: FontWeight.w600,
                       color: Colors.grey,
                       letterSpacing: 0.5,
                     ),
                   ),
                   const SizedBox(height: 12),
+                  // Dropdown
                   Container(
                     decoration: BoxDecoration(
                       color: Colors.grey[100],
@@ -414,18 +409,27 @@ class _HelpSupportPageState extends State<HelpSupportPage>
                           setState(() => _selectedTopic = value!),
                       decoration: const InputDecoration(
                         border: InputBorder.none,
-                        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
                       ),
                       icon: Padding(
                         padding: const EdgeInsets.only(right: 8),
-                        child: Icon(Icons.keyboard_arrow_down, color: Colors.grey[600]),
+                        child: Icon(
+                          Icons.keyboard_arrow_down,
+                          color: Colors.grey[600],
+                        ),
                       ),
                       dropdownColor: Colors.white,
-                      style: const TextStyle(fontSize: 14, color: Colors.black87),
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: Colors.black87,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 12),
-                  // Improved text field
+                  // Text field
                   Container(
                     decoration: BoxDecoration(
                       color: Colors.grey[100],
@@ -486,31 +490,41 @@ class _HelpSupportPageState extends State<HelpSupportPage>
   }
 
   Widget _buildFaqTile(FaqItem faq) {
-    return Theme(
-      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-      child: ExpansionTile(
-        tilePadding: const EdgeInsets.symmetric(vertical: 4, horizontal: 0),
-        childrenPadding: const EdgeInsets.fromLTRB(0, 0, 0, 16),
-        title: Text(
-          faq.question,
-          style: const TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w500,
-            color: Colors.black87,
-          ),
-        ),
-        iconColor: AppColors.kGreen,
-        collapsedIconColor: AppColors.kGreen,
-        children: [
-          Text(
-            faq.answer,
-            style: const TextStyle(
-              fontSize: 14,
-              color: Colors.grey,
-              height: 1.5,
-            ),
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey[200]!),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
           ),
         ],
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          title: Text(
+            faq.question,
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+          ),
+          iconColor: AppColors.kGreen,
+          collapsedIconColor: AppColors.kGreen,
+          children: [
+            Text(
+              faq.answer,
+              style: const TextStyle(
+                fontSize: 13,
+                color: Colors.black54,
+                height: 1.4,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -22,6 +22,7 @@ class _HelpSupportPageState extends State<HelpSupportPage>
   String _selectedTopic = 'General question';
   String _activeTab = 'all';
   String _searchQuery = '';
+  bool _isMessageExpanded = false;
 
   final List<FaqItem> _allFaqs = [
     FaqItem(
@@ -220,6 +221,7 @@ class _HelpSupportPageState extends State<HelpSupportPage>
   }
 
   @override
+  @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isSmallScreen = screenWidth < 380;
@@ -242,225 +244,300 @@ class _HelpSupportPageState extends State<HelpSupportPage>
             fontWeight: FontWeight.w600,
           ),
         ),
-        bottom: TabBar(
-          controller: _tabController,
-          labelColor: AppColors.kGreen,
-          unselectedLabelColor: Colors.grey,
-          indicatorColor: AppColors.kGreen,
-          tabs: const [
-            Tab(text: 'FAQ'),
-            Tab(text: 'Contact us'),
-          ],
-        ),
       ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          // FAQ Tab
-          CustomScrollView(
-            slivers: [
-              SliverPadding(
-                padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
-                sliver: SliverList(
-                  delegate: SliverChildListDelegate([
-                    const SizedBox(height: 16),
-                    // Category chips
-                    SizedBox(
-                      height: 40,
-                      child: ListView(
-                        scrollDirection: Axis.horizontal,
-                        children: [
-                          _buildTabChip('All', 'all'),
-                          _buildTabChip('AR Navigation', 'navigation'),
-                          _buildTabChip('AR Exploration', 'exploration'),
-                          _buildTabChip('Groups & Tracking', 'groups'),
-                          _buildTabChip('Account', 'account'),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                  ]),
-                ),
-              ),
-              // FAQ list (restored card style)
-              SliverPadding(
-                padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
-                sliver: SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                    (context, index) {
-                      if (_filteredFaqs.isEmpty) {
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 40),
-                          child: Center(
-                            child: Text(
-                              'No results found. Try different keywords.',
-                              style: TextStyle(color: Colors.grey[600]),
-                            ),
-                          ),
-                        );
-                      }
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: _buildFaqTile(_filteredFaqs[index]),
-                      );
-                    },
-                    childCount: _filteredFaqs.isEmpty
-                        ? 1
-                        : _filteredFaqs.length,
-                  ),
-                ),
-              ),
-              const SliverToBoxAdapter(child: SizedBox(height: 40)),
-            ],
-          ),
-          // Contact us Tab
-          GestureDetector(
-            onTap: () {
-              FocusScope.of(context).unfocus();
-            },
-            behavior: HitTestBehavior.translucent,
-            child: SingleChildScrollView(
-              padding: EdgeInsets.all(horizontalPadding),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const SizedBox(height: 6),
-                  const Text(
-                    'Still need help?',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.grey,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
+      body: CustomScrollView(
+        slivers: [
+          // FAQ Section
+          SliverPadding(
+            padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+            sliver: SliverList(
+              delegate: SliverChildListDelegate([
+                const SizedBox(height: 16),
+                // Category chips
+                SizedBox(
+                  height: 40,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
                     children: [
-                      _buildContactCard(
-                        icon: Icons.email_outlined,
-                        title: 'Email support',
-                        description:
-                            'We reply within 24 hours on business days.',
-                        buttonText: 'madar@gmail.com',
-                        onPressed: _onEmailCardTap,
+                      _buildTabChip('All', 'all'),
+                      _buildTabChip('AR Navigation', 'navigation'),
+                      _buildTabChip('AR Exploration', 'exploration'),
+                      _buildTabChip('Groups & Tracking', 'groups'),
+                      _buildTabChip('Account', 'account'),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ]),
+            ),
+          ),
+          // FAQ list
+          SliverPadding(
+            padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+            sliver: SliverList(
+              delegate: SliverChildBuilderDelegate((context, index) {
+                if (_filteredFaqs.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 40),
+                    child: Center(
+                      child: Text(
+                        'No results found. Try different keywords.',
+                        style: TextStyle(color: Colors.grey[600]),
                       ),
-                      _buildContactCard(
-                        icon: Icons.bug_report_outlined,
-                        title: 'Report a bug',
-                        description:
-                            'Found something broken? Let us know the details.',
-                        buttonText: 'Report',
-                        onPressed: _onBugCardTap,
+                    ),
+                  );
+                }
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _buildFaqTile(_filteredFaqs[index]),
+                );
+              }, childCount: _filteredFaqs.isEmpty ? 1 : _filteredFaqs.length),
+            ),
+          ),
+          // Spacer before contact section
+          const SliverToBoxAdapter(child: SizedBox(height: 24)),
+          // Contact us Section
+          SliverPadding(
+            padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+            sliver: SliverList(
+              delegate: SliverChildListDelegate([
+                // Still need help? + Email card
+                const Text(
+                  'Still need help?',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _buildContactCard(
+                  icon: Icons.email_outlined,
+                  title: 'Email support',
+                  description: 'We reply within 24 hours on business days.',
+                  buttonText: 'madar@gmail.com',
+                  onPressed: _onEmailCardTap,
+                ),
+                const SizedBox(height: 28),
+                // Expandable message form (card style)
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.grey[200]!),
+                  ),
+                  child: Column(
+                    children: [
+                      InkWell(
+                        borderRadius: BorderRadius.circular(16),
+                        onTap: () {
+                          setState(() {
+                            _isMessageExpanded = !_isMessageExpanded;
+                          });
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 16,
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.sticky_note_2_outlined,
+                                color: AppColors.kGreen,
+                                size: 24,
+                              ),
+                              const SizedBox(width: 12),
+                              const Expanded(
+                                child: Text(
+                                  'Submit your issue',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.black87,
+                                  ),
+                                ),
+                              ),
+                              Icon(
+                                _isMessageExpanded
+                                    ? Icons.keyboard_arrow_up
+                                    : Icons.keyboard_arrow_down,
+                                color: Colors.grey[600],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      AnimatedCrossFade(
+                        duration: const Duration(milliseconds: 220),
+                        crossFadeState: _isMessageExpanded
+                            ? CrossFadeState.showSecond
+                            : CrossFadeState.showFirst,
+                        firstChild: const SizedBox.shrink(),
+                        secondChild: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                          child: Column(
+                            children: [
+                              Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.grey[100],
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: Colors.grey[300]!),
+                                ),
+                                child: DropdownButtonFormField<String>(
+                                  value: _selectedTopic,
+                                  isExpanded: true,
+                                  items: const [
+                                    DropdownMenuItem(
+                                      value: 'General question',
+                                      child: Text('General question'),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 'AR Navigation issue',
+                                      child: Text('AR Navigation issue'),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 'AR Exploration issue',
+                                      child: Text('AR Exploration issue'),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 'Meeting point / tracking',
+                                      child: Text('Meeting point / tracking'),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 'Account & login',
+                                      child: Text('Account & login'),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 'Bug report',
+                                      child: Text('Bug report'),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 'Other',
+                                      child: Text('Other'),
+                                    ),
+                                  ],
+                                  onChanged: (value) =>
+                                      setState(() => _selectedTopic = value!),
+                                  decoration: const InputDecoration(
+                                    border: InputBorder.none,
+                                    contentPadding: EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 12,
+                                    ),
+                                  ),
+                                  icon: Padding(
+                                    padding: const EdgeInsets.only(right: 8),
+                                    child: Icon(
+                                      Icons.keyboard_arrow_down,
+                                      color: Colors.grey[600],
+                                    ),
+                                  ),
+                                  dropdownColor: Colors.white,
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    color: Colors.black87,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.grey[100],
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: Colors.grey[300]!),
+                                ),
+                                child: TextField(
+                                  controller: _messageController,
+                                  focusNode: _messageFocusNode,
+                                  maxLines: 4,
+                                  decoration: const InputDecoration(
+                                    hintText:
+                                        'Describe your issue or question in detail…',
+                                    hintStyle: TextStyle(
+                                      fontSize: 13,
+                                      color: Colors.grey,
+                                    ),
+                                    border: InputBorder.none,
+                                    contentPadding: EdgeInsets.all(16),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              SizedBox(
+                                width: double.infinity,
+                                child: PrimaryButton(
+                                  text: 'Send message',
+                                  onPressed: _onSendMessage,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 28),
-                  const Text(
-                    'Send us a message',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.grey,
-                      letterSpacing: 0.5,
-                    ),
+                ),
+                const SizedBox(height: 24),
+                const Text(
+                  'Follow us',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey,
+                    letterSpacing: 0.5,
                   ),
-                  const SizedBox(height: 12),
-                  // Dropdown
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.grey[100],
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.grey[300]!),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _buildSocialCircle(
+                      icon: Icons.alternate_email,
+                      label: 'X',
+                      url: 'https://x.com/madar_app',
                     ),
-                    child: DropdownButtonFormField<String>(
-                      value: _selectedTopic,
-                      isExpanded: true,
-                      items: const [
-                        DropdownMenuItem(
-                          value: 'General question',
-                          child: Text('General question'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'AR Navigation issue',
-                          child: Text('AR Navigation issue'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'AR Exploration issue',
-                          child: Text('AR Exploration issue'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'Meeting point / tracking',
-                          child: Text('Meeting point / tracking'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'Account & login',
-                          child: Text('Account & login'),
-                        ),
-                        DropdownMenuItem(
-                          value: 'Bug report',
-                          child: Text('Bug report'),
-                        ),
-                        DropdownMenuItem(value: 'Other', child: Text('Other')),
-                      ],
-                      onChanged: (value) =>
-                          setState(() => _selectedTopic = value!),
-                      decoration: const InputDecoration(
-                        border: InputBorder.none,
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 12,
-                        ),
-                      ),
-                      icon: Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: Icon(
-                          Icons.keyboard_arrow_down,
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                      dropdownColor: Colors.white,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        color: Colors.black87,
-                      ),
+                    const SizedBox(width: 40),
+                    _buildSocialCircle(
+                      icon: Icons.camera_alt,
+                      label: 'Instagram',
+                      url: 'https://instagram.com/madar_app',
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  // Text field
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.grey[100],
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.grey[300]!),
+                    const SizedBox(width: 40),
+                    _buildSocialCircle(
+                      icon: Icons.play_circle_filled,
+                      label: 'YouTube',
+                      url: 'https://youtube.com/@madar_app',
                     ),
-                    child: TextField(
-                      controller: _messageController,
-                      focusNode: _messageFocusNode,
-                      maxLines: 4,
-                      decoration: const InputDecoration(
-                        hintText: 'Describe your issue or question in detail…',
-                        border: InputBorder.none,
-                        contentPadding: EdgeInsets.all(16),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    child: PrimaryButton(
-                      text: 'Send message',
-                      onPressed: _onSendMessage,
-                    ),
-                  ),
-                  const SizedBox(height: 28),
-                ],
-              ),
+                  ],
+                ),
+                const SizedBox(height: 32),
+              ]),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSocialCircle({
+    required IconData icon,
+    required String label,
+    required String url,
+  }) {
+    return InkWell(
+      onTap: () => _launchUrl(url),
+      borderRadius: BorderRadius.circular(30),
+      child: Container(
+        width: 52,
+        height: 52,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.grey[300]!),
+        ),
+        child: Icon(icon, color: AppColors.kGreen, size: 22),
       ),
     );
   }
@@ -506,7 +583,7 @@ class _HelpSupportPageState extends State<HelpSupportPage>
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
-          tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           title: Text(
             faq.question,
@@ -540,34 +617,48 @@ class _HelpSupportPageState extends State<HelpSupportPage>
       onTap: onPressed,
       borderRadius: BorderRadius.circular(16),
       child: Container(
-        width: (MediaQuery.of(context).size.width - 48) / 2,
+        width: double.infinity,
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: Colors.grey[200]!),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Icon(icon, color: AppColors.kGreen, size: 24),
-            const SizedBox(height: 8),
-            Text(
-              title,
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              description,
-              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              buttonText,
-              style: const TextStyle(
-                fontSize: 12,
-                color: AppColors.kGreen,
-                fontWeight: FontWeight.w500,
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    description,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[600],
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    buttonText,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: AppColors.kGreen,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],

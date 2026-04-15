@@ -591,15 +591,16 @@ class _HistoryPageState extends State<HistoryPage> {
     final status = (data['status'] ?? '').toString().trim().toLowerCase();
     final storedReason = (data['cancellationReason'] ?? '').toString().trim();
     if (status == 'completed') {
-      return storedReason.toLowerCase() == 'auto-closed after time limit'
-          ? storedReason
-          : '';
+      return '';
     }
     if (status != 'cancelled') return '';
 
     // Explicit reason stored by the arrival-phase auto-cancel logic.
     if (storedReason == 'all_participants_left') {
-      return 'All participants left the meeting';
+      final confirmedAt = data['confirmedAt'];
+      return confirmedAt != null
+          ? 'All participants left the meeting'
+          : 'All participants left before the meeting started';
     }
 
     final hostId = (data['hostId'] ?? '').toString();
@@ -628,6 +629,17 @@ class _HistoryPageState extends State<HistoryPage> {
       if (storedReason == 'host_cancelled') {
         return 'You cancelled this request for all participants';
       }
+      // At step 5 before confirmation, 'all_participants_declined' actually means
+      // participants who had accepted then cancelled — treatCancelAsDeclined in the
+      // form converts their status to 'declined', losing the distinction. Treat
+      // this as "left before the meeting started", not a host rejection.
+      if (storedReason == 'all_participants_declined' &&
+          hostStep >= 5 &&
+          !wasInArrivalPhase) {
+        return 'All participants left before the meeting started';
+      }
+      // Only show host-rejection message when no other reason explains the step-5
+      // cancellation (i.e. not caused by participants leaving).
       if (hostStep == 5 && !wasInArrivalPhase)
         return 'Host (you) rejected the suggested meeting point';
       // 'all_participants_declined' is written by the auto-cancel logic when
@@ -1346,20 +1358,32 @@ class _HistoryPageState extends State<HistoryPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      Text(
+                        item.hostName.isEmpty ? 'Unknown' : item.hostName,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.black87,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                      ),
+                      const SizedBox(height: 2),
                       Row(
                         children: [
-                          Flexible(
-                            child: Text(
-                              item.hostName.isEmpty ? 'Unknown' : item.hostName,
-                              style: const TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w700,
-                                color: Colors.black87,
+                          if (item.hostPhone.isNotEmpty) ...[
+                            Expanded(
+                              child: Text(
+                                item.hostPhone,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.grey[600],
+                                ),
+                                overflow: TextOverflow.ellipsis,
                               ),
-                              overflow: TextOverflow.ellipsis,
                             ),
-                          ),
-                          const SizedBox(width: 6),
+                            const SizedBox(width: 6),
+                          ],
                           Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 8,
@@ -1380,14 +1404,6 @@ class _HistoryPageState extends State<HistoryPage> {
                           ),
                         ],
                       ),
-                      if (item.hostPhone.isNotEmpty)
-                        Text(
-                          item.hostPhone,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Colors.grey[600],
-                          ),
-                        ),
                     ],
                   ),
                 ),
@@ -1460,8 +1476,10 @@ class _HistoryPageState extends State<HistoryPage> {
                             item.status != 'declined' &&
                             item.status != 'expired' &&
                             (item.wasConfirmed ||
-                                item.cancellationReason !=
-                                    'All participants left the meeting')) ...[
+                                (item.cancellationReason !=
+                                        'All participants left the meeting' &&
+                                    item.cancellationReason !=
+                                        'All participants left before the meeting started'))) ...[
                           const SizedBox(height: 4),
                           _labeledDetail(
                             'Suggested point: ',

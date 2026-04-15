@@ -1072,6 +1072,13 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     _activeMeetingSub?.cancel();
     _activeMeetingSub = _meetingPointCardStream.listen((meeting) {
       if (!mounted) return;
+      // Keep the card cache current so _maybeMaintainActiveMeetingIfNeeded()
+      // always has fresh meeting data regardless of which tab is shown.
+      // Without this, _lastKnownActiveMeetingCard is never updated (the
+      // StreamBuilder that called _resolveActiveMeetingCardSnapshot was
+      // removed), causing deadline-based transitions to stall unless the
+      // host happens to open the Meeting Point tab or the form.
+      _lastKnownActiveMeetingCard = meeting;
       _syncMeetingParticipantSubs(meeting);
     });
   }
@@ -1547,6 +1554,13 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     if (meeting == null || uid == null) return;
     // Compute for all users, not just host — participants also see the timer.
     if (_localExpiresAtComputedForMeetingId == meeting.id) return;
+
+    // Only lock in the guard once we have at least one real navmesh ETA.
+    // If the map is empty we're still waiting for participant locations —
+    // return without setting the guard so the next _recomputeAllMeetingPaths
+    // call retries with real values instead of falling back to random minutes.
+    if (_meetingEtaBaseSecondsByUser.isEmpty) return;
+
     _localExpiresAtComputedForMeetingId = meeting.id;
 
     final allEtaSecs = <int>[];
@@ -2475,11 +2489,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         meeting.acceptedCount > 0) {
       final approxStart = _approxStep3StartByMeetingId[meeting.id];
       if (approxStart != null) {
-        final approxDeadline = approxStart.add(const Duration(minutes: 5));
+        final approxDeadline = approxStart.add(const Duration(minutes: 2));
         final seconds = approxDeadline
             .difference(MeetingPointService.serverNow)
             .inSeconds
-            .clamp(0, 300);
+            .clamp(0, 120);
         final mm = (seconds ~/ 60).toString().padLeft(2, '0');
         final ss = (seconds % 60).toString().padLeft(2, '0');
         return '$mm:$ss';
@@ -2556,10 +2570,10 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
   Future<void> _maybeMaintainActiveMeetingIfNeeded() async {
     // Check all blocking meetings for expired deadlines.
-    // Fall back through increasingly stale caches so this works even when
-    // the user is not on the Meeting Point tab (where _lastKnownBlockingMeetings
-    // and _lastKnownActiveMeetingCard are populated). _lastKnownActiveMeetingCount
-    // is always populated via the tab-header badge stream.
+    // _lastKnownBlockingMeetings is populated only on the Meeting Point tab.
+    // _lastKnownActiveMeetingCard is kept current by _listenToActiveMeetingParticipants
+    // (always-on stream subscription) so it works on any tab.
+    // _lastKnownActiveMeetingCount is a last-resort fallback for edge cases.
     final candidates = _lastKnownBlockingMeetings.isNotEmpty
         ? _lastKnownBlockingMeetings
         : (_lastKnownActiveMeetingCard != null
@@ -2602,7 +2616,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
     // Guard is BEFORE the call so stale Firestore cache data (delivered after
     // a stream reset) never triggers a second maybeMaintain that overwrites
-    // suggestDeadline and resets the 5-min host-confirmation timer.
+    // suggestDeadline and resets the 2-min host-confirmation timer.
     final resetKey = '${meeting.id}_${meeting.hostStep}';
     if (_maintainAttemptedKeys.contains(resetKey)) return;
     _maintainAttemptedKeys.add(resetKey);
@@ -2611,18 +2625,13 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       await MeetingPointService.maybeMaintain(meeting);
     } catch (_) {}
 
-    // Force a fresh Firestore subscription so the UI reflects the state
-    // change (cancel / step-5 advance) immediately without waiting for the
-    // stream to emit on its own — which can lag or be missed entirely.
-    if (mounted) {
-      _activeMeetingPointCardStream =
-          MeetingPointService.watchActiveForCurrentUser();
-      _activeMeetingPointCountStream =
-          MeetingPointService.watchActiveForCurrentUser();
-      _activeMeetingPointListStream =
-          MeetingPointService.watchAllBlockingForCurrentUser();
-      setState(() {});
-    }
+    // Schedule key removal so a failed write can be retried after 30 s.
+    // Live Firestore streams notify all listeners of any successful write
+    // automatically — no stream reset is needed here.
+    Future.delayed(const Duration(seconds: 30), () {
+      _maintainAttemptedKeys.remove(resetKey);
+    });
+    if (mounted) setState(() {});
   }
 
   String _firstName(String fullName) {
@@ -2650,7 +2659,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       }
     }
 
-    await showModalBottomSheet(
+    final pendingWork = await showModalBottomSheet<Future<void>?>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -2661,12 +2670,19 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       ),
     );
 
-    // Do NOT reset streams here. The existing Firestore streams are already
-    // live and hold the correct deadlines. Resetting causes a new subscription
-    // that immediately emits a stale cached snapshot as its first active event,
-    // which makes the card briefly show the wrong timer (~1 second flicker).
-    // The live streams already pick up any Firestore writes the form made, so
-    // a simple setState() is sufficient to refresh the UI.
+    // If the form fired markHostDecision in the background (auto-confirm),
+    // await it so the live Firestore streams have the updated state before we
+    // rebuild.  Errors are swallowed — _maybeMaintainActiveMeetingIfNeeded will
+    // retry within the next tick if the write failed.
+    if (pendingWork != null) {
+      await pendingWork.catchError((_) {});
+    }
+
+    // Do NOT reset streams here.  The existing live Firestore streams already
+    // hold the correct state and will emit any writes that were just made.
+    // Resetting creates a new subscription whose first event is a stale local-
+    // cache snapshot, which can temporarily show the wrong timer or hide the
+    // arrival phase.
     if (mounted) setState(() {});
   }
 
@@ -2871,12 +2887,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             !_reconciledArrivalMeetingIds.contains(confirmedMeeting.id)) {
           _reconciledArrivalMeetingIds.add(confirmedMeeting.id);
           MeetingPointService.reconcileArrivalPhase(confirmedMeeting).then((_) {
-            if (mounted) {
-              setState(() {
-                _activeMeetingPointListStream =
-                    MeetingPointService.watchAllBlockingForCurrentUser();
-              });
-            }
+            if (mounted) setState(() {});
           });
         }
 
@@ -2889,12 +2900,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             !_expiredArrivalMeetingIds.contains(confirmedMeeting.id)) {
           _expiredArrivalMeetingIds.add(confirmedMeeting.id);
           MeetingPointService.reconcileArrivalPhase(confirmedMeeting).then((_) {
-            if (mounted) {
-              setState(() {
-                _activeMeetingPointListStream =
-                    MeetingPointService.watchAllBlockingForCurrentUser();
-              });
-            }
+            if (mounted) setState(() {});
           });
         }
 
@@ -2906,12 +2912,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             !_reconciledDeclinedMeetingIds.contains(activeMeeting.id)) {
           _reconciledDeclinedMeetingIds.add(activeMeeting.id);
           MeetingPointService.maybeMaintain(activeMeeting).then((_) {
-            if (mounted) {
-              setState(() {
-                _activeMeetingPointListStream =
-                    MeetingPointService.watchAllBlockingForCurrentUser();
-              });
-            }
+            if (mounted) setState(() {});
           });
         }
 
@@ -2953,12 +2954,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             !_reconciledStep5MeetingIds.contains(activeMeeting.id)) {
           _reconciledStep5MeetingIds.add(activeMeeting.id);
           MeetingPointService.maybeMaintain(activeMeeting).then((_) {
-            if (mounted) {
-              setState(() {
-                _activeMeetingPointListStream =
-                    MeetingPointService.watchAllBlockingForCurrentUser();
-              });
-            }
+            if (mounted) setState(() {});
           });
         }
 
@@ -3268,14 +3264,16 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
-                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(
-                          isHost ? 'Me (Host)' : 'Me',
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.black87,
+                        Flexible(
+                          child: Text(
+                            isHost ? 'Me (Host)' : 'Me',
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.black87,
+                            ),
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -3425,14 +3423,16 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(
-                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            Text(
-                              p.name.trim().isEmpty ? p.phone : p.name,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.black87,
+                            Flexible(
+                              child: Text(
+                                p.name.trim().isEmpty ? p.phone : p.name,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.black87,
+                                ),
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -4041,9 +4041,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       final confirmed = await ConfirmationDialog.showDeleteConfirmation(
         context,
         title: 'Cancel Participation',
-        message: 'You will be removed from this active meeting point.',
-        cancelText: 'Keep',
-        confirmText: 'Cancel',
+        message: 'Are you sure you want to cancel your participation in this meeting point?',
+        cancelText: 'Discard',
+        confirmText: 'Cancel Participation',
       );
       if (confirmed != true) return;
       try {
@@ -4072,24 +4072,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       builder: (ctx) => AlertDialog(
         backgroundColor: Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        titlePadding: const EdgeInsets.fromLTRB(24, 16, 8, 0),
+        titlePadding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
         contentPadding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-        title: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Expanded(
-              child: Text(
-                'Cancel Meeting?',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
-              ),
-            ),
-            IconButton(
-              onPressed: () => Navigator.pop(ctx, null),
-              icon: Icon(Icons.close, size: 20, color: Colors.grey[600]),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(),
-            ),
-          ],
+        title: const Text(
+          'Cancel Meeting',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
         ),
         content: const Text(
           'As the host, you can cancel the meeting for everyone or just remove yourself.',
@@ -4134,6 +4121,29 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               ),
               child: const Text(
                 'Cancel for me',
+                style: TextStyle(
+                  color: Colors.black87,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          // Keep
+          SizedBox(
+            width: double.infinity,
+            child: TextButton(
+              onPressed: () => Navigator.pop(ctx, null),
+              style: TextButton.styleFrom(
+                backgroundColor: Colors.grey[200],
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: const Text(
+                'Discard',
                 style: TextStyle(
                   color: Colors.black87,
                   fontWeight: FontWeight.w600,
@@ -4620,7 +4630,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                         message:
                             'Are you sure you want to cancel your participation in this meeting point?',
                         confirmText: 'Cancel Participation',
-                        cancelText: 'Keep',
+                        cancelText: 'Discard',
                         successMessage: 'Participation cancelled.',
                         cancelParticipation: step == 3,
                       ),
@@ -5793,60 +5803,63 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
             ),
+            titlePadding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+            contentPadding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
             title: const Text(
               'Already in a Meeting Point',
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
             ),
             content: const Text(
-              'You\'re already part of an active meeting point. '
-              'Would you like to leave it and proceed to accept this new invitation?',
+              "You're already part of an active meeting point. Accepting this "
+              'invitation will cancel your participation in it.',
               style: TextStyle(fontSize: 15),
             ),
+            actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                style: TextButton.styleFrom(
-                  backgroundColor: Colors.grey[200],
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 12,
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  style: TextButton.styleFrom(
+                    backgroundColor: AppColors.kError,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                   ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                child: const Text(
-                  'Discard',
-                  style: TextStyle(
-                    color: Colors.black87,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 15,
+                  child: const Text(
+                    'Cancel Participation',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                    ),
                   ),
                 ),
               ),
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                style: TextButton.styleFrom(
-                  backgroundColor: AppColors.kGreen,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 12,
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  style: TextButton.styleFrom(
+                    backgroundColor: Colors.grey[200],
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                   ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                child: const Text(
-                  'Proceed',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 15,
+                  child: const Text(
+                    'Keep',
+                    style: TextStyle(
+                      color: Colors.black87,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 15,
+                    ),
                   ),
                 ),
               ),
             ],
-            actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           ),
         );
         if (!mounted || proceed != true) return;
@@ -5934,112 +5947,48 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       builder: (ctx) => AlertDialog(
         backgroundColor: Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        titlePadding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+        contentPadding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
         title: const Text(
-          'Active Meeting Point',
+          'Already in a Meeting Point',
           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
         ),
         content: const Text(
-          'You are currently the host of an in-progress meeting point. '
-          'Proceeding to accept this new invitation will cancel the current '
-          'meeting point for all participants. '
-          'Would you like to proceed?',
+          "You're hosting an in-progress meeting point. Proceeding to accept "
+          'this new invitation will cancel meeting for all participants.',
           style: TextStyle(fontSize: 15),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            style: TextButton.styleFrom(
-              backgroundColor: Colors.grey[200],
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            child: const Text(
-              'Discard',
-              style: TextStyle(
-                color: Colors.black87,
-                fontWeight: FontWeight.w600,
-                fontSize: 15,
-              ),
-            ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: TextButton.styleFrom(
-              backgroundColor: AppColors.kGreen,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            child: const Text(
-              'Proceed',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 15,
-              ),
-            ),
-          ),
-        ],
         actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      ),
-    );
-  }
-
-  /// Dialog shown when the user (as host in confirmed/arrival phase) tries to
-  /// accept a new invitation — lets them choose to cancel for all or just
-  /// themselves. Returns 'all', 'me', or null (dismissed).
-  Future<String?> _showHostConfirmedConflictDialog() {
-    String selected = 'all';
-    return showDialog<String>(
-      context: context,
-      barrierColor: Colors.black54,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setState) => AlertDialog(
-          backgroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          title: const Text(
-            'Active Meeting Point',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'You are the host of an active meeting point where participants '
-                'are already heading to the venue. Would you like to proceed with '
-                'cancelling the meeting point?',
-                style: TextStyle(fontSize: 15),
+        actions: [
+          SizedBox(
+            width: double.infinity,
+            child: TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: TextButton.styleFrom(
+                backgroundColor: AppColors.kError,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
               ),
-              const SizedBox(height: 16),
-              _buildRadioRow(
-                value: 'all',
-                selected: selected,
-                label: 'Cancel for all participants',
-                onTap: () => setState(() => selected = 'all'),
+              child: const Text(
+                'Cancel Meeting',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                ),
               ),
-              _buildRadioRow(
-                value: 'me',
-                selected: selected,
-                label: 'Cancel for me',
-                onTap: () => setState(() => selected = 'me'),
-              ),
-            ],
+            ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, null),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
               style: TextButton.styleFrom(
                 backgroundColor: Colors.grey[200],
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 12,
-                ),
+                padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
@@ -6053,20 +6002,49 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 ),
               ),
             ),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, selected),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Dialog shown when the user (as host in confirmed/arrival phase) tries to
+  /// accept a new invitation — lets them choose to cancel for all or just
+  /// themselves. Returns 'all', 'me', or null (keep).
+  Future<String?> _showHostConfirmedConflictDialog() {
+    return showDialog<String>(
+      context: context,
+      barrierColor: Colors.black54,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        titlePadding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+        contentPadding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+        title: const Text(
+          'Cancel Meeting',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
+        ),
+        content: const Text(
+          "You're hosting an active meeting point."
+          ' Proceeding to accept this invitation will cancel '
+          'it for you or all participants.',
+          style: TextStyle(fontSize: 15),
+        ),
+        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        actions: [
+          SizedBox(
+            width: double.infinity,
+            child: TextButton(
+              onPressed: () => Navigator.pop(ctx, 'all'),
               style: TextButton.styleFrom(
-                backgroundColor: AppColors.kGreen,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 12,
-                ),
+                backgroundColor: AppColors.kError,
+                padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
               ),
               child: const Text(
-                'Proceed',
+                'Cancel for all participants',
                 style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
@@ -6074,9 +6052,52 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 ),
               ),
             ),
-          ],
-          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: TextButton(
+              onPressed: () => Navigator.pop(ctx, 'me'),
+              style: TextButton.styleFrom(
+                backgroundColor: Colors.grey[200],
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: const Text(
+                'Cancel for me',
+                style: TextStyle(
+                  color: Colors.black87,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: TextButton(
+              onPressed: () => Navigator.pop(ctx, null),
+              style: TextButton.styleFrom(
+                backgroundColor: Colors.grey[200],
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: const Text(
+                'Discard',
+                style: TextStyle(
+                  color: Colors.black87,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15,
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -6356,11 +6377,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     final timerLabel = h > 0
         ? '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}'
         : '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
-    final timerColor = isExpired
-        ? AppColors.kError
-        : remaining.inMinutes < 2
-        ? Colors.orange[700]!
-        : Colors.grey[500]!;
+    final isEnding = isExpired || remaining.inSeconds <= 5;
+    final isLastMinute = isExpired || remaining.inMinutes < 1;
+    final timerColor = isLastMinute ? AppColors.kError : Colors.grey[500]!;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -6378,7 +6397,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           Icon(Icons.timer_outlined, size: 13, color: timerColor),
           const SizedBox(width: 3),
           Text(
-            isExpired ? 'Ending...' : timerLabel,
+            isEnding ? 'Ending...' : timerLabel,
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w500,

@@ -10,7 +10,7 @@ import 'package:http/http.dart' as http;
 // ----------------------------------------------------------------------------
 
 /// Refresh rating if older than 7 days
-const int _kCacheMaxAgeDays = 30;
+const int _kCacheMaxAgeDays = 1;
 
 class PlaceRatingService {
   final FirebaseFirestore _db;

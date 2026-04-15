@@ -335,7 +335,7 @@ class MeetingPointService {
   static CollectionReference<Map<String, dynamic>> get _col =>
       FirebaseFirestore.instance.collection(collectionName);
 
-  static const Duration _kSuggestDuration = Duration(minutes: 5);
+  static const Duration _kSuggestDuration = Duration(minutes: 2);
 
   // ── Server-clock calibration ───────────────────────────────────────────────
   // Estimated offset: serverTime − localTime. Updated from every live
@@ -923,7 +923,6 @@ class MeetingPointService {
       try {
         await _col.doc(meeting.id).update({
           'status': 'completed',
-          'cancellationReason': 'Auto-closed after time limit',
           'updatedAt': FieldValue.serverTimestamp(),
         });
       } catch (_) {}
@@ -1243,9 +1242,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   Timer? _autoAdvanceTimer;
 
   // ── Step 5: Suggested meeting point ──────────────────────────────────────
-  /// 5-minute timer for host to accept/reject.
+  /// 2-minute timer for host to accept/reject.
   Timer? _suggestTimer;
-  int _suggestSecondsLeft = 300; // 5 min
+  int _suggestSecondsLeft = 120; // 2 min
   DateTime? _suggestDeadline;
   String _suggestedPointName = '';
   List<Map<String, dynamic>> _suggestedCandidates = [];
@@ -1403,9 +1402,14 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       final matched = pos == null ? null : _matchVenue(venues, pos);
 
       if (matched != null) {
-        // User is inside a real venue.
-        _venueId = matched.id;
-        _venueName = matched.name;
+        // Check if the matched venue is currently open.
+        final isOpen = await _fetchVenueOpenNow(matched.id);
+        if (isOpen == false) {
+          _venueError = 'Venue is closed';
+        } else {
+          _venueId = matched.id;
+          _venueName = matched.name;
+        }
       } else if (forceVenueForTesting && venues.isNotEmpty) {
         // DEV override: prefer a stable 24h test venue.
         _VenueOption? testVenue;
@@ -1487,6 +1491,94 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       }
     }
     return best;
+  }
+
+  /// Fetches the venue's cached hours and returns whether it is currently open.
+  /// Returns null if hours data is unavailable (treated as open).
+  Future<bool?> _fetchVenueOpenNow(String venueId) async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('venues')
+          .doc(venueId)
+          .collection('cache')
+          .doc('googlePlaces')
+          .get();
+      final data = snap.data();
+      if (data == null) return null;
+      final businessStatus = data['businessStatus'] as String?;
+      if (businessStatus?.toLowerCase() == 'closed_temporarily') return false;
+      final openingHours = data['openingHours'] as Map<String, dynamic>?;
+      final utcOffset = (data['utcOffset'] as num?)?.toInt() ?? 180;
+      final periods = (openingHours?['periods'] as List?) ?? const [];
+      final weekdayText =
+          (openingHours?['weekday_text'] as List?)?.cast<String>() ?? const [];
+      // 24/7 open
+      if (weekdayText.any((t) => t.toLowerCase().contains('open 24 hours'))) {
+        return true;
+      }
+      if (periods.length == 1) {
+        final p = periods.first;
+        if (p is Map && !p.containsKey('close')) return true;
+      }
+      if (periods.isEmpty) return null;
+      final now = DateTime.now().toUtc();
+      final venueNow = now.add(Duration(minutes: utcOffset));
+      final dartWeekday = venueNow.weekday;
+      final googleDay = dartWeekday == 7 ? 0 : dartWeekday;
+      final currentMinutes = venueNow.hour * 60 + venueNow.minute;
+      for (final period in periods) {
+        if (period is! Map<String, dynamic>) continue;
+        final openData = period['open'] as Map<String, dynamic>?;
+        final closeData = period['close'] as Map<String, dynamic>?;
+        if (openData == null) continue;
+        final openDay = openData['day'] as int?;
+        final openTime = openData['time'] as String?;
+        if (openDay == null || openTime == null) continue;
+        final openMins = _parseVenueTime(openTime);
+        if (openMins == null) continue;
+        if (closeData == null) {
+          if (openDay == googleDay) return true;
+          continue;
+        }
+        final closeDay = closeData['day'] as int?;
+        final closeTime = closeData['time'] as String?;
+        if (closeDay == null || closeTime == null) continue;
+        final closeMins = _parseVenueTime(closeTime);
+        if (closeMins == null) continue;
+        if (openDay == closeDay) {
+          if (googleDay == openDay &&
+              currentMinutes >= openMins &&
+              currentMinutes < closeMins) {
+            return true;
+          }
+        } else {
+          if (googleDay == openDay && currentMinutes >= openMins) {
+            return true;
+          }
+          if (googleDay == closeDay && currentMinutes < closeMins) {
+            return true;
+          }
+          int span = closeDay - openDay;
+          if (span < 0) span += 7;
+          if (span > 1) {
+            int offset = googleDay - openDay;
+            if (offset < 0) offset += 7;
+            if (offset > 0 && offset < span) return true;
+          }
+        }
+      }
+      return false;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static int? _parseVenueTime(String time) {
+    if (time.length != 4) return null;
+    final hour = int.tryParse(time.substring(0, 2));
+    final minute = int.tryParse(time.substring(2, 4));
+    if (hour == null || minute == null) return null;
+    return hour * 60 + minute;
   }
 
   bool get _isVenueValid => _venueId != null;
@@ -1976,7 +2068,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           : restoredParticipants;
 
       _waitSecondsLeft = restoredWaitLeft.clamp(0, 120).toInt();
-      _suggestSecondsLeft = restoredSuggestLeft.clamp(0, 300).toInt();
+      _suggestSecondsLeft = restoredSuggestLeft.clamp(0, 120).toInt();
       _proceedUnlocked = _boolFromDynamic(snap.data['proceedUnlocked'], true);
       _waitDeadline = _dateFromEpoch(snap.data['waitDeadlineMs']);
       _suggestDeadline = _dateFromEpoch(snap.data['suggestDeadlineMs']);
@@ -2250,7 +2342,10 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     await MeetingPointDraftStorage.clearForCurrentUser();
   }
 
-  Future<void> _syncMeetingPointProgress({String? status, bool writeSuggestDeadline = false}) async {
+  Future<void> _syncMeetingPointProgress({
+    String? status,
+    bool writeSuggestDeadline = false,
+  }) async {
     final id = _meetingPointId;
     if (id == null || id.trim().isEmpty) return;
     try {
@@ -2263,7 +2358,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         // that diverges from the authoritative Firestore deadline and corrupts
         // the card timer after form close.
         waitDeadline: null,
-        suggestDeadline: (writeSuggestDeadline && _step == 5) ? _suggestDeadline : null,
+        suggestDeadline: (writeSuggestDeadline && _step == 5)
+            ? _suggestDeadline
+            : null,
         status: status,
       );
     } catch (e) {
@@ -2274,6 +2371,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   Future<void> _completeAndClose({
     required bool success,
     required String message,
+    Future<void>? pendingWork,
   }) async {
     if (_closeHandled) return;
     _closeHandled = true;
@@ -2281,7 +2379,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     await _clearManagedDraft();
     if (success) _clearEarlyMemory();
     if (!mounted) return;
-    Navigator.pop(context);
+    // Pass any in-flight background work (e.g. markHostDecision) back to the
+    // caller so track_page can await it before refreshing its UI.
+    Navigator.pop(context, pendingWork);
     if (success) {
       SnackbarHelper.showSuccess(context, message);
     } else {
@@ -2823,9 +2923,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   }
 
   void _initStep5() {
-    _suggestSecondsLeft = 300;
+    _suggestSecondsLeft = 120;
     _suggestDeadline = MeetingPointService.serverNow.add(
-      const Duration(minutes: 5),
+      const Duration(minutes: 2),
     );
     _suggestedPointName = '';
     _suggestedCandidates = [];
@@ -2839,16 +2939,22 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
   void _acceptSuggestedMeetingPoint() {
     _suggestTimer?.cancel();
-    if (_meetingPointId != null) {
-      unawaited(
-        MeetingPointService.markHostDecision(
-          meetingPointId: _meetingPointId!,
-          accepted: true,
-        ),
-      );
-    }
+    // Fire markHostDecision immediately (no await so the form closes at once).
+    // The resulting Future is passed back to track_page via _completeAndClose so
+    // the track page can await it before refreshing — this ensures the live
+    // Firestore streams already carry status:'active' by the time setState runs.
+    final Future<void>? work = _meetingPointId != null
+        ? MeetingPointService.markHostDecision(
+            meetingPointId: _meetingPointId!,
+            accepted: true,
+          )
+        : null;
     unawaited(
-      _completeAndClose(success: true, message: 'Meeting point accepted!'),
+      _completeAndClose(
+        success: true,
+        message: 'Meeting point accepted!',
+        pendingWork: work,
+      ),
     );
   }
 
@@ -4476,39 +4582,39 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         ? _suggestedPointName.trim()
         : (showEmpty ? 'No suitable meeting point found' : 'Calculating...');
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // Big pin icon centred
+          // Pin icon centred
           Container(
-            width: 96,
-            height: 96,
+            width: 72,
+            height: 72,
             decoration: BoxDecoration(
               color: AppColors.kGreen.withOpacity(0.1),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.place, color: AppColors.kGreen, size: 52),
+            child: const Icon(Icons.place, color: AppColors.kGreen, size: 40),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 14),
 
           const Text(
             'The most suitable meeting point is',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 14, color: Colors.black54),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           Text(
             '"$primaryName"',
             textAlign: TextAlign.center,
             style: TextStyle(
-              fontSize: 24,
+              fontSize: 22,
               fontWeight: FontWeight.w700,
               color: hasSuggestion ? Colors.black87 : Colors.grey[500],
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           if (hasSuggestion)
             Text(
               'If you don\'t decide, it will be auto-accepted when the timer runs out.',
@@ -4516,7 +4622,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
               style: TextStyle(fontSize: 12, color: Colors.grey[500]),
             ),
           if (showEmpty) ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             Text(
               'Try different categories or make sure everyone\'s location is available.',
               textAlign: TextAlign.center,
@@ -4524,10 +4630,10 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
             ),
           ],
 
-          const SizedBox(height: 24),
+          const SizedBox(height: 16),
 
           // ── Participants with distances ────────────────────────────────────
-          Expanded(child: _buildStep5ParticipantList()),
+          _buildStep5ParticipantList(),
         ],
       ),
     );
@@ -4536,12 +4642,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   Widget _buildStep5FixedButtons() {
     final hasSuggestion = _suggestedPointName.trim().isNotEmpty;
     return Container(
-      padding: EdgeInsets.fromLTRB(
-        20,
-        12,
-        20,
-        MediaQuery.of(context).padding.bottom + 12,
-      ),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
       decoration: BoxDecoration(
         color: Colors.white,
         border: Border(top: BorderSide(color: Colors.grey.shade200)),
@@ -4747,50 +4848,21 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       ),
     ];
 
-    // ≤2 tiles: natural height (no scroll, no fixed box).
-    // 3+ tiles: capped at ~2.4 tiles tall with a visible scrollbar.
-    const double tileHeight = 76; // name + phone + margin
-    final isScrollable = tiles.length > 2;
-
-    final listWidget = isScrollable
-        ? Scrollbar(
-            thumbVisibility: true,
-            radius: const Radius.circular(4),
-            child: SizedBox(
-              height: tileHeight * 2.4,
-              child: ListView(
-                padding: EdgeInsets.zero,
-                physics: const ClampingScrollPhysics(),
-                children: tiles,
-              ),
-            ),
-          )
-        : Column(children: tiles);
-
+    // The outer body is a SingleChildScrollView, so all tiles render at natural
+    // height and are reachable by scrolling the body.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Text(
-              'Participants',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: Colors.grey[700],
-              ),
-            ),
-            if (isScrollable) ...[
-              const SizedBox(width: 6),
-              Icon(Icons.expand_more, size: 14, color: Colors.grey[400]),
-            ],
-          ],
+        Text(
+          'Participants',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: Colors.grey[700],
+          ),
         ),
         const SizedBox(height: 8),
-        ScrollConfiguration(
-          behavior: ScrollConfiguration.of(context).copyWith(scrollbars: true),
-          child: listWidget,
-        ),
+        ...tiles,
       ],
     );
   }

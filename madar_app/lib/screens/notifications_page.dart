@@ -121,6 +121,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
   ];*/
 
   bool _showAll = false;
+  NotificationListFilter _selectedFilter = NotificationListFilter.all;
   final List<String> _respondedNotifications = [];
   final Map<String, ValueNotifier<double>> _notificationOffsets = {};
   Timer? _uiRefreshTimer;
@@ -169,6 +170,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
   final Map<String, int> _meetingHostStepCache = {};
   final Set<String> _meetingStatusInFlight = {};
   final Set<String> _autoExpiredMeetingNotifIds = {};
+  bool _isDeletingAllNotifications = false;
 
   // Read or Unread notifications
   @override
@@ -1187,6 +1189,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
               fontWeight: FontWeight.w600,
             ),
           ),
+          actions: [_buildDeleteAllAction()],
           bottom: PreferredSize(
             preferredSize: const Size.fromHeight(1),
             child: Container(height: 1, color: Colors.grey[300]),
@@ -1413,6 +1416,140 @@ class _NotificationsPageState extends State<NotificationsPage> {
     );
   }
 
+  bool _isNotificationRead(
+    NotificationItem notification,
+    Map<String, bool> readMap,
+  ) {
+    final override =
+        _localReadOverride[notification.id] ?? (notification.actionTaken ? true : null);
+
+    return override ??
+        (_freezeReadUI
+            ? (_frozenReadMap[notification.id] ?? notification.isRead)
+            : (readMap[notification.id] ?? notification.isRead));
+  }
+
+  bool _isTrackingNotification(NotificationItem notification) {
+    switch (notification.type) {
+      case NotificationType.trackRequest:
+      case NotificationType.trackAccepted:
+      case NotificationType.trackRejected:
+      case NotificationType.trackStarted:
+      case NotificationType.trackTerminated:
+      case NotificationType.trackCompleted:
+      case NotificationType.trackCancelled:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  bool _isMeetingPointNotification(NotificationItem notification) {
+    switch (notification.type) {
+      case NotificationType.meetingPointRequest:
+      case NotificationType.meetingPointCancelled:
+      case NotificationType.meetingPointStarted:
+      case NotificationType.meetingPointCompleted:
+      case NotificationType.meetingLateArrival:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  bool _isRefreshRequestNotification(NotificationItem notification) {
+    return notification.type == NotificationType.locationRefresh ||
+        notification.type == NotificationType.meetingLocationRefresh;
+  }
+
+  bool _isActionRequiredNotification(
+    NotificationItem notification,
+    Map<String, String> trackRequestStatusById,
+  ) {
+    final isActionType =
+        notification.type == NotificationType.trackRequest ||
+        notification.type == NotificationType.meetingPointRequest ||
+        ((notification.type == NotificationType.trackStarted ||
+                notification.type == NotificationType.locationRefresh ||
+                notification.type == NotificationType.meetingLateArrival) &&
+            notification.requiresAction);
+
+    if (!isActionType) return false;
+
+    return !_isActionExpired(notification, trackRequestStatusById);
+  }
+
+  bool _matchesNotificationFilter(
+    NotificationItem notification,
+    Map<String, bool> readMap,
+    Map<String, String> trackRequestStatusById,
+  ) {
+    switch (_selectedFilter) {
+      case NotificationListFilter.all:
+        return true;
+      case NotificationListFilter.unread:
+        return !_isNotificationRead(notification, readMap);
+      case NotificationListFilter.actionRequired:
+        return _isActionRequiredNotification(notification, trackRequestStatusById);
+      case NotificationListFilter.tracking:
+        return _isTrackingNotification(notification);
+      case NotificationListFilter.meetingPoint:
+        return _isMeetingPointNotification(notification);
+      case NotificationListFilter.refreshRequests:
+        return _isRefreshRequestNotification(notification);
+    }
+  }
+
+  Widget _buildFilterBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      child: SizedBox(
+        height: 40,
+        child: ListView.builder(
+          scrollDirection: Axis.horizontal,
+          itemCount: NotificationListFilter.values.length,
+          itemBuilder: (context, index) {
+            final filter = NotificationListFilter.values[index];
+            final selected = filter == _selectedFilter;
+
+            return GestureDetector(
+              onTap: () {
+                if (_selectedFilter == filter) return;
+                setState(() {
+                  _selectedFilter = filter;
+                  _showAll = false;
+                });
+              },
+              child: Container(
+                margin: const EdgeInsets.only(right: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                decoration: BoxDecoration(
+                  color: selected ? AppColors.kGreen : Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: selected ? AppColors.kGreen : Colors.grey.shade300,
+                    width: 1,
+                  ),
+                ),
+                child: Center(
+                  child: Text(
+                    filter.label,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color:
+                          selected ? Colors.white : Colors.grey.shade500,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
   List<NotificationItem> _mergeNotifications({
     required List<NotificationItem> incomingTrack,
     required List<NotificationItem> meetingPointRequests,
@@ -1532,8 +1669,17 @@ class _NotificationsPageState extends State<NotificationsPage> {
     unawaited(
       _collectExpiredActionsForExit(filteredMerged, trackRequestStatusById),
     );
+    final filterMatched = filteredMerged
+        .where(
+          (n) => _matchesNotificationFilter(
+            n,
+            readMap,
+            trackRequestStatusById,
+          ),
+        )
+        .toList();
     final visible =
-        _showAll ? filteredMerged : filteredMerged.take(10).toList();
+        _showAll ? filterMatched : filterMatched.take(10).toList();
     for (final n in visible) {
       final overrideStatus = _localStatusOverride[n.id];
       if (overrideStatus != null &&
@@ -1542,14 +1688,18 @@ class _NotificationsPageState extends State<NotificationsPage> {
       }
     }
 
-    if (filteredMerged.isEmpty) {
+    if (filterMatched.isEmpty) {
       return RefreshIndicator(
         color: AppColors.kGreen,
         backgroundColor: Colors.white,
         onRefresh: _refreshNotifications,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          children: [const SizedBox(height: 120), _buildEmptyState()],
+          children: [
+            _buildFilterBar(),
+            const SizedBox(height: 120),
+            _buildEmptyState(),
+          ],
         ),
       );
     }
@@ -1563,17 +1713,11 @@ class _NotificationsPageState extends State<NotificationsPage> {
         itemCount:
             1 +
             visible.length +
-            ((_showAll || filteredMerged.length <= 10) ? 0 : 1) +
+            ((_showAll || filterMatched.length <= 10) ? 0 : 1) +
             1,
         itemBuilder: (context, index) {
           if (index == 0) {
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(16, 1, 10, 1),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: const [],
-              ),
-            );
+            return _buildFilterBar();
           }
 
           final itemIndex = index - 1;
@@ -1596,7 +1740,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
           }
 
           final footerIndex = itemIndex - visible.length;
-          if (!_showAll && filteredMerged.length > 10 && footerIndex == 0) {
+          if (!_showAll && filterMatched.length > 10 && footerIndex == 0) {
             return Padding(
               padding: const EdgeInsets.all(5),
               child: TextButton(
@@ -2742,6 +2886,136 @@ class _NotificationsPageState extends State<NotificationsPage> {
           confirmText: 'Delete',
         ) ??
         false;
+  }
+
+  Future<bool> _showDeleteAllConfirmation() async {
+    return await ConfirmationDialog.showDeleteConfirmation(
+          context,
+          title: 'Delete All Notifications',
+          message: 'Are you sure you want to delete all notifications?',
+          confirmText: 'Delete All',
+        ) ??
+        false;
+  }
+
+  Stream<bool> _hasNotificationsStream() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return Stream<bool>.value(false);
+
+    return FirebaseFirestore.instance
+        .collection('notifications')
+        .where('userId', isEqualTo: uid)
+        .limit(1)
+        .snapshots()
+        .map((snap) => snap.docs.isNotEmpty);
+  }
+
+  Widget _buildDeleteAllAction() {
+    return StreamBuilder<bool>(
+      stream: _hasNotificationsStream(),
+      builder: (context, snapshot) {
+        final hasNotifications = snapshot.data ?? false;
+
+        return IconButton(
+          tooltip: 'Delete all notifications',
+          iconSize: 22,
+          onPressed:
+              hasNotifications && !_isDeletingAllNotifications
+                  ? _deleteAllNotifications
+                  : null,
+          icon:
+              _isDeletingAllNotifications
+                  ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        AppColors.kGreen,
+                      ),
+                    ),
+                  )
+                  : Icon(
+                    Icons.delete_outline_rounded,
+                    color:
+                        hasNotifications
+                            ? AppColors.kGreen
+                            : Colors.grey[400],
+                  ),
+        );
+      },
+    );
+  }
+
+  Future<void> _deleteAllNotifications() async {
+    if (_isDeletingAllNotifications) return;
+
+    final confirmed = await _showDeleteAllConfirmation();
+    if (!confirmed) return;
+
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    if (mounted) {
+      setState(() => _isDeletingAllNotifications = true);
+    }
+
+    try {
+      final snap =
+          await FirebaseFirestore.instance
+              .collection('notifications')
+              .where('userId', isEqualTo: uid)
+              .get();
+
+      if (snap.docs.isNotEmpty) {
+        for (var i = 0; i < snap.docs.length; i += 400) {
+          final batch = FirebaseFirestore.instance.batch();
+          final chunk = snap.docs.sublist(
+            i,
+            math.min(i + 400, snap.docs.length),
+          );
+          for (final doc in chunk) {
+            batch.delete(doc.reference);
+          }
+          await batch.commit();
+        }
+      }
+
+      await NotificationService.clearAllSystemNotifications();
+
+      if (!mounted) return;
+      setState(_clearNotificationUiState);
+      SnackbarHelper.showSuccess(context, 'All notifications deleted.');
+    } catch (_) {
+      if (mounted) {
+        SnackbarHelper.showError(
+          context,
+          'Failed to delete notifications. Please try again.',
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isDeletingAllNotifications = false);
+      }
+    }
+  }
+
+  void _clearNotificationUiState() {
+    for (final notifier in _notificationOffsets.values) {
+      notifier.dispose();
+    }
+    _notificationOffsets.clear();
+    _pendingDeleteIds.clear();
+    _respondedNotifications.clear();
+    _localReadOverride.clear();
+    _localStatusOverride.clear();
+    _frozenReadMap.clear();
+    _autoCancelledMeetingNotifIds.clear();
+    _autoExpiredMeetingNotifIds.clear();
+    _expiredActionDocIdsThisVisit.clear();
+    _showAll = false;
+    _cachedMerged = [];
+    _cacheReady = false;
   }
 
   // ---------- Helper Functions ----------
@@ -4834,6 +5108,18 @@ class _ExpandableNotificationBodyState
       overflow: isExpanded ? TextOverflow.visible : TextOverflow.ellipsis,
     );
   }
+}
+
+enum NotificationListFilter {
+  all('All'),
+  unread('Unread'),
+  actionRequired('Action Required'),
+  tracking('Tracking'),
+  meetingPoint('Meeting Point'),
+  refreshRequests('Refresh Requests');
+
+  final String label;
+  const NotificationListFilter(this.label);
 }
 
 enum NotificationType {

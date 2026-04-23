@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:madar_app/services/fcm_token_service.dart';
+import 'package:madar_app/services/notification_preferences_service.dart';
+import 'package:madar_app/services/notification_service.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
 import 'package:madar_app/theme/theme.dart';
 
@@ -15,9 +19,12 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  bool _notificationsEnabled = true;
   bool _locationEnabled = true;
   bool _securityExpanded = false;
+  bool _notificationPrefsLoading = true;
+  bool _notificationPrefsSaving = false;
+  NotificationPreferences _notificationPreferences =
+      NotificationPreferences.defaults();
 
   // Password form controllers
   final _formKey = GlobalKey<FormState>();
@@ -59,6 +66,7 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void initState() {
     super.initState();
+    _loadNotificationPreferences();
     _newPasswordCtrl.addListener(_checkPasswordRequirements);
     _oldPasswordCtrl.addListener(_checkPasswordRequirements);
     _confirmPasswordCtrl.addListener(_onConfirmPasswordChange);
@@ -70,6 +78,10 @@ class _SettingsPageState extends State<SettingsPage> {
       if (mounted) setState(() {});
     });
   }
+
+  bool get _allowNotifications => _notificationPreferences.allowNotifications;
+
+  bool get _allNotificationsEnabled => _notificationPreferences.allNotifications;
 
   @override
   void dispose() {
@@ -169,6 +181,142 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   // ---------- Update Password ----------
+
+  Future<void> _loadNotificationPreferences() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      setState(() => _notificationPrefsLoading = false);
+      return;
+    }
+
+    try {
+      final prefs = await NotificationPreferencesService.load(user.uid);
+      if (!mounted) return;
+      setState(() {
+        _notificationPreferences = prefs;
+        _notificationPrefsLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _notificationPrefsLoading = false);
+      SnackbarHelper.showError(
+        context,
+        'Failed to load notification settings. Please try again.',
+      );
+    }
+  }
+
+  Future<void> _saveNotificationPreferences(
+    NotificationPreferences next, {
+    bool requestSystemPermission = false,
+  }) async {
+    if (_notificationPrefsSaving) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      SnackbarHelper.showError(
+        context,
+        'Please sign in again to update notification settings.',
+      );
+      return;
+    }
+
+    final previous = _notificationPreferences;
+    setState(() {
+      _notificationPreferences = next;
+      _notificationPrefsSaving = true;
+    });
+
+    try {
+      await NotificationPreferencesService.save(user.uid, next);
+
+      if (requestSystemPermission && next.allowNotifications) {
+        final status = await NotificationService.ensurePermission();
+        await FcmTokenService.saveToken(user.uid);
+
+        final permissionGranted =
+            status == AuthorizationStatus.authorized ||
+            status == AuthorizationStatus.provisional;
+
+        if (!permissionGranted && mounted) {
+          SnackbarHelper.showError(
+            context,
+            'Push notifications are enabled in Madar, but system permission is still off.',
+          );
+        }
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _notificationPreferences = previous;
+      });
+      SnackbarHelper.showError(
+        context,
+        'Failed to update notification settings. Please try again.',
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _notificationPrefsSaving = false);
+      }
+    }
+  }
+
+  Future<void> _toggleAllowNotifications(bool value) async {
+    await _saveNotificationPreferences(
+      value
+          ? NotificationPreferences.defaults()
+          : NotificationPreferences.disabled(),
+      requestSystemPermission: value,
+    );
+  }
+
+  Future<void> _toggleAllNotifications(bool value) async {
+    await _saveNotificationPreferences(
+      value
+          ? NotificationPreferences.defaults()
+          : NotificationPreferences.disabled(),
+    );
+  }
+
+  Future<void> _toggleTrackingRequests(bool value) async {
+    await _saveNotificationPreferences(
+      _notificationPreferences
+          .copyWith(trackingRequests: value)
+          .syncMasterSwitches(),
+    );
+  }
+
+  Future<void> _toggleTrackingUpdates(bool value) async {
+    await _saveNotificationPreferences(
+      _notificationPreferences
+          .copyWith(trackingUpdates: value)
+          .syncMasterSwitches(),
+    );
+  }
+
+  Future<void> _toggleMeetingPointInvitations(bool value) async {
+    await _saveNotificationPreferences(
+      _notificationPreferences
+          .copyWith(meetingPointInvitations: value)
+          .syncMasterSwitches(),
+    );
+  }
+
+  Future<void> _toggleMeetingPointUpdates(bool value) async {
+    await _saveNotificationPreferences(
+      _notificationPreferences
+          .copyWith(meetingPointUpdates: value)
+          .syncMasterSwitches(),
+    );
+  }
+
+  Future<void> _toggleRefreshLocationRequests(bool value) async {
+    await _saveNotificationPreferences(
+      _notificationPreferences
+          .copyWith(refreshLocationRequests: value)
+          .syncMasterSwitches(),
+    );
+  }
 
   Future<void> _updatePassword() async {
     _messageManager.clearMessage();
@@ -274,13 +422,7 @@ class _SettingsPageState extends State<SettingsPage> {
             _buildSectionTitle('Preferences'),
             const SizedBox(height: 12),
 
-            _buildSwitchTile(
-              icon: Icons.notifications_outlined,
-              title: 'Notifications',
-              subtitle: 'Receive push notifications',
-              value: _notificationsEnabled,
-              onChanged: (val) => setState(() => _notificationsEnabled = val),
-            ),
+            _buildNotificationsSection(),
             const SizedBox(height: 12),
 
             _buildSwitchTile(
@@ -326,7 +468,7 @@ class _SettingsPageState extends State<SettingsPage> {
     required String title,
     String? subtitle,
     required bool value,
-    required ValueChanged<bool> onChanged,
+    ValueChanged<bool>? onChanged,
   }) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -371,6 +513,222 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildNotificationsSection() {
+    if (_notificationPrefsLoading) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
+          border: Border.all(color: Colors.grey[300]!, width: 1),
+        ),
+        child: const Row(
+          children: [
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2.2),
+            ),
+            SizedBox(width: 16),
+            Expanded(
+              child: Text(
+                'Loading notification settings...',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15,
+                  color: Colors.black87,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
+        border: Border.all(color: Colors.grey[300]!, width: 1),
+      ),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.notifications_outlined,
+                  color: AppColors.kGreen,
+                  size: 24,
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Allow notifications',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 16,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _notificationPrefsSaving
+                            ? 'Updating your push notification settings...'
+                            : 'Receive push notifications',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Switch(
+                  value: _allowNotifications,
+                  onChanged: _notificationPrefsSaving
+                      ? null
+                      : _toggleAllowNotifications,
+                  activeColor: AppColors.kGreen,
+                  inactiveThumbColor: Colors.grey[400],
+                  inactiveTrackColor: Colors.grey[300],
+                  trackOutlineColor: WidgetStateProperty.all(
+                    Colors.grey[400],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          AnimatedSize(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeInOut,
+            child: _allowNotifications
+                ? Column(
+                    children: [
+                      Divider(height: 1, thickness: 1, color: Colors.grey[300]),
+                      _buildPreferenceOption(
+                        title: 'All notifications',
+                        subtitle: 'Turn on every notification type.',
+                        value: _allNotificationsEnabled,
+                        onChanged: _notificationPrefsSaving
+                            ? null
+                            : _toggleAllNotifications,
+                      ),
+                      _buildPreferenceOption(
+                        title: 'Tracking Requests',
+                        subtitle: 'New track requests that need your response.',
+                        value: _notificationPreferences.trackingRequests,
+                        onChanged: _notificationPrefsSaving
+                            ? null
+                            : _toggleTrackingRequests,
+                      ),
+                      _buildPreferenceOption(
+                        title: 'Tracking Updates',
+                        subtitle:
+                            'Accepted, declined, started, completed, and cancelled tracking updates.',
+                        value: _notificationPreferences.trackingUpdates,
+                        onChanged: _notificationPrefsSaving
+                            ? null
+                            : _toggleTrackingUpdates,
+                      ),
+                      _buildPreferenceOption(
+                        title: 'Meeting Point Invitations',
+                        subtitle: 'Invitations to join a shared meeting point.',
+                        value:
+                            _notificationPreferences.meetingPointInvitations,
+                        onChanged: _notificationPrefsSaving
+                            ? null
+                            : _toggleMeetingPointInvitations,
+                      ),
+                      _buildPreferenceOption(
+                        title: 'Meeting Point Updates',
+                        subtitle:
+                            'Meeting point started, completed, cancelled, and arrival reminders.',
+                        value: _notificationPreferences.meetingPointUpdates,
+                        onChanged: _notificationPrefsSaving
+                            ? null
+                            : _toggleMeetingPointUpdates,
+                      ),
+                      _buildPreferenceOption(
+                        title: 'Refresh Location Requests',
+                        subtitle:
+                            'Manual and system reminders to refresh your location.',
+                        value:
+                            _notificationPreferences.refreshLocationRequests,
+                        onChanged: _notificationPrefsSaving
+                            ? null
+                            : _toggleRefreshLocationRequests,
+                        isLast: true,
+                      ),
+                    ],
+                  )
+                : const SizedBox.shrink(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPreferenceOption({
+    required String title,
+    String? subtitle,
+    required bool value,
+    ValueChanged<bool>? onChanged,
+    bool isLast = false,
+  }) {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 15,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Switch(
+                value: value,
+                onChanged: onChanged,
+                activeColor: AppColors.kGreen,
+                inactiveThumbColor: Colors.grey[400],
+                inactiveTrackColor: Colors.grey[300],
+                trackOutlineColor: WidgetStateProperty.all(Colors.grey[400]),
+              ),
+            ],
+          ),
+        ),
+        if (!isLast)
+          Divider(height: 1, thickness: 1, color: Colors.grey[200]),
+      ],
     );
   }
 

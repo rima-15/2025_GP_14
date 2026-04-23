@@ -24,6 +24,189 @@ admin.initializeApp();
 
 const db = admin.firestore();
 
+type NotificationPreferenceCategory =
+  | "trackingRequests"
+  | "trackingUpdates"
+  | "meetingPointInvitations"
+  | "meetingPointUpdates"
+  | "refreshLocationRequests";
+
+type NotificationPreferences = {
+  allowNotifications: boolean;
+  allNotifications: boolean;
+  trackingRequests: boolean;
+  trackingUpdates: boolean;
+  meetingPointInvitations: boolean;
+  meetingPointUpdates: boolean;
+  refreshLocationRequests: boolean;
+};
+
+const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
+  allowNotifications: true,
+  allNotifications: true,
+  trackingRequests: true,
+  trackingUpdates: true,
+  meetingPointInvitations: true,
+  meetingPointUpdates: true,
+  refreshLocationRequests: true,
+};
+
+const readBooleanPreference = (
+  source: Record<string, unknown>,
+  key: keyof NotificationPreferences
+): boolean => {
+  const value = source[key];
+  return typeof value === "boolean"
+    ? value
+    : DEFAULT_NOTIFICATION_PREFERENCES[key];
+};
+
+const readOptionalBooleanPreference = (
+  source: Record<string, unknown>,
+  key: keyof NotificationPreferences
+): boolean | null => {
+  const value = source[key];
+  return typeof value === "boolean" ? value : null;
+};
+
+const normalizeNotificationPreferences = (
+  raw: unknown
+): NotificationPreferences => {
+  const source =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : {};
+
+  let trackingRequests = readBooleanPreference(source, "trackingRequests");
+  let trackingUpdates = readBooleanPreference(source, "trackingUpdates");
+  let meetingPointInvitations = readBooleanPreference(
+    source,
+    "meetingPointInvitations"
+  );
+  let meetingPointUpdates = readBooleanPreference(
+    source,
+    "meetingPointUpdates"
+  );
+  let refreshLocationRequests = readBooleanPreference(
+    source,
+    "refreshLocationRequests"
+  );
+
+  const explicitAllow = readOptionalBooleanPreference(
+    source,
+    "allowNotifications"
+  );
+  const explicitAll = readOptionalBooleanPreference(source, "allNotifications");
+
+  const anyCategoryEnabled =
+    trackingRequests ||
+    trackingUpdates ||
+    meetingPointInvitations ||
+    meetingPointUpdates ||
+    refreshLocationRequests;
+
+  const allowNotifications =
+    explicitAllow ?? explicitAll ?? anyCategoryEnabled;
+
+  if (!allowNotifications) {
+    return {
+      allowNotifications: false,
+      allNotifications: false,
+      trackingRequests: false,
+      trackingUpdates: false,
+      meetingPointInvitations: false,
+      meetingPointUpdates: false,
+      refreshLocationRequests: false,
+    };
+  }
+
+  const allNotifications =
+    explicitAll ??
+    (trackingRequests &&
+      trackingUpdates &&
+      meetingPointInvitations &&
+      meetingPointUpdates &&
+      refreshLocationRequests);
+
+  if (allNotifications) {
+    trackingRequests = true;
+    trackingUpdates = true;
+    meetingPointInvitations = true;
+    meetingPointUpdates = true;
+    refreshLocationRequests = true;
+  }
+
+  return {
+    allowNotifications: true,
+    allNotifications,
+    trackingRequests,
+    trackingUpdates,
+    meetingPointInvitations,
+    meetingPointUpdates,
+    refreshLocationRequests,
+  };
+};
+
+const extractNotificationPreferences = (
+  userData: FirebaseFirestore.DocumentData | undefined
+): NotificationPreferences => {
+  return normalizeNotificationPreferences(userData?.notificationPreferences);
+};
+
+const getUserNotificationPreferences = async (
+  userId: string
+): Promise<NotificationPreferences> => {
+  const userDoc = await db.collection("users").doc(userId).get();
+  if (!userDoc.exists) {
+    return { ...DEFAULT_NOTIFICATION_PREFERENCES };
+  }
+
+  return extractNotificationPreferences(userDoc.data());
+};
+
+interface SendPushIfEnabledOptions {
+  userId: string;
+  category: NotificationPreferenceCategory;
+  message: admin.messaging.MulticastMessage;
+  userData?: FirebaseFirestore.DocumentData;
+  notificationPreferences?: NotificationPreferences;
+}
+
+const sendPushIfEnabled = async ({
+  userId,
+  category,
+  message,
+  userData,
+  notificationPreferences,
+}: SendPushIfEnabledOptions): Promise<admin.messaging.BatchResponse | null> => {
+  const tokens = Array.isArray(message.tokens)
+    ? message.tokens.filter(
+        (token): token is string =>
+          typeof token === "string" && token.trim().length > 0
+      )
+    : [];
+
+  if (tokens.length === 0) return null;
+
+  const prefs =
+    notificationPreferences ??
+    (userData
+      ? extractNotificationPreferences(userData)
+      : await getUserNotificationPreferences(userId));
+
+  if (!prefs.allowNotifications || !prefs[category]) {
+    console.log(
+      `Push skipped for ${userId}; category ${category} is disabled`
+    );
+    return null;
+  }
+
+  return admin.messaging().sendEachForMulticast({
+    ...message,
+    tokens,
+  });
+};
+
 
 
 /* ------------------------------------------------------------------
@@ -164,7 +347,12 @@ export const onTrackRequestCreated = onDocumentCreated(
 
 
 
-      const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
+      const userData = userDoc.data();
+      const tokens: string[] = Array.isArray(userData?.fcmTokens)
+        ? userData.fcmTokens.filter((token: unknown): token is string =>
+            typeof token === "string"
+          )
+        : [];
 
 
 
@@ -193,9 +381,16 @@ export const onTrackRequestCreated = onDocumentCreated(
 
 
       if (tokens.length > 0) {
-        const response = await admin.messaging().sendEachForMulticast(message);
+        const response = await sendPushIfEnabled({
+          userId: receiverId,
+          category: "trackingRequests",
+          message,
+          userData,
+        });
         console.log(
-          `Notification sent | success: ${response.successCount}, failure: ${response.failureCount}`
+          response
+            ? `Notification sent | success: ${response.successCount}, failure: ${response.failureCount}`
+            : "Track request push skipped by preferences"
         );
       } else {
         console.log("No FCM tokens for receiver (saved to Firestore only)");
@@ -296,11 +491,20 @@ export const onMeetingPointCreated = onDocumentCreated(
         const userDoc = await db.collection("users").doc(uid).get();
         if (!userDoc.exists) continue;
 
-        const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
+        const userData = userDoc.data();
+        const tokens: string[] = Array.isArray(userData?.fcmTokens)
+          ? userData.fcmTokens.filter((token: unknown): token is string =>
+              typeof token === "string"
+            )
+          : [];
 
         if (tokens.length > 0) {
           try {
-            await admin.messaging().sendEachForMulticast({
+            await sendPushIfEnabled({
+              userId: uid,
+              category: "meetingPointInvitations",
+              userData,
+              message: {
               notification: {
                 title,
                 body,
@@ -311,6 +515,7 @@ export const onMeetingPointCreated = onDocumentCreated(
                 meetingPointId: meetingPointId,
               },
               tokens,
+              },
             });
           } catch (err) {
             console.error(`Failed to send meeting point push to ${uid}`, err);
@@ -630,7 +835,12 @@ export const onMeetingPointCancelled = onDocumentUpdated(
         try {
           const hostDoc = await db.collection("users").doc(hostId).get();
           if (hostDoc.exists) {
-            const tokens: string[] = hostDoc.data()?.fcmTokens ?? [];
+            const hostData = hostDoc.data();
+            const tokens: string[] = Array.isArray(hostData?.fcmTokens)
+              ? hostData.fcmTokens.filter((token: unknown): token is string =>
+                  typeof token === "string"
+                )
+              : [];
             const venueName = (after.venueName ?? "").toString().trim();
             const locationLabel = venueName ? ` at ${venueName}` : "";
             const title = "Meeting Point Cancelled";
@@ -643,14 +853,19 @@ export const onMeetingPointCancelled = onDocumentUpdated(
             const notifId = notifRef.id;
 
             if (tokens.length > 0) {
-              await admin.messaging().sendEachForMulticast({
-                notification: { title, body },
-                data: {
-                  type: "meetingPointCancelled",
-                  requestId: notifId,
-                  meetingPointId: meetingPointId,
+              await sendPushIfEnabled({
+                userId: hostId,
+                category: "meetingPointUpdates",
+                userData: hostData,
+                message: {
+                  notification: { title, body },
+                  data: {
+                    type: "meetingPointCancelled",
+                    requestId: notifId,
+                    meetingPointId: meetingPointId,
+                  },
+                  tokens,
                 },
-                tokens,
               });
             }
 
@@ -695,7 +910,12 @@ export const onMeetingPointCancelled = onDocumentUpdated(
           try {
             const userDoc = await db.collection("users").doc(targetId).get();
             if (userDoc.exists) {
-              const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
+              const userData = userDoc.data();
+              const tokens: string[] = Array.isArray(userData?.fcmTokens)
+                ? userData.fcmTokens.filter((token: unknown): token is string =>
+                    typeof token === "string"
+                  )
+                : [];
               const venueName = (after.venueName ?? "").toString().trim();
               const locationLabel = venueName ? ` at ${venueName}` : "";
               const title = "Meeting Point Cancelled";
@@ -705,14 +925,19 @@ export const onMeetingPointCancelled = onDocumentUpdated(
               const notifId = notifRef.id;
 
               if (tokens.length > 0) {
-                await admin.messaging().sendEachForMulticast({
-                  notification: { title, body },
-                  data: {
-                    type: "meetingPointCancelled",
-                    requestId: notifId,
-                    meetingPointId: meetingPointId,
+                await sendPushIfEnabled({
+                  userId: targetId,
+                  category: "meetingPointUpdates",
+                  userData,
+                  message: {
+                    notification: { title, body },
+                    data: {
+                      type: "meetingPointCancelled",
+                      requestId: notifId,
+                      meetingPointId: meetingPointId,
+                    },
+                    tokens,
                   },
-                  tokens,
                 });
               }
 
@@ -766,20 +991,30 @@ export const onMeetingPointCancelled = onDocumentUpdated(
             const userDoc = await db.collection("users").doc(uid).get();
             if (!userDoc.exists) continue;
 
-            const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
+            const userData = userDoc.data();
+            const tokens: string[] = Array.isArray(userData?.fcmTokens)
+              ? userData.fcmTokens.filter((token: unknown): token is string =>
+                  typeof token === "string"
+                )
+              : [];
             const notifRef = db.collection("notifications").doc();
             const notifId = notifRef.id;
 
             if (tokens.length > 0) {
               try {
-                await admin.messaging().sendEachForMulticast({
-                  notification: { title, body },
-                  data: {
-                    type: "meetingPointCancelled",
-                    requestId: notifId,
-                    meetingPointId: meetingPointId,
+                await sendPushIfEnabled({
+                  userId: uid,
+                  category: "meetingPointUpdates",
+                  userData,
+                  message: {
+                    notification: { title, body },
+                    data: {
+                      type: "meetingPointCancelled",
+                      requestId: notifId,
+                      meetingPointId: meetingPointId,
+                    },
+                    tokens,
                   },
-                  tokens,
                 });
               } catch (err) {
                 console.error(
@@ -843,20 +1078,30 @@ export const onMeetingPointCancelled = onDocumentUpdated(
             const userDoc = await db.collection("users").doc(uid).get();
             if (!userDoc.exists) continue;
 
-            const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
+            const userData = userDoc.data();
+            const tokens: string[] = Array.isArray(userData?.fcmTokens)
+              ? userData.fcmTokens.filter((token: unknown): token is string =>
+                  typeof token === "string"
+                )
+              : [];
             const notifRef = db.collection("notifications").doc();
             const notifId = notifRef.id;
 
             if (tokens.length > 0) {
               try {
-                await admin.messaging().sendEachForMulticast({
-                  notification: { title, body },
-                  data: {
-                    type: "meetingPointCancelled",
-                    requestId: notifId,
-                    meetingPointId: meetingPointId,
+                await sendPushIfEnabled({
+                  userId: uid,
+                  category: "meetingPointUpdates",
+                  userData,
+                  message: {
+                    notification: { title, body },
+                    data: {
+                      type: "meetingPointCancelled",
+                      requestId: notifId,
+                      meetingPointId: meetingPointId,
+                    },
+                    tokens,
                   },
-                  tokens,
                 });
               } catch (err) {
                 console.error(
@@ -908,7 +1153,12 @@ export const onMeetingPointCancelled = onDocumentUpdated(
         try {
           const hostDoc = await db.collection("users").doc(hostId).get();
           if (hostDoc.exists) {
-            const tokens: string[] = hostDoc.data()?.fcmTokens ?? [];
+            const hostData = hostDoc.data();
+            const tokens: string[] = Array.isArray(hostData?.fcmTokens)
+              ? hostData.fcmTokens.filter((token: unknown): token is string =>
+                  typeof token === "string"
+                )
+              : [];
             const venueName = (after.venueName ?? "").toString().trim();
             const locationLabel = venueName ? ` at ${venueName}` : "";
             const title = "Meeting Point Cancelled";
@@ -918,14 +1168,19 @@ export const onMeetingPointCancelled = onDocumentUpdated(
             const notifId = notifRef.id;
 
             if (tokens.length > 0) {
-              await admin.messaging().sendEachForMulticast({
-                notification: { title, body },
-                data: {
-                  type: "meetingPointCancelled",
-                  requestId: notifId,
-                  meetingPointId: meetingPointId,
+              await sendPushIfEnabled({
+                userId: hostId,
+                category: "meetingPointUpdates",
+                userData: hostData,
+                message: {
+                  notification: { title, body },
+                  data: {
+                    type: "meetingPointCancelled",
+                    requestId: notifId,
+                    meetingPointId: meetingPointId,
+                  },
+                  tokens,
                 },
-                tokens,
               });
             }
 
@@ -980,20 +1235,30 @@ export const onMeetingPointCancelled = onDocumentUpdated(
             const userDoc = await db.collection("users").doc(uid).get();
             if (!userDoc.exists) continue;
 
-            const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
+            const userData = userDoc.data();
+            const tokens: string[] = Array.isArray(userData?.fcmTokens)
+              ? userData.fcmTokens.filter((token: unknown): token is string =>
+                  typeof token === "string"
+                )
+              : [];
             const notifRef = db.collection("notifications").doc();
             const notifId = notifRef.id;
 
             if (tokens.length > 0) {
               try {
-                await admin.messaging().sendEachForMulticast({
-                  notification: { title, body },
-                  data: {
-                    type: "meetingPointCancelled",
-                    requestId: notifId,
-                    meetingPointId: meetingPointId,
+                await sendPushIfEnabled({
+                  userId: uid,
+                  category: "meetingPointUpdates",
+                  userData,
+                  message: {
+                    notification: { title, body },
+                    data: {
+                      type: "meetingPointCancelled",
+                      requestId: notifId,
+                      meetingPointId: meetingPointId,
+                    },
+                    tokens,
                   },
-                  tokens,
                 });
               } catch (err) {
                 console.error(
@@ -1060,20 +1325,30 @@ export const onMeetingPointCancelled = onDocumentUpdated(
             const userDoc = await db.collection("users").doc(uid).get();
             if (!userDoc.exists) continue;
 
-            const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
+            const userData = userDoc.data();
+            const tokens: string[] = Array.isArray(userData?.fcmTokens)
+              ? userData.fcmTokens.filter((token: unknown): token is string =>
+                  typeof token === "string"
+                )
+              : [];
             const notifRef = db.collection("notifications").doc();
             const notifId = notifRef.id;
 
             if (tokens.length > 0) {
               try {
-                await admin.messaging().sendEachForMulticast({
-                  notification: { title, body },
-                  data: {
-                    type: "meetingPointCancelled",
-                    requestId: notifId,
-                    meetingPointId: meetingPointId,
+                await sendPushIfEnabled({
+                  userId: uid,
+                  category: "meetingPointUpdates",
+                  userData,
+                  message: {
+                    notification: { title, body },
+                    data: {
+                      type: "meetingPointCancelled",
+                      requestId: notifId,
+                      meetingPointId: meetingPointId,
+                    },
+                    tokens,
                   },
-                  tokens,
                 });
               } catch (err) {
                 console.error(
@@ -1330,20 +1605,30 @@ export const onMeetingPointStarted = onDocumentUpdated(
         const userDoc = await db.collection("users").doc(uid).get();
         if (!userDoc.exists) continue;
 
-        const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
+        const userData = userDoc.data();
+        const tokens: string[] = Array.isArray(userData?.fcmTokens)
+          ? userData.fcmTokens.filter((token: unknown): token is string =>
+              typeof token === "string"
+            )
+          : [];
         const notifRef = db.collection("notifications").doc();
         const notifId = notifRef.id;
 
         if (tokens.length > 0) {
           try {
-            await admin.messaging().sendEachForMulticast({
-              notification: { title, body },
-              data: {
-                type: "meetingPointStarted",
-                requestId: notifId,
-                meetingPointId: meetingPointId,
+            await sendPushIfEnabled({
+              userId: uid,
+              category: "meetingPointUpdates",
+              userData,
+              message: {
+                notification: { title, body },
+                data: {
+                  type: "meetingPointStarted",
+                  requestId: notifId,
+                  meetingPointId: meetingPointId,
+                },
+                tokens,
               },
-              tokens,
             });
           } catch (err) {
             console.error(
@@ -1485,20 +1770,30 @@ export const onMeetingPointCompleted = onDocumentUpdated(
         const userDoc = await db.collection("users").doc(uid).get();
         if (!userDoc.exists) continue;
 
-        const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
+        const userData = userDoc.data();
+        const tokens: string[] = Array.isArray(userData?.fcmTokens)
+          ? userData.fcmTokens.filter((token: unknown): token is string =>
+              typeof token === "string"
+            )
+          : [];
         const notifRef = db.collection("notifications").doc();
         const notifId = notifRef.id;
 
         if (tokens.length > 0) {
           try {
-            await admin.messaging().sendEachForMulticast({
-              notification: { title, body },
-              data: {
-                type: "meetingPointCompleted",
-                requestId: notifId,
-                meetingPointId: meetingPointId,
+            await sendPushIfEnabled({
+              userId: uid,
+              category: "meetingPointUpdates",
+              userData,
+              message: {
+                notification: { title, body },
+                data: {
+                  type: "meetingPointCompleted",
+                  requestId: notifId,
+                  meetingPointId: meetingPointId,
+                },
+                tokens,
               },
-              tokens,
             });
           } catch (err) {
             console.error(
@@ -1690,7 +1985,12 @@ export const onMeetingPointLocationRefreshRequested = onDocumentUpdated(
         const receiverDoc = await db.collection("users").doc(receiverId).get();
         if (!receiverDoc.exists) continue;
 
-        const tokens: string[] = receiverDoc.data()?.fcmTokens ?? [];
+        const receiverData = receiverDoc.data();
+        const tokens: string[] = Array.isArray(receiverData?.fcmTokens)
+          ? receiverData.fcmTokens.filter((token: unknown): token is string =>
+              typeof token === "string"
+            )
+          : [];
         const title = "Refresh Location Request";
         const body = `${senderName} asked to refresh your location`;
 
@@ -1730,14 +2030,19 @@ export const onMeetingPointLocationRefreshRequested = onDocumentUpdated(
         const notifId = notifRef.id;
 
         if (tokens.length > 0) {
-          await admin.messaging().sendEachForMulticast({
-            notification: { title, body },
-            data: {
-              type: "locationRefresh",
-              requestId: notifId,
-              meetingPointId: meetingPointId,
+          await sendPushIfEnabled({
+            userId: receiverId,
+            category: "refreshLocationRequests",
+            userData: receiverData,
+            message: {
+              notification: { title, body },
+              data: {
+                type: "locationRefresh",
+                requestId: notifId,
+                meetingPointId: meetingPointId,
+              },
+              tokens,
             },
-            tokens,
           });
         }
 
@@ -1856,6 +2161,7 @@ export const onMeetingPointLateArrival = onSchedule(
         {
           exists: boolean;
           tokens: string[];
+          notificationPreferences: NotificationPreferences;
           location: { x: number; y: number; floor: string } | null;
           updatedAt: Date | null;
         }
@@ -1869,6 +2175,7 @@ export const onMeetingPointLateArrival = onSchedule(
           const info = {
             exists: false,
             tokens: [] as string[],
+            notificationPreferences: { ...DEFAULT_NOTIFICATION_PREFERENCES },
             location: null,
             updatedAt: null as Date | null,
           };
@@ -1879,6 +2186,7 @@ export const onMeetingPointLateArrival = onSchedule(
         const tokens: string[] = Array.isArray(data.fcmTokens)
           ? data.fcmTokens.filter((t: any) => typeof t === "string")
           : [];
+        const notificationPreferences = extractNotificationPreferences(data);
         const loc: any = data.location ?? {};
         const bp: any = loc.blenderPosition ?? {};
         const x = Number(bp.x);
@@ -1892,6 +2200,7 @@ export const onMeetingPointLateArrival = onSchedule(
         const info = {
           exists: true,
           tokens,
+          notificationPreferences,
           location,
           updatedAt,
         };
@@ -2061,14 +2370,19 @@ export const onMeetingPointLateArrival = onSchedule(
 
           if (userInfo.tokens.length > 0) {
             try {
-              await admin.messaging().sendEachForMulticast({
-                notification: { title, body },
-                data: {
-                  type: "meetingLateArrival",
-                  requestId: notifId,
-                  meetingPointId: doc.id,
+              await sendPushIfEnabled({
+                userId: uid,
+                category: "meetingPointUpdates",
+                notificationPreferences: userInfo.notificationPreferences,
+                message: {
+                  notification: { title, body },
+                  data: {
+                    type: "meetingLateArrival",
+                    requestId: notifId,
+                    meetingPointId: doc.id,
+                  },
+                  tokens: userInfo.tokens,
                 },
-                tokens: userInfo.tokens,
               });
             } catch (err) {
               console.error(`Failed to send late arrival push to ${uid}`, err);
@@ -2319,6 +2633,7 @@ export const onAutoLocationRefresh = onSchedule(
         string,
         {
           tokens: string[];
+          notificationPreferences: NotificationPreferences;
           updatedAt: admin.firestore.Timestamp | null;
           lastAutoRefreshAt: admin.firestore.Timestamp | null;
           lastAutoRefreshNotifId: string | null;
@@ -2334,6 +2649,7 @@ export const onAutoLocationRefresh = onSchedule(
         if (!userDoc.exists) {
           const info = {
             tokens: [] as string[],
+            notificationPreferences: { ...DEFAULT_NOTIFICATION_PREFERENCES },
             updatedAt: null,
             lastAutoRefreshAt: null,
             lastAutoRefreshNotifId: null,
@@ -2345,6 +2661,7 @@ export const onAutoLocationRefresh = onSchedule(
         }
         const data = userDoc.data() ?? {};
         const tokens: string[] = data.fcmTokens ?? [];
+        const notificationPreferences = extractNotificationPreferences(data);
         const updatedAt: admin.firestore.Timestamp | null =
           data.location?.updatedAt ?? null;
         const lastAutoRefreshAt: admin.firestore.Timestamp | null =
@@ -2353,6 +2670,7 @@ export const onAutoLocationRefresh = onSchedule(
           (data.lastAutoRefreshNotifId ?? "").toString().trim() || null;
         const info = {
           tokens,
+          notificationPreferences,
           updatedAt,
           lastAutoRefreshAt,
           lastAutoRefreshNotifId,
@@ -2413,16 +2731,21 @@ export const onAutoLocationRefresh = onSchedule(
         const notifId = notifRef.id;
 
         if (userInfo.tokens.length > 0) {
-          await admin.messaging().sendEachForMulticast({
-            notification: {
-              title,
-              body,
+          await sendPushIfEnabled({
+            userId: uid,
+            category: "refreshLocationRequests",
+            notificationPreferences: userInfo.notificationPreferences,
+            message: {
+              notification: {
+                title,
+                body,
+              },
+              data: {
+                type: "locationRefresh",
+                requestId: notifId,
+              },
+              tokens: userInfo.tokens,
             },
-            data: {
-              type: "locationRefresh",
-              requestId: notifId,
-            },
-            tokens: userInfo.tokens,
           });
         }
 
@@ -2555,7 +2878,12 @@ export const onTrackRequestStatusChanged = onDocumentUpdated(
         const receiverDoc = await db.collection("users").doc(receiverId).get();
         if (!receiverDoc.exists) return;
 
-        const receiverTokens: string[] = receiverDoc.data()?.fcmTokens ?? [];
+        const receiverData = receiverDoc.data();
+        const receiverTokens: string[] = Array.isArray(receiverData?.fcmTokens)
+          ? receiverData.fcmTokens.filter((token: unknown): token is string =>
+              typeof token === "string"
+            )
+          : [];
 
         const senderName =
           (after.senderName ?? "Someone").toString().trim() || "Someone";
@@ -2564,17 +2892,22 @@ export const onTrackRequestStatusChanged = onDocumentUpdated(
         const notifId = notifRef.id;
 
         if (receiverTokens.length > 0) {
-          await admin.messaging().sendEachForMulticast({
-            notification: {
-              title: "Tracking Request Cancelled",
-              body: `${senderName} cancelled the tracking request`,
+          await sendPushIfEnabled({
+            userId: receiverId,
+            category: "trackingUpdates",
+            userData: receiverData,
+            message: {
+              notification: {
+                title: "Tracking Request Cancelled",
+                body: `${senderName} cancelled the tracking request`,
+              },
+              data: {
+                type: "trackCancelled",
+                requestId: notifId,
+                trackRequestId: event.params.requestId,
+              },
+              tokens: receiverTokens,
             },
-            data: {
-              type: "trackCancelled",
-              requestId: notifId,
-              trackRequestId: event.params.requestId,
-            },
-            tokens: receiverTokens,
           });
         }
 
@@ -2607,9 +2940,12 @@ export const onTrackRequestStatusChanged = onDocumentUpdated(
 
       if (!senderDoc.exists) return;
 
-
-
-      const tokens: string[] = senderDoc.data()?.fcmTokens ?? [];
+      const senderData = senderDoc.data();
+      const tokens: string[] = Array.isArray(senderData?.fcmTokens)
+        ? senderData.fcmTokens.filter((token: unknown): token is string =>
+            typeof token === "string"
+          )
+        : [];
 
 
 
@@ -2653,7 +2989,12 @@ export const onTrackRequestStatusChanged = onDocumentUpdated(
 
 
       if (tokens.length > 0) {
-        await admin.messaging().sendEachForMulticast(message);
+        await sendPushIfEnabled({
+          userId: senderId,
+          category: "trackingUpdates",
+          message,
+          userData: senderData,
+        });
       }
 
 
@@ -2792,9 +3133,12 @@ export const onTrackRefreshRequested = onDocumentUpdated(
 
       if (!receiverDoc.exists) return;
 
-
-
-      const tokens: string[] = receiverDoc.data()?.fcmTokens ?? [];
+      const receiverData = receiverDoc.data();
+      const tokens: string[] = Array.isArray(receiverData?.fcmTokens)
+        ? receiverData.fcmTokens.filter((token: unknown): token is string =>
+            typeof token === "string"
+          )
+        : [];
 
 
 
@@ -2830,31 +3174,23 @@ export const onTrackRefreshRequested = onDocumentUpdated(
 
 
       if (tokens.length > 0) {
-
-        await admin.messaging().sendEachForMulticast({
-
-          notification: {
-
-            title,
-
-            body,
-
+        await sendPushIfEnabled({
+          userId: receiverId,
+          category: "refreshLocationRequests",
+          userData: receiverData,
+          message: {
+            notification: {
+              title,
+              body,
+            },
+            data: {
+              type: "locationRefresh",
+              requestId: notifId,
+              trackRequestId: event.params.requestId,
+            },
+            tokens,
           },
-
-          data: {
-
-            type: "locationRefresh",
-
-            requestId: notifId,
-
-            trackRequestId: event.params.requestId,
-
-          },
-
-          tokens,
-
         });
-
       }
 
 
@@ -2950,18 +3286,34 @@ export const onTrackStarted = onSchedule("every 1 minutes", async () => {
     }
   >();
 
-  const tokenCache = new Map<string, string[]>();
+  const userCache = new Map<
+    string,
+    {
+      tokens: string[];
+      data: FirebaseFirestore.DocumentData | undefined;
+    }
+  >();
 
-  const getTokens = async (uid: string) => {
-    if (tokenCache.has(uid)) return tokenCache.get(uid)!;
+  const getUserInfo = async (uid: string) => {
+    if (userCache.has(uid)) return userCache.get(uid)!;
     const userDoc = await db.collection("users").doc(uid).get();
     if (!userDoc.exists) {
-      tokenCache.set(uid, []);
-      return [];
+      const info = {
+        tokens: [] as string[],
+        data: undefined,
+      };
+      userCache.set(uid, info);
+      return info;
     }
-    const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
-    tokenCache.set(uid, tokens);
-    return tokens;
+    const data = userDoc.data();
+    const tokens: string[] = Array.isArray(data?.fcmTokens)
+      ? data.fcmTokens.filter((token: unknown): token is string =>
+          typeof token === "string"
+        )
+      : [];
+    const info = { tokens, data };
+    userCache.set(uid, info);
+    return info;
   };
 
   const formatSenderBody = (names: string[]) => {
@@ -2995,22 +3347,27 @@ export const onTrackStarted = onSchedule("every 1 minutes", async () => {
     const batchId: string = data.batchId || requestId;
 
     if (!receiverAlreadyNotified) {
-      const receiverTokens = await getTokens(receiverId);
+      const receiverInfo = await getUserInfo(receiverId);
       const receiverNotifRef = db.collection("notifications").doc();
       const receiverNotifId = receiverNotifRef.id;
 
-      if (receiverTokens.length > 0) {
-        await admin.messaging().sendEachForMulticast({
-          notification: {
-            title: "Tracking Started",
-            body: `${data.senderName} can now track your location, please set your location`,
+      if (receiverInfo.tokens.length > 0) {
+        await sendPushIfEnabled({
+          userId: receiverId,
+          category: "trackingUpdates",
+          userData: receiverInfo.data,
+          message: {
+            notification: {
+              title: "Tracking Started",
+              body: `${data.senderName} can now track your location, please set your location`,
+            },
+            data: {
+              type: "trackStarted",
+              requestId: receiverNotifId,
+              trackRequestId: requestId,
+            },
+            tokens: receiverInfo.tokens,
           },
-          data: {
-            type: "trackStarted",
-            requestId: receiverNotifId,
-            trackRequestId: requestId,
-          },
-          tokens: receiverTokens,
         });
       }
 
@@ -3058,23 +3415,28 @@ export const onTrackStarted = onSchedule("every 1 minutes", async () => {
   for (const group of senderGroups.values()) {
     if (group.docRefs.length === 0) continue;
 
-    const senderTokens = await getTokens(group.senderId);
+    const senderInfo = await getUserInfo(group.senderId);
     const body = formatSenderBody(group.receiverNames);
     const senderNotifRef = db.collection("notifications").doc();
     const senderNotifId = senderNotifRef.id;
 
-    if (senderTokens.length > 0) {
-      await admin.messaging().sendEachForMulticast({
-        notification: {
-          title: "Tracking Started",
-          body,
+    if (senderInfo.tokens.length > 0) {
+      await sendPushIfEnabled({
+        userId: group.senderId,
+        category: "trackingUpdates",
+        userData: senderInfo.data,
+        message: {
+          notification: {
+            title: "Tracking Started",
+            body,
+          },
+          data: {
+            type: "trackStarted",
+            requestId: senderNotifId,
+            batchId: group.batchId,
+          },
+          tokens: senderInfo.tokens,
         },
-        data: {
-          type: "trackStarted",
-          requestId: senderNotifId,
-          batchId: group.batchId,
-        },
-        tokens: senderTokens,
       });
     }
 
@@ -3122,18 +3484,34 @@ export const onTrackCompleted = onSchedule("every 1 minutes", async () => {
   if (snap.empty) return;
 
   const batch = db.batch();
-  const tokenCache = new Map<string, string[]>();
+  const userCache = new Map<
+    string,
+    {
+      tokens: string[];
+      data: FirebaseFirestore.DocumentData | undefined;
+    }
+  >();
 
-  const getTokens = async (uid: string) => {
-    if (tokenCache.has(uid)) return tokenCache.get(uid)!;
+  const getUserInfo = async (uid: string) => {
+    if (userCache.has(uid)) return userCache.get(uid)!;
     const userDoc = await db.collection("users").doc(uid).get();
     if (!userDoc.exists) {
-      tokenCache.set(uid, []);
-      return [];
+      const info = {
+        tokens: [] as string[],
+        data: undefined,
+      };
+      userCache.set(uid, info);
+      return info;
     }
-    const tokens: string[] = userDoc.data()?.fcmTokens ?? [];
-    tokenCache.set(uid, tokens);
-    return tokens;
+    const data = userDoc.data();
+    const tokens: string[] = Array.isArray(data?.fcmTokens)
+      ? data.fcmTokens.filter((token: unknown): token is string =>
+          typeof token === "string"
+        )
+      : [];
+    const info = { tokens, data };
+    userCache.set(uid, info);
+    return info;
   };
 
   for (const doc of snap.docs) {
@@ -3146,22 +3524,27 @@ export const onTrackCompleted = onSchedule("every 1 minutes", async () => {
     const senderName =
       (data.senderName ?? "Someone").toString().trim() || "Someone";
 
-    const receiverTokens = await getTokens(receiverId);
+    const receiverInfo = await getUserInfo(receiverId);
     const notifRef = db.collection("notifications").doc();
     const notifId = notifRef.id;
 
-    if (receiverTokens.length > 0) {
-      await admin.messaging().sendEachForMulticast({
-        notification: {
-          title: "Tracking Completed",
-          body: `Tracking session from ${senderName} has ended`,
+    if (receiverInfo.tokens.length > 0) {
+      await sendPushIfEnabled({
+        userId: receiverId,
+        category: "trackingUpdates",
+        userData: receiverInfo.data,
+        message: {
+          notification: {
+            title: "Tracking Completed",
+            body: `Tracking session from ${senderName} has ended`,
+          },
+          data: {
+            type: "trackCompleted",
+            requestId: notifId,
+            trackRequestId: doc.id,
+          },
+          tokens: receiverInfo.tokens,
         },
-        data: {
-          type: "trackCompleted",
-          requestId: notifId,
-          trackRequestId: doc.id,
-        },
-        tokens: receiverTokens,
       });
     }
 

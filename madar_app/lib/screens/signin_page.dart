@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:madar_app/services/fcm_token_service.dart';
+import 'package:madar_app/services/notification_preferences_service.dart';
 import 'package:madar_app/widgets/custom_scaffold.dart';
 import 'package:madar_app/screens/signup_page.dart';
 import 'package:madar_app/screens/forgot_password_page.dart';
@@ -71,6 +72,27 @@ class _SignInScreenState extends State<SignInScreen> {
           .collection('users')
           .doc(user.uid)
           .get();
+
+      final rawPrefs = userDoc.data()?[NotificationPreferences.fieldName];
+      final prefsMap = rawPrefs is Map<String, dynamic>
+          ? rawPrefs
+          : rawPrefs is Map
+          ? Map<String, dynamic>.from(rawPrefs)
+          : null;
+      final needsPrefsBackfill =
+          userDoc.exists &&
+          (prefsMap == null || !prefsMap.containsKey('allowNotifications'));
+
+      if (needsPrefsBackfill) {
+        try {
+          await NotificationPreferencesService.save(
+            user.uid,
+            NotificationPreferences.fromMap(prefsMap),
+          );
+        } catch (e) {
+          debugPrint('Failed to backfill notification preferences: $e');
+        }
+      }
 
       final strictVerified =
           (userDoc.data()?['emailVerifiedStrict'] as bool?) ?? false;

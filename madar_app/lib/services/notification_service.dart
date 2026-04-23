@@ -68,6 +68,20 @@ class NotificationService {
     return settings.authorizationStatus;
   }
 
+  static Future<AuthorizationStatus> getAuthorizationStatus() async {
+    final settings = await _fcm.getNotificationSettings();
+    return settings.authorizationStatus;
+  }
+
+  static bool isPermissionGranted(AuthorizationStatus status) {
+    return status == AuthorizationStatus.authorized ||
+        status == AuthorizationStatus.provisional;
+  }
+
+  static bool isPermissionBlocked(AuthorizationStatus status) {
+    return status == AuthorizationStatus.denied;
+  }
+
   static Future<void> _showLocalNotification(RemoteMessage message) async {
     const androidDetails = AndroidNotificationDetails(
       'madar_channel',

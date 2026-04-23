@@ -33,11 +33,11 @@ class NotificationPreferences {
   factory NotificationPreferences.disabled() {
     return const NotificationPreferences(
       allowNotifications: false,
-      trackingRequests: false,
-      trackingUpdates: false,
-      meetingPointInvitations: false,
-      meetingPointUpdates: false,
-      refreshLocationRequests: false,
+      trackingRequests: true,
+      trackingUpdates: true,
+      meetingPointInvitations: true,
+      meetingPointUpdates: true,
+      refreshLocationRequests: true,
     );
   }
 
@@ -71,10 +71,6 @@ class NotificationPreferences {
     final allowNotifications =
         explicitAllow ?? legacyAllNotifications ?? anyCategoryEnabled;
 
-    if (!allowNotifications) {
-      return NotificationPreferences.disabled();
-    }
-
     if (legacyAllNotifications == true) {
       trackingRequests = true;
       trackingUpdates = true;
@@ -84,7 +80,7 @@ class NotificationPreferences {
     }
 
     return NotificationPreferences(
-      allowNotifications: true,
+      allowNotifications: allowNotifications,
       trackingRequests: trackingRequests,
       trackingUpdates: trackingUpdates,
       meetingPointInvitations: meetingPointInvitations,
@@ -120,9 +116,20 @@ class NotificationPreferences {
       meetingPointUpdates ||
       refreshLocationRequests;
 
+  NotificationPreferences disableInApp() {
+    return copyWith(allowNotifications: false);
+  }
+
+  NotificationPreferences enableInApp() {
+    if (anyCategoryEnabled) {
+      return copyWith(allowNotifications: true);
+    }
+    return NotificationPreferences.defaults();
+  }
+
   NotificationPreferences syncMasterSwitches() {
     if (!anyCategoryEnabled) {
-      return NotificationPreferences.disabled();
+      return disableInApp();
     }
 
     return copyWith(allowNotifications: true);
@@ -165,5 +172,16 @@ class NotificationPreferencesService {
       if (e.code != 'not-found') rethrow;
       await _users.doc(uid).set(data, SetOptions(merge: true));
     }
+  }
+
+  static Future<NotificationPreferences> disableInAppNotifications(
+    String uid,
+  ) async {
+    final current = await load(uid);
+    if (!current.allowNotifications) return current;
+
+    final next = current.disableInApp();
+    await save(uid, next);
+    return next;
   }
 }

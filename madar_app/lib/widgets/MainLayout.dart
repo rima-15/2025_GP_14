@@ -13,6 +13,8 @@ import 'package:madar_app/widgets/app_widgets.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'dart:async';
 import 'package:madar_app/services/gps_tracking_service.dart';
+import 'package:madar_app/services/notification_preferences_service.dart';
+import 'package:madar_app/services/notification_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:madar_app/screens/help_support_page.dart';
 
@@ -28,7 +30,7 @@ class MainLayout extends StatefulWidget {
   State<MainLayout> createState() => _MainLayoutState();
 }
 
-class _MainLayoutState extends State<MainLayout> {
+class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
   int _index = 0;
   final _homeKey = GlobalKey<HomePageState>();
 
@@ -67,9 +69,19 @@ class _MainLayoutState extends State<MainLayout> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadUserData();
     _listenForActiveTrackingRequests();
     _listenForActiveMeetingPoints();
+    unawaited(_syncNotificationPreferencesWithSystem());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_syncNotificationPreferencesWithSystem());
+    }
   }
 
   // ---------- GPS Tracking Service ──────────────────────────────────────────
@@ -279,6 +291,7 @@ class _MainLayoutState extends State<MainLayout> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _activeTrackingSub?.cancel();
     _activeMeetingPointSub?.cancel();
     _gpsPeriodicTimer?.cancel();
@@ -304,6 +317,20 @@ class _MainLayoutState extends State<MainLayout> {
       } catch (e) {
         debugPrint('Error loading user data: $e');
       }
+    }
+  }
+
+  Future<void> _syncNotificationPreferencesWithSystem() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    try {
+      final status = await NotificationService.getAuthorizationStatus();
+      if (!NotificationService.isPermissionBlocked(status)) return;
+
+      await NotificationPreferencesService.disableInAppNotifications(uid);
+    } catch (e) {
+      debugPrint('Failed to sync notification system state: $e');
     }
   }
 

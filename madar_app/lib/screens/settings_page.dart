@@ -19,7 +19,6 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  bool _locationEnabled = true;
   bool _securityExpanded = false;
   bool _notificationPrefsLoading = true;
   bool _notificationPrefsSaving = false;
@@ -80,8 +79,6 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   bool get _allowNotifications => _notificationPreferences.allowNotifications;
-
-  bool get _allNotificationsEnabled => _notificationPreferences.allNotifications;
 
   @override
   void dispose() {
@@ -270,14 +267,6 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Future<void> _toggleAllNotifications(bool value) async {
-    await _saveNotificationPreferences(
-      value
-          ? NotificationPreferences.defaults()
-          : NotificationPreferences.disabled(),
-    );
-  }
-
   Future<void> _toggleTrackingRequests(bool value) async {
     await _saveNotificationPreferences(
       _notificationPreferences
@@ -423,15 +412,6 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: 12),
 
             _buildNotificationsSection(),
-            const SizedBox(height: 12),
-
-            _buildSwitchTile(
-              icon: Icons.location_on_outlined,
-              title: 'Location Services',
-              subtitle: 'Allow location access',
-              value: _locationEnabled,
-              onChanged: (val) => setState(() => _locationEnabled = val),
-            ),
 
             const SizedBox(height: 32),
 
@@ -459,59 +439,6 @@ class _SettingsPageState extends State<SettingsPage> {
           color: Colors.grey[600],
           letterSpacing: 0.5,
         ),
-      ),
-    );
-  }
-
-  Widget _buildSwitchTile({
-    required IconData icon,
-    required String title,
-    String? subtitle,
-    required bool value,
-    ValueChanged<bool>? onChanged,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
-        border: Border.all(color: Colors.grey[300]!, width: 1),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, color: AppColors.kGreen, size: 24),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 16,
-                    color: Colors.black87,
-                  ),
-                ),
-                if (subtitle != null) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    style: TextStyle(fontSize: 13, color: Colors.grey[600]),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          Switch(
-            value: value,
-            onChanged: onChanged,
-            activeColor: AppColors.kGreen,
-            inactiveThumbColor: Colors.grey[400],
-            inactiveTrackColor: Colors.grey[300],
-            trackOutlineColor: WidgetStateProperty.all(Colors.grey[400]),
-          ),
-        ],
       ),
     );
   }
@@ -613,14 +540,6 @@ class _SettingsPageState extends State<SettingsPage> {
                 ? Column(
                     children: [
                       Divider(height: 1, thickness: 1, color: Colors.grey[300]),
-                      _buildPreferenceOption(
-                        title: 'All notifications',
-                        subtitle: 'Turn on every notification type.',
-                        value: _allNotificationsEnabled,
-                        onChanged: _notificationPrefsSaving
-                            ? null
-                            : _toggleAllNotifications,
-                      ),
                       _buildPreferenceOption(
                         title: 'Tracking Requests',
                         subtitle: 'New track requests that need your response.',

@@ -4,7 +4,6 @@ class NotificationPreferences {
   static const fieldName = 'notificationPreferences';
 
   final bool allowNotifications;
-  final bool allNotifications;
   final bool trackingRequests;
   final bool trackingUpdates;
   final bool meetingPointInvitations;
@@ -13,7 +12,6 @@ class NotificationPreferences {
 
   const NotificationPreferences({
     required this.allowNotifications,
-    required this.allNotifications,
     required this.trackingRequests,
     required this.trackingUpdates,
     required this.meetingPointInvitations,
@@ -24,7 +22,6 @@ class NotificationPreferences {
   factory NotificationPreferences.defaults() {
     return const NotificationPreferences(
       allowNotifications: true,
-      allNotifications: true,
       trackingRequests: true,
       trackingUpdates: true,
       meetingPointInvitations: true,
@@ -36,7 +33,6 @@ class NotificationPreferences {
   factory NotificationPreferences.disabled() {
     return const NotificationPreferences(
       allowNotifications: false,
-      allNotifications: false,
       trackingRequests: false,
       trackingUpdates: false,
       meetingPointInvitations: false,
@@ -63,7 +59,7 @@ class NotificationPreferences {
     var refreshLocationRequests = read('refreshLocationRequests');
 
     final explicitAllow = readOptional('allowNotifications');
-    final explicitAll = readOptional('allNotifications');
+    final legacyAllNotifications = readOptional('allNotifications');
 
     final anyCategoryEnabled =
         trackingRequests ||
@@ -73,21 +69,13 @@ class NotificationPreferences {
         refreshLocationRequests;
 
     final allowNotifications =
-        explicitAllow ?? explicitAll ?? anyCategoryEnabled;
+        explicitAllow ?? legacyAllNotifications ?? anyCategoryEnabled;
 
     if (!allowNotifications) {
       return NotificationPreferences.disabled();
     }
 
-    final allNotifications =
-        explicitAll ??
-        (trackingRequests &&
-            trackingUpdates &&
-            meetingPointInvitations &&
-            meetingPointUpdates &&
-            refreshLocationRequests);
-
-    if (allNotifications) {
+    if (legacyAllNotifications == true) {
       trackingRequests = true;
       trackingUpdates = true;
       meetingPointInvitations = true;
@@ -97,7 +85,6 @@ class NotificationPreferences {
 
     return NotificationPreferences(
       allowNotifications: true,
-      allNotifications: allNotifications,
       trackingRequests: trackingRequests,
       trackingUpdates: trackingUpdates,
       meetingPointInvitations: meetingPointInvitations,
@@ -108,7 +95,6 @@ class NotificationPreferences {
 
   NotificationPreferences copyWith({
     bool? allowNotifications,
-    bool? allNotifications,
     bool? trackingRequests,
     bool? trackingUpdates,
     bool? meetingPointInvitations,
@@ -117,7 +103,6 @@ class NotificationPreferences {
   }) {
     return NotificationPreferences(
       allowNotifications: allowNotifications ?? this.allowNotifications,
-      allNotifications: allNotifications ?? this.allNotifications,
       trackingRequests: trackingRequests ?? this.trackingRequests,
       trackingUpdates: trackingUpdates ?? this.trackingUpdates,
       meetingPointInvitations:
@@ -135,28 +120,17 @@ class NotificationPreferences {
       meetingPointUpdates ||
       refreshLocationRequests;
 
-  bool get everyCategoryEnabled =>
-      trackingRequests &&
-      trackingUpdates &&
-      meetingPointInvitations &&
-      meetingPointUpdates &&
-      refreshLocationRequests;
-
   NotificationPreferences syncMasterSwitches() {
     if (!anyCategoryEnabled) {
       return NotificationPreferences.disabled();
     }
 
-    return copyWith(
-      allowNotifications: true,
-      allNotifications: everyCategoryEnabled,
-    );
+    return copyWith(allowNotifications: true);
   }
 
   Map<String, dynamic> toMap() {
     return {
       'allowNotifications': allowNotifications,
-      'allNotifications': allNotifications,
       'trackingRequests': trackingRequests,
       'trackingUpdates': trackingUpdates,
       'meetingPointInvitations': meetingPointInvitations,
@@ -183,8 +157,13 @@ class NotificationPreferencesService {
   }
 
   static Future<void> save(String uid, NotificationPreferences prefs) async {
-    await _users.doc(uid).set({
-      NotificationPreferences.fieldName: prefs.toMap(),
-    }, SetOptions(merge: true));
+    final data = {NotificationPreferences.fieldName: prefs.toMap()};
+
+    try {
+      await _users.doc(uid).update(data);
+    } on FirebaseException catch (e) {
+      if (e.code != 'not-found') rethrow;
+      await _users.doc(uid).set(data, SetOptions(merge: true));
+    }
   }
 }

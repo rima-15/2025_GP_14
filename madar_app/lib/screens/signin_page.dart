@@ -81,7 +81,9 @@ class _SignInScreenState extends State<SignInScreen> {
           : null;
       final needsPrefsBackfill =
           userDoc.exists &&
-          (prefsMap == null || !prefsMap.containsKey('allowNotifications'));
+          (prefsMap == null ||
+              !prefsMap.containsKey('allowNotifications') ||
+              prefsMap.containsKey('allNotifications'));
 
       if (needsPrefsBackfill) {
         try {

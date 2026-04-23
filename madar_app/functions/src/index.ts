@@ -33,7 +33,6 @@ type NotificationPreferenceCategory =
 
 type NotificationPreferences = {
   allowNotifications: boolean;
-  allNotifications: boolean;
   trackingRequests: boolean;
   trackingUpdates: boolean;
   meetingPointInvitations: boolean;
@@ -43,7 +42,6 @@ type NotificationPreferences = {
 
 const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
   allowNotifications: true,
-  allNotifications: true,
   trackingRequests: true,
   trackingUpdates: true,
   meetingPointInvitations: true,
@@ -63,7 +61,7 @@ const readBooleanPreference = (
 
 const readOptionalBooleanPreference = (
   source: Record<string, unknown>,
-  key: keyof NotificationPreferences
+  key: string
 ): boolean | null => {
   const value = source[key];
   return typeof value === "boolean" ? value : null;
@@ -96,7 +94,10 @@ const normalizeNotificationPreferences = (
     source,
     "allowNotifications"
   );
-  const explicitAll = readOptionalBooleanPreference(source, "allNotifications");
+  const legacyAllNotifications = readOptionalBooleanPreference(
+    source,
+    "allNotifications"
+  );
 
   const anyCategoryEnabled =
     trackingRequests ||
@@ -106,12 +107,11 @@ const normalizeNotificationPreferences = (
     refreshLocationRequests;
 
   const allowNotifications =
-    explicitAllow ?? explicitAll ?? anyCategoryEnabled;
+    explicitAllow ?? legacyAllNotifications ?? anyCategoryEnabled;
 
   if (!allowNotifications) {
     return {
       allowNotifications: false,
-      allNotifications: false,
       trackingRequests: false,
       trackingUpdates: false,
       meetingPointInvitations: false,
@@ -120,15 +120,7 @@ const normalizeNotificationPreferences = (
     };
   }
 
-  const allNotifications =
-    explicitAll ??
-    (trackingRequests &&
-      trackingUpdates &&
-      meetingPointInvitations &&
-      meetingPointUpdates &&
-      refreshLocationRequests);
-
-  if (allNotifications) {
+  if (legacyAllNotifications === true) {
     trackingRequests = true;
     trackingUpdates = true;
     meetingPointInvitations = true;
@@ -138,7 +130,6 @@ const normalizeNotificationPreferences = (
 
   return {
     allowNotifications: true,
-    allNotifications,
     trackingRequests,
     trackingUpdates,
     meetingPointInvitations,

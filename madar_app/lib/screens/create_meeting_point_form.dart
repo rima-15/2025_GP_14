@@ -14,6 +14,7 @@ import 'package:madar_app/screens/navigation_flow_complete.dart'
 import 'package:madar_app/screens/AR_page.dart';
 import 'package:madar_app/screens/meeting_point_draft_storage.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
+import 'package:madar_app/services/favorites_service.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -1282,6 +1283,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   // ── Step 1: Friends ───────────────────────────────────────────────────────
   final TextEditingController _phoneCtrl = TextEditingController();
   final FocusNode _phoneFocus = FocusNode();
+  final _favService = FavoritesService();
   bool _isPhoneFocused = false;
   bool _isAddingPhone = false;
   bool _phoneValid = true;
@@ -1418,6 +1420,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     _phoneFocus.addListener(() {
       setState(() => _isPhoneFocused = _phoneFocus.hasFocus);
     });
+    _favService.load();
     _prepareStep2MapVenueId();
     _loadSavedStep2Location();
     _loadCurrentUser();
@@ -3827,11 +3830,17 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
             ),
           ),
 
-          // Heart icon
-          Icon(
-            friend.isFavorite ? Icons.favorite : Icons.favorite_border,
-            size: 22,
-            color: friend.isFavorite ? Colors.red : Colors.grey[400],
+          // Heart icon — always reads live from DB, tap toggles favorite
+          GestureDetector(
+            onTap: () async {
+              await _favService.toggle(friend.phone, friend.name);
+              if (mounted) setState(() {});
+            },
+            child: Icon(
+              _favService.isFavorite(friend.phone) ? Icons.favorite : Icons.favorite_border,
+              size: 22,
+              color: _favService.isFavorite(friend.phone) ? Colors.red : Colors.grey[400],
+            ),
           ),
           const SizedBox(width: 8),
 
@@ -4631,11 +4640,17 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
             ),
           ),
 
-          // Heart
-          Icon(
-            p.friend.isFavorite ? Icons.favorite : Icons.favorite_border,
-            size: 22,
-            color: p.friend.isFavorite ? Colors.red : Colors.grey[400],
+          // Heart — live from DB, tap toggles favorite
+          GestureDetector(
+            onTap: () async {
+              await _favService.toggle(p.friend.phone, p.friend.name);
+              if (mounted) setState(() {});
+            },
+            child: Icon(
+              _favService.isFavorite(p.friend.phone) ? Icons.favorite : Icons.favorite_border,
+              size: 22,
+              color: _favService.isFavorite(p.friend.phone) ? Colors.red : Colors.grey[400],
+            ),
           ),
           const SizedBox(width: 10),
 
@@ -4883,7 +4898,20 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
               ),
             ),
             const SizedBox(width: 8),
-            if (!isHost)
+            if (!isHost) ...[
+              // Heart — live from DB, tap toggles favorite
+              GestureDetector(
+                onTap: () async {
+                  await _favService.toggle(phone, name);
+                  if (mounted) setState(() {});
+                },
+                child: Icon(
+                  _favService.isFavorite(phone) ? Icons.favorite : Icons.favorite_border,
+                  size: 20,
+                  color: _favService.isFavorite(phone) ? Colors.red : Colors.grey[400],
+                ),
+              ),
+              const SizedBox(width: 6),
               Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 10,
@@ -4902,6 +4930,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
                   ),
                 ),
               ),
+            ],
           ],
         ),
       );
@@ -5181,34 +5210,42 @@ class _FavoriteListSheet extends StatefulWidget {
 class _FavoriteListSheetState extends State<_FavoriteListSheet> {
   final _searchCtrl = TextEditingController();
 
-  // Stub favorites – replace with real Firestore query.
-  final List<_Friend> _allFavorites = [
-    _Friend(
-      id: '1',
-      name: 'Mona Saleh',
-      phone: '+966557225235',
-      isFavorite: true,
-    ),
-    _Friend(
-      id: '2',
-      name: 'ar saeed',
-      phone: '+966334333333',
-      isFavorite: true,
-    ),
-    _Friend(id: '3', name: 'Ameera', phone: '+966503347974', isFavorite: true),
-    _Friend(id: '4', name: 'Amjad', phone: '+966503347973', isFavorite: true),
-  ];
-
-  late List<_Friend> _filtered;
+  List<_Friend> _allFavorites = [];
+  List<_Friend> _filtered = [];
   final List<_Friend> _picked = [];
+  bool _loadingFavorites = true;
 
   @override
   void initState() {
     super.initState();
-    _filtered = _allFavorites
-        .where((f) => !widget.alreadySelectedPhones.contains(f.phone))
-        .toList();
     _searchCtrl.addListener(_filter);
+    _loadFavorites();
+  }
+
+  Future<void> _loadFavorites() async {
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) { setState(() => _loadingFavorites = false); return; }
+      final snap = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      final raw = snap.data()?['favoriteFriends'];
+      final list = raw is List
+          ? raw.map((e) => _Friend(
+                id: (e['phone'] ?? '').toString(),
+                name: (e['name'] ?? '').toString(),
+                phone: (e['phone'] ?? '').toString(),
+                isFavorite: true,
+              )).toList()
+          : <_Friend>[];
+      if (mounted) {
+        setState(() {
+          _allFavorites = list;
+          _filtered = List.from(list);
+          _loadingFavorites = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingFavorites = false);
+    }
   }
 
   @override
@@ -5221,8 +5258,7 @@ class _FavoriteListSheetState extends State<_FavoriteListSheet> {
     final q = _searchCtrl.text.toLowerCase();
     setState(() {
       _filtered = _allFavorites
-          .where((f) => !widget.alreadySelectedPhones.contains(f.phone))
-          .where((f) => f.name.toLowerCase().contains(q) || f.phone.contains(q))
+          .where((f) => q.isEmpty || f.name.toLowerCase().contains(q) || f.phone.contains(q))
           .toList();
     });
   }
@@ -5317,14 +5353,27 @@ class _FavoriteListSheetState extends State<_FavoriteListSheet> {
           ),
           const SizedBox(height: 12),
           Expanded(
-            child: ListView.separated(
+            child: _loadingFavorites
+                ? const AppLoadingIndicator()
+                : _filtered.isEmpty
+                    ? Center(
+                        child: Text(
+                          _searchCtrl.text.isEmpty
+                              ? "You haven't added any favorite friends yet."
+                              : 'No results found. Try again',
+                          style: TextStyle(color: Colors.grey[400], fontSize: 15),
+                          textAlign: TextAlign.center,
+                        ),
+                      )
+                    : ListView.separated(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               itemCount: _filtered.length,
               separatorBuilder: (_, __) =>
                   const Divider(height: 1, thickness: 0.5),
               itemBuilder: (ctx, i) {
                 final f = _filtered[i];
-                final selected = _picked.contains(f);
+                final alreadyAdded = widget.alreadySelectedPhones.contains(f.phone);
+                final picked = _picked.contains(f);
                 return ListTile(
                   contentPadding: const EdgeInsets.symmetric(vertical: 6),
                   leading: Container(
@@ -5334,53 +5383,54 @@ class _FavoriteListSheetState extends State<_FavoriteListSheet> {
                       color: Colors.grey[300],
                       shape: BoxShape.circle,
                     ),
-                    child: Icon(
-                      Icons.person,
-                      color: Colors.grey[600],
-                      size: 22,
-                    ),
+                    child: Icon(Icons.person, color: Colors.grey[600], size: 22),
                   ),
                   title: Text(
                     f.name,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w600,
-                      color: Colors.black87,
+                      color: alreadyAdded ? Colors.grey[400] : Colors.black87,
                     ),
                   ),
                   subtitle: Text(
                     f.phone,
-                    style: TextStyle(fontSize: 13, color: Colors.grey[500]),
+                    style: TextStyle(fontSize: 13, color: Colors.grey[400]),
                   ),
-                  trailing: GestureDetector(
-                    onTap: () => setState(() {
-                      selected ? _picked.remove(f) : _picked.add(f);
-                    }),
-                    child: Container(
-                      width: 26,
-                      height: 26,
-                      decoration: BoxDecoration(
-                        color: selected ? AppColors.kGreen : Colors.transparent,
-                        border: Border.all(
-                          color: selected
-                              ? AppColors.kGreen
-                              : Colors.grey.shade300,
-                          width: 2,
+                  trailing: alreadyAdded
+                      ? Text(
+                          'Added',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppColors.kGreen,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        )
+                      : GestureDetector(
+                          onTap: () => setState(() {
+                            picked ? _picked.remove(f) : _picked.add(f);
+                          }),
+                          child: Container(
+                            width: 26,
+                            height: 26,
+                            decoration: BoxDecoration(
+                              color: picked ? AppColors.kGreen : Colors.transparent,
+                              border: Border.all(
+                                color: picked ? AppColors.kGreen : Colors.grey.shade300,
+                                width: 2,
+                              ),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: picked
+                                ? const Icon(Icons.check, color: Colors.white, size: 16)
+                                : null,
+                          ),
                         ),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: selected
-                          ? const Icon(
-                              Icons.check,
-                              color: Colors.white,
-                              size: 16,
-                            )
-                          : null,
-                    ),
-                  ),
-                  onTap: () => setState(() {
-                    selected ? _picked.remove(f) : _picked.add(f);
-                  }),
+                  onTap: alreadyAdded
+                      ? null
+                      : () => setState(() {
+                            picked ? _picked.remove(f) : _picked.add(f);
+                          }),
                 );
               },
             ),

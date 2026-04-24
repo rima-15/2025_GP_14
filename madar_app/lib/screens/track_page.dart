@@ -18,6 +18,7 @@ import 'package:geolocator/geolocator.dart';
 // by remas end
 import 'package:flutter/services.dart';
 import 'package:madar_app/nav/navmesh.dart';
+import 'package:madar_app/services/favorites_service.dart';
 
 const bool kFeatureEnabled = true;
 const String kSolitaireVenueId = 'ChIJcYTQDwDjLj4RZEiboV6gZzM';
@@ -146,7 +147,7 @@ class _TrackPageState extends State<TrackPage> {
   // ── Arrival section state ──────────────────────────────────────────────────
   Timer? _arrivalTimer;
   String? _expandedArrivalParticipantId; // userId of expanded participant card
-  final Set<String> _favoriteParticipantIds = {};
+  final _favService = FavoritesService();
   DateTime? _lastMeetingMaintainAttemptAt;
   static const double _autoArriveDistanceMeters = 10.0;
   static const Duration _autoArriveCooldown = Duration(seconds: 15);
@@ -322,7 +323,11 @@ class _TrackPageState extends State<TrackPage> {
 
               venueName: (data['venueName'] ?? '').toString(),
               venueId: (data['venueId'] ?? '').toString(),
-              isFavorite: false,
+              isFavorite: _favService.isFavorite(
+                (data['senderId'] ?? '') == (FirebaseAuth.instance.currentUser?.uid ?? '')
+                    ? (data['receiverPhone'] ?? '').toString()
+                    : (data['senderPhone'] ?? '').toString(),
+              ),
               lastSeen: _timeAgo(startAt),
               // Add these two lines to satisfy the constructor:
               senderName: (data['senderName'] ?? '').toString(),
@@ -879,6 +884,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     _activeMeetingPointCountStream =
         MeetingPointService.watchActiveForCurrentUser();
     _loadVenueMaps();
+    _favService.load();
     if (widget.initialMeetingPointId != null) {
       _isTrackingView = false;
       _expandedMeetingInviteId = widget.initialMeetingPointId;
@@ -1809,26 +1815,18 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     });
   }
 
-  void _toggleParticipantFavorite(String userId) {
-    setState(() {
-      if (_favoriteParticipantIds.contains(userId)) {
-        _favoriteParticipantIds.remove(userId);
-      } else {
-        _favoriteParticipantIds.add(userId);
-      }
-    });
+  Future<void> _toggleParticipantFavorite(String phone, String name) async {
+    try {
+      await _favService.toggle(phone, name);
+      if (mounted) setState(() {});
+    } catch (_) {}
   }
 
-  void _toggleFavorite(String requestId) {
-    // TODO: implement favorites later using Firestore (users/{uid}/favorites)
-    // keeping it here to avoid UI changes/errors.
-    /*setState(() {
-      final index = _trackingRequests.indexWhere((r) => r.id == requestId);
-      if (index != -1) {
-        _trackingRequests[index].isFavorite =
-            !_trackingRequests[index].isFavorite;
-      }
-    });*/
+  Future<void> _toggleFavorite(String phone, String name) async {
+    try {
+      await _favService.toggle(phone, name);
+      if (mounted) setState(() {});
+    } catch (_) {}
   }
 
   Future<void> _loadVenueMaps() async {
@@ -3478,12 +3476,12 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                   if (!isCancelled) ...[
                     const SizedBox(width: 8),
                     IconButton(
-                      onPressed: () => _toggleParticipantFavorite(p.userId),
+                      onPressed: () => _toggleParticipantFavorite(p.phone, p.name),
                       icon: Icon(
-                        _favoriteParticipantIds.contains(p.userId)
+                        _favService.isFavorite(p.phone)
                             ? Icons.favorite
                             : Icons.favorite_border,
-                        color: _favoriteParticipantIds.contains(p.userId)
+                        color: _favService.isFavorite(p.phone)
                             ? Colors.red
                             : Colors.grey[400],
                         size: 24,
@@ -6662,13 +6660,25 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                       ],
                     ),
                   ),
-                  IconButton(
-                    onPressed: () => _toggleFavorite(r.id),
-                    icon: Icon(
-                      r.isFavorite ? Icons.favorite : Icons.favorite_border,
-                      color: r.isFavorite ? Colors.red : Colors.grey[400],
-                      size: 24,
-                    ),
+                  Builder(
+                    builder: (context) {
+                      final _uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+                      final _phone = r.senderId == _uid
+                          ? r.trackedUserPhone
+                          : (r.senderPhone ?? r.trackedUserPhone);
+                      final _name = r.senderId == _uid
+                          ? r.trackedUserName
+                          : (r.senderName ?? r.trackedUserName);
+                      final _isFav = _favService.isFavorite(_phone);
+                      return IconButton(
+                        onPressed: () => _toggleFavorite(_phone, _name),
+                        icon: Icon(
+                          _isFav ? Icons.favorite : Icons.favorite_border,
+                          color: _isFav ? Colors.red : Colors.grey[400],
+                          size: 24,
+                        ),
+                      );
+                    },
                   ),
                   AnimatedRotation(
                     turns: isExpanded ? 0.5 : 0,
@@ -6785,13 +6795,25 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                       ],
                     ),
                   ),
-                  IconButton(
-                    onPressed: () => _toggleFavorite(r.id),
-                    icon: Icon(
-                      r.isFavorite ? Icons.favorite : Icons.favorite_border,
-                      color: r.isFavorite ? Colors.red : Colors.grey[400],
-                      size: 24,
-                    ),
+                  Builder(
+                    builder: (context) {
+                      final _uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+                      final _phone = r.senderId == _uid
+                          ? r.trackedUserPhone
+                          : (r.senderPhone ?? r.trackedUserPhone);
+                      final _name = r.senderId == _uid
+                          ? r.trackedUserName
+                          : (r.senderName ?? r.trackedUserName);
+                      final _isFav = _favService.isFavorite(_phone);
+                      return IconButton(
+                        onPressed: () => _toggleFavorite(_phone, _name),
+                        icon: Icon(
+                          _isFav ? Icons.favorite : Icons.favorite_border,
+                          color: _isFav ? Colors.red : Colors.grey[400],
+                          size: 24,
+                        ),
+                      );
+                    },
                   ),
                   AnimatedRotation(
                     turns: isExpanded ? 0.5 : 0,
@@ -6994,13 +7016,25 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                       ],
                     ),
                   ),
-                  IconButton(
-                    onPressed: () => _toggleFavorite(r.id),
-                    icon: Icon(
-                      r.isFavorite ? Icons.favorite : Icons.favorite_border,
-                      color: r.isFavorite ? Colors.red : Colors.grey[400],
-                      size: 24,
-                    ),
+                  Builder(
+                    builder: (context) {
+                      final _uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+                      final _phone = r.senderId == _uid
+                          ? r.trackedUserPhone
+                          : (r.senderPhone ?? r.trackedUserPhone);
+                      final _name = r.senderId == _uid
+                          ? r.trackedUserName
+                          : (r.senderName ?? r.trackedUserName);
+                      final _isFav = _favService.isFavorite(_phone);
+                      return IconButton(
+                        onPressed: () => _toggleFavorite(_phone, _name),
+                        icon: Icon(
+                          _isFav ? Icons.favorite : Icons.favorite_border,
+                          color: _isFav ? Colors.red : Colors.grey[400],
+                          size: 24,
+                        ),
+                      );
+                    },
                   ),
                   AnimatedRotation(
                     turns: isExpanded ? 0.5 : 0,
@@ -7167,13 +7201,25 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                       ],
                     ),
                   ),
-                  IconButton(
-                    onPressed: () => _toggleFavorite(r.id),
-                    icon: Icon(
-                      r.isFavorite ? Icons.favorite : Icons.favorite_border,
-                      color: r.isFavorite ? Colors.red : Colors.grey[400],
-                      size: 24,
-                    ),
+                  Builder(
+                    builder: (context) {
+                      final _uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+                      final _phone = r.senderId == _uid
+                          ? r.trackedUserPhone
+                          : (r.senderPhone ?? r.trackedUserPhone);
+                      final _name = r.senderId == _uid
+                          ? r.trackedUserName
+                          : (r.senderName ?? r.trackedUserName);
+                      final _isFav = _favService.isFavorite(_phone);
+                      return IconButton(
+                        onPressed: () => _toggleFavorite(_phone, _name),
+                        icon: Icon(
+                          _isFav ? Icons.favorite : Icons.favorite_border,
+                          color: _isFav ? Colors.red : Colors.grey[400],
+                          size: 24,
+                        ),
+                      );
+                    },
                   ),
                   AnimatedRotation(
                     turns: isExpanded ? 0.5 : 0,

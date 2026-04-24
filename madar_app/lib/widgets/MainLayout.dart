@@ -17,6 +17,7 @@ import 'package:madar_app/services/notification_preferences_service.dart';
 import 'package:madar_app/services/notification_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:madar_app/screens/help_support_page.dart';
+import 'package:madar_app/screens/favorite_friends_page.dart';
 
 // ----------------------------------------------------------------------------
 // Main Layout
@@ -641,6 +642,19 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                               builder: (_) => const ProfilePage(),
                             ),
                           ).then((_) => _loadUserData());
+                        },
+                      ),
+                      _buildMenuItem(
+                        icon: Icons.favorite_border,
+                        title: 'Favorite Friends',
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const FavoriteFriendsPage(),
+                            ),
+                          );
                         },
                       ),
                       _buildMenuItem(

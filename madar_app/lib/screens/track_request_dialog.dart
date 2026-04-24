@@ -8,6 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:madar_app/services/favorites_service.dart';
 
 // ----------------------------------------------------------------------------
 // Contact Item Model (for pre-loading)
@@ -161,6 +162,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
     _getCurrentLocation();
     _preloadContacts(); // Pre-load contacts and DB status
     _loadCurrentUserInfo(); // Cache current user's phone/name
+    _favService.load();
 
     _phoneFocusNode.addListener(() {
       setState(() {
@@ -848,18 +850,13 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
     });
   }
 
-  void _toggleFavorite(Friend friend) {
-    setState(() {
-      final index = _selectedFriends.indexOf(friend);
-      if (index != -1) {
-        _selectedFriends[index] = Friend(
-          name: friend.name,
-          phone: friend.phone,
-          isFavorite: !friend.isFavorite,
-          isFromPhoneInput: friend.isFromPhoneInput,
-        );
-      }
-    });
+  final _favService = FavoritesService();
+
+  Future<void> _toggleFavorite(Friend friend) async {
+    try {
+      await _favService.toggle(friend.phone, friend.name);
+      if (mounted) setState(() {});
+    } catch (_) {}
   }
 
   Future<void> _showFavoritesList() async {
@@ -2625,20 +2622,19 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                                 ],
                               ),
                             ),
-                            // Favorite button for phone-added friends
-                            if (friend.isFromPhoneInput)
-                              IconButton(
-                                onPressed: () => _toggleFavorite(friend),
-                                icon: Icon(
-                                  friend.isFavorite
-                                      ? Icons.favorite
-                                      : Icons.favorite_border,
-                                  color: friend.isFavorite
-                                      ? Colors.red
-                                      : Colors.grey[400],
-                                  size: 22,
-                                ),
+                            // Favorite button — shown for every friend, state always from DB
+                            IconButton(
+                              onPressed: () => _toggleFavorite(friend),
+                              icon: Icon(
+                                _favService.isFavorite(friend.phone)
+                                    ? Icons.favorite
+                                    : Icons.favorite_border,
+                                color: _favService.isFavorite(friend.phone)
+                                    ? Colors.red
+                                    : Colors.grey[400],
+                                size: 22,
                               ),
+                            ),
                             IconButton(
                               onPressed: () => _removeFriend(friend),
                               icon: const Icon(
@@ -3682,30 +3678,40 @@ class _FavoritesListSheetState extends State<FavoritesListSheet> {
   final _searchController = TextEditingController();
   final List<Friend> _selectedFriends = [];
 
-  // Mock favorite friends data
-  final List<Friend> _allFavorites = [
-    Friend(name: 'Abeer فاد', phone: '+966503347979', isFavorite: true),
-    Friend(name: 'Afnan Salamah', phone: '+966503347978', isFavorite: true),
-    Friend(name: 'Razan Aldosari', phone: '+966503347977', isFavorite: true),
-    Friend(
-      name: 'Dr. Rafah Almousli',
-      phone: '+966503347976',
-      isFavorite: true,
-    ),
-    Friend(name: 'AMAL', phone: '+966503347975', isFavorite: true),
-    Friend(name: 'Ameera', phone: '+966503347974', isFavorite: true),
-    Friend(name: 'Amjad', phone: '+966503347973', isFavorite: true),
-    Friend(name: 'Areen', phone: '+966503347972', isFavorite: true),
-    Friend(name: 'Aryam', phone: '+966503347971', isFavorite: true),
-  ];
-
+  List<Friend> _allFavorites = [];
   List<Friend> _filteredFavorites = [];
+  bool _loadingFavorites = true;
 
   @override
   void initState() {
     super.initState();
-    _filteredFavorites = List.from(_allFavorites);
     _searchController.addListener(_filterFavorites);
+    _loadFavorites();
+  }
+
+  Future<void> _loadFavorites() async {
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) { setState(() => _loadingFavorites = false); return; }
+      final snap = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      final raw = snap.data()?['favoriteFriends'];
+      final list = raw is List
+          ? raw.map((e) => Friend(
+                name: (e['name'] ?? '').toString(),
+                phone: (e['phone'] ?? '').toString(),
+                isFavorite: true,
+              )).toList()
+          : <Friend>[];
+      if (mounted) {
+        setState(() {
+          _allFavorites = list;
+          _filteredFavorites = List.from(list);
+          _loadingFavorites = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingFavorites = false);
+    }
   }
 
   @override
@@ -3830,7 +3836,19 @@ class _FavoritesListSheetState extends State<FavoritesListSheet> {
 
           // Friends List
           Expanded(
-            child: ListView.separated(
+            child: _loadingFavorites
+                ? const AppLoadingIndicator()
+                : _filteredFavorites.isEmpty
+                    ? Center(
+                        child: Text(
+                          _searchController.text.isEmpty
+                              ? "You haven't added any favorite friends yet."
+                              : 'No results found. Try again',
+                          style: TextStyle(color: Colors.grey[400], fontSize: 15),
+                          textAlign: TextAlign.center,
+                        ),
+                      )
+                    : ListView.separated(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               itemCount: _filteredFavorites.length,
               separatorBuilder: (context, index) => const Divider(height: 1),

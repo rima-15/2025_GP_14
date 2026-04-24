@@ -51,7 +51,7 @@ class MeetingPointParticipant {
   // ── Arrival tracking (populated when meeting status becomes 'active') ──────
   final String arrivalStatus; // on_the_way | arrived | cancelled
   final DateTime? arrivedAt;
-  final int estimatedArrivalMinutes; // 1-5 (random)
+  final int estimatedArrivalMinutes; // 1-60, updated from live ETA when available
   final DateTime? locationUpdatedAt;
 
   bool get isPending => status == 'pending';
@@ -142,7 +142,7 @@ class MeetingPointParticipant {
       arrivalStatus: arrivalStatus,
       arrivedAt: _meetingPointAsDateTime(raw['arrivedAt']),
       estimatedArrivalMinutes: (estMins is num)
-          ? estMins.toInt().clamp(1, 5)
+          ? estMins.toInt().clamp(1, 60)
           : 3,
       locationUpdatedAt: _meetingPointAsDateTime(raw['locationUpdatedAt']),
     );
@@ -202,7 +202,7 @@ class MeetingPointRecord {
   final bool suggestionsComputed;
   final String hostArrivalStatus; // on_the_way | arrived | cancelled
   final DateTime? hostArrivedAt;
-  final int hostEstimatedMinutes; // 1-5 (random)
+  final int hostEstimatedMinutes; // 1-60, updated from live ETA when available
   final DateTime? hostLocationUpdatedAt;
   final DateTime? expiresAt;
 
@@ -319,7 +319,7 @@ class MeetingPointRecord {
       hostArrivalStatus: (data['hostArrivalStatus'] ?? 'on_the_way').toString(),
       hostArrivedAt: _meetingPointAsDateTime(data['hostArrivedAt']),
       hostEstimatedMinutes: (data['hostEstimatedMinutes'] is num)
-          ? (data['hostEstimatedMinutes'] as num).toInt().clamp(1, 5)
+          ? (data['hostEstimatedMinutes'] as num).toInt().clamp(1, 60)
           : 3,
       hostLocationUpdatedAt: _meetingPointAsDateTime(
         data['hostLocationUpdatedAt'],
@@ -910,6 +910,93 @@ class MeetingPointService {
     });
   }
 
+  static bool _sameTimestamp(DateTime? a, DateTime? b) {
+    if (a == null && b == null) return true;
+    if (a == null || b == null) return false;
+    return a.millisecondsSinceEpoch == b.millisecondsSinceEpoch;
+  }
+
+  /// Persist the latest live ETA for a confirmed meeting participant so
+  /// backend late-arrival notifications use the same up-to-date estimate
+  /// shown in the client.
+  static Future<void> syncLiveArrivalEstimate({
+    required String meetingPointId,
+    required String userId,
+    required int etaSeconds,
+    required DateTime locationUpdatedAt,
+  }) async {
+    final trimmedMeetingId = meetingPointId.trim();
+    final trimmedUserId = userId.trim();
+    if (trimmedMeetingId.isEmpty || trimmedUserId.isEmpty) return;
+    if (etaSeconds <= 0) return;
+
+    final etaMinutes = (etaSeconds / 60).ceil().clamp(1, 60);
+    final ref = _col.doc(trimmedMeetingId);
+
+    await FirebaseFirestore.instance.runTransaction((tx) async {
+      final snap = await tx.get(ref);
+      final meeting = MeetingPointRecord.fromDoc(snap);
+      if (meeting == null || !meeting.isConfirmed) return;
+
+      if (meeting.isHost(trimmedUserId)) {
+        final storedLocationAt = meeting.hostLocationUpdatedAt;
+        if (storedLocationAt != null &&
+            !locationUpdatedAt.isAfter(storedLocationAt)) {
+          return;
+        }
+        final sameEta = meeting.hostEstimatedMinutes == etaMinutes;
+        final sameLocation = _sameTimestamp(
+          meeting.hostLocationUpdatedAt,
+          locationUpdatedAt,
+        );
+        if (sameEta && sameLocation) return;
+
+        tx.update(ref, {
+          'hostEstimatedMinutes': etaMinutes,
+          'hostLocationUpdatedAt': Timestamp.fromDate(locationUpdatedAt),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+        return;
+      }
+
+      final idx = meeting.participants.indexWhere((p) => p.userId == trimmedUserId);
+      if (idx < 0) return;
+
+      final participant = meeting.participants[idx];
+      if (!participant.isAccepted ||
+          participant.isCancelledArrival ||
+          participant.isArrived) {
+        return;
+      }
+
+      final storedLocationAt = participant.locationUpdatedAt;
+      if (storedLocationAt != null &&
+          !locationUpdatedAt.isAfter(storedLocationAt)) {
+        return;
+      }
+
+      final sameEta = participant.estimatedArrivalMinutes == etaMinutes;
+      final sameLocation = _sameTimestamp(
+        participant.locationUpdatedAt,
+        locationUpdatedAt,
+      );
+      if (sameEta && sameLocation) return;
+
+      final updatedParticipants = List<MeetingPointParticipant>.from(
+        meeting.participants,
+      );
+      updatedParticipants[idx] = participant.copyWith(
+        estimatedArrivalMinutes: etaMinutes,
+        locationUpdatedAt: locationUpdatedAt,
+      );
+
+      tx.update(ref, {
+        'participants': updatedParticipants.map((p) => p.toMap()).toList(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    });
+  }
+
   /// Reconciles a confirmed (arrival-phase) meeting that may be stuck due to
   /// old app code that didn't write meeting-level status transitions.
   /// Safe to call repeatedly — only writes to Firestore when a change is needed.
@@ -917,12 +1004,14 @@ class MeetingPointService {
     if (!meeting.isConfirmed) return;
 
     // Session time limit: auto-complete if expiresAt has passed.
-    // Uses 'completed' so it is distinct from host cancellation.
+    // Keep status as 'completed', but include a reason so notifications can
+    // distinguish time-limit completion from everyone-arrived completion.
     if (meeting.expiresAt != null &&
         !meeting.expiresAt!.isAfter(MeetingPointService.serverNow)) {
       try {
         await _col.doc(meeting.id).update({
           'status': 'completed',
+          'cancellationReason': 'auto-closed after time limit',
           'updatedAt': FieldValue.serverTimestamp(),
         });
       } catch (_) {}

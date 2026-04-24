@@ -83,6 +83,7 @@ class _TrackPageState extends State<TrackPage> {
   final Map<String, String> _meetingFloorByUser = {};
   final Map<String, String> _meetingNameByUser = {};
   final Map<String, DateTime> _meetingUpdatedAtByUser = {};
+  final Map<String, String> _meetingLocationSignatureByUser = {};
   final Map<String, String> _meetingArrivalStatusByUser = {};
   final Map<String, String> _arrivalOverrideByUser = {};
   final Map<String, DateTime> _arrivalOverrideAtByUser = {};
@@ -94,6 +95,8 @@ class _TrackPageState extends State<TrackPage> {
   _meetingPathsByUserFloorGltf = {};
   final Map<String, int> _meetingEtaBaseSecondsByUser = {};
   final Map<String, DateTime> _meetingEtaBaseTimeByUser = {};
+  final Map<String, String> _meetingEtaSyncSignatureByUser = {};
+  String? _meetingPathTargetSignature;
   List<ConnectorLink> _connectors = const [];
   bool _connectorsLoaded = false;
   final Map<String, NavMesh> _navmeshCache = {};
@@ -162,17 +165,6 @@ class _TrackPageState extends State<TrackPage> {
   /// Meeting IDs for which session-expiry reconciliation has been triggered
   /// so we don't call reconcileArrivalPhase on every second tick.
   final Set<String> _expiredArrivalMeetingIds = {};
-
-  /// The meeting ID for which real-ETA expiresAt has already been computed
-  /// locally. Prevents recomputing on every path-recompute cycle.
-  String? _localExpiresAtComputedForMeetingId;
-
-  /// Local real-ETA-based session expiry time, computed from navmesh distances.
-  /// Used ONLY for the displayed countdown; Firestore keeps the random-ETA
-  /// safety baseline (written by markHostDecision) so auto-expiry is guaranteed
-  /// even if path computation never runs. Keeping them separate eliminates the
-  /// oscillation caused by two Firestore writes delivering alternating values.
-  DateTime? _localExpiresAt;
 
   /// Tracks pending meetings where all participants declined, so we don't
   /// fire maybeMaintain (which writes cancellationReason) on every rebuild.
@@ -1100,6 +1092,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     _meetingFloorByUser.clear();
     _meetingNameByUser.clear();
     _meetingUpdatedAtByUser.clear();
+    _meetingLocationSignatureByUser.clear();
     _meetingArrivalStatusByUser.clear();
     _arrivalOverrideByUser.clear();
     _arrivalOverrideAtByUser.clear();
@@ -1110,6 +1103,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     _trackMapController?.runJavaScript("hideMeetingPointPin();");
     _trackMapController?.runJavaScript("clearMeetingPathsFromFlutter();");
     _meetingPathsByUserFloorGltf.clear();
+    _meetingPathTargetSignature = null;
 
     _applyAllTrackedPinsToViewer();
   }
@@ -1262,9 +1256,18 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         }
       }
     }
+    String? nextTargetSignature;
     if (_meetingPointPosBlender != null) {
-      unawaited(_recomputeAllMeetingPaths());
+      nextTargetSignature =
+          '${meeting.id}|${_meetingPointPosBlender!['x']}|${_meetingPointPosBlender!['y']}|${_meetingPointPosBlender!['z']}|$_meetingPointFloorLabel';
+    }
+    if (_meetingPointPosBlender != null) {
+      if (_meetingPathTargetSignature != nextTargetSignature) {
+        _meetingPathTargetSignature = nextTargetSignature;
+        unawaited(_recomputeAllMeetingPaths());
+      }
     } else {
+      _meetingPathTargetSignature = null;
       unawaited(_clearMeetingPaths());
     }
 
@@ -1278,6 +1281,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       _meetingFloorByUser.remove(id);
       _meetingNameByUser.remove(id);
       _meetingUpdatedAtByUser.remove(id);
+      _meetingLocationSignatureByUser.remove(id);
+      _meetingEtaSyncSignatureByUser.remove(id);
       _meetingArrivalStatusByUser.remove(id);
       _arrivalOverrideByUser.remove(id);
       _arrivalOverrideAtByUser.remove(id);
@@ -1316,6 +1321,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 ? updatedAtRaw.toDate()
                 : null;
             if (updatedAt != null) _meetingUpdatedAtByUser[id] = updatedAt;
+            final locationSignature =
+                '${bx ?? 'null'}|${by ?? 'null'}|${bz ?? 'null'}|$floorRaw|${updatedAt?.millisecondsSinceEpoch ?? 0}';
 
             final first = (u['firstName'] ?? '').toString().trim();
             final last = (u['lastName'] ?? '').toString().trim();
@@ -1332,6 +1339,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               _meetingPosByUser.remove(id);
               _meetingPosBlenderByUser.remove(id);
               _meetingFloorByUser.remove(id);
+              _meetingLocationSignatureByUser.remove(id);
               _trackMapController?.runJavaScript("hideTrackedPin('$id');");
               _trackMapController?.runJavaScript(
                 "clearMeetingPathForUser('$id');",
@@ -1344,9 +1352,14 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             _meetingPosByUser[id] = gltf;
             _meetingPosBlenderByUser[id] = {'x': bx, 'y': by, 'z': bz};
             _meetingFloorByUser[id] = floorRaw;
-            unawaited(_recomputeMeetingPathForUser(id));
-            if (currentUid.isNotEmpty && id == currentUid) {
-              unawaited(_maybeAutoArriveForCurrentUser());
+            final previousSignature = _meetingLocationSignatureByUser[id];
+            final locationChanged = previousSignature != locationSignature;
+            _meetingLocationSignatureByUser[id] = locationSignature;
+            if (locationChanged) {
+              unawaited(_recomputeMeetingPathForUser(id));
+              if (currentUid.isNotEmpty && id == currentUid) {
+                unawaited(_maybeAutoArriveForCurrentUser());
+              }
             }
             _applyAllTrackedPinsToViewer();
           });
@@ -1359,6 +1372,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     _meetingPathsByUserFloorGltf.clear();
     _meetingEtaBaseSecondsByUser.clear();
     _meetingEtaBaseTimeByUser.clear();
+    _meetingEtaSyncSignatureByUser.clear();
+    _meetingPathTargetSignature = null;
+    _meetingLocationSignatureByUser.clear();
     if (_trackMapController != null) {
       await _trackMapController!.runJavaScript(
         "clearMeetingPathsFromFlutter();",
@@ -1372,6 +1388,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       _meetingPathsByUserFloorGltf.remove(userId);
       _meetingEtaBaseSecondsByUser.remove(userId);
       _meetingEtaBaseTimeByUser.remove(userId);
+      _meetingEtaSyncSignatureByUser.remove(userId);
+      _meetingLocationSignatureByUser.remove(userId);
       if (mounted) setState(() {});
     }
     if (_trackMapController != null) {
@@ -1379,6 +1397,27 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         "clearMeetingPathForUser('$userId');",
       );
     }
+  }
+
+  DateTime? _meetingEtaAnchorForUser(String userId) {
+    final meeting = _lastKnownConfirmedMeeting;
+    DateTime? anchor = _meetingUpdatedAtByUser[userId];
+
+    if (meeting != null && meeting.isConfirmed) {
+      final meetingAnchor = meeting.isHost(userId)
+          ? meeting.hostLocationUpdatedAt
+          : meeting.participantFor(userId)?.locationUpdatedAt;
+      final confirmedAt = meeting.confirmedAt;
+
+      if (meetingAnchor != null && (anchor == null || meetingAnchor.isAfter(anchor))) {
+        anchor = meetingAnchor;
+      }
+      if (confirmedAt != null && (anchor == null || confirmedAt.isAfter(anchor))) {
+        anchor = confirmedAt;
+      }
+    }
+
+    return anchor;
   }
 
   Future<void> _recomputeMeetingPathForUser(String userId) async {
@@ -1512,18 +1551,49 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       final seconds = (totalMeters / 1.4).ceil();
       final baseSeconds = seconds < 60 ? 60 : seconds;
       _meetingEtaBaseSecondsByUser[userId] = baseSeconds;
-      // Always anchor to local device time so elapsed is computed consistently
-      // using the device clock. Previously we used the Firestore server timestamp
-      // (updatedAt) as the anchor, which caused the timer to run fast/slow on
-      // devices whose clock differs from the server (e.g. Note 9 ~1 min ahead).
-      _meetingEtaBaseTimeByUser[userId] = DateTime.now();
+      _meetingEtaBaseTimeByUser[userId] =
+          _meetingEtaAnchorForUser(userId) ?? MeetingPointService.serverNow;
+      unawaited(_syncMeetingEtaForUser(userId, baseSeconds));
     } else {
       _meetingEtaBaseSecondsByUser.remove(userId);
       _meetingEtaBaseTimeByUser.remove(userId);
+      _meetingEtaSyncSignatureByUser.remove(userId);
     }
     if (mounted) {
       setState(() {});
       _applyAllTrackedPinsToViewer();
+    }
+  }
+
+  Future<void> _syncMeetingEtaForUser(String userId, int etaSeconds) async {
+    final meeting = _lastKnownConfirmedMeeting;
+    final currentUid = FirebaseAuth.instance.currentUser?.uid?.trim();
+    final locationUpdatedAt = _meetingUpdatedAtByUser[userId];
+    if (meeting == null ||
+        !meeting.isConfirmed ||
+        locationUpdatedAt == null ||
+        currentUid == null ||
+        currentUid != userId) {
+      return;
+    }
+
+    final etaMinutes = (etaSeconds / 60).ceil().clamp(1, 60);
+    final signature =
+        '${meeting.id}|$etaMinutes|${locationUpdatedAt.millisecondsSinceEpoch}';
+    if (_meetingEtaSyncSignatureByUser[userId] == signature) return;
+    _meetingEtaSyncSignatureByUser[userId] = signature;
+
+    try {
+      await MeetingPointService.syncLiveArrivalEstimate(
+        meetingPointId: meeting.id,
+        userId: userId,
+        etaSeconds: etaSeconds,
+        locationUpdatedAt: locationUpdatedAt,
+      );
+    } catch (_) {
+      if (_meetingEtaSyncSignatureByUser[userId] == signature) {
+        _meetingEtaSyncSignatureByUser.remove(userId);
+      }
     }
   }
 
@@ -1537,60 +1607,6 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     for (final id in ids) {
       await _recomputeMeetingPathForUser(id);
     }
-
-    // After all paths are computed, update the local expiry display using
-    // real navmesh ETAs.  No Firestore write — avoids the oscillation.
-    _maybeComputeLocalExpiresAt();
-  }
-
-  /// Computes the session expiry locally from real navmesh ETAs and stores it
-  /// in [_localExpiresAt] for display only — no Firestore write.
-  /// Firestore keeps the random-ETA safety baseline (written by markHostDecision)
-  /// for the actual auto-expiry trigger; this keeps the two concerns separate
-  /// and eliminates the oscillation caused by two competing Firestore writes.
-  void _maybeComputeLocalExpiresAt() {
-    final meeting = _lastKnownConfirmedMeeting;
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (meeting == null || uid == null) return;
-    // Compute for all users, not just host — participants also see the timer.
-    if (_localExpiresAtComputedForMeetingId == meeting.id) return;
-
-    // Only lock in the guard once we have at least one real navmesh ETA.
-    // If the map is empty we're still waiting for participant locations —
-    // return without setting the guard so the next _recomputeAllMeetingPaths
-    // call retries with real values instead of falling back to random minutes.
-    if (_meetingEtaBaseSecondsByUser.isEmpty) return;
-
-    _localExpiresAtComputedForMeetingId = meeting.id;
-
-    final allEtaSecs = <int>[];
-
-    // Host ETA: real path if available, else fall back to stored value.
-    final hostSecs =
-        _meetingEtaBaseSecondsByUser[meeting.hostId] ??
-        (meeting.hostEstimatedMinutes * 60);
-    allEtaSecs.add(hostSecs);
-
-    // Participant ETAs: accepted & not cancelled.
-    for (final p in meeting.participants) {
-      if (!p.isAccepted || p.isCancelledArrival || p.isCancelledParticipation) {
-        continue;
-      }
-      final etaSecs =
-          _meetingEtaBaseSecondsByUser[p.userId] ??
-          (p.estimatedArrivalMinutes * 60);
-      allEtaSecs.add(etaSecs);
-    }
-
-    final largestSecs = allEtaSecs.reduce(math.max);
-    const kMinSession = Duration(minutes: 10);
-    final rawDuration = Duration(seconds: largestSecs * 3);
-    final sessionDuration =
-        rawDuration < kMinSession ? kMinSession : rawDuration;
-    final confirmedAt = meeting.confirmedAt ?? DateTime.now();
-    setState(() {
-      _localExpiresAt = confirmedAt.add(sessionDuration);
-    });
   }
 
   void _startHighlightClearTimer() {
@@ -2891,7 +2907,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           });
         }
 
-        // Session expiry: trigger auto-cancel once expiresAt has passed.
+        // Session expiry: auto-complete the meeting once expiresAt has passed.
         if (confirmedMeeting != null &&
             confirmedMeeting.expiresAt != null &&
             !confirmedMeeting.expiresAt!.isAfter(
@@ -2966,11 +2982,6 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         } else {
           _arrivalTimer?.cancel();
           _arrivalTimer = null;
-          // Clear local expiry state so the timer widget disappears with the meeting.
-          if (_localExpiresAt != null || _localExpiresAtComputedForMeetingId != null) {
-            _localExpiresAt = null;
-            _localExpiresAtComputedForMeetingId = null;
-          }
         }
 
         // Disable create when user is in active setup or confirmed arrival phase.
@@ -3112,7 +3123,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     final baseTime = _meetingEtaBaseTimeByUser[userId];
     final elapsedRaw = baseTime == null
         ? 0
-        : DateTime.now().difference(baseTime).inSeconds;
+        : MeetingPointService.serverNow.difference(baseTime).inSeconds;
     final elapsed = elapsedRaw < 0 ? 0 : elapsedRaw;
     final remaining = baseSeconds - elapsed;
     return remaining < 60 ? 60 : remaining;
@@ -6363,8 +6374,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   Widget _buildActiveMeetingSubsectionLabel(
     MeetingPointRecord? confirmedMeeting,
   ) {
-    // Prefer local real-ETA value; fall back to Firestore random-ETA baseline.
-    final expiresAt = _localExpiresAt ?? confirmedMeeting?.expiresAt;
+    // Keep the session timer fixed from the moment the meeting starts.
+    final expiresAt = confirmedMeeting?.expiresAt;
     if (expiresAt == null) {
       return _buildSubsectionLabel('Active Meeting Point');
     }

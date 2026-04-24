@@ -2305,6 +2305,7 @@ export const onMeetingPointLateArrival = onSchedule(
         const maybeNotify = async (
           uid: string,
           rawEta: any,
+          rawMeetingLocationUpdatedAt: any,
           isHost: boolean
         ) => {
           if (!uid) return;
@@ -2318,10 +2319,19 @@ export const onMeetingPointLateArrival = onSchedule(
               ? Math.min(Math.max(Math.round(etaNum), 1), 60)
               : 3;
 
+          const meetingLocationUpdatedAt = toDate(rawMeetingLocationUpdatedAt);
           let baseTime: Date | null = meetingStartAt;
-          if (userInfo.updatedAt) {
-            if (!baseTime || userInfo.updatedAt > baseTime) {
-              baseTime = userInfo.updatedAt;
+          let effectiveLocationUpdatedAt = meetingLocationUpdatedAt;
+          if (
+            userInfo.updatedAt &&
+            (!effectiveLocationUpdatedAt ||
+              userInfo.updatedAt > effectiveLocationUpdatedAt)
+          ) {
+            effectiveLocationUpdatedAt = userInfo.updatedAt;
+          }
+          if (effectiveLocationUpdatedAt) {
+            if (!baseTime || effectiveLocationUpdatedAt > baseTime) {
+              baseTime = effectiveLocationUpdatedAt;
             }
           }
           if (!baseTime) baseTime = nowDate;
@@ -2405,7 +2415,12 @@ export const onMeetingPointLateArrival = onSchedule(
           .trim()
           .toLowerCase();
         if (hostId && hostArrival === "on_the_way") {
-          await maybeNotify(hostId, data.hostEstimatedMinutes ?? 3, true);
+          await maybeNotify(
+            hostId,
+            data.hostEstimatedMinutes ?? 3,
+            data.hostLocationUpdatedAt,
+            true
+          );
         }
 
         for (const p of participants) {
@@ -2421,7 +2436,12 @@ export const onMeetingPointLateArrival = onSchedule(
           if (arrival !== "on_the_way") continue;
           const uid = (p?.userId ?? "").toString().trim();
           if (!uid || uid === hostId) continue;
-          await maybeNotify(uid, p?.estimatedArrivalMinutes ?? 3, false);
+          await maybeNotify(
+            uid,
+            p?.estimatedArrivalMinutes ?? 3,
+            p?.locationUpdatedAt,
+            false
+          );
         }
 
         if (Object.keys(pendingUpdates).length > 0) {
@@ -3563,6 +3583,61 @@ export const onTrackCompleted = onSchedule("every 1 minutes", async () => {
 
   await batch.commit();
 });
+
+/* ------------------------------------------------------------------
+
+   Meeting Point Session Expiry (Scheduled)
+
+   - When an active meeting point passes expiresAt, mark it completed with
+     an auto-close reason so the completed notification uses the time-limit
+     message.
+
+-------------------------------------------------------------------*/
+
+export const onMeetingPointSessionExpired = onSchedule(
+  "every 1 minutes",
+  async () => {
+    const now = admin.firestore.Timestamp.now();
+    const nowDate = now.toDate();
+
+    const snap = await db
+      .collection("meetingPoints")
+      .where("status", "==", "active")
+      .get();
+
+    if (snap.empty) return;
+
+    let batch = db.batch();
+    let ops = 0;
+    const commits: Promise<any>[] = [];
+
+    for (const doc of snap.docs) {
+      const data = doc.data();
+      const expiresAt =
+        data.expiresAt && typeof data.expiresAt.toDate === "function"
+          ? data.expiresAt.toDate()
+          : null;
+
+      if (!expiresAt || expiresAt > nowDate) continue;
+
+      batch.update(doc.ref, {
+        status: "completed",
+        cancellationReason: "auto-closed after time limit",
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      ops++;
+      if (ops >= 450) {
+        commits.push(batch.commit());
+        batch = db.batch();
+        ops = 0;
+      }
+    }
+
+    if (ops > 0) commits.push(batch.commit());
+    if (commits.length > 0) await Promise.all(commits);
+  }
+);
 
 /* ------------------------------------------------------------------
 

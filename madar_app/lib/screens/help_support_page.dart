@@ -12,9 +12,7 @@ class HelpSupportPage extends StatefulWidget {
   State<HelpSupportPage> createState() => _HelpSupportPageState();
 }
 
-class _HelpSupportPageState extends State<HelpSupportPage>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
+class _HelpSupportPageState extends State<HelpSupportPage> {
   final FocusNode _messageFocusNode = FocusNode();
 
   final TextEditingController _searchController = TextEditingController();
@@ -22,7 +20,8 @@ class _HelpSupportPageState extends State<HelpSupportPage>
   String _selectedTopic = 'General question';
   String _activeTab = 'all';
   String _searchQuery = '';
-  bool _isMessageExpanded = false;
+  bool _isMessageExpanded = true; // expanded by default
+  bool _showAllFaqs = false;
 
   final List<FaqItem> _allFaqs = [
     FaqItem(
@@ -135,15 +134,11 @@ class _HelpSupportPageState extends State<HelpSupportPage>
     return list;
   }
 
-  @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-  }
+  List<FaqItem> get _visibleFaqs =>
+      _showAllFaqs ? _filteredFaqs : _filteredFaqs.take(4).toList();
 
   @override
   void dispose() {
-    _tabController.dispose();
     _searchController.dispose();
     _messageController.dispose();
     _messageFocusNode.dispose();
@@ -182,14 +177,6 @@ class _HelpSupportPageState extends State<HelpSupportPage>
     }
   }
 
-  void _onAskPressed() {
-    final query = _searchController.text.trim();
-    final body = query.isEmpty
-        ? 'I need help with Madar.'
-        : 'I need help with Madar: $query';
-    _sendEmail(subject: 'Madar Support Request', body: body);
-  }
-
   void _onSendMessage() {
     final topic = _selectedTopic;
     final message = _messageController.text.trim();
@@ -206,21 +193,6 @@ class _HelpSupportPageState extends State<HelpSupportPage>
     SnackbarHelper.showSuccess(context, 'Message sent! We\'ll reply soon.');
   }
 
-  void _onEmailCardTap() {
-    setState(() {
-      _selectedTopic = 'General question';
-    });
-    FocusScope.of(context).requestFocus(_messageFocusNode);
-  }
-
-  void _onBugCardTap() {
-    setState(() {
-      _selectedTopic = 'Bug report';
-    });
-    FocusScope.of(context).requestFocus(_messageFocusNode);
-  }
-
-  @override
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
@@ -248,12 +220,12 @@ class _HelpSupportPageState extends State<HelpSupportPage>
       body: CustomScrollView(
         slivers: [
           // FAQ Section
+          // Category chips (filter buttons)
           SliverPadding(
             padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
             sliver: SliverList(
               delegate: SliverChildListDelegate([
                 const SizedBox(height: 16),
-                // Category chips
                 SizedBox(
                   height: 40,
                   child: ListView(
@@ -271,37 +243,74 @@ class _HelpSupportPageState extends State<HelpSupportPage>
               ]),
             ),
           ),
-          // FAQ list
+          // FAQ list with toggle button (simple TextButton)
           SliverPadding(
             padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
             sliver: SliverList(
-              delegate: SliverChildBuilderDelegate((context, index) {
-                if (_filteredFaqs.isEmpty) {
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 40),
-                    child: Center(
-                      child: Text(
-                        'No results found. Try different keywords.',
-                        style: TextStyle(color: Colors.grey[600]),
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  if (_filteredFaqs.isEmpty) {
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 40),
+                      child: Center(
+                        child: Text(
+                          'No results found. Try different keywords.',
+                          style: TextStyle(color: Colors.grey[600]),
+                        ),
                       ),
-                    ),
-                  );
-                }
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: _buildFaqTile(_filteredFaqs[index]),
-                );
-              }, childCount: _filteredFaqs.isEmpty ? 1 : _filteredFaqs.length),
+                    );
+                  }
+
+                  final visibleFaqs = _showAllFaqs
+                      ? _filteredFaqs
+                      : _filteredFaqs.take(4).toList();
+
+                  if (index < visibleFaqs.length) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: _buildFaqTile(visibleFaqs[index]),
+                    );
+                  }
+
+                  if (_filteredFaqs.length > 4 && index == visibleFaqs.length) {
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 4, bottom: 4),
+                      child: Center(
+                        child: GestureDetector(
+                          onTap: () =>
+                              setState(() => _showAllFaqs = !_showAllFaqs),
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text(
+                              _showAllFaqs ? 'Show less' : 'Show more',
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: AppColors.kGreen,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+
+                  return const SizedBox.shrink();
+                },
+                childCount: _filteredFaqs.isEmpty
+                    ? 1
+                    : (_filteredFaqs.length > 4
+                          ? (_showAllFaqs ? _filteredFaqs.length + 1 : 5)
+                          : _filteredFaqs.length),
+              ),
             ),
           ),
-          // Spacer before contact section
-          const SliverToBoxAdapter(child: SizedBox(height: 24)),
-          // Contact us Section
+          const SliverToBoxAdapter(child: SizedBox(height: 12)),
+          // Still need help? + Submit issue form
           SliverPadding(
             padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
             sliver: SliverList(
               delegate: SliverChildListDelegate([
-                // Still need help? + Email card
                 const Text(
                   'Still need help?',
                   style: TextStyle(
@@ -312,20 +321,19 @@ class _HelpSupportPageState extends State<HelpSupportPage>
                   ),
                 ),
                 const SizedBox(height: 12),
-                _buildContactCard(
-                  icon: Icons.email_outlined,
-                  title: 'Email support',
-                  description: 'We reply within 24 hours on business days.',
-                  buttonText: 'madar@gmail.com',
-                  onPressed: _onEmailCardTap,
-                ),
-                const SizedBox(height: 28),
-                // Expandable message form (card style)
+                // Enhanced submit issue card
                 Container(
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(color: Colors.grey[200]!),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.04),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
                   ),
                   child: Column(
                     children: [
@@ -343,10 +351,17 @@ class _HelpSupportPageState extends State<HelpSupportPage>
                           ),
                           child: Row(
                             children: [
-                              Icon(
-                                Icons.sticky_note_2_outlined,
-                                color: AppColors.kGreen,
-                                size: 24,
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  //color: AppColors.kGreen.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Icon(
+                                  Icons.mail,
+                                  color: AppColors.kGreen,
+                                  size: 20,
+                                ),
                               ),
                               const SizedBox(width: 12),
                               const Expanded(
@@ -379,11 +394,12 @@ class _HelpSupportPageState extends State<HelpSupportPage>
                           padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                           child: Column(
                             children: [
+                              // Topic dropdown
                               Container(
                                 decoration: BoxDecoration(
-                                  color: Colors.grey[100],
+                                  color: Colors.grey[50],
                                   borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: Colors.grey[300]!),
+                                  border: Border.all(color: Colors.grey[200]!),
                                 ),
                                 child: DropdownButtonFormField<String>(
                                   value: _selectedTopic,
@@ -424,14 +440,14 @@ class _HelpSupportPageState extends State<HelpSupportPage>
                                     border: InputBorder.none,
                                     contentPadding: EdgeInsets.symmetric(
                                       horizontal: 16,
-                                      vertical: 12,
+                                      vertical: 14,
                                     ),
                                   ),
                                   icon: Padding(
                                     padding: const EdgeInsets.only(right: 8),
                                     child: Icon(
                                       Icons.keyboard_arrow_down,
-                                      color: Colors.grey[600],
+                                      color: Colors.grey[500],
                                     ),
                                   ),
                                   dropdownColor: Colors.white,
@@ -442,16 +458,18 @@ class _HelpSupportPageState extends State<HelpSupportPage>
                                 ),
                               ),
                               const SizedBox(height: 12),
+                              // Message field
                               Container(
                                 decoration: BoxDecoration(
-                                  color: Colors.grey[100],
+                                  color: Colors.grey[50],
                                   borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: Colors.grey[300]!),
+                                  border: Border.all(color: Colors.grey[200]!),
                                 ),
                                 child: TextField(
                                   controller: _messageController,
                                   focusNode: _messageFocusNode,
                                   maxLines: 4,
+                                  style: const TextStyle(fontSize: 14),
                                   decoration: const InputDecoration(
                                     hintText:
                                         'Describe your issue or question in detail…',
@@ -465,6 +483,7 @@ class _HelpSupportPageState extends State<HelpSupportPage>
                                 ),
                               ),
                               const SizedBox(height: 16),
+                              // Send button
                               SizedBox(
                                 width: double.infinity,
                                 child: PrimaryButton(
@@ -544,22 +563,25 @@ class _HelpSupportPageState extends State<HelpSupportPage>
 
   Widget _buildTabChip(String label, String tab) {
     final isActive = _activeTab == tab;
-    return Padding(
-      padding: const EdgeInsets.only(right: 8),
-      child: FilterChip(
-        label: Text(label),
-        selected: isActive,
-        onSelected: (_) => setState(() => _activeTab = tab),
-        backgroundColor: Colors.grey[100],
-        selectedColor: AppColors.kGreen.withOpacity(0.15),
-        checkmarkColor: AppColors.kGreen,
-        labelStyle: TextStyle(
-          color: isActive ? AppColors.kGreen : Colors.grey[700],
-          fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+    return GestureDetector(
+      onTap: () => setState(() => _activeTab = tab),
+      child: Container(
+        margin: const EdgeInsets.only(right: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        decoration: BoxDecoration(
+          color: isActive ? AppColors.kGreen : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isActive ? AppColors.kGreen : Colors.grey.shade300,
+            width: 1,
+          ),
         ),
-        shape: StadiumBorder(
-          side: BorderSide(
-            color: isActive ? AppColors.kGreen : Colors.grey[300]!,
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+            color: isActive ? Colors.white : Colors.grey.shade500,
           ),
         ),
       ),
@@ -567,105 +589,44 @@ class _HelpSupportPageState extends State<HelpSupportPage>
   }
 
   Widget _buildFaqTile(FaqItem faq) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
+  return Container(
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: Colors.grey[200]!),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withOpacity(0.04),
+          blurRadius: 6,
+          offset: const Offset(0, 2),
+        ),
+      ],
+    ),
+    child: Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        title: Text(
+          faq.question,
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+        ),
+        iconColor: AppColors.kGreen,
+        collapsedIconColor: AppColors.kGreen,
+        children: [
+          Text(
+            faq.answer,
+            style: const TextStyle(
+              fontSize: 13,
+              color: Colors.black54,
+              height: 1.4,
+            ),
           ),
         ],
       ),
-      child: Theme(
-        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-        child: ExpansionTile(
-          tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          title: Text(
-            faq.question,
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-          ),
-          iconColor: AppColors.kGreen,
-          collapsedIconColor: AppColors.kGreen,
-          children: [
-            Text(
-              faq.answer,
-              style: const TextStyle(
-                fontSize: 13,
-                color: Colors.black54,
-                height: 1.4,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildContactCard({
-    required IconData icon,
-    required String title,
-    required String description,
-    required String buttonText,
-    required VoidCallback onPressed,
-  }) {
-    return InkWell(
-      onTap: onPressed,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.grey[200]!),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Icon(icon, color: AppColors.kGreen, size: 24),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    description,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[600],
-                      height: 1.4,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    buttonText,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      color: AppColors.kGreen,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+    ),
+  );
+}
 }
 
 class FaqItem {

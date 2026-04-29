@@ -21,7 +21,7 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
   String _selectedTopic = 'General question';
   String _activeTab = 'all';
   String _searchQuery = '';
-  bool _isMessageExpanded = true; // expanded by default
+  bool _isMessageExpanded = false;
   bool _showAllFaqs = false;
   bool _isSending = false;
 
@@ -294,345 +294,356 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
     final isSmallScreen = screenWidth < 380;
     final horizontalPadding = isSmallScreen ? 16.0 : 24.0;
 
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => FocusScope.of(context).unfocus(),
+      child: Scaffold(
         backgroundColor: Colors.white,
-        elevation: 0,
-        centerTitle: true,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: AppColors.kGreen),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text(
-          'Help & Support',
-          style: TextStyle(
-            color: AppColors.kGreen,
-            fontWeight: FontWeight.w600,
+        appBar: AppBar(
+          backgroundColor: Colors.white,
+          elevation: 0,
+          centerTitle: true,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: AppColors.kGreen),
+            onPressed: () => Navigator.pop(context),
           ),
-        ),
-      ),
-      body: CustomScrollView(
-        slivers: [
-          // FAQ Section
-          // Category chips (filter buttons)
-          SliverPadding(
-            padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
-            sliver: SliverList(
-              delegate: SliverChildListDelegate([
-                const SizedBox(height: 16),
-                SizedBox(
-                  height: 40,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
-                    children: [
-                      _buildTabChip('All', 'all'),
-                      _buildTabChip('AR Navigation', 'navigation'),
-                      _buildTabChip('AR Exploration', 'exploration'),
-                      _buildTabChip('Groups & Tracking', 'groups'),
-                      _buildTabChip('Account', 'account'),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ]),
+          title: const Text(
+            'Help & Support',
+            style: TextStyle(
+              color: AppColors.kGreen,
+              fontWeight: FontWeight.w600,
             ),
           ),
-          // FAQ list with toggle button (simple TextButton)
-          SliverPadding(
-            padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
-            sliver: SliverList(
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  if (_filteredFaqs.isEmpty) {
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 40),
-                      child: Center(
-                        child: Text(
-                          'No results found. Try different keywords.',
-                          style: TextStyle(color: Colors.grey[600]),
+        ),
+        body: CustomScrollView(
+          slivers: [
+            // FAQ Section
+            // Category chips (filter buttons)
+            SliverPadding(
+              padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+              sliver: SliverList(
+                delegate: SliverChildListDelegate([
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    height: 40,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      children: [
+                        _buildTabChip('All', 'all'),
+                        _buildTabChip('AR Navigation', 'navigation'),
+                        _buildTabChip('AR Exploration', 'exploration'),
+                        _buildTabChip('Groups & Tracking', 'groups'),
+                        _buildTabChip('Account', 'account'),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ]),
+              ),
+            ),
+            // FAQ list with toggle button (simple TextButton)
+            SliverPadding(
+              padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+              sliver: SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) {
+                    if (_filteredFaqs.isEmpty) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 40),
+                        child: Center(
+                          child: Text(
+                            'No results found. Try different keywords.',
+                            style: TextStyle(color: Colors.grey[600]),
+                          ),
                         ),
-                      ),
-                    );
-                  }
+                      );
+                    }
 
-                  final visibleFaqs = _showAllFaqs
-                      ? _filteredFaqs
-                      : _filteredFaqs.take(4).toList();
+                    final visibleFaqs = _showAllFaqs
+                        ? _filteredFaqs
+                        : _filteredFaqs.take(4).toList();
 
-                  if (index < visibleFaqs.length) {
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: _buildFaqTile(visibleFaqs[index]),
-                    );
-                  }
+                    if (index < visibleFaqs.length) {
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _buildFaqTile(visibleFaqs[index]),
+                      );
+                    }
 
-                  if (_filteredFaqs.length > 4 && index == visibleFaqs.length) {
-                    return Padding(
-                      padding: const EdgeInsets.only(top: 4, bottom: 4),
-                      child: Center(
-                        child: GestureDetector(
-                          onTap: () =>
-                              setState(() => _showAllFaqs = !_showAllFaqs),
-                          child: Padding(
-                            padding: const EdgeInsets.only(top: 6),
-                            child: Text(
-                              _showAllFaqs ? 'Show less' : 'Show more',
-                              style: const TextStyle(
-                                fontSize: 13,
-                                color: AppColors.kGreen,
-                                fontWeight: FontWeight.w500,
+                    if (_filteredFaqs.length > 4 &&
+                        index == visibleFaqs.length) {
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 4, bottom: 4),
+                        child: Center(
+                          child: GestureDetector(
+                            onTap: () =>
+                                setState(() => _showAllFaqs = !_showAllFaqs),
+                            child: Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Text(
+                                _showAllFaqs ? 'Show less' : 'Show more',
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  color: AppColors.kGreen,
+                                  fontWeight: FontWeight.w500,
+                                ),
                               ),
                             ),
                           ),
                         ),
-                      ),
-                    );
-                  }
+                      );
+                    }
 
-                  return const SizedBox.shrink();
-                },
-                childCount: _filteredFaqs.isEmpty
-                    ? 1
-                    : (_filteredFaqs.length > 4
-                          ? (_showAllFaqs ? _filteredFaqs.length + 1 : 5)
-                          : _filteredFaqs.length),
+                    return const SizedBox.shrink();
+                  },
+                  childCount: _filteredFaqs.isEmpty
+                      ? 1
+                      : (_filteredFaqs.length > 4
+                            ? (_showAllFaqs ? _filteredFaqs.length + 1 : 5)
+                            : _filteredFaqs.length),
+                ),
               ),
             ),
-          ),
-          const SliverToBoxAdapter(child: SizedBox(height: 12)),
-          // Still need help? + Submit issue form
-          SliverPadding(
-            padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
-            sliver: SliverList(
-              delegate: SliverChildListDelegate([
-                const Text(
-                  'Still need help?',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey,
-                    letterSpacing: 0.5,
+            const SliverToBoxAdapter(child: SizedBox(height: 12)),
+            // Still need help? + Submit issue form
+            SliverPadding(
+              padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+              sliver: SliverList(
+                delegate: SliverChildListDelegate([
+                  const Text(
+                    'Still need help?',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey,
+                      letterSpacing: 0.5,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                // Enhanced submit issue card
-                Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: Colors.grey[200]!),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.04),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
+                  const SizedBox(height: 12),
+                  // Enhanced submit issue card
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: Colors.grey[200]!),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.04),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      children: [
+                        InkWell(
+                          borderRadius: BorderRadius.circular(16),
+                          onTap: () {
+                            setState(() {
+                              _isMessageExpanded = !_isMessageExpanded;
+                            });
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 16,
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    //color: AppColors.kGreen.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Icon(
+                                    Icons.mail,
+                                    color: AppColors.kGreen,
+                                    size: 20,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                const Expanded(
+                                  child: Text(
+                                    'Submit your issue',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.black87,
+                                    ),
+                                  ),
+                                ),
+                                Icon(
+                                  _isMessageExpanded
+                                      ? Icons.keyboard_arrow_up
+                                      : Icons.keyboard_arrow_down,
+                                  color: Colors.grey[600],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        AnimatedCrossFade(
+                          duration: const Duration(milliseconds: 220),
+                          crossFadeState: _isMessageExpanded
+                              ? CrossFadeState.showSecond
+                              : CrossFadeState.showFirst,
+                          firstChild: const SizedBox.shrink(),
+                          secondChild: Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                            child: Column(
+                              children: [
+                                // Topic dropdown
+                                Container(
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey[50],
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: Colors.grey[200]!,
+                                    ),
+                                  ),
+                                  child: DropdownButtonFormField<String>(
+                                    value: _selectedTopic,
+                                    isExpanded: true,
+                                    items: const [
+                                      DropdownMenuItem(
+                                        value: 'General question',
+                                        child: Text('General question'),
+                                      ),
+                                      DropdownMenuItem(
+                                        value: 'AR Navigation issue',
+                                        child: Text('AR Navigation issue'),
+                                      ),
+                                      DropdownMenuItem(
+                                        value: 'AR Exploration issue',
+                                        child: Text('AR Exploration issue'),
+                                      ),
+                                      DropdownMenuItem(
+                                        value: 'Meeting point / tracking',
+                                        child: Text('Meeting point / tracking'),
+                                      ),
+                                      DropdownMenuItem(
+                                        value: 'Account & login',
+                                        child: Text('Account & login'),
+                                      ),
+                                      DropdownMenuItem(
+                                        value: 'Bug report',
+                                        child: Text('Bug report'),
+                                      ),
+                                      DropdownMenuItem(
+                                        value: 'Other',
+                                        child: Text('Other'),
+                                      ),
+                                    ],
+                                    onChanged: (value) =>
+                                        setState(() => _selectedTopic = value!),
+                                    decoration: const InputDecoration(
+                                      border: InputBorder.none,
+                                      contentPadding: EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                        vertical: 14,
+                                      ),
+                                    ),
+                                    icon: Padding(
+                                      padding: const EdgeInsets.only(right: 8),
+                                      child: Icon(
+                                        Icons.keyboard_arrow_down,
+                                        color: Colors.grey[500],
+                                      ),
+                                    ),
+                                    dropdownColor: Colors.white,
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      color: Colors.black87,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                // Message field
+                                Container(
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey[50],
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: Colors.grey[200]!,
+                                    ),
+                                  ),
+                                  child: TextField(
+                                    controller: _messageController,
+                                    focusNode: _messageFocusNode,
+                                    maxLines: 4,
+                                    style: const TextStyle(fontSize: 14),
+                                    decoration: const InputDecoration(
+                                      hintText:
+                                          'Describe your issue or question in detail…',
+                                      hintStyle: TextStyle(
+                                        fontSize: 13,
+                                        color: Colors.grey,
+                                      ),
+                                      border: InputBorder.none,
+                                      contentPadding: EdgeInsets.all(16),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                // Send button
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: PrimaryButton(
+                                    text: _isSending
+                                        ? 'Sending...'
+                                        : 'Send message',
+                                    onPressed: _isSending
+                                        ? null
+                                        : _onSendMessage,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  child: Column(
+                  const SizedBox(height: 24),
+                  const Text(
+                    'Follow us',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      InkWell(
-                        borderRadius: BorderRadius.circular(16),
-                        onTap: () {
-                          setState(() {
-                            _isMessageExpanded = !_isMessageExpanded;
-                          });
-                        },
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 16,
-                          ),
-                          child: Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  //color: AppColors.kGreen.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Icon(
-                                  Icons.mail,
-                                  color: AppColors.kGreen,
-                                  size: 20,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              const Expanded(
-                                child: Text(
-                                  'Submit your issue',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.black87,
-                                  ),
-                                ),
-                              ),
-                              Icon(
-                                _isMessageExpanded
-                                    ? Icons.keyboard_arrow_up
-                                    : Icons.keyboard_arrow_down,
-                                color: Colors.grey[600],
-                              ),
-                            ],
-                          ),
-                        ),
+                      _buildSocialCircle(
+                        icon: Icons.alternate_email,
+                        label: 'X',
+                        url: 'https://x.com/madar_app',
                       ),
-                      AnimatedCrossFade(
-                        duration: const Duration(milliseconds: 220),
-                        crossFadeState: _isMessageExpanded
-                            ? CrossFadeState.showSecond
-                            : CrossFadeState.showFirst,
-                        firstChild: const SizedBox.shrink(),
-                        secondChild: Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                          child: Column(
-                            children: [
-                              // Topic dropdown
-                              Container(
-                                decoration: BoxDecoration(
-                                  color: Colors.grey[50],
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: Colors.grey[200]!),
-                                ),
-                                child: DropdownButtonFormField<String>(
-                                  value: _selectedTopic,
-                                  isExpanded: true,
-                                  items: const [
-                                    DropdownMenuItem(
-                                      value: 'General question',
-                                      child: Text('General question'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'AR Navigation issue',
-                                      child: Text('AR Navigation issue'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'AR Exploration issue',
-                                      child: Text('AR Exploration issue'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'Meeting point / tracking',
-                                      child: Text('Meeting point / tracking'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'Account & login',
-                                      child: Text('Account & login'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'Bug report',
-                                      child: Text('Bug report'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'Other',
-                                      child: Text('Other'),
-                                    ),
-                                  ],
-                                  onChanged: (value) =>
-                                      setState(() => _selectedTopic = value!),
-                                  decoration: const InputDecoration(
-                                    border: InputBorder.none,
-                                    contentPadding: EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                      vertical: 14,
-                                    ),
-                                  ),
-                                  icon: Padding(
-                                    padding: const EdgeInsets.only(right: 8),
-                                    child: Icon(
-                                      Icons.keyboard_arrow_down,
-                                      color: Colors.grey[500],
-                                    ),
-                                  ),
-                                  dropdownColor: Colors.white,
-                                  style: const TextStyle(
-                                    fontSize: 14,
-                                    color: Colors.black87,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              // Message field
-                              Container(
-                                decoration: BoxDecoration(
-                                  color: Colors.grey[50],
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: Colors.grey[200]!),
-                                ),
-                                child: TextField(
-                                  controller: _messageController,
-                                  focusNode: _messageFocusNode,
-                                  maxLines: 4,
-                                  style: const TextStyle(fontSize: 14),
-                                  decoration: const InputDecoration(
-                                    hintText:
-                                        'Describe your issue or question in detail…',
-                                    hintStyle: TextStyle(
-                                      fontSize: 13,
-                                      color: Colors.grey,
-                                    ),
-                                    border: InputBorder.none,
-                                    contentPadding: EdgeInsets.all(16),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 16),
-                              // Send button
-                              SizedBox(
-                                width: double.infinity,
-                                child: PrimaryButton(
-                                  text: _isSending
-                                      ? 'Sending...'
-                                      : 'Send message',
-                                  onPressed: _isSending ? null : _onSendMessage,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                      const SizedBox(width: 40),
+                      _buildSocialCircle(
+                        icon: Icons.camera_alt,
+                        label: 'Instagram',
+                        url: 'https://instagram.com/madar_app',
+                      ),
+                      const SizedBox(width: 40),
+                      _buildSocialCircle(
+                        icon: Icons.play_circle_filled,
+                        label: 'YouTube',
+                        url: 'https://youtube.com/@madar_app',
                       ),
                     ],
                   ),
-                ),
-                const SizedBox(height: 24),
-                const Text(
-                  'Follow us',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _buildSocialCircle(
-                      icon: Icons.alternate_email,
-                      label: 'X',
-                      url: 'https://x.com/madar_app',
-                    ),
-                    const SizedBox(width: 40),
-                    _buildSocialCircle(
-                      icon: Icons.camera_alt,
-                      label: 'Instagram',
-                      url: 'https://instagram.com/madar_app',
-                    ),
-                    const SizedBox(width: 40),
-                    _buildSocialCircle(
-                      icon: Icons.play_circle_filled,
-                      label: 'YouTube',
-                      url: 'https://youtube.com/@madar_app',
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 32),
-              ]),
+                  const SizedBox(height: 32),
+                ]),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

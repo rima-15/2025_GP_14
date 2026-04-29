@@ -1,11 +1,10 @@
-import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
-import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:madar_app/theme/theme.dart';
+import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:madar_app/theme/theme.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class HelpSupportPage extends StatefulWidget {
   const HelpSupportPage({super.key});
@@ -16,12 +15,10 @@ class HelpSupportPage extends StatefulWidget {
 
 class _HelpSupportPageState extends State<HelpSupportPage> {
   final FocusNode _messageFocusNode = FocusNode();
-
-  final TextEditingController _searchController = TextEditingController();
   final TextEditingController _messageController = TextEditingController();
+
   String _selectedTopic = 'General question';
   String _activeTab = 'all';
-  String _searchQuery = '';
   bool _isMessageExpanded = false;
   bool _showAllFaqs = false;
   bool _isSending = false;
@@ -121,52 +118,26 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
 
   List<FaqItem> get _filteredFaqs {
     var list = _allFaqs;
+
     if (_activeTab != 'all') {
-      list = list.where((f) => f.category == _activeTab).toList();
+      list = list.where((faq) => faq.category == _activeTab).toList();
     }
-    if (_searchQuery.isNotEmpty) {
-      final query = _searchQuery.toLowerCase();
-      list = list
-          .where(
-            (f) =>
-                f.question.toLowerCase().contains(query) ||
-                f.answer.toLowerCase().contains(query),
-          )
-          .toList();
-    }
+
     return list;
   }
 
-  List<FaqItem> get _visibleFaqs =>
-      _showAllFaqs ? _filteredFaqs : _filteredFaqs.take(4).toList();
+  List<FaqItem> get _visibleFaqs {
+    return _showAllFaqs ? _filteredFaqs : _filteredFaqs.take(4).toList();
+  }
 
   @override
   void dispose() {
-    _searchController.dispose();
     _messageController.dispose();
     _messageFocusNode.dispose();
     super.dispose();
   }
 
-  Future<bool> _sendEmail({
-    required String subject,
-    required String body,
-  }) async {
-    final emailUri = Uri(
-      scheme: 'mailto',
-      path: 'madar.support@gmail.com',
-      queryParameters: {'subject': subject, 'body': body},
-    );
-
-    if (await canLaunchUrl(emailUri)) {
-      await launchUrl(emailUri);
-      return true;
-    }
-    return false;
-  }
-
-  // IMPROVED onSendMessage (only one copy)
-  void _onSendMessage() async {
+  Future<void> _onSendMessage() async {
     final topic = _selectedTopic;
     final message = _messageController.text.trim();
     final userEmail = FirebaseAuth.instance.currentUser?.email?.trim();
@@ -194,17 +165,17 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
           'subject': '[Madar Support] $topic',
           'html':
               '''
-          <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #222;">
-            <h2>New Support Request</h2>
-            <p><strong>User email:</strong> $userEmail</p>
-            <p><strong>Topic:</strong> $topic</p>
-            <hr style="margin: 16px 0;">
-            <p><strong>Message:</strong></p>
-            <div style="background:#f7f7f7; padding:12px; border-radius:8px;">
-              ${message.replaceAll('\n', '<br>')}
+            <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #222;">
+              <h2>New Support Request</h2>
+              <p><strong>User email:</strong> $userEmail</p>
+              <p><strong>Topic:</strong> $topic</p>
+              <hr style="margin: 16px 0;">
+              <p><strong>Message:</strong></p>
+              <div style="background:#f7f7f7; padding:12px; border-radius:8px;">
+                ${message.replaceAll('\n', '<br>')}
+              </div>
             </div>
-          </div>
-        ''',
+          ''',
           'text': 'User email: $userEmail\nTopic: $topic\n\n$message',
         },
         'createdAt': FieldValue.serverTimestamp(),
@@ -213,8 +184,6 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
       if (!mounted) return;
 
       _messageController.clear();
-      setState(() => _isSending = false);
-
       SnackbarHelper.showSuccess(
         context,
         'Your request was submitted successfully.',
@@ -222,70 +191,24 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
     } catch (e) {
       if (!mounted) return;
 
-      setState(() => _isSending = false);
       SnackbarHelper.showError(
         context,
         'Failed to send message. Please try again.',
       );
+    } finally {
+      if (mounted) {
+        setState(() => _isSending = false);
+      }
     }
-  }
-
-  void _showEmailFallbackDialog(String messageBody) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('No email app found'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'We couldn’t open your email client. You can manually send your request to:',
-            ),
-            const SizedBox(height: 8),
-            SelectableText(
-              'madar.support@gmail.com',
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                color: AppColors.kGreen,
-              ),
-            ),
-            const SizedBox(height: 12),
-            const Text('Your message has been copied to the clipboard.'),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-            },
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              await Clipboard.setData(ClipboardData(text: messageBody));
-              Navigator.pop(context);
-              SnackbarHelper.showSuccess(
-                context,
-                'Message copied! Please paste it into your email client.',
-              );
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.kGreen),
-            child: const Text('Copy & Close'),
-          ),
-        ],
-      ),
-    );
   }
 
   Future<void> _launchUrl(String url) async {
     final uri = Uri.parse(url);
+
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri);
-    } else {
-      if (mounted) {
-        SnackbarHelper.showError(context, 'Could not open link.');
-      }
+    } else if (mounted) {
+      SnackbarHelper.showError(context, 'Could not open link.');
     }
   }
 
@@ -318,8 +241,6 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
         ),
         body: CustomScrollView(
           slivers: [
-            // FAQ Section
-            // Category chips (filter buttons)
             SliverPadding(
               padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
               sliver: SliverList(
@@ -342,7 +263,6 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
                 ]),
               ),
             ),
-            // FAQ list with toggle button (simple TextButton)
             SliverPadding(
               padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
               sliver: SliverList(
@@ -360,25 +280,22 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
                       );
                     }
 
-                    final visibleFaqs = _showAllFaqs
-                        ? _filteredFaqs
-                        : _filteredFaqs.take(4).toList();
-
-                    if (index < visibleFaqs.length) {
+                    if (index < _visibleFaqs.length) {
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 12),
-                        child: _buildFaqTile(visibleFaqs[index]),
+                        child: _buildFaqTile(_visibleFaqs[index]),
                       );
                     }
 
                     if (_filteredFaqs.length > 4 &&
-                        index == visibleFaqs.length) {
+                        index == _visibleFaqs.length) {
                       return Padding(
                         padding: const EdgeInsets.only(top: 4, bottom: 4),
                         child: Center(
                           child: GestureDetector(
-                            onTap: () =>
-                                setState(() => _showAllFaqs = !_showAllFaqs),
+                            onTap: () {
+                              setState(() => _showAllFaqs = !_showAllFaqs);
+                            },
                             child: Padding(
                               padding: const EdgeInsets.only(top: 6),
                               child: Text(
@@ -406,7 +323,6 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
               ),
             ),
             const SliverToBoxAdapter(child: SizedBox(height: 12)),
-            // Still need help? + Submit issue form
             SliverPadding(
               padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
               sliver: SliverList(
@@ -421,7 +337,6 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  // Enhanced submit issue card
                   Container(
                     decoration: BoxDecoration(
                       color: Colors.white,
@@ -454,10 +369,9 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
                                 Container(
                                   padding: const EdgeInsets.all(8),
                                   decoration: BoxDecoration(
-                                    //color: AppColors.kGreen.withOpacity(0.1),
                                     borderRadius: BorderRadius.circular(12),
                                   ),
-                                  child: Icon(
+                                  child: const Icon(
                                     Icons.mail,
                                     color: AppColors.kGreen,
                                     size: 20,
@@ -494,7 +408,6 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
                             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                             child: Column(
                               children: [
-                                // Topic dropdown
                                 Container(
                                   decoration: BoxDecoration(
                                     color: Colors.grey[50],
@@ -536,8 +449,11 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
                                         child: Text('Other'),
                                       ),
                                     ],
-                                    onChanged: (value) =>
-                                        setState(() => _selectedTopic = value!),
+                                    onChanged: (value) {
+                                      if (value != null) {
+                                        setState(() => _selectedTopic = value);
+                                      }
+                                    },
                                     decoration: const InputDecoration(
                                       border: InputBorder.none,
                                       contentPadding: EdgeInsets.symmetric(
@@ -560,7 +476,6 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
                                   ),
                                 ),
                                 const SizedBox(height: 12),
-                                // Message field
                                 Container(
                                   decoration: BoxDecoration(
                                     color: Colors.grey[50],
@@ -587,7 +502,6 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
                                   ),
                                 ),
                                 const SizedBox(height: 16),
-                                // Send button
                                 SizedBox(
                                   width: double.infinity,
                                   child: PrimaryButton(
@@ -622,19 +536,16 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
                     children: [
                       _buildSocialCircle(
                         icon: FontAwesomeIcons.xTwitter,
-                        label: 'X',
                         url: 'https://x.com/madar_app',
                       ),
                       const SizedBox(width: 40),
                       _buildSocialCircle(
                         icon: FontAwesomeIcons.instagram,
-                        label: 'Instagram',
                         url: 'https://instagram.com/madar_app',
                       ),
                       const SizedBox(width: 40),
                       _buildSocialCircle(
                         icon: FontAwesomeIcons.youtube,
-                        label: 'YouTube',
                         url: 'https://youtube.com/@madar_app',
                       ),
                     ],
@@ -649,11 +560,7 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
     );
   }
 
-  Widget _buildSocialCircle({
-    required IconData icon,
-    required String label,
-    required String url,
-  }) {
+  Widget _buildSocialCircle({required IconData icon, required String url}) {
     return InkWell(
       onTap: () => _launchUrl(url),
       borderRadius: BorderRadius.circular(30),
@@ -672,6 +579,7 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
 
   Widget _buildTabChip(String label, String tab) {
     final isActive = _activeTab == tab;
+
     return GestureDetector(
       onTap: () => setState(() => _activeTab = tab),
       child: Container(
@@ -742,6 +650,7 @@ class FaqItem {
   final String category;
   final String question;
   final String answer;
+
   FaqItem({
     required this.category,
     required this.question,

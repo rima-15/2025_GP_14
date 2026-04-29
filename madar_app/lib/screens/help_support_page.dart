@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:madar_app/theme/theme.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
 
 class HelpSupportPage extends StatefulWidget {
@@ -620,19 +621,19 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       _buildSocialCircle(
-                        icon: Icons.alternate_email,
+                        icon: FontAwesomeIcons.xTwitter,
                         label: 'X',
                         url: 'https://x.com/madar_app',
                       ),
                       const SizedBox(width: 40),
                       _buildSocialCircle(
-                        icon: Icons.camera_alt,
+                        icon: FontAwesomeIcons.instagram,
                         label: 'Instagram',
                         url: 'https://instagram.com/madar_app',
                       ),
                       const SizedBox(width: 40),
                       _buildSocialCircle(
-                        icon: Icons.play_circle_filled,
+                        icon: FontAwesomeIcons.youtube,
                         label: 'YouTube',
                         url: 'https://youtube.com/@madar_app',
                       ),

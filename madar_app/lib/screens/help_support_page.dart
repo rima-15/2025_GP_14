@@ -1,7 +1,8 @@
-// lib/screens/help_support_page.dart
-
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter/services.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:madar_app/theme/theme.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
 
@@ -22,6 +23,7 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
   String _searchQuery = '';
   bool _isMessageExpanded = true; // expanded by default
   bool _showAllFaqs = false;
+  bool _isSending = false;
 
   final List<FaqItem> _allFaqs = [
     FaqItem(
@@ -145,25 +147,134 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
     super.dispose();
   }
 
-  Future<void> _sendEmail({
+  Future<bool> _sendEmail({
     required String subject,
     required String body,
   }) async {
     final emailUri = Uri(
       scheme: 'mailto',
-      path: 'support@madar.app',
+      path: 'madar.support@gmail.com',
       queryParameters: {'subject': subject, 'body': body},
     );
+
     if (await canLaunchUrl(emailUri)) {
       await launchUrl(emailUri);
-    } else {
-      if (mounted) {
-        SnackbarHelper.showError(
-          context,
-          'Could not open email client. Please email support@madar.app manually.',
-        );
-      }
+      return true;
     }
+    return false;
+  }
+
+  // IMPROVED onSendMessage (only one copy)
+  void _onSendMessage() async {
+    final topic = _selectedTopic;
+    final message = _messageController.text.trim();
+    final userEmail = FirebaseAuth.instance.currentUser?.email?.trim();
+
+    if (message.isEmpty) {
+      SnackbarHelper.showError(
+        context,
+        'Please enter a message before sending.',
+      );
+      return;
+    }
+
+    if (userEmail == null || userEmail.isEmpty) {
+      SnackbarHelper.showError(context, 'Could not find your email address.');
+      return;
+    }
+
+    setState(() => _isSending = true);
+
+    try {
+      await FirebaseFirestore.instance.collection('mail').add({
+        'to': ['madar.support@gmail.com'],
+        'replyTo': userEmail,
+        'message': {
+          'subject': '[Madar Support] $topic',
+          'html':
+              '''
+          <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #222;">
+            <h2>New Support Request</h2>
+            <p><strong>User email:</strong> $userEmail</p>
+            <p><strong>Topic:</strong> $topic</p>
+            <hr style="margin: 16px 0;">
+            <p><strong>Message:</strong></p>
+            <div style="background:#f7f7f7; padding:12px; border-radius:8px;">
+              ${message.replaceAll('\n', '<br>')}
+            </div>
+          </div>
+        ''',
+          'text': 'User email: $userEmail\nTopic: $topic\n\n$message',
+        },
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      if (!mounted) return;
+
+      _messageController.clear();
+      setState(() => _isSending = false);
+
+      SnackbarHelper.showSuccess(
+        context,
+        'Your request was submitted successfully.',
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() => _isSending = false);
+      SnackbarHelper.showError(
+        context,
+        'Failed to send message. Please try again.',
+      );
+    }
+  }
+
+  void _showEmailFallbackDialog(String messageBody) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('No email app found'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'We couldn’t open your email client. You can manually send your request to:',
+            ),
+            const SizedBox(height: 8),
+            SelectableText(
+              'madar.support@gmail.com',
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                color: AppColors.kGreen,
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text('Your message has been copied to the clipboard.'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+            },
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: messageBody));
+              Navigator.pop(context);
+              SnackbarHelper.showSuccess(
+                context,
+                'Message copied! Please paste it into your email client.',
+              );
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.kGreen),
+            child: const Text('Copy & Close'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _launchUrl(String url) async {
@@ -175,22 +286,6 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
         SnackbarHelper.showError(context, 'Could not open link.');
       }
     }
-  }
-
-  void _onSendMessage() {
-    final topic = _selectedTopic;
-    final message = _messageController.text.trim();
-    if (message.isEmpty) {
-      SnackbarHelper.showError(
-        context,
-        'Please enter a message before sending.',
-      );
-      return;
-    }
-    final fullMessage = 'Topic: $topic\n\n$message';
-    _sendEmail(subject: 'Madar Support Request', body: fullMessage);
-    _messageController.clear();
-    SnackbarHelper.showSuccess(context, 'Message sent! We\'ll reply soon.');
   }
 
   @override
@@ -487,8 +582,10 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
                               SizedBox(
                                 width: double.infinity,
                                 child: PrimaryButton(
-                                  text: 'Send message',
-                                  onPressed: _onSendMessage,
+                                  text: _isSending
+                                      ? 'Sending...'
+                                      : 'Send message',
+                                  onPressed: _isSending ? null : _onSendMessage,
                                 ),
                               ),
                             ],
@@ -589,44 +686,44 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
   }
 
   Widget _buildFaqTile(FaqItem faq) {
-  return Container(
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: Colors.grey[200]!),
-      boxShadow: [
-        BoxShadow(
-          color: Colors.black.withOpacity(0.04),
-          blurRadius: 6,
-          offset: const Offset(0, 2),
-        ),
-      ],
-    ),
-    child: Theme(
-      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-      child: ExpansionTile(
-        tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-        title: Text(
-          faq.question,
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-        ),
-        iconColor: AppColors.kGreen,
-        collapsedIconColor: AppColors.kGreen,
-        children: [
-          Text(
-            faq.answer,
-            style: const TextStyle(
-              fontSize: 13,
-              color: Colors.black54,
-              height: 1.4,
-            ),
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey[200]!),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
-    ),
-  );
-}
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          title: Text(
+            faq.question,
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+          ),
+          iconColor: AppColors.kGreen,
+          collapsedIconColor: AppColors.kGreen,
+          children: [
+            Text(
+              faq.answer,
+              style: const TextStyle(
+                fontSize: 13,
+                color: Colors.black54,
+                height: 1.4,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class FaqItem {

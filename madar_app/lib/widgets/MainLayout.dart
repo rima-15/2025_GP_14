@@ -658,19 +658,6 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                         },
                       ),
                       _buildMenuItem(
-                        icon: Icons.settings_outlined,
-                        title: 'Settings',
-                        onTap: () {
-                          Navigator.pop(context);
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const SettingsPage(),
-                            ),
-                          );
-                        },
-                      ),
-                      _buildMenuItem(
                         icon: Icons.history,
                         title: 'Requests History',
                         onTap: () {
@@ -679,6 +666,19 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                             context,
                             MaterialPageRoute(
                               builder: (_) => const HistoryPage(),
+                            ),
+                          );
+                        },
+                      ),
+                      _buildMenuItem(
+                        icon: Icons.settings_outlined,
+                        title: 'Settings',
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const SettingsPage(),
                             ),
                           );
                         },

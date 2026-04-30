@@ -329,7 +329,7 @@ class _FavoriteFriendsPageState extends State<FavoriteFriendsPage> {
             child: TextField(
               controller: _searchCtrl,
               decoration: const InputDecoration(
-                hintText: 'Search by name',
+                hintText: 'Search',
                 hintStyle: TextStyle(color: Color(0xFF9E9E9E)),
                 border: InputBorder.none,
                 enabledBorder: InputBorder.none,
@@ -422,8 +422,85 @@ class _FavoriteFriendsPageState extends State<FavoriteFriendsPage> {
                 ),
               ),
               GestureDetector(
-                onTap: () => _removeFavorite(phone),
-                child: const Icon(Icons.favorite, color: Colors.red, size: 26),
+                onTap: () async {
+                  final confirmed = await showDialog<bool>(
+                    context: context,
+                    barrierColor: Colors.black54,
+                    builder: (ctx) => AlertDialog(
+                      backgroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      titlePadding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+                      contentPadding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+                      title: const Text(
+                        'Remove Favorite',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 20,
+                        ),
+                      ),
+                      content: Text(
+                        'Are you sure you want to remove "$name" from your favorite friends?',
+                        style: const TextStyle(fontSize: 15),
+                      ),
+                      actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                      actions: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextButton(
+                                onPressed: () => Navigator.pop(ctx, false),
+                                style: TextButton.styleFrom(
+                                  backgroundColor: Colors.grey[200],
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 12,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                                child: const Text(
+                                  'Cancel',
+                                  style: TextStyle(
+                                    color: Colors.black87,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: TextButton(
+                                onPressed: () => Navigator.pop(ctx, true),
+                                style: TextButton.styleFrom(
+                                  backgroundColor: AppColors.kError,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 12,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                                child: const Text(
+                                  'Remove',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirmed == true) _removeFavorite(phone);
+                },
+                child: const Icon(Icons.favorite, color: Colors.red, size: 24),
               ),
             ],
           ),

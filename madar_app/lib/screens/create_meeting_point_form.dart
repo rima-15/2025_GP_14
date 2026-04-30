@@ -4601,7 +4601,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: Colors.grey[50],
         borderRadius: BorderRadius.circular(12),
@@ -4652,7 +4652,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
               color: _favService.isFavorite(p.friend.phone) ? Colors.red : Colors.grey[400],
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 8),
 
           // Status chip
           Container(
@@ -4846,7 +4846,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
       return Container(
         margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         decoration: BoxDecoration(
           color: Colors.grey[50],
           borderRadius: BorderRadius.circular(12),
@@ -4907,11 +4907,11 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
                 },
                 child: Icon(
                   _favService.isFavorite(phone) ? Icons.favorite : Icons.favorite_border,
-                  size: 20,
+                  size: 22,
                   color: _favService.isFavorite(phone) ? Colors.red : Colors.grey[400],
                 ),
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: 8),
               Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 10,
@@ -5213,6 +5213,7 @@ class _FavoriteListSheetState extends State<_FavoriteListSheet> {
   List<_Friend> _allFavorites = [];
   List<_Friend> _filtered = [];
   final List<_Friend> _picked = [];
+  final Set<_Friend> _deselected = {};
   bool _loadingFavorites = true;
 
   @override
@@ -5374,6 +5375,20 @@ class _FavoriteListSheetState extends State<_FavoriteListSheet> {
                 final f = _filtered[i];
                 final alreadyAdded = widget.alreadySelectedPhones.contains(f.phone);
                 final picked = _picked.contains(f);
+                final isChecked = alreadyAdded
+                    ? !_deselected.contains(f)
+                    : picked;
+
+                void toggle() => setState(() {
+                      if (alreadyAdded) {
+                        _deselected.contains(f)
+                            ? _deselected.remove(f)
+                            : _deselected.add(f);
+                      } else {
+                        picked ? _picked.remove(f) : _picked.add(f);
+                      }
+                    });
+
                 return ListTile(
                   contentPadding: const EdgeInsets.symmetric(vertical: 6),
                   leading: Container(
@@ -5387,50 +5402,35 @@ class _FavoriteListSheetState extends State<_FavoriteListSheet> {
                   ),
                   title: Text(
                     f.name,
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w600,
-                      color: alreadyAdded ? Colors.grey[400] : Colors.black87,
+                      color: Colors.black87,
                     ),
                   ),
                   subtitle: Text(
                     f.phone,
                     style: TextStyle(fontSize: 13, color: Colors.grey[400]),
                   ),
-                  trailing: alreadyAdded
-                      ? Text(
-                          'Added',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: AppColors.kGreen,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        )
-                      : GestureDetector(
-                          onTap: () => setState(() {
-                            picked ? _picked.remove(f) : _picked.add(f);
-                          }),
-                          child: Container(
-                            width: 26,
-                            height: 26,
-                            decoration: BoxDecoration(
-                              color: picked ? AppColors.kGreen : Colors.transparent,
-                              border: Border.all(
-                                color: picked ? AppColors.kGreen : Colors.grey.shade300,
-                                width: 2,
-                              ),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: picked
-                                ? const Icon(Icons.check, color: Colors.white, size: 16)
-                                : null,
-                          ),
+                  trailing: GestureDetector(
+                    onTap: toggle,
+                    child: Container(
+                      width: 26,
+                      height: 26,
+                      decoration: BoxDecoration(
+                        color: isChecked ? AppColors.kGreen : Colors.transparent,
+                        border: Border.all(
+                          color: isChecked ? AppColors.kGreen : Colors.grey.shade300,
+                          width: 2,
                         ),
-                  onTap: alreadyAdded
-                      ? null
-                      : () => setState(() {
-                            picked ? _picked.remove(f) : _picked.add(f);
-                          }),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: isChecked
+                          ? const Icon(Icons.check, color: Colors.white, size: 16)
+                          : null,
+                    ),
+                  ),
+                  onTap: toggle,
                 );
               },
             ),

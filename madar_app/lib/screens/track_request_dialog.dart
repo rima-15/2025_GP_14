@@ -2623,9 +2623,9 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                               ),
                             ),
                             // Favorite button — shown for every friend, state always from DB
-                            IconButton(
-                              onPressed: () => _toggleFavorite(friend),
-                              icon: Icon(
+                            GestureDetector(
+                              onTap: () => _toggleFavorite(friend),
+                              child: Icon(
                                 _favService.isFavorite(friend.phone)
                                     ? Icons.favorite
                                     : Icons.favorite_border,
@@ -2635,9 +2635,10 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                                 size: 22,
                               ),
                             ),
-                            IconButton(
-                              onPressed: () => _removeFriend(friend),
-                              icon: const Icon(
+                            const SizedBox(width: 8),
+                            GestureDetector(
+                              onTap: () => _removeFriend(friend),
+                              child: const Icon(
                                 Icons.check_circle,
                                 color: AppColors.kGreen,
                                 size: 24,

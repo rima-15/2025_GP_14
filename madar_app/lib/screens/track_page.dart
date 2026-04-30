@@ -3484,7 +3484,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                         color: _favService.isFavorite(p.phone)
                             ? Colors.red
                             : Colors.grey[400],
-                        size: 24,
+                        size: 23, 
                       ),
                     ),
                     AnimatedRotation(
@@ -4689,7 +4689,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             }),
             borderRadius: BorderRadius.circular(16),
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               child: Row(
                 children: [
                   Container(
@@ -4724,6 +4724,25 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                       ],
                     ),
                   ),
+                  if (meeting.hostPhone.isNotEmpty)
+                    IconButton(
+                      onPressed: () async {
+                        await _favService.toggle(
+                          meeting.hostPhone,
+                          meeting.hostName,
+                        );
+                        if (mounted) setState(() {});
+                      },
+                      icon: Icon(
+                        _favService.isFavorite(meeting.hostPhone)
+                            ? Icons.favorite
+                            : Icons.favorite_border,
+                        color: _favService.isFavorite(meeting.hostPhone)
+                            ? Colors.red
+                            : Colors.grey[400],
+                        size: 23,
+                      ),
+                    ),
                   AnimatedRotation(
                     turns: isExpanded ? 0.5 : 0,
                     duration: const Duration(milliseconds: 200),
@@ -4795,15 +4814,21 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                   ),
                 ),
                 const SizedBox(height: 8),
-                ...meeting.participants.map(
-                  (p) => _buildMeetingInviteParticipantRow(
-                    name: p.name,
-                    phone: p.phone,
-                    isHost: false,
-                    status: p.userId == uid ? null : p.status,
-                    isMe: p.userId == uid,
-                  ),
-                ),
+                ...([...meeting.participants]
+                      ..sort((a, b) {
+                        if (a.userId == uid) return -1;
+                        if (b.userId == uid) return 1;
+                        return 0;
+                      }))
+                    .map(
+                      (p) => _buildMeetingInviteParticipantRow(
+                        name: p.name,
+                        phone: p.phone,
+                        isHost: false,
+                        status: p.userId == uid ? null : p.status,
+                        isMe: p.userId == uid,
+                      ),
+                    ),
               ],
             ),
           ),
@@ -4892,6 +4917,24 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 ),
               ),
             ),
+          if (!isMe && !isHost && phone.isNotEmpty) ...[
+            GestureDetector(
+              onTap: () async {
+                await _favService.toggle(phone, name);
+                if (mounted) setState(() {});
+              },
+              child: Icon(
+                _favService.isFavorite(phone)
+                    ? Icons.favorite
+                    : Icons.favorite_border,
+                color: _favService.isFavorite(phone)
+                    ? Colors.red
+                    : Colors.grey[400],
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: 6),
+          ],
           if (isMe)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -5550,11 +5593,36 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
-                                      _labeledDetail(
-                                        'Host: ',
-                                        live.hostPhone.isEmpty
-                                            ? live.hostName
-                                            : '${live.hostName} (${live.hostPhone})',
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: _labeledDetail(
+                                              'Host: ',
+                                              live.hostPhone.isEmpty
+                                                  ? live.hostName
+                                                  : '${live.hostName} (${live.hostPhone})',
+                                            ),
+                                          ),
+                                          if (live.hostPhone.isNotEmpty)
+                                            GestureDetector(
+                                              onTap: () async {
+                                                await _favService.toggle(
+                                                  live.hostPhone,
+                                                  live.hostName,
+                                                );
+                                                if (mounted) setState(() {});
+                                              },
+                                              child: Icon(
+                                                _favService.isFavorite(live.hostPhone)
+                                                    ? Icons.favorite
+                                                    : Icons.favorite_border,
+                                                color: _favService.isFavorite(live.hostPhone)
+                                                    ? Colors.red
+                                                    : Colors.grey[400],
+                                                size: 22,
+                                              ),
+                                            ),
+                                        ],
                                       ),
                                       const SizedBox(height: 8),
                                       _labeledDetail('Venue: ', live.venueName),
@@ -5586,20 +5654,29 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                             ],
                           ),
                           const SizedBox(height: 8),
-                          ...[
-                            if (step == 3) ...[
-                              ...live.participants.where((p) => p.isAccepted),
-                              ...live.participants.where(
-                                (p) => p.isCancelledParticipation,
+                          ...() {
+                            final list = step == 3
+                                ? [
+                                    ...live.participants.where(
+                                      (p) => p.isAccepted,
+                                    ),
+                                    ...live.participants.where(
+                                      (p) => p.isCancelledParticipation,
+                                    ),
+                                  ]
+                                : [...live.participants];
+                            list.sort((a, b) {
+                              if (a.userId == currentUid) return -1;
+                              if (b.userId == currentUid) return 1;
+                              return 0;
+                            });
+                            return list.map(
+                              (p) => _buildInviteeParticipantStatusRow(
+                                p,
+                                isMe: p.userId == currentUid,
                               ),
-                            ] else
-                              ...live.participants,
-                          ].map(
-                            (p) => _buildInviteeParticipantStatusRow(
-                              p,
-                              isMe: p.userId == currentUid,
-                            ),
-                          ),
+                            );
+                          }(),
                           const SizedBox(height: 12),
                           // Note
                           Text(
@@ -5736,6 +5813,24 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               ],
             ),
           ),
+          if (!isMe && p.phone.isNotEmpty) ...[
+            GestureDetector(
+              onTap: () async {
+                await _favService.toggle(p.phone, p.name);
+                if (mounted) setState(() {});
+              },
+              child: Icon(
+                _favService.isFavorite(p.phone)
+                    ? Icons.favorite
+                    : Icons.favorite_border,
+                color: _favService.isFavorite(p.phone)
+                    ? Colors.red
+                    : Colors.grey[400],
+                size: 22, //try 
+              ),
+            ),
+            const SizedBox(width: 6),
+          ],
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
             decoration: BoxDecoration(
@@ -6627,7 +6722,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             onTap: () => _toggleExpand(r.id),
             borderRadius: BorderRadius.circular(16),
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               child: Row(
                 children: [
                   Container(
@@ -6675,7 +6770,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                         icon: Icon(
                           _isFav ? Icons.favorite : Icons.favorite_border,
                           color: _isFav ? Colors.red : Colors.grey[400],
-                          size: 24,
+                          size: 22,  
                         ),
                       );
                     },
@@ -6810,7 +6905,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                         icon: Icon(
                           _isFav ? Icons.favorite : Icons.favorite_border,
                           color: _isFav ? Colors.red : Colors.grey[400],
-                          size: 24,
+                          size: 22,
                         ),
                       );
                     },
@@ -6983,7 +7078,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             onTap: () => _toggleExpand(r.id),
             borderRadius: BorderRadius.circular(16),
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               child: Row(
                 children: [
                   Container(
@@ -7031,7 +7126,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                         icon: Icon(
                           _isFav ? Icons.favorite : Icons.favorite_border,
                           color: _isFav ? Colors.red : Colors.grey[400],
-                          size: 24,
+                          size: 23,
                         ),
                       );
                     },
@@ -7216,7 +7311,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                         icon: Icon(
                           _isFav ? Icons.favorite : Icons.favorite_border,
                           color: _isFav ? Colors.red : Colors.grey[400],
-                          size: 24,
+                          size: 23,
                         ),
                       );
                     },

@@ -2070,17 +2070,31 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   }
 
   Future<void> _showFavoritesList() async {
-    final selected = await showModalBottomSheet<List<_Friend>>(
+    final alreadyPhones = _selectedFriends.map((f) => f.phone).toSet();
+
+    final result = await showModalBottomSheet<List<_Friend>>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => _FavoriteListSheet(
-        alreadySelectedPhones: _selectedFriends.map((f) => f.phone).toSet(),
+        alreadySelectedPhones: alreadyPhones,
       ),
     );
-    if (selected == null || selected.isEmpty) return;
-    for (final f in selected) {
-      _addFriend(f);
+
+    if (result == null) return;
+
+    final finalPhones = result.map((f) => f.phone).toSet();
+    // Remove friends that were deselected in the sheet
+    setState(() {
+      _selectedFriends.removeWhere(
+        (f) => alreadyPhones.contains(f.phone) && !finalPhones.contains(f.phone),
+      );
+    });
+    // Add newly selected friends
+    for (final f in result) {
+      if (!_selectedFriends.any((s) => s.phone == f.phone)) {
+        _addFriend(f);
+      }
     }
   }
 
@@ -5212,8 +5226,7 @@ class _FavoriteListSheetState extends State<_FavoriteListSheet> {
 
   List<_Friend> _allFavorites = [];
   List<_Friend> _filtered = [];
-  final List<_Friend> _picked = [];
-  final Set<_Friend> _deselected = {};
+  final Set<String> _checkedPhones = {};
   bool _loadingFavorites = true;
 
   @override
@@ -5241,6 +5254,11 @@ class _FavoriteListSheetState extends State<_FavoriteListSheet> {
         setState(() {
           _allFavorites = list;
           _filtered = List.from(list);
+          _checkedPhones.addAll(
+            list
+                .where((f) => widget.alreadySelectedPhones.contains(f.phone))
+                .map((f) => f.phone),
+          );
           _loadingFavorites = false;
         });
       }
@@ -5253,6 +5271,14 @@ class _FavoriteListSheetState extends State<_FavoriteListSheet> {
   void dispose() {
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  void _toggleFriend(_Friend f) {
+    setState(() {
+      _checkedPhones.contains(f.phone)
+          ? _checkedPhones.remove(f.phone)
+          : _checkedPhones.add(f.phone);
+    });
   }
 
   void _filter() {
@@ -5309,17 +5335,18 @@ class _FavoriteListSheetState extends State<_FavoriteListSheet> {
                   ),
                 ),
                 TextButton(
-                  onPressed: _picked.isEmpty
-                      ? null
-                      : () => Navigator.pop(context, _picked),
-                  child: Text(
-                    'Add',
+                  onPressed: () => Navigator.pop(
+                    context,
+                    _allFavorites
+                        .where((f) => _checkedPhones.contains(f.phone))
+                        .toList(),
+                  ),
+                  child: const Text(
+                    'Done',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
-                      color: _picked.isEmpty
-                          ? Colors.grey[400]
-                          : AppColors.kGreen,
+                      color: AppColors.kGreen,
                     ),
                   ),
                 ),
@@ -5373,22 +5400,7 @@ class _FavoriteListSheetState extends State<_FavoriteListSheet> {
                   const Divider(height: 1, thickness: 0.5),
               itemBuilder: (ctx, i) {
                 final f = _filtered[i];
-                final alreadyAdded = widget.alreadySelectedPhones.contains(f.phone);
-                final picked = _picked.contains(f);
-                final isChecked = alreadyAdded
-                    ? !_deselected.contains(f)
-                    : picked;
-
-                void toggle() => setState(() {
-                      if (alreadyAdded) {
-                        _deselected.contains(f)
-                            ? _deselected.remove(f)
-                            : _deselected.add(f);
-                      } else {
-                        picked ? _picked.remove(f) : _picked.add(f);
-                      }
-                    });
-
+                final isChecked = _checkedPhones.contains(f.phone);
                 return ListTile(
                   contentPadding: const EdgeInsets.symmetric(vertical: 6),
                   leading: Container(
@@ -5413,8 +5425,9 @@ class _FavoriteListSheetState extends State<_FavoriteListSheet> {
                     style: TextStyle(fontSize: 13, color: Colors.grey[400]),
                   ),
                   trailing: GestureDetector(
-                    onTap: toggle,
+                    onTap: () => _toggleFriend(f),
                     child: Container(
+                      key: ValueKey('${f.phone}_$isChecked'),
                       width: 26,
                       height: 26,
                       decoration: BoxDecoration(
@@ -5430,7 +5443,7 @@ class _FavoriteListSheetState extends State<_FavoriteListSheet> {
                           : null,
                     ),
                   ),
-                  onTap: toggle,
+                  onTap: () => _toggleFriend(f),
                 );
               },
             ),

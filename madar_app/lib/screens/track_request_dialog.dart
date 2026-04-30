@@ -860,26 +860,33 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
   }
 
   Future<void> _showFavoritesList() async {
-    // Dismiss keyboard when opening favorites list
     FocusScope.of(context).unfocus();
+
+    final alreadyPhones = _selectedFriends.map((f) => f.phone).toSet();
 
     final result = await showModalBottomSheet<List<Friend>>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => const FavoritesListSheet(),
+      builder: (context) => FavoritesListSheet(
+        alreadySelectedPhones: alreadyPhones,
+      ),
     );
 
     if (result != null) {
+      final finalPhones = result.map((f) => f.phone).toSet();
       setState(() {
+        // Remove friends that were deselected in the sheet
+        _selectedFriends.removeWhere(
+          (f) => alreadyPhones.contains(f.phone) && !finalPhones.contains(f.phone),
+        );
+        // Add newly selected friends
         for (final friend in result) {
-          // Only add if not already in list
           if (!_selectedFriends.any((f) => f.phone == friend.phone)) {
             _selectedFriends.add(friend);
           }
         }
       });
-      // Re-check overlaps if time is already set
       _checkOverlapsForFriends();
     }
   }
@@ -3669,7 +3676,9 @@ class _VenueSelectionSheetState extends State<VenueSelectionSheet> {
 // ----------------------------------------------------------------------------
 
 class FavoritesListSheet extends StatefulWidget {
-  const FavoritesListSheet({super.key});
+  const FavoritesListSheet({super.key, this.alreadySelectedPhones = const {}});
+
+  final Set<String> alreadySelectedPhones;
 
   @override
   State<FavoritesListSheet> createState() => _FavoritesListSheetState();
@@ -3677,7 +3686,7 @@ class FavoritesListSheet extends StatefulWidget {
 
 class _FavoritesListSheetState extends State<FavoritesListSheet> {
   final _searchController = TextEditingController();
-  final List<Friend> _selectedFriends = [];
+  final Set<String> _checkedPhones = {};
 
   List<Friend> _allFavorites = [];
   List<Friend> _filteredFavorites = [];
@@ -3707,6 +3716,11 @@ class _FavoritesListSheetState extends State<FavoritesListSheet> {
         setState(() {
           _allFavorites = list;
           _filteredFavorites = List.from(list);
+          _checkedPhones.addAll(
+            list
+                .where((f) => widget.alreadySelectedPhones.contains(f.phone))
+                .map((f) => f.phone),
+          );
           _loadingFavorites = false;
         });
       }
@@ -3740,11 +3754,9 @@ class _FavoritesListSheetState extends State<FavoritesListSheet> {
 
   void _toggleFriend(Friend friend) {
     setState(() {
-      if (_selectedFriends.contains(friend)) {
-        _selectedFriends.remove(friend);
-      } else {
-        _selectedFriends.add(friend);
-      }
+      _checkedPhones.contains(friend.phone)
+          ? _checkedPhones.remove(friend.phone)
+          : _checkedPhones.add(friend.phone);
     });
   }
 
@@ -3784,17 +3796,18 @@ class _FavoritesListSheetState extends State<FavoritesListSheet> {
                   ),
                 ),
                 TextButton(
-                  onPressed: _selectedFriends.isEmpty
-                      ? null
-                      : () => Navigator.pop(context, _selectedFriends),
-                  child: Text(
-                    'Add',
+                  onPressed: () => Navigator.pop(
+                    context,
+                    _allFavorites
+                        .where((f) => _checkedPhones.contains(f.phone))
+                        .toList(),
+                  ),
+                  child: const Text(
+                    'Done',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
-                      color: _selectedFriends.isEmpty
-                          ? Colors.grey[400]
-                          : AppColors.kGreen,
+                      color: AppColors.kGreen,
                     ),
                   ),
                 ),
@@ -3855,7 +3868,7 @@ class _FavoritesListSheetState extends State<FavoritesListSheet> {
               separatorBuilder: (context, index) => const Divider(height: 1),
               itemBuilder: (context, index) {
                 final friend = _filteredFavorites[index];
-                final isSelected = _selectedFriends.contains(friend);
+                final isChecked = _checkedPhones.contains(friend.phone);
 
                 return ListTile(
                   contentPadding: const EdgeInsets.symmetric(vertical: 8),
@@ -3887,27 +3900,19 @@ class _FavoritesListSheetState extends State<FavoritesListSheet> {
                   trailing: GestureDetector(
                     onTap: () => _toggleFriend(friend),
                     child: Container(
-                      key: ValueKey('${friend.phone}_$isSelected'),
+                      key: ValueKey('${friend.phone}_$isChecked'),
                       width: 28,
                       height: 28,
                       decoration: BoxDecoration(
-                        color: isSelected
-                            ? AppColors.kGreen
-                            : Colors.transparent,
+                        color: isChecked ? AppColors.kGreen : Colors.transparent,
                         border: Border.all(
-                          color: isSelected
-                              ? AppColors.kGreen
-                              : Colors.grey.shade300,
+                          color: isChecked ? AppColors.kGreen : Colors.grey.shade300,
                           width: 2,
                         ),
                         borderRadius: BorderRadius.circular(6),
                       ),
-                      child: isSelected
-                          ? const Icon(
-                              Icons.check,
-                              color: Colors.white,
-                              size: 18,
-                            )
+                      child: isChecked
+                          ? const Icon(Icons.check, color: Colors.white, size: 18)
                           : null,
                     ),
                   ),

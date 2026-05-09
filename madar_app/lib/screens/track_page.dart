@@ -120,6 +120,8 @@ class _TrackPageState extends State<TrackPage> {
   final Map<String, DateTime> _refreshCooldownUntilByRequestId = {};
   final Set<String> _refreshCooldownMessageRequestIds = {};
   final Map<String, Timer> _refreshCooldownMessageTimers = {};
+  final Set<String> _acceptCutoffMessageRequestIds = {};
+  final Map<String, Timer> _acceptCutoffMessageTimers = {};
   // Meeting participant location refresh state (keyed by participant userId)
   final Set<String> _refreshingMeetingParticipantIds = {};
   final Map<String, DateTime> _meetingRefreshCooldownUntilByUserId = {};
@@ -1805,6 +1807,12 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     _refreshCooldownMessageTimers.clear();
     _refreshCooldownMessageRequestIds.clear();
 
+    for (final timer in _acceptCutoffMessageTimers.values) {
+      timer.cancel();
+    }
+    _acceptCutoffMessageTimers.clear();
+    _acceptCutoffMessageRequestIds.clear();
+
     _scrollController.dispose();
     super.dispose();
   }
@@ -2492,7 +2500,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
   String? _currentStepTimerLabel(MeetingPointRecord meeting) {
     // Meeting is transitioning from step 4 → 5 (either all participants
-    // responded, or the 2-min wait deadline expired). Show an immediate
+    // responded, or the 10-min wait deadline expired). Show an immediate
     // ~5-min countdown using a local start time so the invitee doesn't see
     // a gap or "00:00" before Firestore delivers hostStep=5+suggestDeadline.
     final waitExpiredForTimer =
@@ -2503,11 +2511,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         meeting.acceptedCount > 0) {
       final approxStart = _approxStep3StartByMeetingId[meeting.id];
       if (approxStart != null) {
-        final approxDeadline = approxStart.add(const Duration(minutes: 2));
+        final approxDeadline = approxStart.add(const Duration(minutes: 10));
         final seconds = approxDeadline
             .difference(MeetingPointService.serverNow)
             .inSeconds
-            .clamp(0, 120);
+            .clamp(0, 600);
         final mm = (seconds ~/ 60).toString().padLeft(2, '0');
         final ss = (seconds % 60).toString().padLeft(2, '0');
         return '$mm:$ss';
@@ -2542,7 +2550,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     // Step 3 = waiting for host to confirm the suggested point.
     // This happens when the host explicitly advanced (hostStep >= 5),
     // OR when all participants responded (pendingCount == 0),
-    // OR when the 2-min wait deadline has expired (some may not have responded
+    // OR when the 10-min wait deadline has expired (some may not have responded
     // but the window closed — the accepted participants move to step 3).
     final waitExpired =
         meeting.waitDeadline != null &&
@@ -2715,6 +2723,16 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 bottom: 16,
                 child: ErrorMessageBox(
                   message: 'you cannot send many request within short period',
+                ),
+              ),
+            if (_acceptCutoffMessageRequestIds.isNotEmpty)
+              const Positioned(
+                left: 16,
+                right: 16,
+                bottom: 16,
+                child: ErrorMessageBox(
+                  message:
+                      'This request is about to end and can no longer be accepted.',
                 ),
               ),
           ],
@@ -3012,65 +3030,64 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               ),
             ),
             const SizedBox(height: 10),
-            if (confirmedMeeting == null &&
-                activeMeeting == null &&
-                pendingMeetings.isEmpty) ...[
-              // ── Nothing at all ──────────────────────────────────────────
-              SizedBox(
-                height: 140,
-                child: Center(
-                  child: Text(
-                    'No meeting point requests',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.grey[500],
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ),
+            // ── Active meeting point ────────────────────────────────────
+            _buildActiveMeetingSubsectionLabel(confirmedMeeting),
+            const SizedBox(height: 4),
+            if (confirmedMeeting != null && uid != null) ...[
+              // ── Arrival-phase UI ──────────────────────────────────────
+              _buildRunningMeetingSection(confirmedMeeting, uid),
+            ] else if (activeMeeting != null && uid != null) ...[
+              // ── Setup-phase UI ────────────────────────────────────────
+              if (activeMeeting.isHost(uid))
+                _buildHostMeetingPointStatusCard(activeMeeting)
+              else
+                _buildInviteeMeetingPointStatusCard(activeMeeting, uid),
             ] else ...[
-              // ── Active meeting point ────────────────────────────────────
-              _buildActiveMeetingSubsectionLabel(confirmedMeeting),
-              if (confirmedMeeting != null && uid != null) ...[
-                // ── Arrival-phase UI ──────────────────────────────────────
-                _buildRunningMeetingSection(confirmedMeeting, uid),
-              ] else if (activeMeeting != null && uid != null) ...[
-                // ── Setup-phase UI ────────────────────────────────────────
-                if (activeMeeting.isHost(uid))
-                  _buildHostMeetingPointStatusCard(activeMeeting)
-                else
-                  _buildInviteeMeetingPointStatusCard(activeMeeting, uid),
-              ] else ...[
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
+              SizedBox(
+                height: 52,
+                child: Center(
                   child: Text(
                     'No active meeting point',
                     style: TextStyle(
                       fontSize: 13,
-                      color: Colors.grey[400],
-                      fontWeight: FontWeight.w500,
+                      color: Colors.grey[500],
+                      fontWeight: FontWeight.normal,
                     ),
                   ),
                 ),
-              ],
-              if (pendingMeetings.isNotEmpty) const SizedBox(height: 16),
+              ),
+            ],
+            const SizedBox(height: 24),
 
-              // ── Pending invitations ─────────────────────────────────────
-              if (pendingMeetings.isNotEmpty && uid != null) ...[
-                _buildSubsectionLabel('Meeting Point Invitations'),
-                ...pendingMeetings.map(
-                  (m) => Padding(
-                    key:
-                        _meetingInviteScrollTargetId != null &&
-                            m.id == _meetingInviteScrollTargetId
-                        ? _scrollToMeetingInviteKey
-                        : null,
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: _buildMeetingPointInvitationTile(m, uid),
+            // ── Pending invitations ─────────────────────────────────────
+            _buildSubsectionLabel('Meeting Point Invitations'),
+            const SizedBox(height: 4),
+            if (pendingMeetings.isNotEmpty && uid != null) ...[
+              ...pendingMeetings.map(
+                (m) => Padding(
+                  key:
+                      _meetingInviteScrollTargetId != null &&
+                          m.id == _meetingInviteScrollTargetId
+                      ? _scrollToMeetingInviteKey
+                      : null,
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: _buildMeetingPointInvitationTile(m, uid),
+                ),
+              ),
+            ] else ...[
+              SizedBox(
+                height: 52,
+                child: Center(
+                  child: Text(
+                    'No meeting point invitations',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.grey[500],
+                      fontWeight: FontWeight.normal,
+                    ),
                   ),
                 ),
-              ],
+              ),
             ],
           ],
         );
@@ -3346,19 +3363,42 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             Row(
               children: [
                 Expanded(
-                  child: SecondaryButton(
-                    text: 'Cancel',
+                  child: OutlinedButton(
                     onPressed: () =>
                         _cancelArrival(meeting, isHost: isHost, uid: uid),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.kGreen,
+                      side: const BorderSide(color: AppColors.kGreen, width: 2),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    child: const Text(
+                      'Cancel',
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                    ),
                   ),
                 ),
                 if (!isArrived) ...[
                   const SizedBox(width: 12),
                   Expanded(
-                    child: PrimaryButton(
-                      text: 'Arrive',
+                    child: ElevatedButton(
                       onPressed: () =>
                           _markArrived(meeting, isHost: isHost, uid: uid),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.kGreen,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                      child: const Text(
+                        'Arrive',
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                      ),
                     ),
                   ),
                 ],
@@ -4152,7 +4192,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 ),
               ),
               child: const Text(
-                'Discard',
+                'Keep',
                 style: TextStyle(
                   color: Colors.black87,
                   fontWeight: FontWeight.w600,
@@ -4345,20 +4385,46 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 Row(
                   children: [
                     Expanded(
-                      child: SecondaryButton(
-                        text: 'Cancel',
+                      child: OutlinedButton(
                         onPressed: () => _cancelMeetingPoint(meeting),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.kGreen,
+                          side: const BorderSide(color: AppColors.kGreen, width: 2),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                        child: const Text(
+                          'Cancel',
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                        ),
                       ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: PrimaryButton(
-                        text: 'Proceed',
-                        enabled: meeting.acceptedCount > 0,
-                        onPressed: () => _showCreateMeetingPointForm(
-                          resumeDraft: true,
-                          meetingPointId: meeting.id,
-                          autoAdvanceToStep5: true,
+                      child: ElevatedButton(
+                        onPressed: meeting.acceptedCount > 0
+                            ? () => _showCreateMeetingPointForm(
+                                resumeDraft: true,
+                                meetingPointId: meeting.id,
+                                autoAdvanceToStep5: true,
+                              )
+                            : null,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.kGreen,
+                          foregroundColor: Colors.white,
+                          disabledBackgroundColor: Colors.grey[300],
+                          disabledForegroundColor: Colors.grey[600],
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                        child: const Text(
+                          'Proceed',
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                         ),
                       ),
                     ),
@@ -4417,16 +4483,39 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 Row(
                   children: [
                     Expanded(
-                      child: SecondaryButton(
-                        text: 'Reject',
+                      child: OutlinedButton(
                         onPressed: () => _rejectSuggestedPoint(meeting),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.kGreen,
+                          side: const BorderSide(color: AppColors.kGreen, width: 2),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                        child: const Text(
+                          'Reject',
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                        ),
                       ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: PrimaryButton(
-                        text: 'Confirm',
+                      child: ElevatedButton(
                         onPressed: () => _confirmSuggestedPoint(meeting),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.kGreen,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                        child: const Text(
+                          'Confirm',
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                        ),
                       ),
                     ),
                   ],
@@ -4639,7 +4728,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                         message:
                             'Are you sure you want to cancel your participation in this meeting point?',
                         confirmText: 'Cancel Participation',
-                        cancelText: 'Discard',
+                        cancelText: 'Keep',
                         successMessage: 'Participation cancelled.',
                         cancelParticipation: step == 3,
                       ),
@@ -4976,18 +5065,41 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     return Row(
       children: [
         Expanded(
-          child: SecondaryButton(
-            text: 'Decline',
-            icon: Icons.cancel_outlined,
+          child: OutlinedButton.icon(
             onPressed: () => _declineMeetingInvite(meeting),
+            icon: const Icon(Icons.close, size: 18),
+            label: const Text(
+              'Decline',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+            ),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.kGreen,
+              side: const BorderSide(color: AppColors.kGreen, width: 2),
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
           ),
         ),
         const SizedBox(width: 12),
         Expanded(
-          child: PrimaryButton(
-            text: 'Accept',
-            icon: Icons.check_circle_outline,
+          child: ElevatedButton.icon(
             onPressed: () => _acceptMeetingInvite(meeting),
+            icon: const Icon(Icons.check, size: 18),
+            label: const Text(
+              'Accept',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.kGreen,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
           ),
         ),
       ],
@@ -5484,12 +5596,12 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                           width: 42,
                           height: 42,
                           decoration: BoxDecoration(
-                            color: Colors.grey[200],
+                            color: Colors.grey[100],
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: Icon(
-                            Icons.location_on_outlined,
-                            color: Colors.grey[600],
+                          child: const Icon(
+                            Icons.people_outline,
+                            color: AppColors.kGreen,
                             size: 22,
                           ),
                         ),
@@ -5907,63 +6019,60 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
             ),
-            titlePadding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
-            contentPadding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
             title: const Text(
               'Already in a Meeting Point',
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
             ),
             content: const Text(
-              "You're already part of an active meeting point. Accepting this "
-              'invitation will cancel your participation in it.',
+              "You're already part of an active meeting point. Proceeding to accept this new "
+              'invitation will cancel your participation in it. Would you like to proceed?',
               style: TextStyle(fontSize: 15),
             ),
-            actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             actions: [
-              SizedBox(
-                width: double.infinity,
-                child: TextButton(
-                  onPressed: () => Navigator.pop(ctx, true),
-                  style: TextButton.styleFrom(
-                    backgroundColor: AppColors.kError,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                style: TextButton.styleFrom(
+                  backgroundColor: Colors.grey[200],
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
                   ),
-                  child: const Text(
-                    'Cancel Participation',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 15,
-                    ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: const Text(
+                  'Discard',
+                  style: TextStyle(
+                    color: Colors.black87,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 15,
                   ),
                 ),
               ),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: TextButton(
-                  onPressed: () => Navigator.pop(ctx, false),
-                  style: TextButton.styleFrom(
-                    backgroundColor: Colors.grey[200],
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                style: TextButton.styleFrom(
+                  backgroundColor: AppColors.kGreen,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
                   ),
-                  child: const Text(
-                    'Keep',
-                    style: TextStyle(
-                      color: Colors.black87,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 15,
-                    ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8), // dialog
+                  ),
+                ),
+                child: const Text(
+                  'Proceed',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
                   ),
                 ),
               ),
             ],
+            actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           ),
         );
         if (!mounted || proceed != true) return;
@@ -6051,142 +6160,111 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       builder: (ctx) => AlertDialog(
         backgroundColor: Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        titlePadding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
-        contentPadding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
         title: const Text(
           'Already in a Meeting Point',
           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
         ),
         content: const Text(
           "You're hosting an in-progress meeting point. Proceeding to accept "
-          'this new invitation will cancel meeting for all participants.',
+          'this new invitation will cancel it for all participants. '
+          'Would you like to proceed?',
           style: TextStyle(fontSize: 15),
         ),
-        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         actions: [
-          SizedBox(
-            width: double.infinity,
-            child: TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              style: TextButton.styleFrom(
-                backgroundColor: AppColors.kError,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            style: TextButton.styleFrom(
+              backgroundColor: Colors.grey[200],
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
               ),
-              child: const Text(
-                'Cancel Meeting',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 15,
-                ),
+            ),
+            child: const Text(
+              'Discard',
+              style: TextStyle(
+                color: Colors.black87,
+                fontWeight: FontWeight.w600,
+                fontSize: 15,
               ),
             ),
           ),
-          const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              style: TextButton.styleFrom(
-                backgroundColor: Colors.grey[200],
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(
+              backgroundColor: AppColors.kGreen,
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
               ),
-              child: const Text(
-                'Discard',
-                style: TextStyle(
-                  color: Colors.black87,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 15,
-                ),
+            ),
+            child: const Text(
+              'Proceed',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 15,
               ),
             ),
           ),
         ],
+        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       ),
     );
   }
 
   /// Dialog shown when the user (as host in confirmed/arrival phase) tries to
   /// accept a new invitation — lets them choose to cancel for all or just
-  /// themselves. Returns 'all', 'me', or null (keep).
+  /// themselves. Returns 'all', 'me', or null (dismissed).
   Future<String?> _showHostConfirmedConflictDialog() {
+    String selected = 'all';
     return showDialog<String>(
       context: context,
       barrierColor: Colors.black54,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        titlePadding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
-        contentPadding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-        title: const Text(
-          'Cancel Meeting',
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
-        ),
-        content: const Text(
-          "You're hosting an active meeting point."
-          ' Proceeding to accept this invitation will cancel '
-          'it for you or all participants.',
-          style: TextStyle(fontSize: 15),
-        ),
-        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        actions: [
-          SizedBox(
-            width: double.infinity,
-            child: TextButton(
-              onPressed: () => Navigator.pop(ctx, 'all'),
-              style: TextButton.styleFrom(
-                backgroundColor: AppColors.kError,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              child: const Text(
-                'Cancel for all participants',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 15,
-                ),
-              ),
-            ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
           ),
-          const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: TextButton(
-              onPressed: () => Navigator.pop(ctx, 'me'),
-              style: TextButton.styleFrom(
-                backgroundColor: Colors.grey[200],
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              child: const Text(
-                'Cancel for me',
-                style: TextStyle(
-                  color: Colors.black87,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 15,
-                ),
-              ),
-            ),
+          title: const Text(
+            'Already in a Meeting Point',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
           ),
-          const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: TextButton(
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "You're hosting an active meeting point. Proceeding to accept "
+                'this new invitation will cancel it for you or all participants. '
+                'Would you like to proceed?',
+                style: TextStyle(fontSize: 15),
+              ),
+              const SizedBox(height: 16),
+              _buildRadioRow(
+                value: 'all',
+                selected: selected,
+                label: 'Cancel for all participants',
+                onTap: () => setState(() => selected = 'all'),
+              ),
+              _buildRadioRow(
+                value: 'me',
+                selected: selected,
+                label: 'Cancel for me',
+                onTap: () => setState(() => selected = 'me'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
               onPressed: () => Navigator.pop(ctx, null),
               style: TextButton.styleFrom(
                 backgroundColor: Colors.grey[200],
-                padding: const EdgeInsets.symmetric(vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
@@ -6200,8 +6278,30 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 ),
               ),
             ),
-          ),
-        ],
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, selected),
+              style: TextButton.styleFrom(
+                backgroundColor: AppColors.kGreen,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: const Text(
+                'Proceed',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                ),
+              ),
+            ),
+          ],
+          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        ),
       ),
     );
   }
@@ -6539,15 +6639,15 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         _buildSubsectionLabel('Active Tracking'),
         const SizedBox(height: 4),
         if (active.isEmpty)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 24, top: 0),
+          SizedBox(
+            height: 52,
             child: Center(
               child: Text(
-                'No Active Requests',
+                'No active requests',
                 style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey[600],
-                  fontWeight: FontWeight.w500,
+                  fontSize: 13,
+                  color: Colors.grey[500],
+                  fontWeight: FontWeight.normal,
                 ),
               ),
             ),
@@ -6564,20 +6664,20 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               child: _buildReceivedActiveTile(r),
             ),
           ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 16),
         // -------- Scheduled Tracking (always show title) --------
         _buildSubsectionLabel('Scheduled Tracking'),
         const SizedBox(height: 4),
         if (scheduled.isEmpty)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8, top: 0),
+          SizedBox(
+            height: 52,
             child: Center(
               child: Text(
-                'No Scheduled Requests',
+                'No scheduled requests',
                 style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey[600],
-                  fontWeight: FontWeight.w500,
+                  fontSize: 13,
+                  color: Colors.grey[500],
+                  fontWeight: FontWeight.normal,
                 ),
               ),
             ),
@@ -6623,15 +6723,15 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         _buildSubsectionLabel('Active Tracking'),
         const SizedBox(height: 4),
         if (active.isEmpty)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 24, top: 0),
+          SizedBox(
+            height: 52,
             child: Center(
               child: Text(
-                'No Active Requests',
+                'No active requests',
                 style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey[600],
-                  fontWeight: FontWeight.w500,
+                  fontSize: 13,
+                  color: Colors.grey[500],
+                  fontWeight: FontWeight.normal,
                 ),
               ),
             ),
@@ -6650,19 +6750,19 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               child: _buildActiveTile(r),
             ),
           ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 16),
         _buildSubsectionLabel('Scheduled Tracking'),
         const SizedBox(height: 4),
         if (upcoming.isEmpty)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8, top: 0),
+          SizedBox(
+            height: 52,
             child: Center(
               child: Text(
-                'No Scheduled Requests',
+                'No scheduled requests',
                 style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey[600],
-                  fontWeight: FontWeight.w500,
+                  fontSize: 13,
+                  color: Colors.grey[500],
+                  fontWeight: FontWeight.normal,
                 ),
               ),
             ),
@@ -7463,6 +7563,30 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     );
   }
 
+  void _showAcceptCutoffMessage(String requestId) {
+    _acceptCutoffMessageTimers[requestId]?.cancel();
+    if (mounted) {
+      setState(() {
+        _acceptCutoffMessageRequestIds.add(requestId);
+      });
+    } else {
+      _acceptCutoffMessageRequestIds.add(requestId);
+    }
+    _acceptCutoffMessageTimers[requestId] = Timer(
+      const Duration(seconds: 2),
+      () {
+        _acceptCutoffMessageTimers.remove(requestId);
+        if (!mounted) {
+          _acceptCutoffMessageRequestIds.remove(requestId);
+          return;
+        }
+        setState(() {
+          _acceptCutoffMessageRequestIds.remove(requestId);
+        });
+      },
+    );
+  }
+
   // Logic to update Firestore
   Future<void> _requestLocationRefresh(TrackingRequest r) async {
     if (_refreshingRequestIds.contains(r.id)) return;
@@ -7598,6 +7722,12 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   }
 
   Widget _buildIncomingActionButtons(BuildContext context, TrackingRequest r) {
+    final totalDuration = r.endAt.difference(r.startAt);
+    final tenPercent = totalDuration * 0.10;
+    const cap = Duration(minutes: 10);
+    final cutoff = tenPercent < cap ? tenPercent : cap;
+    final canAccept = DateTime.now().isBefore(r.endAt.subtract(cutoff));
+
     return Row(
       children: [
         // Decline (left) = outlined
@@ -7619,7 +7749,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               }
             },
             icon: Icon(
-              Icons.cancel_outlined,
+              Icons.close,
               size: 18,
               color: AppColors.kGreen,
             ),
@@ -7632,7 +7762,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               side: BorderSide(color: AppColors.kGreen, width: 2),
               padding: const EdgeInsets.symmetric(vertical: 12),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(10),
               ),
             ),
           ),
@@ -7640,38 +7770,61 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         const SizedBox(width: 12),
         // Accept (right) = filled green
         Expanded(
-          child: ElevatedButton.icon(
-            onPressed: () async {
-              final confirmed =
-                  await ConfirmationDialog.showPositiveConfirmation(
-                    context,
-                    title: 'Accept Track Request',
-                    message:
-                        'Are you sure you want to accept this tracking request?',
-                    confirmText: 'Accept',
-                  );
-              if (confirmed && mounted) {
-                _updateRequestStatus(
-                  r.id,
-                  'accepted',
-                  successMessage: 'Tracking request accepted successfully.',
-                );
-              }
-            },
-            icon: const Icon(Icons.check_circle_outline, size: 18),
-            label: const Text(
-              'Accept',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.kGreen,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              elevation: 0,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: canAccept
+                      ? () async {
+                          final confirmed =
+                              await ConfirmationDialog.showPositiveConfirmation(
+                                context,
+                                title: 'Accept Track Request',
+                                message:
+                                    'Are you sure you want to accept this tracking request?',
+                                confirmText: 'Accept',
+                              );
+                          if (confirmed && mounted) {
+                            _updateRequestStatus(
+                              r.id,
+                              'accepted',
+                              successMessage:
+                                  'Tracking request accepted successfully.',
+                            );
+                          }
+                        }
+                      : null,
+                  icon: const Icon(Icons.check, size: 18),
+                  label: const Text(
+                    'Accept',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor:
+                        canAccept ? AppColors.kGreen : Colors.grey[300],
+                    foregroundColor:
+                        canAccept ? Colors.white : Colors.grey[600],
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ),
               ),
-            ),
+              if (!canAccept)
+                Positioned.fill(
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: () => _showAcceptCutoffMessage(r.id),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
       ],

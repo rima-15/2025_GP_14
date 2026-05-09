@@ -238,6 +238,10 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
               fontWeight: FontWeight.w600,
             ),
           ),
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(1),
+            child: Container(color: Colors.grey[300], height: 1),
+          ),
         ),
         body: CustomScrollView(
           slivers: [
@@ -327,13 +331,16 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
               padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
               sliver: SliverList(
                 delegate: SliverChildListDelegate([
-                  const Text(
-                    'Still need help?',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.grey,
-                      letterSpacing: 0.5,
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4),
+                    child: Text(
+                      'Still need help?',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.grey[600],
+                        letterSpacing: 0.5,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -398,107 +405,113 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
                             ),
                           ),
                         ),
-                        AnimatedCrossFade(
+                        AnimatedSize(
                           duration: const Duration(milliseconds: 220),
-                          crossFadeState: _isMessageExpanded
-                              ? CrossFadeState.showSecond
-                              : CrossFadeState.showFirst,
-                          firstChild: const SizedBox.shrink(),
-                          secondChild: Padding(
+                          curve: Curves.easeInOut,
+                          child: _isMessageExpanded
+                              ? Padding(
                             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                             child: Column(
                               children: [
-                                Container(
-                                  decoration: BoxDecoration(
-                                    color: Colors.grey[50],
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                      color: Colors.grey[200]!,
+                                DropdownButtonFormField<String>(
+                                  value: _selectedTopic,
+                                  isExpanded: true,
+                                  items: const [
+                                    DropdownMenuItem(
+                                      value: 'General question',
+                                      child: Text('General question'),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 'AR Navigation issue',
+                                      child: Text('AR Navigation issue'),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 'AR Exploration issue',
+                                      child: Text('AR Exploration issue'),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 'Meeting point / tracking',
+                                      child: Text('Meeting point / tracking'),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 'Account & login',
+                                      child: Text('Account & login'),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 'Bug report',
+                                      child: Text('Bug report'),
+                                    ),
+                                    DropdownMenuItem(
+                                      value: 'Other',
+                                      child: Text('Other'),
+                                    ),
+                                  ],
+                                  onChanged: (value) {
+                                    if (value != null) {
+                                      setState(() => _selectedTopic = value);
+                                    }
+                                  },
+                                  decoration: InputDecoration(
+                                    filled: true,
+                                    fillColor: Colors.white,
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 14,
+                                    ),
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
+                                      borderSide: BorderSide.none,
+                                    ),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
+                                      borderSide: const BorderSide(color: Colors.black12, width: 1),
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
+                                      borderSide: const BorderSide(color: AppColors.kGreen, width: 1.8),
                                     ),
                                   ),
-                                  child: DropdownButtonFormField<String>(
-                                    value: _selectedTopic,
-                                    isExpanded: true,
-                                    items: const [
-                                      DropdownMenuItem(
-                                        value: 'General question',
-                                        child: Text('General question'),
-                                      ),
-                                      DropdownMenuItem(
-                                        value: 'AR Navigation issue',
-                                        child: Text('AR Navigation issue'),
-                                      ),
-                                      DropdownMenuItem(
-                                        value: 'AR Exploration issue',
-                                        child: Text('AR Exploration issue'),
-                                      ),
-                                      DropdownMenuItem(
-                                        value: 'Meeting point / tracking',
-                                        child: Text('Meeting point / tracking'),
-                                      ),
-                                      DropdownMenuItem(
-                                        value: 'Account & login',
-                                        child: Text('Account & login'),
-                                      ),
-                                      DropdownMenuItem(
-                                        value: 'Bug report',
-                                        child: Text('Bug report'),
-                                      ),
-                                      DropdownMenuItem(
-                                        value: 'Other',
-                                        child: Text('Other'),
-                                      ),
-                                    ],
-                                    onChanged: (value) {
-                                      if (value != null) {
-                                        setState(() => _selectedTopic = value);
-                                      }
-                                    },
-                                    decoration: const InputDecoration(
-                                      border: InputBorder.none,
-                                      contentPadding: EdgeInsets.symmetric(
-                                        horizontal: 16,
-                                        vertical: 14,
-                                      ),
+                                  icon: Padding(
+                                    padding: const EdgeInsets.only(right: 8),
+                                    child: Icon(
+                                      Icons.keyboard_arrow_down,
+                                      color: Colors.grey[500],
                                     ),
-                                    icon: Padding(
-                                      padding: const EdgeInsets.only(right: 8),
-                                      child: Icon(
-                                        Icons.keyboard_arrow_down,
-                                        color: Colors.grey[500],
-                                      ),
-                                    ),
-                                    dropdownColor: Colors.white,
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      color: Colors.black87,
-                                    ),
+                                  ),
+                                  dropdownColor: Colors.white,
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    color: Colors.black87,
                                   ),
                                 ),
                                 const SizedBox(height: 12),
-                                Container(
-                                  decoration: BoxDecoration(
-                                    color: Colors.grey[50],
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                      color: Colors.grey[200]!,
+                                TextField(
+                                  controller: _messageController,
+                                  focusNode: _messageFocusNode,
+                                  maxLines: 4,
+                                  style: const TextStyle(fontSize: 14),
+                                  decoration: InputDecoration(
+                                    hintText: 'Describe your issue or question in detail…',
+                                    hintStyle: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w400,
+                                      color: Colors.grey[400],
                                     ),
-                                  ),
-                                  child: TextField(
-                                    controller: _messageController,
-                                    focusNode: _messageFocusNode,
-                                    maxLines: 4,
-                                    style: const TextStyle(fontSize: 14),
-                                    decoration: const InputDecoration(
-                                      hintText:
-                                          'Describe your issue or question in detail…',
-                                      hintStyle: TextStyle(
-                                        fontSize: 13,
-                                        color: Colors.grey,
-                                      ),
-                                      border: InputBorder.none,
-                                      contentPadding: EdgeInsets.all(16),
+                                    filled: true,
+                                    fillColor: Colors.white,
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
+                                      borderSide: BorderSide.none,
                                     ),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
+                                      borderSide: const BorderSide(color: Colors.black12, width: 1),
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
+                                      borderSide: const BorderSide(color: AppColors.kGreen, width: 1.8),
+                                    ),
+                                    contentPadding: const EdgeInsets.all(16),
                                   ),
                                 ),
                                 const SizedBox(height: 16),
@@ -515,19 +528,23 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
                                 ),
                               ],
                             ),
-                          ),
+                          )
+                              : const SizedBox.shrink(),
                         ),
                       ],
                     ),
                   ),
                   const SizedBox(height: 24),
-                  const Text(
-                    'Follow us',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.grey,
-                      letterSpacing: 0.5,
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4),
+                    child: Text(
+                      'Follow us',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.grey[600],
+                        letterSpacing: 0.5,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 16),

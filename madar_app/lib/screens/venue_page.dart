@@ -2857,31 +2857,17 @@ sortedMaps.sort((a, b) {
                 ),
                 if (widget.venueMaps.length > 1)
                   Positioned(
-                    top: 12,
-                    right: 12,
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.9),
-                        borderRadius: BorderRadius.circular(8),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.1),
-                            blurRadius: 4,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        children: sortedMaps.map((map) {
-                          final floorNumber = map['floorNumber'] ?? '';
-                          final mapURL = map['mapURL'] ?? '';
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: _buildFloorButton(floorNumber, mapURL),
-                          );
-                        }).toList(),
-                      ),
+                    top: 16,
+                    right: 16,
+                    child: Column(
+                      children: sortedMaps.map((map) {
+                        final floorNumber = map['floorNumber'] ?? '';
+                        final mapURL = map['mapURL'] ?? '';
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: _buildFloorButton(floorNumber, mapURL),
+                        );
+                      }).toList(),
                     ),
                   ),
               ],
@@ -2893,29 +2879,27 @@ sortedMaps.sort((a, b) {
   }
 
   Widget _buildFloorButton(String label, String mapURL) {
-    bool isSelected = _currentFloor == mapURL;
-
-    return SizedBox(
-      width: 42,
-      height: 36,
-      child: ElevatedButton(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: isSelected ? kPrimaryGreen : Colors.white,
-          foregroundColor: isSelected ? Colors.white : kPrimaryGreen,
-          padding: EdgeInsets.zero,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-            side: BorderSide(
-              color: isSelected ? kPrimaryGreen : Colors.grey.shade300,
-              width: 1.5,
-            ),
-          ),
-          elevation: isSelected ? 2 : 0,
+    final isSelected = _currentFloor == mapURL;
+    return GestureDetector(
+      onTap: () => setState(() => _currentFloor = mapURL),
+      child: Container(
+        width: 42,
+        height: 36,
+        decoration: BoxDecoration(
+          color: isSelected ? kPrimaryGreen : Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 4),
+          ],
         ),
-        onPressed: () => setState(() => _currentFloor = mapURL),
+        alignment: Alignment.center,
         child: Text(
           label,
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            color: isSelected ? Colors.white : Colors.black87,
+          ),
         ),
       ),
     );

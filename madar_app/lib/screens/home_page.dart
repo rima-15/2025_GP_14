@@ -424,7 +424,12 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
                 : _error != null
                 ? Center(child: Text('Error: $_error'))
                 : _venues.isEmpty
-                ? const Center(child: Text('No results found. Try again'))
+                ? Center(
+                    child: Text(
+                      'No results found. Try again',
+                      style: TextStyle(fontSize: 15, color: Colors.grey[400]),
+                    ),
+                  )
                 : _buildVenueList(horizontalPadding),
           ),
         ],

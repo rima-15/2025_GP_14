@@ -467,6 +467,7 @@ class StyledTextField extends StatelessWidget {
       autovalidateMode: AutovalidateMode.onUserInteraction,
       validator: validator,
       style: TextStyle(
+        fontSize: 14,
         color: enabled ? Colors.black87 : Colors.grey[700],
         fontWeight: FontWeight.w500,
       ),
@@ -475,7 +476,15 @@ class StyledTextField extends StatelessWidget {
         hintText: hint,
         prefixText: prefixText,
         suffixIcon: suffixIcon,
-        labelStyle: TextStyle(color: enabled ? null : Colors.grey[600]),
+        labelStyle: TextStyle(
+          fontSize: 14,
+          color: enabled ? null : Colors.grey[600],
+        ),
+        hintStyle: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w400,
+          color: Colors.grey[400],
+        ),
         filled: true,
         fillColor: enabled ? Colors.white : Colors.grey[200],
         border: OutlineInputBorder(

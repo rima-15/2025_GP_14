@@ -406,8 +406,11 @@ class _CategoryPageState extends State<CategoryPage>
                 }
 
                 if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return const Center(
-                    child: Text('No places found in this category.'),
+                  return Center(
+                    child: Text(
+                      'No places found in this category.',
+                      style: TextStyle(fontSize: 15, color: Colors.grey[400]),
+                    ),
                   );
                 }
 
@@ -427,7 +430,12 @@ class _CategoryPageState extends State<CategoryPage>
                       }).toList();
 
                 if (filtered.isEmpty) {
-                  return const Center(child: Text('No matching places found.'));
+                  return Center(
+                    child: Text(
+                      'No results found. Try again',
+                      style: TextStyle(fontSize: 15, color: Colors.grey[400]),
+                    ),
+                  );
                 }
 
                 return GridView.builder(

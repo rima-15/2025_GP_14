@@ -3332,8 +3332,8 @@ class _SelectContactPageState extends State<SelectContactPage> {
                 : keys.isEmpty
                 ? Center(
                     child: Text(
-                      'No contacts',
-                      style: TextStyle(color: Colors.grey[600]),
+                      'No matching contacts',
+                      style: TextStyle(fontSize: 15, color: Colors.grey[400]),
                     ),
                   )
                 : Stack(
@@ -3764,6 +3764,7 @@ class _FavoritesListSheetState extends State<FavoritesListSheet> {
   Widget build(BuildContext context) {
     return Container(
       height: MediaQuery.of(context).size.height * 0.85,
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       decoration: const BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.only(

@@ -1817,21 +1817,10 @@ const timer = setInterval(function() {
             ),
 
             // Floor Selectors
-            Positioned(
-              top: 12,
-              right: 12,
-              child: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.9),
-                  borderRadius: BorderRadius.circular(8),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
-                      blurRadius: 4,
-                    ),
-                  ],
-                ),
+            if (_venueMaps.length > 1)
+              Positioned(
+                top: 16,
+                right: 16,
                 child: Column(
                   children:
                       (List<Map<String, String>>.from(_venueMaps)..sort((a, b) {
@@ -1859,7 +1848,6 @@ const timer = setInterval(function() {
                           .toList(),
                 ),
               ),
-            ),
 
             // Debug/feedback chip (optional, lightweight)
             if (pos != null)
@@ -1901,36 +1889,33 @@ const timer = setInterval(function() {
   }
 
   Widget _buildFloorButton(String label, String url, bool isSelected) {
-    return SizedBox(
-      width: 44,
-      height: 40,
-      child: ElevatedButton(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: isSelected ? AppColors.kGreen : Colors.white,
-          foregroundColor: isSelected ? Colors.white : AppColors.kGreen,
-          padding: EdgeInsets.zero,
-          elevation: isSelected ? 2 : 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-            side: BorderSide(
-              color: isSelected ? AppColors.kGreen : Colors.grey.shade300,
-            ),
-          ),
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _currentFloorURL = url;
+        });
+        if (_pickedPosGltf != null) {
+          _pushUserPinToJs(_pickedPosGltf!);
+        }
+      },
+      child: Container(
+        width: 42,
+        height: 36,
+        decoration: BoxDecoration(
+          color: isSelected ? AppColors.kGreen : Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 4),
+          ],
         ),
-        onPressed: () {
-          setState(() {
-            _currentFloorURL = url;
-            // Do NOT nullify _pickedPosGltf, _pickedPosBlender, or _pickedFloorLabel
-          });
-          // After the floor changes, tell the JavaScript side to update the pin visibility.
-          // This will show the pin if the new floor matches the pin's floor, otherwise hide it.
-          if (_pickedPosGltf != null) {
-            _pushUserPinToJs(_pickedPosGltf!);
-          }
-        },
+        alignment: Alignment.center,
         child: Text(
           label,
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            color: isSelected ? Colors.white : Colors.black87,
+          ),
         ),
       ),
     );

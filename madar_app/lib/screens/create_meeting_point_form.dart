@@ -21,6 +21,8 @@ import 'package:share_plus/share_plus.dart';
 // ── DEV FLAG ──────────────────────────────────────────────────────────────────
 /// Set to true so the full wizard can be tested even outside a real venue.
 const bool forceVenueForTesting = true;
+/// Set to true to force the "Venue is closed" error for UI testing.
+const bool forceVenueClosedForTesting = true;
 const String _kTestVenueName = 'Solitaire';
 const String _kTestVenueId = 'ChIJcYTQDwDjLj4RZEiboV6gZzM';
 const String _kFallbackMapVenueId = 'ChIJcYTQDwDjLj4RZEiboV6gZzM';
@@ -1316,9 +1318,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   /// Simulated participant list built from _selectedFriends at step 4 entry.
   List<_Participant> _participants = [];
 
-  /// Step-4 2-minute countdown.
+  /// Step-4 10-minute countdown.
   Timer? _waitTimer;
-  int _waitSecondsLeft = 120; // 2 min
+  int _waitSecondsLeft = 600; // 10 min
   DateTime?
   _pendingWaitDeadline; // deadline computed once before the Firestore commit
 
@@ -1496,7 +1498,8 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       if (matched != null) {
         // Check if the matched venue is currently open.
         final isOpen = await _fetchVenueOpenNow(matched.id);
-        if (isOpen == false) {
+        if (isOpen == false || forceVenueClosedForTesting) {
+          _venueName = matched.name;
           _venueError = 'Venue is closed';
         } else {
           _venueId = matched.id;
@@ -1524,8 +1527,13 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           }
         }
         testVenue ??= venues.first;
-        _venueId = testVenue.id;
-        _venueName = testVenue.name; // no "(DEV)" label shown to user
+        if (forceVenueClosedForTesting) {
+          _venueName = testVenue.name;
+          _venueError = 'Venue is closed';
+        } else {
+          _venueId = testVenue.id;
+          _venueName = testVenue.name;
+        }
       } else {
         _venueError =
             'You must be inside a supported venue to create a meeting point.';
@@ -2173,7 +2181,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
                 .toList()
           : restoredParticipants;
 
-      _waitSecondsLeft = restoredWaitLeft.clamp(0, 120).toInt();
+      _waitSecondsLeft = restoredWaitLeft.clamp(0, 600).toInt();
       _suggestSecondsLeft = restoredSuggestLeft.clamp(0, 120).toInt();
       _proceedUnlocked = _boolFromDynamic(snap.data['proceedUnlocked'], true);
       _waitDeadline = _dateFromEpoch(snap.data['waitDeadlineMs']);
@@ -2331,7 +2339,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
               : meeting.waitDeadline!
                     .difference(MeetingPointService.serverNow)
                     .inSeconds
-                    .clamp(0, 120);
+                    .clamp(0, 600);
           final suggestLeft = meeting.suggestDeadline == null
               ? _suggestSecondsLeft
               : meeting.suggestDeadline!
@@ -2976,12 +2984,12 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           .toList();
     }
 
-    // 2-minute countdown.  Use the deadline that was already committed to
+    // 10-minute countdown.  Use the deadline that was already committed to
     // Firestore so the local timer and the Firestore field are identical.
-    _waitSecondsLeft = 120;
+    _waitSecondsLeft = 600;
     _waitDeadline =
         _pendingWaitDeadline ??
-        MeetingPointService.serverNow.add(const Duration(minutes: 2));
+        MeetingPointService.serverNow.add(const Duration(minutes: 10));
     _pendingWaitDeadline = null; // consumed
     _startStep4WaitCountdown();
 
@@ -3184,7 +3192,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       placeCategories: _selectedPlaceCategories.toList(),
       hostLocation: _hostLocation?.toMap(),
       participants: participants,
-      waitDuration: const Duration(minutes: 2),
+      waitDuration: const Duration(minutes: 10),
     );
     _pendingWaitDeadline = serverDeadline;
 
@@ -4777,7 +4785,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
                 backgroundColor: AppColors.kGreen,
                 elevation: 0,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(12),
                 ),
               ),
               child: const Text(
@@ -5294,6 +5302,7 @@ class _FavoriteListSheetState extends State<_FavoriteListSheet> {
   Widget build(BuildContext context) {
     return Container(
       height: MediaQuery.of(context).size.height * 0.85,
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       decoration: const BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.only(
@@ -5646,8 +5655,8 @@ class _SelectContactPageState extends State<SelectContactPage> {
                 : keys.isEmpty
                 ? Center(
                     child: Text(
-                      'No contacts',
-                      style: TextStyle(color: Colors.grey[600]),
+                      'No matching contacts',
+                      style: TextStyle(fontSize: 15, color: Colors.grey[400]),
                     ),
                   )
                 : Stack(

@@ -127,6 +127,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
   Timer? _uiRefreshTimer;
   Timer? _tickTimer;
   final ValueNotifier<int> _tick = ValueNotifier<int>(0);
+  final Set<String> _acceptCutoffMessageNotifIds = {};
+  final Map<String, Timer> _acceptCutoffMessageTimers = {};
   bool _freezeReadUI = true; // Keep true while the page is open
   Map<String, bool> _frozenReadMap = {};
   bool _isRefreshing = false;
@@ -205,6 +207,11 @@ class _NotificationsPageState extends State<NotificationsPage> {
       notifier.dispose();
     }
     _notificationOffsets.clear();
+    for (final timer in _acceptCutoffMessageTimers.values) {
+      timer.cancel();
+    }
+    _acceptCutoffMessageTimers.clear();
+    _acceptCutoffMessageNotifIds.clear();
     super.dispose();
   }
 
@@ -580,6 +587,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
               requiresAction: status == 'pending' && !isTimeExpired,
               isExpired: isExpired,
               requestStatus: status,
+              startAt: startAt,
               endAt: endAt,
               senderName: (d['senderName'] ?? '').toString(),
               senderPhone: (d['senderPhone'] ?? '').toString(),
@@ -1170,7 +1178,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
         return true;
       },
       child: Scaffold(
-        backgroundColor: Colors.grey[50],
+        backgroundColor: Colors.white,
         appBar: AppBar(
           backgroundColor: Colors.white,
           elevation: 0,
@@ -1196,8 +1204,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
           ),
         ),
 
-        body: StreamBuilder<Map<String, String>>(
-          stream: _notificationDocMap(), // 🔥 NEW
+        body: Stack(
+          children: [
+            StreamBuilder<Map<String, String>>(
+              stream: _notificationDocMap(), // 🔥 NEW
           builder: (context, docMapSnap) {
             final notifDocMap = docMapSnap.data ?? {};
 
@@ -1406,6 +1416,18 @@ class _NotificationsPageState extends State<NotificationsPage> {
             );
           },
         ),
+        if (_acceptCutoffMessageNotifIds.isNotEmpty)
+          const Positioned(
+            left: 16,
+            right: 16,
+            bottom: 16,
+            child: ErrorMessageBox(
+              message:
+                  'This request is about to end and can no longer be accepted.',
+            ),
+          ),
+      ],
+    ),
       ),
     );
   }
@@ -1693,12 +1715,14 @@ class _NotificationsPageState extends State<NotificationsPage> {
         color: AppColors.kGreen,
         backgroundColor: Colors.white,
         onRefresh: _refreshNotifications,
-        child: ListView(
+        child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
-          children: [
-            _buildFilterBar(),
-            const SizedBox(height: 120),
-            _buildEmptyState(),
+          slivers: [
+            SliverToBoxAdapter(child: _buildFilterBar()),
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: _buildEmptyState(),
+            ),
           ],
         ),
       );
@@ -1868,9 +1892,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
   // ---------- Empty State ----------
 
   Widget _buildEmptyState() {
-    return Center(
+    return Align(
+      alignment: const Alignment(0, -0.3),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
             Icons.notifications_none_outlined,
@@ -1880,11 +1905,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
           const SizedBox(height: 16),
           Text(
             'No notifications found',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w500,
-              color: Colors.grey[600],
-            ),
+            style: TextStyle(fontSize: 15, color: Colors.grey[400]),
           ),
         ],
       ),
@@ -2044,9 +2065,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.03),
-                            blurRadius: 4,
-                            offset: const Offset(0, 1),
+                            color: Colors.black.withOpacity(0.07),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
                           ),
                         ],
                       ),
@@ -2542,6 +2563,19 @@ class _NotificationsPageState extends State<NotificationsPage> {
     switch (notification.type) {
       case NotificationType.trackRequest:
         if (!notification.isExpired) {
+          final startAt = notification.startAt;
+          final endAt = notification.endAt;
+          final bool canAccept;
+          if (startAt != null && endAt != null) {
+            final totalDuration = endAt.difference(startAt);
+            final tenPercent = totalDuration * 0.10;
+            const cap = Duration(minutes: 10);
+            final cutoff = tenPercent < cap ? tenPercent : cap;
+            canAccept = DateTime.now().isBefore(endAt.subtract(cutoff));
+          } else {
+            canAccept = true;
+          }
+
           return Row(
             children: [
               // Decline Button
@@ -2573,24 +2607,34 @@ class _NotificationsPageState extends State<NotificationsPage> {
               const SizedBox(width: 8),
               // Accept Button
               InkWell(
-                onTap: () => _handleAccept(notification),
+                onTap: canAccept
+                    ? () => _handleAccept(notification)
+                    : () => _showAcceptCutoffMessage(notification.id),
                 borderRadius: BorderRadius.circular(8),
                 child: Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 16,
                     vertical: 8,
                   ),
-                  child: const Row(
+                  child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.check, size: 18, color: AppColors.kGreen),
-                      SizedBox(width: 6),
+                      Icon(
+                        Icons.check,
+                        size: 18,
+                        color: canAccept
+                            ? AppColors.kGreen
+                            : Colors.grey.shade400,
+                      ),
+                      const SizedBox(width: 6),
                       Text(
                         'Accept',
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
-                          color: AppColors.kGreen,
+                          color: canAccept
+                              ? AppColors.kGreen
+                              : Colors.grey.shade400,
                         ),
                       ),
                     ],
@@ -4260,6 +4304,30 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
   // ---------- Action Handlers ----------
 
+  void _showAcceptCutoffMessage(String notifId) {
+    _acceptCutoffMessageTimers[notifId]?.cancel();
+    if (mounted) {
+      setState(() {
+        _acceptCutoffMessageNotifIds.add(notifId);
+      });
+    } else {
+      _acceptCutoffMessageNotifIds.add(notifId);
+    }
+    _acceptCutoffMessageTimers[notifId] = Timer(
+      const Duration(seconds: 2),
+      () {
+        _acceptCutoffMessageTimers.remove(notifId);
+        if (!mounted) {
+          _acceptCutoffMessageNotifIds.remove(notifId);
+          return;
+        }
+        setState(() {
+          _acceptCutoffMessageNotifIds.remove(notifId);
+        });
+      },
+    );
+  }
+
   void _handleAccept(NotificationItem notification) async {
     final confirmed = await _showAcceptTrackRequestDialog(notification);
 
@@ -5153,6 +5221,7 @@ class NotificationItem {
   final String? trackRequestId;
   final String? meetingPointId;
   final String? requestStatus;
+  final DateTime? startAt;
   final DateTime? endAt;
   final bool requiresAction;
   final bool actionTaken;
@@ -5180,6 +5249,7 @@ class NotificationItem {
     this.trackRequestId,
     this.meetingPointId,
     this.requestStatus,
+    this.startAt,
     this.endAt,
 
     this.requiresAction = false,

@@ -770,8 +770,8 @@ class _HistoryPageState extends State<HistoryPage> {
         const SizedBox(height: 16),
         Expanded(
           child: _trackingFilterIndex == 0
-              ? _buildHistoryList(stream: _sentStream)
-              : _buildHistoryList(stream: _receivedStream),
+              ? _buildHistoryList(stream: _sentStream, isSent: true)
+              : _buildHistoryList(stream: _receivedStream, isSent: false),
         ),
       ],
     );
@@ -815,6 +815,7 @@ class _HistoryPageState extends State<HistoryPage> {
 
   Widget _buildHistoryList({
     required Stream<List<HistoryTrackingRequest>> stream,
+    required bool isSent,
   }) {
     return StreamBuilder<List<HistoryTrackingRequest>>(
       key: ValueKey(_trackingFilterIndex),
@@ -844,14 +845,13 @@ class _HistoryPageState extends State<HistoryPage> {
         }
         final list = snapshot.data ?? [];
         if (list.isEmpty) {
-          return Center(
+          return Align(
+            alignment: const Alignment(0, -0.3),
             child: Text(
-              'No past requests',
-              style: TextStyle(
-                fontSize: 15,
-                color: Colors.grey[600],
-                fontWeight: FontWeight.w500,
-              ),
+              isSent
+                  ? 'No tracking requests sent yet'
+                  : 'No tracking requests received yet',
+              style: TextStyle(fontSize: 15, color: Colors.grey[400]),
             ),
           );
         }
@@ -1184,15 +1184,21 @@ class _HistoryPageState extends State<HistoryPage> {
                   : allList.where((m) => !m.isHost).toList();
 
               if (list.isEmpty) {
-                return Center(
-                  child: Text(
-                    'No past meeting points',
-                    style: TextStyle(
-                      fontSize: 15,
-                      color: Colors.grey[600],
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
+                return Align(
+                  alignment: const Alignment(0, -0.3),
+                  child: _meetingFilterIndex == 0
+                      ? Text(
+                          "You haven't hosted any meeting points yet",
+                          style: TextStyle(fontSize: 15, color: Colors.grey[400]),
+                        )
+                      : Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 48),
+                          child: Text(
+                            "You haven't been invited to any meeting points yet",
+                            style: TextStyle(fontSize: 15, color: Colors.grey[400]),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
                 );
               }
 

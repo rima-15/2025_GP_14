@@ -258,12 +258,10 @@ class _TrackPageState extends State<TrackPage> {
 
   int _meetingPointActiveCount(MeetingPointRecord? meeting) {
     if (meeting == null) return 0;
-    final hostActive =
-        !meeting.isConfirmed || meeting.hostArrivalStatus != 'cancelled';
+    if (!meeting.isConfirmed) return 0;
+    final hostActive = meeting.hostArrivalStatus != 'cancelled';
     final accepted = meeting.participants.where((p) => p.isAccepted);
-    final acceptedActive = meeting.isConfirmed
-        ? accepted.where((p) => !p.isCancelledArrival)
-        : accepted;
+    final acceptedActive = accepted.where((p) => !p.isCancelledArrival);
     return (hostActive ? 1 : 0) + acceptedActive.length;
   }
 

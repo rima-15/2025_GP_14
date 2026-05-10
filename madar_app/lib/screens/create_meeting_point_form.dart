@@ -21,8 +21,9 @@ import 'package:share_plus/share_plus.dart';
 // ── DEV FLAG ──────────────────────────────────────────────────────────────────
 /// Set to true so the full wizard can be tested even outside a real venue.
 const bool forceVenueForTesting = true;
+
 /// Set to true to force the "Venue is closed" error for UI testing.
-const bool forceVenueClosedForTesting = true;
+const bool forceVenueClosedForTesting = false;
 const String _kTestVenueName = 'Solitaire';
 const String _kTestVenueId = 'ChIJcYTQDwDjLj4RZEiboV6gZzM';
 const String _kFallbackMapVenueId = 'ChIJcYTQDwDjLj4RZEiboV6gZzM';
@@ -54,7 +55,8 @@ class MeetingPointParticipant {
   // ── Arrival tracking (populated when meeting status becomes 'active') ──────
   final String arrivalStatus; // on_the_way | arrived | cancelled
   final DateTime? arrivedAt;
-  final int estimatedArrivalMinutes; // 1-60, updated from live ETA when available
+  final int
+  estimatedArrivalMinutes; // 1-60, updated from live ETA when available
   final DateTime? locationUpdatedAt;
 
   bool get isPending => status == 'pending';
@@ -962,7 +964,9 @@ class MeetingPointService {
         return;
       }
 
-      final idx = meeting.participants.indexWhere((p) => p.userId == trimmedUserId);
+      final idx = meeting.participants.indexWhere(
+        (p) => p.userId == trimmedUserId,
+      );
       if (idx < 0) return;
 
       final participant = meeting.participants[idx];
@@ -2084,9 +2088,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _FavoriteListSheet(
-        alreadySelectedPhones: alreadyPhones,
-      ),
+      builder: (_) => _FavoriteListSheet(alreadySelectedPhones: alreadyPhones),
     );
 
     if (result == null) return;
@@ -2095,7 +2097,8 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     // Remove friends that were deselected in the sheet
     setState(() {
       _selectedFriends.removeWhere(
-        (f) => alreadyPhones.contains(f.phone) && !finalPhones.contains(f.phone),
+        (f) =>
+            alreadyPhones.contains(f.phone) && !finalPhones.contains(f.phone),
       );
     });
     // Add newly selected friends
@@ -3859,9 +3862,13 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
               if (mounted) setState(() {});
             },
             child: Icon(
-              _favService.isFavorite(friend.phone) ? Icons.favorite : Icons.favorite_border,
+              _favService.isFavorite(friend.phone)
+                  ? Icons.favorite
+                  : Icons.favorite_border,
               size: 22,
-              color: _favService.isFavorite(friend.phone) ? Colors.red : Colors.grey[400],
+              color: _favService.isFavorite(friend.phone)
+                  ? Colors.red
+                  : Colors.grey[400],
             ),
           ),
           const SizedBox(width: 8),
@@ -4669,9 +4676,13 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
               if (mounted) setState(() {});
             },
             child: Icon(
-              _favService.isFavorite(p.friend.phone) ? Icons.favorite : Icons.favorite_border,
+              _favService.isFavorite(p.friend.phone)
+                  ? Icons.favorite
+                  : Icons.favorite_border,
               size: 22,
-              color: _favService.isFavorite(p.friend.phone) ? Colors.red : Colors.grey[400],
+              color: _favService.isFavorite(p.friend.phone)
+                  ? Colors.red
+                  : Colors.grey[400],
             ),
           ),
           const SizedBox(width: 8),
@@ -4928,9 +4939,13 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
                   if (mounted) setState(() {});
                 },
                 child: Icon(
-                  _favService.isFavorite(phone) ? Icons.favorite : Icons.favorite_border,
+                  _favService.isFavorite(phone)
+                      ? Icons.favorite
+                      : Icons.favorite_border,
                   size: 22,
-                  color: _favService.isFavorite(phone) ? Colors.red : Colors.grey[400],
+                  color: _favService.isFavorite(phone)
+                      ? Colors.red
+                      : Colors.grey[400],
                 ),
               ),
               const SizedBox(width: 8),
@@ -5247,16 +5262,26 @@ class _FavoriteListSheetState extends State<_FavoriteListSheet> {
   Future<void> _loadFavorites() async {
     try {
       final uid = FirebaseAuth.instance.currentUser?.uid;
-      if (uid == null) { setState(() => _loadingFavorites = false); return; }
-      final snap = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      if (uid == null) {
+        setState(() => _loadingFavorites = false);
+        return;
+      }
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get();
       final raw = snap.data()?['favoriteFriends'];
       final list = raw is List
-          ? raw.map((e) => _Friend(
-                id: (e['phone'] ?? '').toString(),
-                name: (e['name'] ?? '').toString(),
-                phone: (e['phone'] ?? '').toString(),
-                isFavorite: true,
-              )).toList()
+          ? raw
+                .map(
+                  (e) => _Friend(
+                    id: (e['phone'] ?? '').toString(),
+                    name: (e['name'] ?? '').toString(),
+                    phone: (e['phone'] ?? '').toString(),
+                    isFavorite: true,
+                  ),
+                )
+                .toList()
           : <_Friend>[];
       if (mounted) {
         setState(() {
@@ -5293,7 +5318,12 @@ class _FavoriteListSheetState extends State<_FavoriteListSheet> {
     final q = _searchCtrl.text.toLowerCase();
     setState(() {
       _filtered = _allFavorites
-          .where((f) => q.isEmpty || f.name.toLowerCase().contains(q) || f.phone.contains(q))
+          .where(
+            (f) =>
+                q.isEmpty ||
+                f.name.toLowerCase().contains(q) ||
+                f.phone.contains(q),
+          )
           .toList();
     });
   }
@@ -5302,7 +5332,9 @@ class _FavoriteListSheetState extends State<_FavoriteListSheet> {
   Widget build(BuildContext context) {
     return Container(
       height: MediaQuery.of(context).size.height * 0.85,
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
       decoration: const BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.only(
@@ -5393,69 +5425,84 @@ class _FavoriteListSheetState extends State<_FavoriteListSheet> {
             child: _loadingFavorites
                 ? const AppLoadingIndicator()
                 : _filtered.isEmpty
-                    ? Center(
-                        child: Text(
-                          _searchCtrl.text.isEmpty
-                              ? "You haven't added any favorite friends yet."
-                              : 'No results found. Try again',
-                          style: TextStyle(color: Colors.grey[400], fontSize: 15),
-                          textAlign: TextAlign.center,
+                ? Center(
+                    child: Text(
+                      _searchCtrl.text.isEmpty
+                          ? "You haven't added any favorite friends yet."
+                          : 'No results found. Try again',
+                      style: TextStyle(color: Colors.grey[400], fontSize: 15),
+                      textAlign: TextAlign.center,
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    itemCount: _filtered.length,
+                    separatorBuilder: (_, __) =>
+                        const Divider(height: 1, thickness: 0.5),
+                    itemBuilder: (ctx, i) {
+                      final f = _filtered[i];
+                      final isChecked = _checkedPhones.contains(f.phone);
+                      return ListTile(
+                        contentPadding: const EdgeInsets.symmetric(vertical: 6),
+                        leading: Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: Colors.grey[300],
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.person,
+                            color: Colors.grey[600],
+                            size: 22,
+                          ),
                         ),
-                      )
-                    : ListView.separated(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              itemCount: _filtered.length,
-              separatorBuilder: (_, __) =>
-                  const Divider(height: 1, thickness: 0.5),
-              itemBuilder: (ctx, i) {
-                final f = _filtered[i];
-                final isChecked = _checkedPhones.contains(f.phone);
-                return ListTile(
-                  contentPadding: const EdgeInsets.symmetric(vertical: 6),
-                  leading: Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: Colors.grey[300],
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(Icons.person, color: Colors.grey[600], size: 22),
-                  ),
-                  title: Text(
-                    f.name,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.black87,
-                    ),
-                  ),
-                  subtitle: Text(
-                    f.phone,
-                    style: TextStyle(fontSize: 13, color: Colors.grey[400]),
-                  ),
-                  trailing: GestureDetector(
-                    onTap: () => _toggleFriend(f),
-                    child: Container(
-                      key: ValueKey('${f.phone}_$isChecked'),
-                      width: 26,
-                      height: 26,
-                      decoration: BoxDecoration(
-                        color: isChecked ? AppColors.kGreen : Colors.transparent,
-                        border: Border.all(
-                          color: isChecked ? AppColors.kGreen : Colors.grey.shade300,
-                          width: 2,
+                        title: Text(
+                          f.name,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black87,
+                          ),
                         ),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: isChecked
-                          ? const Icon(Icons.check, color: Colors.white, size: 16)
-                          : null,
-                    ),
+                        subtitle: Text(
+                          f.phone,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey[400],
+                          ),
+                        ),
+                        trailing: GestureDetector(
+                          onTap: () => _toggleFriend(f),
+                          child: Container(
+                            key: ValueKey('${f.phone}_$isChecked'),
+                            width: 26,
+                            height: 26,
+                            decoration: BoxDecoration(
+                              color: isChecked
+                                  ? AppColors.kGreen
+                                  : Colors.transparent,
+                              border: Border.all(
+                                color: isChecked
+                                    ? AppColors.kGreen
+                                    : Colors.grey.shade300,
+                                width: 2,
+                              ),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: isChecked
+                                ? const Icon(
+                                    Icons.check,
+                                    color: Colors.white,
+                                    size: 16,
+                                  )
+                                : null,
+                          ),
+                        ),
+                        onTap: () => _toggleFriend(f),
+                      );
+                    },
                   ),
-                  onTap: () => _toggleFriend(f),
-                );
-              },
-            ),
           ),
         ],
       ),

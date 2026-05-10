@@ -152,6 +152,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
     fontWeight: FontWeight.w600,
     color: Colors.black87,
   );
+  static const IconData _deleteAllNotificationsIcon = Icons.delete_rounded;
+  static const IconData _deleteNotificationIcon = Icons.delete_rounded;
+  static const double _deleteAllNotificationsIconSize = 24;
+  static const double _deleteNotificationIconSize = 26;
 
   TextStyle _notificationBodyStyle() => TextStyle(
     fontSize: _notificationBodyFontSize,
@@ -2025,9 +2029,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
                     ),
                     child: const Center(
                       child: Icon(
-                        Icons.delete_outline,
+                        _deleteNotificationIcon,
                         color: Colors.white,
-                        size: 24,
+                        size: _deleteNotificationIconSize,
                       ),
                     ),
                   ),
@@ -2962,7 +2966,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
         return IconButton(
           tooltip: 'Delete all notifications',
-          iconSize: 22,
+          iconSize: _deleteAllNotificationsIconSize,
           onPressed:
               hasNotifications && !_isDeletingAllNotifications
                   ? _deleteAllNotifications
@@ -2980,7 +2984,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                     ),
                   )
                   : Icon(
-                    Icons.delete_outline_rounded,
+                    _deleteAllNotificationsIcon,
                     color:
                         hasNotifications
                             ? AppColors.kGreen

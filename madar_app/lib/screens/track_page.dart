@@ -96,6 +96,9 @@ class _TrackPageState extends State<TrackPage> {
   _meetingPathsByUserFloorGltf = {};
   final Map<String, int> _meetingEtaBaseSecondsByUser = {};
   final Map<String, DateTime> _meetingEtaBaseTimeByUser = {};
+  final Map<String, int> _meetingEtaResetAnchorMsByUser = {};
+  final Map<String, int> _meetingEtaDisplayedSecondsByUser = {};
+  final Map<String, int?> _meetingEtaDisplayedAnchorMsByUser = {};
   final Map<String, String> _meetingEtaSyncSignatureByUser = {};
   String? _meetingPathTargetSignature;
   List<ConnectorLink> _connectors = const [];
@@ -122,9 +125,9 @@ class _TrackPageState extends State<TrackPage> {
   final Map<String, Timer> _refreshCooldownMessageTimers = {};
   final Set<String> _acceptCutoffMessageRequestIds = {};
   final Map<String, Timer> _acceptCutoffMessageTimers = {};
-  // Meeting participant location refresh state (keyed by participant userId)
+  // Meeting participant location refresh state (keyed by meetingId + participant userId)
   final Set<String> _refreshingMeetingParticipantIds = {};
-  final Map<String, DateTime> _meetingRefreshCooldownUntilByUserId = {};
+  final Map<String, DateTime> _meetingRefreshCooldownUntilByKey = {};
 
   /// 0 = Sent, 1 = Received (same order as History page)
   int _selectedFilterIndex = 0;
@@ -1099,6 +1102,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     _meetingNameByUser.clear();
     _meetingUpdatedAtByUser.clear();
     _meetingLocationSignatureByUser.clear();
+    _meetingEtaDisplayedSecondsByUser.clear();
+    _meetingEtaDisplayedAnchorMsByUser.clear();
     _meetingArrivalStatusByUser.clear();
     _arrivalOverrideByUser.clear();
     _arrivalOverrideAtByUser.clear();
@@ -1288,6 +1293,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       _meetingNameByUser.remove(id);
       _meetingUpdatedAtByUser.remove(id);
       _meetingLocationSignatureByUser.remove(id);
+      _meetingEtaBaseSecondsByUser.remove(id);
+      _meetingEtaBaseTimeByUser.remove(id);
+      _meetingEtaResetAnchorMsByUser.remove(id);
+      _meetingEtaDisplayedSecondsByUser.remove(id);
+      _meetingEtaDisplayedAnchorMsByUser.remove(id);
       _meetingEtaSyncSignatureByUser.remove(id);
       _meetingArrivalStatusByUser.remove(id);
       _arrivalOverrideByUser.remove(id);
@@ -1376,9 +1386,6 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
   Future<void> _clearMeetingPaths() async {
     _meetingPathsByUserFloorGltf.clear();
-    _meetingEtaBaseSecondsByUser.clear();
-    _meetingEtaBaseTimeByUser.clear();
-    _meetingEtaSyncSignatureByUser.clear();
     _meetingPathTargetSignature = null;
     _meetingLocationSignatureByUser.clear();
     if (_trackMapController != null) {
@@ -1392,9 +1399,6 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   Future<void> _clearMeetingPathForUser(String userId) async {
     if (_meetingPathsByUserFloorGltf.containsKey(userId)) {
       _meetingPathsByUserFloorGltf.remove(userId);
-      _meetingEtaBaseSecondsByUser.remove(userId);
-      _meetingEtaBaseTimeByUser.remove(userId);
-      _meetingEtaSyncSignatureByUser.remove(userId);
       _meetingLocationSignatureByUser.remove(userId);
       if (mounted) setState(() {});
     }
@@ -1415,10 +1419,12 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           : meeting.participantFor(userId)?.locationUpdatedAt;
       final confirmedAt = meeting.confirmedAt;
 
-      if (meetingAnchor != null && (anchor == null || meetingAnchor.isAfter(anchor))) {
+      if (meetingAnchor != null &&
+          (anchor == null || meetingAnchor.isAfter(anchor))) {
         anchor = meetingAnchor;
       }
-      if (confirmedAt != null && (anchor == null || confirmedAt.isAfter(anchor))) {
+      if (confirmedAt != null &&
+          (anchor == null || confirmedAt.isAfter(anchor))) {
         anchor = confirmedAt;
       }
     }
@@ -1556,13 +1562,21 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       final totalMeters = rawDist * _unitToMeters;
       final seconds = (totalMeters / 1.4).ceil();
       final baseSeconds = seconds < 60 ? 60 : seconds;
-      _meetingEtaBaseSecondsByUser[userId] = baseSeconds;
-      _meetingEtaBaseTimeByUser[userId] =
+      final anchor =
           _meetingEtaAnchorForUser(userId) ?? MeetingPointService.serverNow;
+      final anchorMs = anchor.millisecondsSinceEpoch;
+      final hadEtaState =
+          _meetingEtaBaseSecondsByUser.containsKey(userId) &&
+          _meetingEtaBaseTimeByUser.containsKey(userId);
+      final shouldResetCountdown =
+          !hadEtaState || _meetingEtaResetAnchorMsByUser[userId] != anchorMs;
+      if (shouldResetCountdown) {
+        _meetingEtaBaseSecondsByUser[userId] = baseSeconds;
+        _meetingEtaBaseTimeByUser[userId] = anchor;
+        _meetingEtaResetAnchorMsByUser[userId] = anchorMs;
+      }
       unawaited(_syncMeetingEtaForUser(userId, baseSeconds));
     } else {
-      _meetingEtaBaseSecondsByUser.remove(userId);
-      _meetingEtaBaseTimeByUser.remove(userId);
       _meetingEtaSyncSignatureByUser.remove(userId);
     }
     if (mounted) {
@@ -3130,16 +3144,48 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     return total;
   }
 
-  int _etaSecondsLeftForUser(String userId, int fallbackMins) {
-    final baseSeconds =
-        _meetingEtaBaseSecondsByUser[userId] ?? (fallbackMins * 60);
-    final baseTime = _meetingEtaBaseTimeByUser[userId];
-    final elapsedRaw = baseTime == null
-        ? 0
-        : MeetingPointService.serverNow.difference(baseTime).inSeconds;
-    final elapsed = elapsedRaw < 0 ? 0 : elapsedRaw;
-    final remaining = baseSeconds - elapsed;
-    return remaining < 60 ? 60 : remaining;
+  int _etaSecondsLeftForUser(
+    String userId,
+    int fallbackMins, {
+    DateTime? persistedAnchor,
+  }) {
+    int remainingFrom(int totalSeconds, DateTime? anchor) {
+      final elapsedRaw = anchor == null
+          ? 0
+          : MeetingPointService.serverNow.difference(anchor).inSeconds;
+      final elapsed = elapsedRaw < 0 ? 0 : elapsedRaw;
+      final remaining = totalSeconds - elapsed;
+      return remaining < 60 ? 60 : remaining;
+    }
+
+    final persistedSeconds = remainingFrom(fallbackMins * 60, persistedAnchor);
+
+    final localBaseSeconds = _meetingEtaBaseSecondsByUser[userId];
+    final localBaseTime = _meetingEtaBaseTimeByUser[userId];
+    final localAnchorMs = _meetingEtaResetAnchorMsByUser[userId];
+    if (localBaseSeconds == null || localBaseTime == null) {
+      return persistedSeconds;
+    }
+
+    final persistedAnchorMs = persistedAnchor?.millisecondsSinceEpoch;
+    final localIsCurrent =
+        localAnchorMs != null &&
+        (persistedAnchorMs == null || localAnchorMs >= persistedAnchorMs);
+    final currentAnchorMs = localIsCurrent ? localAnchorMs : persistedAnchorMs;
+    final candidateSeconds = localIsCurrent
+        ? remainingFrom(localBaseSeconds, localBaseTime)
+        : persistedSeconds;
+
+    final previousAnchorMs = _meetingEtaDisplayedAnchorMsByUser[userId];
+    final previousSeconds = _meetingEtaDisplayedSecondsByUser[userId];
+    final resolvedSeconds =
+        previousSeconds != null && previousAnchorMs == currentAnchorMs
+        ? math.min(previousSeconds, candidateSeconds)
+        : candidateSeconds;
+
+    _meetingEtaDisplayedAnchorMsByUser[userId] = currentAnchorMs;
+    _meetingEtaDisplayedSecondsByUser[userId] = resolvedSeconds;
+    return resolvedSeconds;
   }
 
   List<Map<String, double>> _offsetPathPointsForUser(
@@ -3245,7 +3291,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     final locationUpdatedAt =
         _meetingUpdatedAtByUser[uid] ?? fallbackLocationUpdatedAt;
 
-    final secsLeft = _etaSecondsLeftForUser(uid, fallbackMins);
+    final secsLeft = _etaSecondsLeftForUser(
+      uid,
+      fallbackMins,
+      persistedAnchor: fallbackLocationUpdatedAt,
+    );
     final isArrived = arrivalStatus == 'arrived';
     final isCancelled = arrivalStatus == 'cancelled';
 
@@ -3419,7 +3469,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     final isCancelled = effectiveStatus == 'cancelled';
     final isArrived = effectiveStatus == 'arrived';
     final fallbackMins = p.estimatedArrivalMinutes;
-    final secsLeft = _etaSecondsLeftForUser(p.userId, fallbackMins);
+    final secsLeft = _etaSecondsLeftForUser(
+      p.userId,
+      fallbackMins,
+      persistedAnchor: p.locationUpdatedAt,
+    );
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -3647,10 +3701,14 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                       width: double.infinity,
                       child: Builder(
                         builder: (_) {
+                          final refreshKey = _meetingParticipantRefreshKey(
+                            meeting.id,
+                            p.userId,
+                          );
                           final isBusy = _refreshingMeetingParticipantIds
-                              .contains(p.userId);
+                              .contains(refreshKey);
                           final until =
-                              _meetingRefreshCooldownUntilByUserId[p.userId];
+                              _meetingRefreshCooldownUntilByKey[refreshKey];
                           final isCoolingDown =
                               !isBusy &&
                               until != null &&
@@ -8020,15 +8078,20 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     return '${months[d.month - 1]} ${d.day}';
   }
 
+  String _meetingParticipantRefreshKey(String meetingId, String participantUserId) {
+    return '${meetingId.trim()}|${participantUserId.trim()}';
+  }
+
   // ========== MEETING PARTICIPANT LOCATION REFRESH ==========
   Future<void> _requestMeetingParticipantLocationRefresh(
     MeetingPointRecord meeting,
     String participantUserId,
     String participantName,
   ) async {
-    if (_refreshingMeetingParticipantIds.contains(participantUserId)) return;
+    final refreshKey = _meetingParticipantRefreshKey(meeting.id, participantUserId);
+    if (_refreshingMeetingParticipantIds.contains(refreshKey)) return;
 
-    final until = _meetingRefreshCooldownUntilByUserId[participantUserId];
+    final until = _meetingRefreshCooldownUntilByKey[refreshKey];
     if (until != null && DateTime.now().isBefore(until)) {
       SnackbarHelper.showError(
         context,
@@ -8040,7 +8103,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) return;
 
-    setState(() => _refreshingMeetingParticipantIds.add(participantUserId));
+    setState(() => _refreshingMeetingParticipantIds.add(refreshKey));
 
     try {
       final token =
@@ -8055,7 +8118,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 FieldValue.serverTimestamp(),
           });
 
-      _meetingRefreshCooldownUntilByUserId[participantUserId] = DateTime.now()
+      _meetingRefreshCooldownUntilByKey[refreshKey] = DateTime.now()
           .add(_meetingRefreshCooldownDuration);
 
       if (mounted) {
@@ -8078,10 +8141,10 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     } finally {
       if (mounted) {
         setState(
-          () => _refreshingMeetingParticipantIds.remove(participantUserId),
+          () => _refreshingMeetingParticipantIds.remove(refreshKey),
         );
       } else {
-        _refreshingMeetingParticipantIds.remove(participantUserId);
+        _refreshingMeetingParticipantIds.remove(refreshKey);
       }
     }
   }

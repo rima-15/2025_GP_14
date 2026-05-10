@@ -75,6 +75,7 @@ class _TrackPageState extends State<TrackPage> {
   String? _highlightMeetingInviteId;
   Timer? _highlightClearTimer;
   static const Duration _meetingRefreshCooldownDuration = Duration(minutes: 2);
+  static const Duration _kMeetingMinSessionDuration = Duration(minutes: 10);
   // by remas start
   final Map<String, double> _trackedGpsLatByUser = {};
   final Map<String, double> _trackedGpsLngByUser = {};
@@ -100,6 +101,8 @@ class _TrackPageState extends State<TrackPage> {
   final Map<String, int> _meetingEtaDisplayedSecondsByUser = {};
   final Map<String, int?> _meetingEtaDisplayedAnchorMsByUser = {};
   final Map<String, String> _meetingEtaSyncSignatureByUser = {};
+  final Set<String> _meetingRealExpiryResolvedIds = {};
+  final Set<String> _meetingRealExpirySyncingIds = {};
   String? _meetingPathTargetSignature;
   List<ConnectorLink> _connectors = const [];
   bool _connectorsLoaded = false;
@@ -1124,6 +1127,16 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   }
 
   void _syncMeetingParticipantSubs(MeetingPointRecord? meeting) {
+    final activeMeetingId =
+        meeting != null && meeting.isConfirmed ? meeting.id : null;
+    if (activeMeetingId == null) {
+      _meetingRealExpiryResolvedIds.clear();
+      _meetingRealExpirySyncingIds.clear();
+    } else {
+      _meetingRealExpiryResolvedIds.removeWhere((id) => id != activeMeetingId);
+      _meetingRealExpirySyncingIds.removeWhere((id) => id != activeMeetingId);
+    }
+
     if (_pendingCompletionHoldStartedAt != null &&
         DateTime.now().difference(_pendingCompletionHoldStartedAt!) >
             _kCompletionHoldGrace) {
@@ -1432,6 +1445,94 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     return anchor;
   }
 
+  Set<String> _activeMeetingArrivalUserIds(MeetingPointRecord meeting) {
+    final ids = <String>{};
+
+    final hostId = meeting.hostId.trim();
+    if (meeting.hostArrivalStatus != 'cancelled' && hostId.isNotEmpty) {
+      ids.add(hostId);
+    }
+
+    for (final p in meeting.participants) {
+      if (!p.isAccepted || p.isCancelledArrival) continue;
+      final userId = p.userId.trim();
+      if (userId.isEmpty || userId == hostId) continue;
+      ids.add(userId);
+    }
+
+    return ids;
+  }
+
+  Future<void> _maybeWriteExpiresAtFromRealEtas() async {
+    final meeting = _lastKnownConfirmedMeeting;
+    final currentUid = FirebaseAuth.instance.currentUser?.uid?.trim();
+    if (meeting == null ||
+        !meeting.isConfirmed ||
+        currentUid == null ||
+        currentUid.isEmpty ||
+        !meeting.isHost(currentUid)) {
+      return;
+    }
+
+    final meetingId = meeting.id;
+    if (_meetingRealExpiryResolvedIds.contains(meetingId) ||
+        _meetingRealExpirySyncingIds.contains(meetingId)) {
+      return;
+    }
+
+    final activeIds = _activeMeetingArrivalUserIds(meeting).toList();
+    if (activeIds.length < 2) return;
+
+    final etaSeconds = <int>[];
+    for (final userId in activeIds) {
+      final anchor = _meetingEtaAnchorForUser(userId);
+      final baseSeconds = _meetingEtaBaseSecondsByUser[userId];
+      final baseAnchorMs = _meetingEtaResetAnchorMsByUser[userId];
+      if (anchor == null || baseSeconds == null || baseAnchorMs == null) {
+        return;
+      }
+      if (baseAnchorMs != anchor.millisecondsSinceEpoch) {
+        return;
+      }
+      etaSeconds.add(baseSeconds);
+    }
+    if (etaSeconds.isEmpty) return;
+
+    final maxEtaSeconds = etaSeconds.fold<int>(
+      0,
+      (best, value) => value > best ? value : best,
+    );
+    if (maxEtaSeconds <= 0) return;
+
+    final rawSession = Duration(seconds: maxEtaSeconds * 3);
+    final sessionDuration = rawSession < _kMeetingMinSessionDuration
+        ? _kMeetingMinSessionDuration
+        : rawSession;
+    final meetingStartAt =
+        meeting.confirmedAt ??
+        meeting.updatedAt ??
+        meeting.createdAt ??
+        MeetingPointService.serverNow;
+    final nextExpiresAt = meetingStartAt.add(sessionDuration);
+    final currentExpiresAt = meeting.expiresAt;
+
+    if (currentExpiresAt != null &&
+        currentExpiresAt.difference(nextExpiresAt).inSeconds.abs() <= 1) {
+      _meetingRealExpiryResolvedIds.add(meetingId);
+      return;
+    }
+
+    _meetingRealExpirySyncingIds.add(meetingId);
+    try {
+      await MeetingPointService.updateExpiresAt(meetingId, nextExpiresAt);
+      _meetingRealExpiryResolvedIds.add(meetingId);
+    } catch (_) {
+      // Keep the initial safety expiresAt if the accurate rewrite fails.
+    } finally {
+      _meetingRealExpirySyncingIds.remove(meetingId);
+    }
+  }
+
   Future<void> _recomputeMeetingPathForUser(String userId) async {
     final destPos = _meetingPointPosBlender;
     if (destPos == null) {
@@ -1576,6 +1677,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         _meetingEtaResetAnchorMsByUser[userId] = anchorMs;
       }
       unawaited(_syncMeetingEtaForUser(userId, baseSeconds));
+      unawaited(_maybeWriteExpiresAtFromRealEtas());
     } else {
       _meetingEtaSyncSignatureByUser.remove(userId);
     }

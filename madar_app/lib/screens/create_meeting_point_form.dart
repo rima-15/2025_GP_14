@@ -859,35 +859,22 @@ class MeetingPointService {
     final meeting = MeetingPointRecord.fromDoc(doc);
     if (meeting == null) return;
 
-    final rng = math.Random();
-    final hostMins = rng.nextInt(5) + 1;
     final now = DateTime.now();
 
-    // Initialize arrivalStatus + random estimatedArrivalMinutes for all
-    // participants who accepted the invitation.
+    // Initialize arrival status for accepted participants and keep their
+    // placeholder ETA until the host device syncs the real path-based value.
     final updatedParticipants = meeting.participants.map((p) {
       if (!p.isAccepted) return p;
       return p.copyWith(
         arrivalStatus: 'on_the_way',
-        estimatedArrivalMinutes: rng.nextInt(5) + 1,
         locationUpdatedAt: now,
       );
     }).toList();
 
-    // Write an initial expiresAt using the random estimatedArrivalMinutes as a
-    // guaranteed safety baseline — this ensures auto-expiry always works even if
-    // the host device never completes navmesh path calculation.
-    // The host device will overwrite this with a more accurate real-path-based
-    // value once _maybeWriteExpiresAtFromRealEtas() runs.
-    final acceptedETAs = updatedParticipants
-        .where((p) => p.isAccepted)
-        .map((p) => p.estimatedArrivalMinutes);
-    final allETAs = [hostMins, ...acceptedETAs];
-    final largestMins = allETAs.reduce(math.max);
-    final rawSession = Duration(minutes: largestMins * 3);
-    const kMinSession = Duration(minutes: 10);
-    final sessionDuration = rawSession < kMinSession ? kMinSession : rawSession;
-    final expiresAt = now.add(sessionDuration);
+    // Write a fixed minimum expiresAt as a safety baseline so session length
+    // never depends on random placeholder ETAs before the real path ETAs arrive.
+    const kInitialSessionDuration = Duration(minutes: 10);
+    final expiresAt = now.add(kInitialSessionDuration);
 
     await _col.doc(meetingPointId).update({
       'status': 'active',
@@ -895,7 +882,7 @@ class MeetingPointService {
       'updatedAt': FieldValue.serverTimestamp(),
       'confirmedAt': FieldValue.serverTimestamp(),
       'hostArrivalStatus': 'on_the_way',
-      'hostEstimatedMinutes': hostMins,
+      'hostEstimatedMinutes': meeting.hostEstimatedMinutes,
       'hostArrivedAt': null,
       'hostLocationUpdatedAt': Timestamp.fromDate(now),
       'expiresAt': Timestamp.fromDate(expiresAt),

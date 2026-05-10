@@ -3101,7 +3101,7 @@ function buildPinUI(el) {
   var pin = document.createElement("div");
   pin.style.width = "24px";
   pin.style.height = "24px";
-  pin.style.background = "#ff3b30";
+  pin.style.background = "#C8655C";
   pin.style.borderRadius = "24px 24px 24px 0";
   pin.style.transform = "rotate(-45deg)";
   pin.style.position = "relative";
@@ -3204,7 +3204,7 @@ function ensurePathStyle() {
       width: 6px;
       height: 6px;
       border-radius: 50%;
-      background: #ff8a00;
+      background: #D5964E;
       box-shadow: 0 1px 3px rgba(0,0,0,0.25);
     }
   `;

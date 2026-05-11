@@ -1621,6 +1621,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         return;
       }
 
+      const connectorPenalty = 0.5;
       double bestScore = double.infinity;
       List<List<double>> bestA = const [];
       List<List<double>> bestB = const [];
@@ -1632,7 +1633,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         if (aPts.isEmpty) continue;
         final bPts = computePathOn(destNm, bPos, destPos);
         if (bPts.isEmpty) continue;
-        final score = pathLen(aPts) + pathLen(bPts);
+        final score = pathLen(aPts) + pathLen(bPts) + connectorPenalty;
         if (score < bestScore) {
           bestScore = score;
           bestA = aPts;

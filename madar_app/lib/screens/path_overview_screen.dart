@@ -2913,6 +2913,7 @@ class _PathOverviewScreenState
         }
 
         Map<String, double>? bestDest;
+        const connectorPenalty = 0.5;
         for (final c in pool) {
           final aPos = c
               .endpointsByFNumber[startF]!;
@@ -2936,7 +2937,8 @@ class _PathOverviewScreenState
               continue;
             final score =
                 pathLen(aPts) +
-                pathLen(bPts);
+                pathLen(bPts) +
+                connectorPenalty;
             if (score < bestScore) {
               bestScore = score;
               best = c;

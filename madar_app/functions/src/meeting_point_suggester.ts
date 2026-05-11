@@ -37,6 +37,7 @@ type Selection = {
 
 // Scale factor: 1 navmesh unit = 69.32 metres (matches Flutter _unitToMeters).
 const UNITS_TO_METERS = 69.32;
+const CONNECTOR_PENALTY = 0.5;
 
 type SuggestedCandidate = {
   placeId: string;
@@ -324,7 +325,7 @@ function pathLenOnFloor(
   const nm = loadNavmeshForFloor(floor);
   let len = distXY(a, b);
   if (nm) {
-    const pts = nm.findPathBlenderXY([a.x, a.y, a.z], [b.x, b.y, b.z]);
+    const pts = nm.findPathFunnelBlenderXY([a.x, a.y, a.z], [b.x, b.y, b.z]);
     len = pathLenXY(pts);
   }
   cache.set(key, len);
@@ -484,7 +485,7 @@ function distanceUserToEntrance(
     if (!connectorDirectionAllowed(normType, userFloor, entFloor)) continue;
     const partA = pathLenOnFloor(userFloor, start, a, pathCache);
     const partB = pathLenOnFloor(entFloor, b, dest, pathCache);
-    const total = partA + partB;
+    const total = partA + partB + CONNECTOR_PENALTY;
     if (total < best) best = total;
   }
   return Number.isFinite(best) ? best : null;
@@ -869,7 +870,7 @@ class NavMesh {
           pts.push(this.triCenter(rev[i]));
         }
         pts.push(g);
-        return pts;
+        return this.simplifyPathXY(pts);
       }
       open.delete(current);
       for (const nb of this.n[current]) {
@@ -886,5 +887,239 @@ class NavMesh {
       }
     }
     return [s, g];
+  }
+
+  private simplifyPathXY(
+    pts: number[][],
+    minStep = 0.05,
+    collinearEps = 1e-4
+  ): number[][] {
+    if (pts.length <= 2) return pts;
+
+    const out: number[][] = [pts[0]];
+    for (let i = 1; i < pts.length; i++) {
+      const last = out[out.length - 1];
+      const dx = pts[i][0] - last[0];
+      const dy = pts[i][1] - last[1];
+      if (dx * dx + dy * dy >= minStep * minStep) {
+        out.push(pts[i]);
+      }
+    }
+    if (out.length <= 2) return out;
+
+    const out2: number[][] = [out[0]];
+    for (let i = 1; i < out.length - 1; i++) {
+      const a = out2[out2.length - 1];
+      const b = out[i];
+      const c = out[i + 1];
+
+      const abx = b[0] - a[0];
+      const aby = b[1] - a[1];
+      const bcx = c[0] - b[0];
+      const bcy = c[1] - b[1];
+
+      const cross = Math.abs(abx * bcy - aby * bcx);
+      if (cross > collinearEps) {
+        out2.push(b);
+      }
+    }
+    out2.push(out[out.length - 1]);
+    return out2;
+  }
+
+  findPathFunnelBlenderXY(
+    start: number[],
+    goal: number[],
+    maxExpanded = 5000
+  ): number[][] {
+    const sSnap = this.snapPointXY(start);
+    const gSnap = this.snapPointXY(goal);
+    const s = [sSnap[0], sSnap[1], sSnap[2]];
+    const g = [gSnap[0], gSnap[1], gSnap[2]];
+
+    let sTri = this.findContainingTriXY(s);
+    if (sTri < 0) sTri = this.findNearestTriXY(s).tri;
+    let gTri = this.findContainingTriXY(g);
+    if (gTri < 0) gTri = this.findNearestTriXY(g).tri;
+
+    if (sTri < 0 || gTri < 0) return [s, g];
+    if (sTri === gTri) return [s, g];
+
+    const open = new Set<number>();
+    open.add(sTri);
+    const cameFrom = new Map<number, number>();
+    const gScore = new Map<number, number>();
+    const fScore = new Map<number, number>();
+    gScore.set(sTri, 0);
+
+    const goalCenter = this.triCenter(gTri);
+    const h = (ti: number) =>
+      Math.sqrt(this.dist2XY(this.triCenter(ti), goalCenter));
+    fScore.set(sTri, h(sTri));
+
+    let expanded = 0;
+    while (open.size > 0 && expanded < maxExpanded) {
+      expanded++;
+      let current = -1;
+      let bestF = Infinity;
+      for (const tIdx of open) {
+        const f = fScore.get(tIdx) ?? Infinity;
+        if (f < bestF) {
+          bestF = f;
+          current = tIdx;
+        }
+      }
+      if (current === -1) break;
+
+      if (current === gTri) {
+        const triPath: number[] = [current];
+        let cur = current;
+        while (cameFrom.has(cur)) {
+          cur = cameFrom.get(cur)!;
+          triPath.push(cur);
+        }
+        const corridor = triPath.reverse();
+        const funnelPts = this.funnelFromTriPath(s, g, corridor);
+        return this.simplifyPathXY(
+          funnelPts.map((p) => this.snapPointXY([p[0], p[1], p[2]]))
+        );
+      }
+
+      open.delete(current);
+      for (const nb of this.n[current]) {
+        if (nb < 0) continue;
+        const tentativeG =
+          (gScore.get(current) ?? Infinity) +
+          Math.sqrt(this.dist2XY(this.triCenter(current), this.triCenter(nb)));
+
+        if (tentativeG < (gScore.get(nb) ?? Infinity)) {
+          cameFrom.set(nb, current);
+          gScore.set(nb, tentativeG);
+          fScore.set(nb, tentativeG + h(nb));
+          open.add(nb);
+        }
+      }
+    }
+
+    return this.findPathBlenderXY(start, goal, maxExpanded);
+  }
+
+  private funnelFromTriPath(
+    start: number[],
+    goal: number[],
+    corridor: number[]
+  ): number[][] {
+    const portals: number[][][] = [];
+    portals.push([
+      [start[0], start[1], start[2]],
+      [start[0], start[1], start[2]],
+    ]);
+
+    for (let i = 0; i < corridor.length - 1; i++) {
+      const a = corridor[i];
+      const b = corridor[i + 1];
+      const edge = this.sharedEdgeVerts(a, b);
+      if (!edge) continue;
+
+      const va = this.v[edge[0]];
+      const vb = this.v[edge[1]];
+      const ca = this.triCenter(a);
+      const cb = this.triCenter(b);
+      const dirx = cb[0] - ca[0];
+      const diry = cb[1] - ca[1];
+      const ex = vb[0] - va[0];
+      const ey = vb[1] - va[1];
+      const cross = dirx * ey - diry * ex;
+
+      const left =
+        cross >= 0
+          ? [va[0], va[1], (va[2] + vb[2]) * 0.5]
+          : [vb[0], vb[1], (va[2] + vb[2]) * 0.5];
+      const right =
+        cross >= 0
+          ? [vb[0], vb[1], (va[2] + vb[2]) * 0.5]
+          : [va[0], va[1], (va[2] + vb[2]) * 0.5];
+
+      portals.push([left, right]);
+    }
+
+    portals.push([
+      [goal[0], goal[1], goal[2]],
+      [goal[0], goal[1], goal[2]],
+    ]);
+
+    const triArea2 = (a: number[], b: number[], c: number[]) =>
+      (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+
+    const result: number[][] = [];
+    let apex = portals[0][0];
+    let left = portals[0][0];
+    let right = portals[0][1];
+    let apexIndex = 0;
+    let leftIndex = 0;
+    let rightIndex = 0;
+
+    result.push([apex[0], apex[1], apex[2]]);
+
+    for (let i = 1; i < portals.length; i++) {
+      const pLeft = portals[i][0];
+      const pRight = portals[i][1];
+
+      if (triArea2(apex, right, pRight) <= 0.0) {
+        if (this.samePoint(apex, right) || triArea2(apex, left, pRight) > 0.0) {
+          right = pRight;
+          rightIndex = i;
+        } else {
+          result.push([left[0], left[1], left[2]]);
+          apex = left;
+          apexIndex = leftIndex;
+          left = apex;
+          right = apex;
+          leftIndex = apexIndex;
+          rightIndex = apexIndex;
+          i = apexIndex;
+          continue;
+        }
+      }
+
+      if (triArea2(apex, left, pLeft) >= 0.0) {
+        if (this.samePoint(apex, left) || triArea2(apex, right, pLeft) < 0.0) {
+          left = pLeft;
+          leftIndex = i;
+        } else {
+          result.push([right[0], right[1], right[2]]);
+          apex = right;
+          apexIndex = rightIndex;
+          left = apex;
+          right = apex;
+          leftIndex = apexIndex;
+          rightIndex = apexIndex;
+          i = apexIndex;
+          continue;
+        }
+      }
+    }
+
+    const last = portals[portals.length - 1][0];
+    if (!result.length || !this.samePoint(result[result.length - 1], last)) {
+      result.push([last[0], last[1], last[2]]);
+    }
+    return result;
+  }
+
+  private samePoint(a: number[], b: number[], eps = 1e-9): boolean {
+    return Math.abs(a[0] - b[0]) < eps && Math.abs(a[1] - b[1]) < eps;
+  }
+
+  private sharedEdgeVerts(triA: number, triB: number): number[] | null {
+    const ta = this.t[triA];
+    const tb = this.t[triB];
+    const shared: number[] = [];
+    for (const ia of ta) {
+      for (const ib of tb) {
+        if (ia === ib) shared.push(ia);
+      }
+    }
+    return shared.length === 2 ? [shared[0], shared[1]] : null;
   }
 }

@@ -22,6 +22,7 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
   bool _isMessageExpanded = false;
   bool _showAllFaqs = false;
   bool _isSending = false;
+  static const Duration _rateLimitDuration = Duration(minutes: 5);
 
   final List<FaqItem> _allFaqs = [
     FaqItem(
@@ -138,11 +139,19 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
   }
 
   Future<void> _onSendMessage() async {
+    if (_isSending) return;
+    setState(() => _isSending = true);
+
     final topic = _selectedTopic;
     final message = _messageController.text.trim();
-    final userEmail = FirebaseAuth.instance.currentUser?.email?.trim();
+    final user = FirebaseAuth.instance.currentUser;
+
+    void enableButton() {
+      if (mounted) setState(() => _isSending = false);
+    }
 
     if (message.isEmpty) {
+      enableButton();
       SnackbarHelper.showError(
         context,
         'Please enter a message before sending.',
@@ -150,12 +159,33 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
       return;
     }
 
+    if (user == null) {
+      enableButton();
+      SnackbarHelper.showError(
+        context,
+        'You must be logged in to contact support.',
+      );
+      return;
+    }
+
+    final userEmail = user.email?.trim();
     if (userEmail == null || userEmail.isEmpty) {
+      enableButton();
       SnackbarHelper.showError(context, 'Could not find your email address.');
       return;
     }
 
-    setState(() => _isSending = true);
+    final isLimited = await _isRateLimited(user.uid);
+    if (isLimited) {
+      enableButton();
+      if (mounted) {
+        SnackbarHelper.showError(
+          context,
+          'You can only send one message every ${_rateLimitDuration.inMinutes} minutes. Please wait before sending another.',
+        );
+      }
+      return;
+    }
 
     try {
       await FirebaseFirestore.instance.collection('mail').add({
@@ -165,24 +195,25 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
           'subject': '[Madar Support] $topic',
           'html':
               '''
-            <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #222;">
-              <h2>New Support Request</h2>
-              <p><strong>User email:</strong> $userEmail</p>
-              <p><strong>Topic:</strong> $topic</p>
-              <hr style="margin: 16px 0;">
-              <p><strong>Message:</strong></p>
-              <div style="background:#f7f7f7; padding:12px; border-radius:8px;">
-                ${message.replaceAll('\n', '<br>')}
-              </div>
+          <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #222;">
+            <h2>New Support Request</h2>
+            <p><strong>User email:</strong> $userEmail</p>
+            <p><strong>Topic:</strong> $topic</p>
+            <hr style="margin: 16px 0;">
+            <p><strong>Message:</strong></p>
+            <div style="background:#f7f7f7; padding:12px; border-radius:8px;">
+              ${message.replaceAll('\n', '<br>')}
             </div>
-          ''',
+          </div>
+        ''',
           'text': 'User email: $userEmail\nTopic: $topic\n\n$message',
         },
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      if (!mounted) return;
+      await _updateRateLimit(user.uid);
 
+      if (!mounted) return;
       _messageController.clear();
       SnackbarHelper.showSuccess(
         context,
@@ -190,16 +221,34 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
       );
     } catch (e) {
       if (!mounted) return;
-
       SnackbarHelper.showError(
         context,
         'Failed to send message. Please try again.',
       );
     } finally {
-      if (mounted) {
-        setState(() => _isSending = false);
-      }
+      if (mounted) setState(() => _isSending = false);
     }
+  }
+
+  Future<bool> _isRateLimited(String userId) async {
+    final docRef = FirebaseFirestore.instance
+        .collection('support_rate_limits')
+        .doc(userId);
+    final doc = await docRef.get();
+    if (!doc.exists) return false;
+
+    final lastSent = doc.data()?['lastMessageTimestamp'] as Timestamp?;
+    if (lastSent == null) return false;
+
+    final timeSinceLast = DateTime.now().difference(lastSent.toDate());
+    return timeSinceLast < _rateLimitDuration;
+  }
+
+  Future<void> _updateRateLimit(String userId) async {
+    final docRef = FirebaseFirestore.instance
+        .collection('support_rate_limits')
+        .doc(userId);
+    await docRef.set({'lastMessageTimestamp': FieldValue.serverTimestamp()});
   }
 
   Future<void> _launchUrl(String url) async {
@@ -410,125 +459,169 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
                           curve: Curves.easeInOut,
                           child: _isMessageExpanded
                               ? Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                            child: Column(
-                              children: [
-                                DropdownButtonFormField<String>(
-                                  value: _selectedTopic,
-                                  isExpanded: true,
-                                  items: const [
-                                    DropdownMenuItem(
-                                      value: 'General question',
-                                      child: Text('General question'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'AR Navigation issue',
-                                      child: Text('AR Navigation issue'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'AR Exploration issue',
-                                      child: Text('AR Exploration issue'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'Meeting point / tracking',
-                                      child: Text('Meeting point / tracking'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'Account & login',
-                                      child: Text('Account & login'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'Bug report',
-                                      child: Text('Bug report'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'Other',
-                                      child: Text('Other'),
-                                    ),
-                                  ],
-                                  onChanged: (value) {
-                                    if (value != null) {
-                                      setState(() => _selectedTopic = value);
-                                    }
-                                  },
-                                  decoration: InputDecoration(
-                                    filled: true,
-                                    fillColor: Colors.white,
-                                    contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                      vertical: 14,
-                                    ),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
-                                      borderSide: const BorderSide(color: Colors.black12, width: 1),
-                                    ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
-                                      borderSide: const BorderSide(color: AppColors.kGreen, width: 1.8),
-                                    ),
+                                  padding: const EdgeInsets.fromLTRB(
+                                    16,
+                                    0,
+                                    16,
+                                    16,
                                   ),
-                                  icon: Padding(
-                                    padding: const EdgeInsets.only(right: 8),
-                                    child: Icon(
-                                      Icons.keyboard_arrow_down,
-                                      color: Colors.grey[500],
-                                    ),
+                                  child: Column(
+                                    children: [
+                                      DropdownButtonFormField<String>(
+                                        value: _selectedTopic,
+                                        isExpanded: true,
+                                        items: const [
+                                          DropdownMenuItem(
+                                            value: 'General question',
+                                            child: Text('General question'),
+                                          ),
+                                          DropdownMenuItem(
+                                            value: 'AR Navigation issue',
+                                            child: Text('AR Navigation issue'),
+                                          ),
+                                          DropdownMenuItem(
+                                            value: 'AR Exploration issue',
+                                            child: Text('AR Exploration issue'),
+                                          ),
+                                          DropdownMenuItem(
+                                            value: 'Meeting point / tracking',
+                                            child: Text(
+                                              'Meeting point / tracking',
+                                            ),
+                                          ),
+                                          DropdownMenuItem(
+                                            value: 'Account & login',
+                                            child: Text('Account & login'),
+                                          ),
+                                          DropdownMenuItem(
+                                            value: 'Bug report',
+                                            child: Text('Bug report'),
+                                          ),
+                                          DropdownMenuItem(
+                                            value: 'Other',
+                                            child: Text('Other'),
+                                          ),
+                                        ],
+                                        onChanged: (value) {
+                                          if (value != null) {
+                                            setState(
+                                              () => _selectedTopic = value,
+                                            );
+                                          }
+                                        },
+                                        decoration: InputDecoration(
+                                          filled: true,
+                                          fillColor: Colors.white,
+                                          contentPadding:
+                                              const EdgeInsets.symmetric(
+                                                horizontal: 16,
+                                                vertical: 14,
+                                              ),
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              AppSpacing.buttonRadius,
+                                            ),
+                                            borderSide: BorderSide.none,
+                                          ),
+                                          enabledBorder: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              AppSpacing.buttonRadius,
+                                            ),
+                                            borderSide: const BorderSide(
+                                              color: Colors.black12,
+                                              width: 1,
+                                            ),
+                                          ),
+                                          focusedBorder: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              AppSpacing.buttonRadius,
+                                            ),
+                                            borderSide: const BorderSide(
+                                              color: AppColors.kGreen,
+                                              width: 1.8,
+                                            ),
+                                          ),
+                                        ),
+                                        icon: Padding(
+                                          padding: const EdgeInsets.only(
+                                            right: 8,
+                                          ),
+                                          child: Icon(
+                                            Icons.keyboard_arrow_down,
+                                            color: Colors.grey[500],
+                                          ),
+                                        ),
+                                        dropdownColor: Colors.white,
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          color: Colors.black87,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      TextField(
+                                        controller: _messageController,
+                                        focusNode: _messageFocusNode,
+                                        maxLines: 4,
+                                        onChanged: (_) => setState(() {}),
+                                        style: const TextStyle(fontSize: 14),
+                                        decoration: InputDecoration(
+                                          hintText:
+                                              'Describe your issue or question in detail…',
+                                          hintStyle: TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w400,
+                                            color: Colors.grey[400],
+                                          ),
+                                          filled: true,
+                                          fillColor: Colors.white,
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              AppSpacing.buttonRadius,
+                                            ),
+                                            borderSide: BorderSide.none,
+                                          ),
+                                          enabledBorder: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              AppSpacing.buttonRadius,
+                                            ),
+                                            borderSide: const BorderSide(
+                                              color: Colors.black12,
+                                              width: 1,
+                                            ),
+                                          ),
+                                          focusedBorder: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(
+                                              AppSpacing.buttonRadius,
+                                            ),
+                                            borderSide: const BorderSide(
+                                              color: AppColors.kGreen,
+                                              width: 1.8,
+                                            ),
+                                          ),
+                                          contentPadding: const EdgeInsets.all(
+                                            16,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 16),
+                                      SizedBox(
+                                        width: double.infinity,
+                                        child: PrimaryButton(
+                                          text: _isSending
+                                              ? 'Sending...'
+                                              : 'Send message',
+                                          onPressed:
+                                              (_isSending ||
+                                                  _messageController.text
+                                                      .trim()
+                                                      .isEmpty)
+                                              ? null
+                                              : _onSendMessage,
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                  dropdownColor: Colors.white,
-                                  style: const TextStyle(
-                                    fontSize: 14,
-                                    color: Colors.black87,
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                TextField(
-                                  controller: _messageController,
-                                  focusNode: _messageFocusNode,
-                                  maxLines: 4,
-                                  style: const TextStyle(fontSize: 14),
-                                  decoration: InputDecoration(
-                                    hintText: 'Describe your issue or question in detail…',
-                                    hintStyle: TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w400,
-                                      color: Colors.grey[400],
-                                    ),
-                                    filled: true,
-                                    fillColor: Colors.white,
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
-                                      borderSide: const BorderSide(color: Colors.black12, width: 1),
-                                    ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
-                                      borderSide: const BorderSide(color: AppColors.kGreen, width: 1.8),
-                                    ),
-                                    contentPadding: const EdgeInsets.all(16),
-                                  ),
-                                ),
-                                const SizedBox(height: 16),
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: PrimaryButton(
-                                    text: _isSending
-                                        ? 'Sending...'
-                                        : 'Send message',
-                                    onPressed: _isSending
-                                        ? null
-                                        : _onSendMessage,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          )
+                                )
                               : const SizedBox.shrink(),
                         ),
                       ],
@@ -553,17 +646,17 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
                     children: [
                       _buildSocialCircle(
                         icon: FontAwesomeIcons.xTwitter,
-                        url: 'https://x.com/madar_app',
+                        url: 'https://x.com/Madar_guide',
                       ),
                       const SizedBox(width: 40),
                       _buildSocialCircle(
                         icon: FontAwesomeIcons.instagram,
-                        url: 'https://instagram.com/madar_app',
+                        url: 'https://www.instagram.com/madar_guide/',
                       ),
                       const SizedBox(width: 40),
                       _buildSocialCircle(
                         icon: FontAwesomeIcons.youtube,
-                        url: 'https://youtube.com/@madar_app',
+                        url: 'https://www.youtube.com/@Madar_guide',
                       ),
                     ],
                   ),

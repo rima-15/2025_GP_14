@@ -2999,10 +2999,17 @@ class _PathOverviewScreenState
 
       if (_pathPointsByFloorGltf
           .isNotEmpty) {
+        const connectorPenalty = 0.5;
         final rawDist =
             _calculateTotalDistance();
+        final effectiveRawDist =
+            rawDist +
+            (_chosenConnectorId != null
+                ? connectorPenalty
+                : 0.0);
         final totalDist =
-            rawDist * _unitToMeters;
+            effectiveRawDist *
+            _unitToMeters;
         _estimatedDistance =
             '${totalDist.toStringAsFixed(0)} m';
         final timeSeconds =

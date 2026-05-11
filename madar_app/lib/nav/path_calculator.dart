@@ -50,6 +50,7 @@ class PathCalculator {
     required ConnectorTypeNormalizer normalizeConnectorType,
     required ConnectorDirectionAllowed connectorDirectionAllowed,
     required ConnectorPreferenceMatcher connectorMatchesPreference,
+    double connectorPenalty = 0.5,
   }) async {
     final startF = toFNumber(startFloorLabel);
     final destF = toFNumber(destinationFloorLabel);
@@ -139,7 +140,7 @@ class PathCalculator {
       final bPts = computePathOn(destNm, bPos, destination);
       if (bPts.length < 2) continue;
 
-      final score = pathLen(aPts) + pathLen(bPts);
+      final score = pathLen(aPts) + pathLen(bPts) + connectorPenalty;
       if (score < bestScore) {
         bestScore = score;
         best = c;

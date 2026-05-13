@@ -70,6 +70,7 @@ class _TrackPageState extends State<TrackPage> {
   List<Map<String, String>> _venueMaps = [];
   bool _mapsLoading = false;
   static const double _unitToMeters = 69.32;
+  static const double _connectorPenaltyUnits = 0.5;
   String? _expandedRequestId;
   String? _highlightRequestId;
   String? _highlightMeetingInviteId;
@@ -191,7 +192,7 @@ class _TrackPageState extends State<TrackPage> {
   final Set<String> _maintainAttemptedKeys = {};
 
   /// Local approximate start time for step 3 (invitee), recorded the moment
-  /// pendingCount hits 0. Used to show an immediate ~5-min countdown while
+  /// pendingCount hits 0. Used to show an immediate ~2-min countdown while
   /// waiting for Firestore to deliver hostStep=5 + suggestDeadline.
   final Map<String, DateTime> _approxStep3StartByMeetingId = {};
 
@@ -1587,6 +1588,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     }
 
     final nextPaths = <String, List<Map<String, double>>>{};
+    var usedConnector = false;
 
     if (startF == destF) {
       final pts = computePathOn(startNm, startPos, destPos);
@@ -1632,7 +1634,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         if (aPts.isEmpty) continue;
         final bPts = computePathOn(destNm, bPos, destPos);
         if (bPts.isEmpty) continue;
-        final score = pathLen(aPts) + pathLen(bPts);
+        final score =
+            pathLen(aPts) + pathLen(bPts) + _connectorPenaltyUnits;
         if (score < bestScore) {
           bestScore = score;
           bestA = aPts;
@@ -1650,6 +1653,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             .map((p) => _blenderToGltf(x: p[0], y: p[1], z: p[2]))
             .toList();
       }
+      usedConnector = bestA.isNotEmpty && bestB.isNotEmpty;
     }
 
     if (nextPaths.isEmpty) {
@@ -1659,8 +1663,10 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
     _meetingPathsByUserFloorGltf[userId] = nextPaths;
     final rawDist = _meetingPathDistance(nextPaths);
-    if (rawDist > 0) {
-      final totalMeters = rawDist * _unitToMeters;
+    final effectiveRawDist =
+        rawDist + (usedConnector ? _connectorPenaltyUnits : 0.0);
+    if (effectiveRawDist > 0) {
+      final totalMeters = effectiveRawDist * _unitToMeters;
       final seconds = (totalMeters / 1.4).ceil();
       final baseSeconds = seconds < 60 ? 60 : seconds;
       final anchor =
@@ -2615,7 +2621,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   String? _currentStepTimerLabel(MeetingPointRecord meeting) {
     // Meeting is transitioning from step 4 → 5 (either all participants
     // responded, or the 10-min wait deadline expired). Show an immediate
-    // ~5-min countdown using a local start time so the invitee doesn't see
+    // ~2-min countdown using a local start time so the invitee doesn't see
     // a gap or "00:00" before Firestore delivers hostStep=5+suggestDeadline.
     final waitExpiredForTimer =
         meeting.waitDeadline != null &&
@@ -2625,11 +2631,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         meeting.acceptedCount > 0) {
       final approxStart = _approxStep3StartByMeetingId[meeting.id];
       if (approxStart != null) {
-        final approxDeadline = approxStart.add(const Duration(minutes: 10));
+        final approxDeadline = approxStart.add(const Duration(minutes: 2));
         final seconds = approxDeadline
             .difference(MeetingPointService.serverNow)
             .inSeconds
-            .clamp(0, 600);
+            .clamp(0, 120);
         final mm = (seconds ~/ 60).toString().padLeft(2, '0');
         final ss = (seconds % 60).toString().padLeft(2, '0');
         return '$mm:$ss';
@@ -3064,7 +3070,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
         // Setup-phase: all participants responded (or wait deadline expired) and
         // at least one accepted → record approximate step-3 start so invitees
-        // see an immediate ~5-min countdown before Firestore delivers
+        // see an immediate ~2-min countdown before Firestore delivers
         // hostStep=5+suggestDeadline.
         if (activeMeeting != null &&
             activeMeeting.hostStep == 4 &&

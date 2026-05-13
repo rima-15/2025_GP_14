@@ -2609,6 +2609,38 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     return sum;
   }
 
+  static String _s5NormalizeConnectorType(String raw) {
+    final t = raw.toLowerCase().trim();
+    if (t == 'stair' || t == 'stairs') return 'stairs';
+    if (t == 'elev' || t == 'elevator' || t == 'lift') return 'elevator';
+    if (t == 'esc_up' || t == 'escalator_up' || t == 'escalatorup') {
+      return 'escalator_up';
+    }
+    if (t == 'esc_dn' ||
+        t == 'esc_down' ||
+        t == 'escalator_down' ||
+        t == 'escalatordown') {
+      return 'escalator_down';
+    }
+    if (t.contains('esc') || t.contains('escalator')) return 'escalator';
+    return t;
+  }
+
+  static bool _s5ConnectorDirectionAllowed(
+    String normType,
+    String fromFloor,
+    String toFloor,
+  ) {
+    final from = int.tryParse(fromFloor);
+    final to = int.tryParse(toFloor);
+    if (from == null || to == null) return true;
+
+    final t = normType.toLowerCase();
+    if (t == 'escalator_up') return from < to;
+    if (t == 'escalator_down') return from > to;
+    return true;
+  }
+
   static String? _s5EpFNum(Map ep) {
     if (ep['floorNumber'] != null) return ep['floorNumber'].toString();
     if (ep['f_number'] != null) return ep['f_number'].toString();
@@ -2704,6 +2736,7 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     } catch (_) {}
 
     const double unitToMeters = 69.32;
+    const double connectorPenalty = 0.5;
     final Map<String, int> result = {};
 
     for (final userId in allUserIds) {
@@ -2736,6 +2769,13 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           if (c is! Map) continue;
           final endpoints = c['endpoints'] ?? c['floors'] ?? c['nodes'];
           if (endpoints is! List) continue;
+
+          final normType = _s5NormalizeConnectorType(
+            (c['type'] ?? '').toString(),
+          );
+          if (!_s5ConnectorDirectionAllowed(normType, userFNum, entFNum)) {
+            continue;
+          }
 
           Map? epA, epB;
           for (final ep in endpoints) {
@@ -2778,7 +2818,8 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
             start: [bx, by, bz],
             goal: entPt,
           );
-          final total = _s5PathLen(ptsA) + _s5PathLen(ptsB);
+          final total =
+              _s5PathLen(ptsA) + _s5PathLen(ptsB) + connectorPenalty;
           if (total < best) best = total;
         }
         if (best.isFinite) rawDist = best;

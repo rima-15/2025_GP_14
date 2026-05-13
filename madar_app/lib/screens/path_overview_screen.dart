@@ -1787,16 +1787,26 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
         }
 
         Map<String, double>? bestDest;
+        const connectorPenalty = 0.5;
         for (final c in pool) {
           final aPos = c.endpointsByFNumber[startF]!;
           final bPos = c.endpointsByFNumber[destF]!;
           final aPts = computePathOn(startNm, effectiveStart, aPos);
           if (aPts.length < 2) continue;
 
-          for (final d in destCandidates) {
-            final bPts = computePathOn(destNm, bPos, d);
-            if (bPts.length < 2) continue;
-            final score = pathLen(aPts) + pathLen(bPts);
+          for (final d
+              in destCandidates) {
+            final bPts = computePathOn(
+              destNm,
+              bPos,
+              d,
+            );
+            if (bPts.length < 2)
+              continue;
+            final score =
+                pathLen(aPts) +
+                pathLen(bPts) +
+                connectorPenalty;
             if (score < bestScore) {
               bestScore = score;
               best = c;
@@ -1836,11 +1846,23 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
 
       _routeComputed = true;
 
-      if (_pathPointsByFloorGltf.isNotEmpty) {
-        final rawDist = _calculateTotalDistance();
-        final totalDist = rawDist * _unitToMeters;
-        _estimatedDistance = '${totalDist.toStringAsFixed(0)} m';
-        final timeSeconds = totalDist / 1.4;
+      if (_pathPointsByFloorGltf
+          .isNotEmpty) {
+        const connectorPenalty = 0.5;
+        final rawDist =
+            _calculateTotalDistance();
+        final effectiveRawDist =
+            rawDist +
+            (_chosenConnectorId != null
+                ? connectorPenalty
+                : 0.0);
+        final totalDist =
+            effectiveRawDist *
+            _unitToMeters;
+        _estimatedDistance =
+            '${totalDist.toStringAsFixed(0)} m';
+        final timeSeconds =
+            totalDist / 1.4;
         if (timeSeconds < 50) {
           _estimatedTime = 'Less than 1 min';
         } else {

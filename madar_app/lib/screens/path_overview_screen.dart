@@ -1,5 +1,5 @@
 // ============================================================================
-// PATH OVERVIEW SCREEN (cleaned version)
+// PATH OVERVIEW SCREEN
 // ============================================================================
 
 import 'dart:convert';
@@ -17,7 +17,6 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:madar_app/nav/navmesh.dart';
 import 'navigation_flow_complete.dart';
 import 'package:madar_app/screens/AR_page.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 
 class PathOverviewScreen extends StatefulWidget {
   final String shopName;
@@ -746,14 +745,12 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     final startF = _toFNumber(startLabel);
     final currF = _currentFNumber();
 
-    // Handle user pin (start)
     if (_pendingUserPinGltf != null && currF == startF) {
       await _pushUserPinToJsPath(_pendingUserPinGltf!);
     } else {
       await _clearUserPinFromJs();
     }
 
-    // Handle destination: either POI highlight or destination pin
     final destLabel =
         _destFloorLabelFixed ??
         _destFloorLabel ??
@@ -923,6 +920,28 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
 
   bool _isBlank(String? s) => s == null || s.trim().isEmpty;
 
+  bool _isPlacePoint(Map<String, dynamic>? point) {
+    if (point == null) return false;
+
+    final material = (point['material'] ?? '').toString().trim();
+    final type = (point['type'] ?? '').toString().trim().toLowerCase();
+
+    return type == 'poi' &&
+        material.isNotEmpty &&
+        material.toLowerCase() != 'null';
+  }
+
+  bool _isCustomPinPoint(Map<String, dynamic>? point) {
+    if (point == null) return false;
+
+    final type = (point['type'] ?? '').toString().trim().toLowerCase();
+    final material = (point['material'] ?? '').toString().trim();
+
+    return type != 'poi' ||
+        material.isEmpty ||
+        material.toLowerCase() == 'null';
+  }
+
   Future<void> _loadEntrances() async {
     try {
       const path = 'assets/poi/solitaire_entrances.json';
@@ -1035,7 +1054,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       }
 
       _entrancesLoaded = true;
-      if (mounted) setState(() {}); 
+      if (mounted) setState(() {});
       debugPrint(
         '✅ Entrances loaded: ${_entrancesByPoi.length} POIs with entrances',
       );
@@ -1178,9 +1197,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
           }
 
           final rawFloor = entrance['floor']?.toString() ?? '';
-          final formattedFloor = _floorLabelFromToken(
-            rawFloor,
-          ); 
+          final formattedFloor = _floorLabelFromToken(rawFloor);
           final name = baseName;
 
           final nearby = entrance['nearby']?.toString();
@@ -1794,19 +1811,10 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
           final aPts = computePathOn(startNm, effectiveStart, aPos);
           if (aPts.length < 2) continue;
 
-          for (final d
-              in destCandidates) {
-            final bPts = computePathOn(
-              destNm,
-              bPos,
-              d,
-            );
-            if (bPts.length < 2)
-              continue;
-            final score =
-                pathLen(aPts) +
-                pathLen(bPts) +
-                connectorPenalty;
+          for (final d in destCandidates) {
+            final bPts = computePathOn(destNm, bPos, d);
+            if (bPts.length < 2) continue;
+            final score = pathLen(aPts) + pathLen(bPts) + connectorPenalty;
             if (score < bestScore) {
               bestScore = score;
               best = c;
@@ -1846,23 +1854,14 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
 
       _routeComputed = true;
 
-      if (_pathPointsByFloorGltf
-          .isNotEmpty) {
+      if (_pathPointsByFloorGltf.isNotEmpty) {
         const connectorPenalty = 0.5;
-        final rawDist =
-            _calculateTotalDistance();
+        final rawDist = _calculateTotalDistance();
         final effectiveRawDist =
-            rawDist +
-            (_chosenConnectorId != null
-                ? connectorPenalty
-                : 0.0);
-        final totalDist =
-            effectiveRawDist *
-            _unitToMeters;
-        _estimatedDistance =
-            '${totalDist.toStringAsFixed(0)} m';
-        final timeSeconds =
-            totalDist / 1.4;
+            rawDist + (_chosenConnectorId != null ? connectorPenalty : 0.0);
+        final totalDist = effectiveRawDist * _unitToMeters;
+        _estimatedDistance = '${totalDist.toStringAsFixed(0)} m';
+        final timeSeconds = totalDist / 1.4;
         if (timeSeconds < 50) {
           _estimatedTime = 'Less than 1 min';
         } else {
@@ -2754,7 +2753,6 @@ const timer = setInterval(function() {
 
     if (!mounted) return;
 
-
     final bool isFriendNav = widget.destinationHitGltf != null;
 
     if (isFriendNav) {
@@ -3030,7 +3028,7 @@ const timer = setInterval(function() {
         pois: allPois,
         title: 'Select start point',
         showPinPlacement: true,
-        selectedPoi: currentStartPoi, 
+        selectedPoi: currentStartPoi,
       ),
     );
 
@@ -3100,9 +3098,9 @@ const timer = setInterval(function() {
       _selectedPreference = 'any';
     });
     _pendingUserPinGltf = {
-      'x': result['x'],
-      'y': result['z'],
-      'z': -result['y'],
+      'x': (result['x'] as num).toDouble(),
+      'y': (result['z'] as num).toDouble(),
+      'z': -(result['y'] as num).toDouble(),
     };
     _routeComputed = false;
     _pathPointsByFloorGltf.clear();
@@ -3163,7 +3161,7 @@ const timer = setInterval(function() {
         setState(() {
           _selectedDestPoi = {
             'name': 'Selected location',
-            'type': 'poi',
+            'type': 'pin',
             'floor': displayFloor,
             'x': pinResult['blender']['x'],
             'y': pinResult['blender']['y'],
@@ -3191,8 +3189,7 @@ const timer = setInterval(function() {
         }
       }
       return;
-    }
-    else if (result['type'] == 'active_request') {
+    } else if (result['type'] == 'active_request') {
       setState(() {
         _selectedDestPoi = {
           'name': result['name'],
@@ -3224,8 +3221,7 @@ const timer = setInterval(function() {
         _ensureFloorSelected(_destFloorLabel!);
       }
       return;
-    }
-    else {
+    } else {
       setState(() {
         _selectedDestPoi = result;
         _destFloorLabel = result['floor'];
@@ -3443,7 +3439,7 @@ const timer = setInterval(function() {
                               GestureDetector(
                                 onTap: _showStartPicker,
                                 child: _locationRow(
-                                  Icons.radio_button_checked,
+                                  Icons.location_on,
                                   _usePinAsStart
                                       ? 'Your location'
                                       : (_customStartPoi?['name'] ?? ''),
@@ -3458,7 +3454,7 @@ const timer = setInterval(function() {
                                                   ) ??
                                                   _customStartPoi!['floor'])
                                             : ''),
-                                  const Color(0xFF6C6C6C),
+                                  const Color(0xFFC8655C), // red start pin
                                 ),
                               ),
                               Padding(
@@ -3487,7 +3483,9 @@ const timer = setInterval(function() {
                               GestureDetector(
                                 onTap: _showDestPicker,
                                 child: _locationRow(
-                                  Icons.location_on,
+                                  _isCustomPinPoint(_selectedDestPoi)
+                                      ? Icons.location_on
+                                      : Icons.radio_button_checked,
                                   _selectedDestPoi?['name'] ?? widget.shopName,
                                   _selectedDestPoi?['floor'] != null
                                       ? (_floorLabelFromToken(

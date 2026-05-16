@@ -3,33 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:madar_app/theme/theme.dart';
 
 // ----------------------------------------------------------------------------
-// Meeting Point Popup Guard
-// ----------------------------------------------------------------------------
-
-/// Suppresses the background "Action needed in meeting point" popup when the
-/// user is already on a screen that handles step-5 actions:
-///   • CreateMeetingPointForm is open (any step — it will auto-advance to 5)
-///   • TrackPage is showing the Meeting Point tab (_isTrackingView == false)
-///
-/// Uses a [ValueNotifier] so MainLayout can listen and show the popup
-/// immediately after suppression is lifted (e.g. the form closes).
-class MeetingPointPopupGuard {
-  MeetingPointPopupGuard._();
-
-  static final ValueNotifier<bool> _notifier = ValueNotifier(false);
-
-  /// True → popup is suppressed.
-  static bool get suppress => _notifier.value;
-  static set suppress(bool value) {
-    if (_notifier.value != value) _notifier.value = value;
-  }
-
-  /// Listen for guard changes. Call [removeListener] when done.
-  static void addListener(VoidCallback cb) => _notifier.addListener(cb);
-  static void removeListener(VoidCallback cb) => _notifier.removeListener(cb);
-}
-
-// ----------------------------------------------------------------------------
 // App Colors
 // ----------------------------------------------------------------------------
 class AppColors {
@@ -295,46 +268,66 @@ class ConfirmationDialog {
           title,
           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
         ),
-        content: Text(message, style: const TextStyle(fontSize: 15)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            style: TextButton.styleFrom(
-              backgroundColor: Colors.grey[200],
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
+        contentPadding: const EdgeInsets.fromLTRB(24, 12, 24, 20),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(message, style: const TextStyle(fontSize: 15)),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      style: TextButton.styleFrom(
+                        backgroundColor: Colors.grey[200],
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: Text(
+                        cancelText,
+                        style: const TextStyle(
+                          color: Colors.black87,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      style: TextButton.styleFrom(
+                        backgroundColor: AppColors.kError,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: Text(
+                        confirmText,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-            child: Text(
-              cancelText,
-              style: const TextStyle(
-                color: Colors.black87,
-                fontWeight: FontWeight.w600,
-                fontSize: 15,
-              ),
-            ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(
-              backgroundColor: AppColors.kError,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            child: Text(
-              confirmText,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 15,
-              ),
-            ),
-          ),
-        ],
-        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          ],
+        ),
       ),
     );
 
@@ -359,46 +352,66 @@ class ConfirmationDialog {
           title,
           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
         ),
-        content: Text(message, style: const TextStyle(fontSize: 15)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            style: TextButton.styleFrom(
-              backgroundColor: Colors.grey[200],
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
+        contentPadding: const EdgeInsets.fromLTRB(24, 12, 24, 20),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(message, style: const TextStyle(fontSize: 15)),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      style: TextButton.styleFrom(
+                        backgroundColor: Colors.grey[200],
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: Text(
+                        cancelText,
+                        style: const TextStyle(
+                          color: Colors.black87,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      style: TextButton.styleFrom(
+                        backgroundColor: AppColors.kGreen,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      child: Text(
+                        confirmText,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-            child: Text(
-              cancelText,
-              style: const TextStyle(
-                color: Colors.black87,
-                fontWeight: FontWeight.w600,
-                fontSize: 15,
-              ),
-            ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(
-              backgroundColor: AppColors.kGreen,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            child: Text(
-              confirmText,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 15,
-              ),
-            ),
-          ),
-        ],
-        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          ],
+        ),
       ),
     );
 
@@ -454,6 +467,7 @@ class StyledTextField extends StatelessWidget {
       autovalidateMode: AutovalidateMode.onUserInteraction,
       validator: validator,
       style: TextStyle(
+        fontSize: 14,
         color: enabled ? Colors.black87 : Colors.grey[700],
         fontWeight: FontWeight.w500,
       ),
@@ -462,7 +476,15 @@ class StyledTextField extends StatelessWidget {
         hintText: hint,
         prefixText: prefixText,
         suffixIcon: suffixIcon,
-        labelStyle: TextStyle(color: enabled ? null : Colors.grey[600]),
+        labelStyle: TextStyle(
+          fontSize: 14,
+          color: enabled ? null : Colors.grey[600],
+        ),
+        hintStyle: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w400,
+          color: Colors.grey[400],
+        ),
         filled: true,
         fillColor: enabled ? Colors.white : Colors.grey[200],
         border: OutlineInputBorder(

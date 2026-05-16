@@ -4031,6 +4031,7 @@ class _FloorMapSectionState
           ],
         ),
         alignment: Alignment.center,
+        alignment: Alignment.center,
         child: Text(
           label,
           style: TextStyle(

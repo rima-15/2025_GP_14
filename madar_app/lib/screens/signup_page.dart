@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
 import 'package:madar_app/screens/signin_page.dart';
+import 'package:madar_app/services/notification_preferences_service.dart';
 import 'package:madar_app/widgets/custom_scaffold.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -257,6 +258,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
         'email': email,
         'phone': fullPhone,
         'emailVerifiedStrict': false, // <-- NEW ATTRIBUTE
+        NotificationPreferences.fieldName:
+            NotificationPreferences.defaults().toMap(),
       });
       await user.sendEmailVerification();
 

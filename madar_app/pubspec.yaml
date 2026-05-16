@@ -30,6 +30,7 @@ environment:
 dependencies:
 # date in track request 
   flutter_contacts: ^1.1.7
+  font_awesome_flutter: ^10.7.0
   intl: ^0.18.0
   flutter:
     sdk: flutter

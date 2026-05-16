@@ -9,8 +9,7 @@ class NotificationService {
   static final _local = FlutterLocalNotificationsPlugin();
 
   static Future<void> init() async {
-    // Permission
-    await _fcm.requestPermission(alert: true, badge: true, sound: true);
+    await ensurePermission();
 
     // ANDROID CHANNELS
     const AndroidNotificationChannel channel = AndroidNotificationChannel(
@@ -58,6 +57,29 @@ class NotificationService {
     navigatorKey.currentState?.push(
       MaterialPageRoute(builder: (_) => const NotificationsPage()),
     );
+  }
+
+  static Future<AuthorizationStatus> ensurePermission() async {
+    final settings = await _fcm.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
+    return settings.authorizationStatus;
+  }
+
+  static Future<AuthorizationStatus> getAuthorizationStatus() async {
+    final settings = await _fcm.getNotificationSettings();
+    return settings.authorizationStatus;
+  }
+
+  static bool isPermissionGranted(AuthorizationStatus status) {
+    return status == AuthorizationStatus.authorized ||
+        status == AuthorizationStatus.provisional;
+  }
+
+  static bool isPermissionBlocked(AuthorizationStatus status) {
+    return status == AuthorizationStatus.denied;
   }
 
   static Future<void> _showLocalNotification(RemoteMessage message) async {

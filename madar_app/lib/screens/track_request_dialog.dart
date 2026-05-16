@@ -8,6 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:madar_app/services/favorites_service.dart';
 
 // ----------------------------------------------------------------------------
 // Contact Item Model (for pre-loading)
@@ -161,6 +162,7 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
     _getCurrentLocation();
     _preloadContacts(); // Pre-load contacts and DB status
     _loadCurrentUserInfo(); // Cache current user's phone/name
+    _favService.load();
 
     _phoneFocusNode.addListener(() {
       setState(() {
@@ -848,41 +850,43 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
     });
   }
 
-  void _toggleFavorite(Friend friend) {
-    setState(() {
-      final index = _selectedFriends.indexOf(friend);
-      if (index != -1) {
-        _selectedFriends[index] = Friend(
-          name: friend.name,
-          phone: friend.phone,
-          isFavorite: !friend.isFavorite,
-          isFromPhoneInput: friend.isFromPhoneInput,
-        );
-      }
-    });
+  final _favService = FavoritesService();
+
+  Future<void> _toggleFavorite(Friend friend) async {
+    try {
+      await _favService.toggle(friend.phone, friend.name);
+      if (mounted) setState(() {});
+    } catch (_) {}
   }
 
   Future<void> _showFavoritesList() async {
-    // Dismiss keyboard when opening favorites list
     FocusScope.of(context).unfocus();
+
+    final alreadyPhones = _selectedFriends.map((f) => f.phone).toSet();
 
     final result = await showModalBottomSheet<List<Friend>>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => const FavoritesListSheet(),
+      builder: (context) => FavoritesListSheet(
+        alreadySelectedPhones: alreadyPhones,
+      ),
     );
 
     if (result != null) {
+      final finalPhones = result.map((f) => f.phone).toSet();
       setState(() {
+        // Remove friends that were deselected in the sheet
+        _selectedFriends.removeWhere(
+          (f) => alreadyPhones.contains(f.phone) && !finalPhones.contains(f.phone),
+        );
+        // Add newly selected friends
         for (final friend in result) {
-          // Only add if not already in list
           if (!_selectedFriends.any((f) => f.phone == friend.phone)) {
             _selectedFriends.add(friend);
           }
         }
       });
-      // Re-check overlaps if time is already set
       _checkOverlapsForFriends();
     }
   }
@@ -2625,23 +2629,23 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
                                 ],
                               ),
                             ),
-                            // Favorite button for phone-added friends
-                            if (friend.isFromPhoneInput)
-                              IconButton(
-                                onPressed: () => _toggleFavorite(friend),
-                                icon: Icon(
-                                  friend.isFavorite
-                                      ? Icons.favorite
-                                      : Icons.favorite_border,
-                                  color: friend.isFavorite
-                                      ? Colors.red
-                                      : Colors.grey[400],
-                                  size: 22,
-                                ),
+                            // Favorite button — shown for every friend, state always from DB
+                            GestureDetector(
+                              onTap: () => _toggleFavorite(friend),
+                              child: Icon(
+                                _favService.isFavorite(friend.phone)
+                                    ? Icons.favorite
+                                    : Icons.favorite_border,
+                                color: _favService.isFavorite(friend.phone)
+                                    ? Colors.red
+                                    : Colors.grey[400],
+                                size: 22,
                               ),
-                            IconButton(
-                              onPressed: () => _removeFriend(friend),
-                              icon: const Icon(
+                            ),
+                            const SizedBox(width: 8),
+                            GestureDetector(
+                              onTap: () => _removeFriend(friend),
+                              child: const Icon(
                                 Icons.check_circle,
                                 color: AppColors.kGreen,
                                 size: 24,
@@ -3328,8 +3332,8 @@ class _SelectContactPageState extends State<SelectContactPage> {
                 : keys.isEmpty
                 ? Center(
                     child: Text(
-                      'No contacts',
-                      style: TextStyle(color: Colors.grey[600]),
+                      'No matching contacts',
+                      style: TextStyle(fontSize: 15, color: Colors.grey[400]),
                     ),
                   )
                 : Stack(
@@ -3672,7 +3676,9 @@ class _VenueSelectionSheetState extends State<VenueSelectionSheet> {
 // ----------------------------------------------------------------------------
 
 class FavoritesListSheet extends StatefulWidget {
-  const FavoritesListSheet({super.key});
+  const FavoritesListSheet({super.key, this.alreadySelectedPhones = const {}});
+
+  final Set<String> alreadySelectedPhones;
 
   @override
   State<FavoritesListSheet> createState() => _FavoritesListSheetState();
@@ -3680,32 +3686,47 @@ class FavoritesListSheet extends StatefulWidget {
 
 class _FavoritesListSheetState extends State<FavoritesListSheet> {
   final _searchController = TextEditingController();
-  final List<Friend> _selectedFriends = [];
+  final Set<String> _checkedPhones = {};
 
-  // Mock favorite friends data
-  final List<Friend> _allFavorites = [
-    Friend(name: 'Abeer فاد', phone: '+966503347979', isFavorite: true),
-    Friend(name: 'Afnan Salamah', phone: '+966503347978', isFavorite: true),
-    Friend(name: 'Razan Aldosari', phone: '+966503347977', isFavorite: true),
-    Friend(
-      name: 'Dr. Rafah Almousli',
-      phone: '+966503347976',
-      isFavorite: true,
-    ),
-    Friend(name: 'AMAL', phone: '+966503347975', isFavorite: true),
-    Friend(name: 'Ameera', phone: '+966503347974', isFavorite: true),
-    Friend(name: 'Amjad', phone: '+966503347973', isFavorite: true),
-    Friend(name: 'Areen', phone: '+966503347972', isFavorite: true),
-    Friend(name: 'Aryam', phone: '+966503347971', isFavorite: true),
-  ];
-
+  List<Friend> _allFavorites = [];
   List<Friend> _filteredFavorites = [];
+  bool _loadingFavorites = true;
 
   @override
   void initState() {
     super.initState();
-    _filteredFavorites = List.from(_allFavorites);
     _searchController.addListener(_filterFavorites);
+    _loadFavorites();
+  }
+
+  Future<void> _loadFavorites() async {
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) { setState(() => _loadingFavorites = false); return; }
+      final snap = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      final raw = snap.data()?['favoriteFriends'];
+      final list = raw is List
+          ? raw.map((e) => Friend(
+                name: (e['name'] ?? '').toString(),
+                phone: (e['phone'] ?? '').toString(),
+                isFavorite: true,
+              )).toList()
+          : <Friend>[];
+      if (mounted) {
+        setState(() {
+          _allFavorites = list;
+          _filteredFavorites = List.from(list);
+          _checkedPhones.addAll(
+            list
+                .where((f) => widget.alreadySelectedPhones.contains(f.phone))
+                .map((f) => f.phone),
+          );
+          _loadingFavorites = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingFavorites = false);
+    }
   }
 
   @override
@@ -3733,11 +3754,9 @@ class _FavoritesListSheetState extends State<FavoritesListSheet> {
 
   void _toggleFriend(Friend friend) {
     setState(() {
-      if (_selectedFriends.contains(friend)) {
-        _selectedFriends.remove(friend);
-      } else {
-        _selectedFriends.add(friend);
-      }
+      _checkedPhones.contains(friend.phone)
+          ? _checkedPhones.remove(friend.phone)
+          : _checkedPhones.add(friend.phone);
     });
   }
 
@@ -3745,6 +3764,7 @@ class _FavoritesListSheetState extends State<FavoritesListSheet> {
   Widget build(BuildContext context) {
     return Container(
       height: MediaQuery.of(context).size.height * 0.85,
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       decoration: const BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.only(
@@ -3777,17 +3797,18 @@ class _FavoritesListSheetState extends State<FavoritesListSheet> {
                   ),
                 ),
                 TextButton(
-                  onPressed: _selectedFriends.isEmpty
-                      ? null
-                      : () => Navigator.pop(context, _selectedFriends),
-                  child: Text(
-                    'Add',
+                  onPressed: () => Navigator.pop(
+                    context,
+                    _allFavorites
+                        .where((f) => _checkedPhones.contains(f.phone))
+                        .toList(),
+                  ),
+                  child: const Text(
+                    'Done',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
-                      color: _selectedFriends.isEmpty
-                          ? Colors.grey[400]
-                          : AppColors.kGreen,
+                      color: AppColors.kGreen,
                     ),
                   ),
                 ),
@@ -3830,13 +3851,25 @@ class _FavoritesListSheetState extends State<FavoritesListSheet> {
 
           // Friends List
           Expanded(
-            child: ListView.separated(
+            child: _loadingFavorites
+                ? const AppLoadingIndicator()
+                : _filteredFavorites.isEmpty
+                    ? Center(
+                        child: Text(
+                          _searchController.text.isEmpty
+                              ? "You haven't added any favorite friends yet."
+                              : 'No results found. Try again',
+                          style: TextStyle(color: Colors.grey[400], fontSize: 15),
+                          textAlign: TextAlign.center,
+                        ),
+                      )
+                    : ListView.separated(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               itemCount: _filteredFavorites.length,
               separatorBuilder: (context, index) => const Divider(height: 1),
               itemBuilder: (context, index) {
                 final friend = _filteredFavorites[index];
-                final isSelected = _selectedFriends.contains(friend);
+                final isChecked = _checkedPhones.contains(friend.phone);
 
                 return ListTile(
                   contentPadding: const EdgeInsets.symmetric(vertical: 8),
@@ -3868,27 +3901,19 @@ class _FavoritesListSheetState extends State<FavoritesListSheet> {
                   trailing: GestureDetector(
                     onTap: () => _toggleFriend(friend),
                     child: Container(
-                      key: ValueKey('${friend.phone}_$isSelected'),
+                      key: ValueKey('${friend.phone}_$isChecked'),
                       width: 28,
                       height: 28,
                       decoration: BoxDecoration(
-                        color: isSelected
-                            ? AppColors.kGreen
-                            : Colors.transparent,
+                        color: isChecked ? AppColors.kGreen : Colors.transparent,
                         border: Border.all(
-                          color: isSelected
-                              ? AppColors.kGreen
-                              : Colors.grey.shade300,
+                          color: isChecked ? AppColors.kGreen : Colors.grey.shade300,
                           width: 2,
                         ),
                         borderRadius: BorderRadius.circular(6),
                       ),
-                      child: isSelected
-                          ? const Icon(
-                              Icons.check,
-                              color: Colors.white,
-                              size: 18,
-                            )
+                      child: isChecked
+                          ? const Icon(Icons.check, color: Colors.white, size: 18)
                           : null,
                     ),
                   ),

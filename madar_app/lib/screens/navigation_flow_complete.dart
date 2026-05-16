@@ -1139,7 +1139,7 @@ function buildPinUI(el) {
   var pin = document.createElement("div");
   pin.style.width = "24px";
   pin.style.height = "24px";
-  pin.style.background = "#ff3b30";
+  pin.style.background = "#C8655C";
   pin.style.borderRadius = "24px 24px 24px 0";
   pin.style.transform = "rotate(-45deg)";
   pin.style.position = "relative";
@@ -2563,7 +2563,6 @@ const timer = setInterval(function() {
                           .toList(),
                 ),
               ),
-            ),
 
             // Debug/feedback chip (optional, lightweight)
             if (pos != null)

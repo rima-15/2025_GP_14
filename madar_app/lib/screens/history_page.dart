@@ -506,18 +506,15 @@ class _HistoryPageState extends State<HistoryPage> {
               // 'cancelled' = participant used "Cancel participation" in step 2/3.
               if (pStatus == 'declined' || pStatus == 'cancelled')
                 displayStatus = 'declined';
-              // Only treat as 'expired' when the timer actually ran out.
-              // If the host cancelled before the deadline, keep 'cancelled'
-              // so the reason shows as "Cancelled by host".
+              // Only treat as 'expired' when the timer actually ran out with
+              // no one accepting (auto-cancel logic writes 'all_participants_declined').
+              // If the host explicitly cancelled, keep 'cancelled' so the reason
+              // shows as "Cancelled by host" — even after the deadline passes.
               if (pStatus == 'pending' && status == 'cancelled') {
-                final waitDeadline = _parseTimestamp(data['waitDeadline']);
-                final hostStep = (data['hostStep'] is num)
-                    ? (data['hostStep'] as num).toInt()
-                    : 4;
-                final timerExpired =
-                    waitDeadline != null &&
-                    !waitDeadline.isAfter(DateTime.now());
-                if (timerExpired || hostStep >= 5) displayStatus = 'expired';
+                final storedReason =
+                    (data['cancellationReason'] ?? '').toString().trim();
+                if (storedReason == 'all_participants_declined')
+                  displayStatus = 'expired';
                 // else: displayStatus stays 'cancelled' → "Cancelled by host"
               }
               break;
@@ -594,15 +591,16 @@ class _HistoryPageState extends State<HistoryPage> {
     final status = (data['status'] ?? '').toString().trim().toLowerCase();
     final storedReason = (data['cancellationReason'] ?? '').toString().trim();
     if (status == 'completed') {
-      return storedReason.toLowerCase() == 'auto-closed after time limit'
-          ? storedReason
-          : '';
+      return '';
     }
     if (status != 'cancelled') return '';
 
     // Explicit reason stored by the arrival-phase auto-cancel logic.
     if (storedReason == 'all_participants_left') {
-      return 'All participants left the meeting';
+      final confirmedAt = data['confirmedAt'];
+      return confirmedAt != null
+          ? 'All participants left the meeting'
+          : 'All participants left before the meeting started';
     }
 
     final hostId = (data['hostId'] ?? '').toString();
@@ -631,6 +629,17 @@ class _HistoryPageState extends State<HistoryPage> {
       if (storedReason == 'host_cancelled') {
         return 'You cancelled this request for all participants';
       }
+      // At step 5 before confirmation, 'all_participants_declined' actually means
+      // participants who had accepted then cancelled — treatCancelAsDeclined in the
+      // form converts their status to 'declined', losing the distinction. Treat
+      // this as "left before the meeting started", not a host rejection.
+      if (storedReason == 'all_participants_declined' &&
+          hostStep >= 5 &&
+          !wasInArrivalPhase) {
+        return 'All participants left before the meeting started';
+      }
+      // Only show host-rejection message when no other reason explains the step-5
+      // cancellation (i.e. not caused by participants leaving).
       if (hostStep == 5 && !wasInArrivalPhase)
         return 'Host (you) rejected the suggested meeting point';
       // 'all_participants_declined' is written by the auto-cancel logic when
@@ -761,8 +770,8 @@ class _HistoryPageState extends State<HistoryPage> {
         const SizedBox(height: 16),
         Expanded(
           child: _trackingFilterIndex == 0
-              ? _buildHistoryList(stream: _sentStream)
-              : _buildHistoryList(stream: _receivedStream),
+              ? _buildHistoryList(stream: _sentStream, isSent: true)
+              : _buildHistoryList(stream: _receivedStream, isSent: false),
         ),
       ],
     );
@@ -806,6 +815,7 @@ class _HistoryPageState extends State<HistoryPage> {
 
   Widget _buildHistoryList({
     required Stream<List<HistoryTrackingRequest>> stream,
+    required bool isSent,
   }) {
     return StreamBuilder<List<HistoryTrackingRequest>>(
       key: ValueKey(_trackingFilterIndex),
@@ -835,14 +845,13 @@ class _HistoryPageState extends State<HistoryPage> {
         }
         final list = snapshot.data ?? [];
         if (list.isEmpty) {
-          return Center(
+          return Align(
+            alignment: const Alignment(0, -0.3),
             child: Text(
-              'No past requests',
-              style: TextStyle(
-                fontSize: 15,
-                color: Colors.grey[600],
-                fontWeight: FontWeight.w500,
-              ),
+              isSent
+                  ? 'No tracking requests sent yet'
+                  : 'No tracking requests received yet',
+              style: TextStyle(fontSize: 15, color: Colors.grey[400]),
             ),
           );
         }
@@ -1175,15 +1184,21 @@ class _HistoryPageState extends State<HistoryPage> {
                   : allList.where((m) => !m.isHost).toList();
 
               if (list.isEmpty) {
-                return Center(
-                  child: Text(
-                    'No past meeting points',
-                    style: TextStyle(
-                      fontSize: 15,
-                      color: Colors.grey[600],
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
+                return Align(
+                  alignment: const Alignment(0, -0.3),
+                  child: _meetingFilterIndex == 0
+                      ? Text(
+                          "You haven't hosted any meeting points yet",
+                          style: TextStyle(fontSize: 15, color: Colors.grey[400]),
+                        )
+                      : Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 48),
+                          child: Text(
+                            "You haven't been invited to any meeting points yet",
+                            style: TextStyle(fontSize: 15, color: Colors.grey[400]),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
                 );
               }
 
@@ -1349,20 +1364,32 @@ class _HistoryPageState extends State<HistoryPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      Text(
+                        item.hostName.isEmpty ? 'Unknown' : item.hostName,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.black87,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                      ),
+                      const SizedBox(height: 2),
                       Row(
                         children: [
-                          Flexible(
-                            child: Text(
-                              item.hostName.isEmpty ? 'Unknown' : item.hostName,
-                              style: const TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w700,
-                                color: Colors.black87,
+                          if (item.hostPhone.isNotEmpty) ...[
+                            Expanded(
+                              child: Text(
+                                item.hostPhone,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: Colors.grey[600],
+                                ),
+                                overflow: TextOverflow.ellipsis,
                               ),
-                              overflow: TextOverflow.ellipsis,
                             ),
-                          ),
-                          const SizedBox(width: 6),
+                            const SizedBox(width: 6),
+                          ],
                           Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 8,
@@ -1383,14 +1410,6 @@ class _HistoryPageState extends State<HistoryPage> {
                           ),
                         ],
                       ),
-                      if (item.hostPhone.isNotEmpty)
-                        Text(
-                          item.hostPhone,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Colors.grey[600],
-                          ),
-                        ),
                     ],
                   ),
                 ),
@@ -1463,8 +1482,10 @@ class _HistoryPageState extends State<HistoryPage> {
                             item.status != 'declined' &&
                             item.status != 'expired' &&
                             (item.wasConfirmed ||
-                                item.cancellationReason !=
-                                    'All participants left the meeting')) ...[
+                                (item.cancellationReason !=
+                                        'All participants left the meeting' &&
+                                    item.cancellationReason !=
+                                        'All participants left before the meeting started'))) ...[
                           const SizedBox(height: 4),
                           _labeledDetail(
                             'Suggested point: ',

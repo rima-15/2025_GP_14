@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
 import 'package:madar_app/theme/theme.dart';
 import 'package:madar_app/screens/AR_page.dart';
@@ -6064,7 +6065,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                                         : AppColors.kGreen,
                                     foregroundColor:
                                         disabled
-                                        ? Colors.grey[600]
+                                        ? Colors.grey[500]
                                         : Colors.white,
                                     elevation:
                                         0,
@@ -6217,10 +6218,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                   const Tooltip(
                     message: 'Navigate',
                     child: Icon(
-                      Icons.north_east,
+                      FontAwesomeIcons
+                          .locationArrow,
                       color: AppColors
                           .kGreen,
-                      size: 20,
+                      size: 14,
                     ),
                   ),
                 ],
@@ -7232,7 +7234,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                                   .grey[300],
                           disabledForegroundColor:
                               Colors
-                                  .grey[600],
+                                  .grey[500],
                           padding:
                               const EdgeInsets.symmetric(
                                 vertical:
@@ -13090,12 +13092,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                   foregroundColor:
                       Colors.white,
                   disabledBackgroundColor:
-                      AppColors.kGreen
-                          .withOpacity(
-                            0.4,
-                          ),
+                      Colors.grey[300],
                   disabledForegroundColor:
-                      Colors.white70,
+                      Colors.grey[500],
                   padding:
                       const EdgeInsets.symmetric(
                         vertical: 12,

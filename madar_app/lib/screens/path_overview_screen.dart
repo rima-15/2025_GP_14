@@ -3403,30 +3403,17 @@ const timer = setInterval(function() {
 
             Positioned(
               top: 220,
-              right: 20,
-              child: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.9),
-                  borderRadius: BorderRadius.circular(8),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
-                      blurRadius: 4,
-                    ),
-                  ],
-                ),
-                child: Column(
-                  children: sortedMaps.map((map) {
-                    final label = map['floorNumber'] ?? '';
-                    final url = map['mapURL'] ?? '';
-                    final isSelected = _currentFloor == url;
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: _buildFloorButton(label, url, isSelected),
-                    );
-                  }).toList(),
-                ),
+              right: 16,
+              child: Column(
+                children: sortedMaps.map((map) {
+                  final label = map['floorNumber'] ?? '';
+                  final url = map['mapURL'] ?? '';
+                  final isSelected = _currentFloor == url;
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: _buildFloorButton(label, url, isSelected),
+                  );
+                }).toList(),
               ),
             ),
 
@@ -3764,31 +3751,34 @@ const timer = setInterval(function() {
   }
 
   Widget _buildFloorButton(String label, String url, bool isSelected) {
-    return SizedBox(
-      width: 44,
-      height: 40,
-      child: ElevatedButton(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: isSelected ? AppColors.kGreen : Colors.white,
-          foregroundColor: isSelected ? Colors.white : AppColors.kGreen,
-          padding: EdgeInsets.zero,
-          elevation: isSelected ? 2 : 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-            side: BorderSide(
-              color: isSelected ? AppColors.kGreen : Colors.grey.shade300,
+    return GestureDetector(
+      onTap: () async {
+        setState(() {
+          _pathPushed = false;
+        });
+        await _ensureFloorSelected(label);
+      },
+      child: Container(
+        width: 42,
+        height: 36,
+        decoration: BoxDecoration(
+          color: isSelected ? AppColors.kGreen : Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 4,
             ),
-          ),
+          ],
         ),
-        onPressed: () async {
-          setState(() {
-            _pathPushed = false;
-          });
-          await _ensureFloorSelected(label);
-        },
+        alignment: Alignment.center,
         child: Text(
           label,
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            color: isSelected ? Colors.white : Colors.black87,
+          ),
         ),
       ),
     );

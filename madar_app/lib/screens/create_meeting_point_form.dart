@@ -7488,6 +7488,11 @@ class _CreateMeetingPointFormState
               style: ElevatedButton.styleFrom(
                 backgroundColor:
                     AppColors.kGreen,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor:
+                    Colors.grey[300],
+                disabledForegroundColor:
+                    Colors.grey[500],
                 elevation: 0,
                 shape: RoundedRectangleBorder(
                   borderRadius:
@@ -7499,7 +7504,6 @@ class _CreateMeetingPointFormState
               child: const Text(
                 'Confirm',
                 style: TextStyle(
-                  color: Colors.white,
                   fontSize: 16,
                   fontWeight:
                       FontWeight.w600,

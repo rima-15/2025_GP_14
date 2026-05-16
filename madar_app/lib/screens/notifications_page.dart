@@ -2305,7 +2305,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                             if (states.contains(
                                               MaterialState.disabled,
                                             )) {
-                                              return Colors.grey[600]!;
+                                              return Colors.grey[500]!;
                                             }
                                             return Colors.white;
                                           }),
@@ -2435,7 +2435,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                             if (states.contains(
                                               MaterialState.disabled,
                                             )) {
-                                              return Colors.grey[600]!;
+                                              return Colors.grey[500]!;
                                             }
                                             return Colors.white;
                                           }),
@@ -2739,7 +2739,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
       case NotificationType.meetingLateArrival:
         final isDisabled = _isLateArrivalActionDisabled(notification);
         final disabledBorder = Colors.grey[400]!;
-        final disabledText = Colors.grey[600]!;
+        final disabledText = Colors.grey[500]!;
         final disabledFill = Colors.grey[300]!;
         return Column(
           children: [

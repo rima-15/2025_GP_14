@@ -568,7 +568,7 @@ class PrimaryButton extends StatelessWidget {
           elevation: 0,
           // Gray when loading or disabled (original behavior)
           disabledBackgroundColor: Colors.grey[300],
-          disabledForegroundColor: Colors.grey[600],
+          disabledForegroundColor: Colors.grey[500],
         ),
         child: isLoading
             ? const SizedBox(

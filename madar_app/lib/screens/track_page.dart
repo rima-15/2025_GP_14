@@ -6217,12 +6217,17 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                   ),
                   const Tooltip(
                     message: 'Navigate',
-                    child: Icon(
-                      FontAwesomeIcons
-                          .locationArrow,
-                      color: AppColors
-                          .kGreen,
-                      size: 14,
+                    child: Padding(
+                      padding: EdgeInsets.only(
+                        right: 4,
+                      ),
+                      child: Icon(
+                        FontAwesomeIcons
+                            .locationArrow,
+                        color: AppColors
+                            .kGreen,
+                        size: 15,
+                      ),
                     ),
                   ),
                 ],

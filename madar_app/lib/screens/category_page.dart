@@ -2,11 +2,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_storage/firebase_storage.dart' as storage;
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:madar_app/screens/AR_page.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:madar_app/theme/theme.dart';
 import 'package:madar_app/api/place_rating_service.dart';
 import 'navigation_flow_complete.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+
 // ----------------------------------------------------------------------------
 // Category Page - Shows places within a specific category
 // ----------------------------------------------------------------------------
@@ -122,213 +123,81 @@ class _CategoryPageState extends State<CategoryPage>
     return rating;
   }
 
-  // ---------- AR Navigation ----------
+  Future<void> _openNavigationFlow(
+    String placeId,
+    String placeName,
+    String? poiMaterial,
+    String floorSrc,
+  ) async {
+    final normalizedName = placeName.trim().toLowerCase();
+    final isServicesCategory =
+        widget.categoryName.trim().toLowerCase() == 'services';
 
-  // Check if place has world position for AR navigation
-  Future<bool> _hasWorldPosition(String placeId) async {
-    try {
-      final doc = await FirebaseFirestore.instance
-          .collection('places')
-          .doc(placeId)
-          .get();
-
-      if (!doc.exists) return false;
-
-      final data = doc.data();
-      if (data == null) return false;
-
-      // Check for world_position field
-      return data.containsKey('worldPosition') && data['worldPosition'] != null;
-    } catch (e) {
-      debugPrint("Error checking world position: $e");
-      return false;
-    }
-  }
-
-  // Show dialog when AR is not supported for this place
-  void _showNoPositionDialog(String placeName) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final dialogPadding = screenWidth < 360 ? 20.0 : 28.0;
-
-    showDialog(
-      context: context,
-      barrierDismissible: true,
-      builder: (BuildContext context) {
-        return Dialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-          ),
-          elevation: 0,
-          backgroundColor: Colors.transparent,
-          child: Container(
-            padding: EdgeInsets.all(dialogPadding),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(24),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.15),
-                  blurRadius: 20,
-                  offset: const Offset(0, 10),
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Icon
-                Container(
-                  width: 80,
-                  height: 80,
-                  decoration: BoxDecoration(
-                    color: kGreen.withOpacity(0.15),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Center(
-                    child: Icon(
-                      Icons.location_off_rounded,
-                      size: 42,
-                      color: kGreen,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-
-                // Title
-                const Text(
-                  'AR Not Supported',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                    color: kGreen,
-                    height: 1.2,
-                  ),
-                ),
-                const SizedBox(height: 12),
-
-                // Description
-                Text(
-                  'This place doesn\'t support AR navigation yet. Please check back later!',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 15,
-                    height: 1.5,
-                    color: Colors.grey[700],
-                  ),
-                ),
-                const SizedBox(height: 24),
-
-                // Button
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: kGreen,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      elevation: 0,
-                    ),
-                    child: const Text(
-                      'Got it',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.3,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
+    if (isServicesCategory) {
+      if (normalizedName == 'female bathroom') {
+        showNavigationDialog(
+          context,
+          'Female Bathroom',
+          'service_bathroom_female',
+          destinationPoiMaterial: '',
+          floorSrc: floorSrc,
+          destinationFloorLabel: _floorLabelFromSrc(floorSrc),
         );
-      },
+        return;
+      }
+
+      if (normalizedName == 'male bathroom') {
+        showNavigationDialog(
+          context,
+          'Male Bathroom',
+          'service_bathroom_male',
+          destinationPoiMaterial: '',
+          floorSrc: floorSrc,
+          destinationFloorLabel: _floorLabelFromSrc(floorSrc),
+        );
+        return;
+      }
+
+      if (normalizedName == 'prayer room') {
+        showNavigationDialog(
+          context,
+          'Prayer Room',
+          'service_prayer_room',
+          destinationPoiMaterial: '',
+          floorSrc: floorSrc,
+          destinationFloorLabel: _floorLabelFromSrc(floorSrc),
+        );
+        return;
+      }
+    }
+
+    var material = (poiMaterial ?? '').trim();
+    if (material.isEmpty) {
+      material = 'POIMAT_${placeName.trim()}';
+    }
+
+    if (material.toUpperCase().startsWith('POI_')) {
+      material = 'POIMAT_${material.substring(4)}';
+    }
+
+    debugPrint(
+      '🧾 Category selected: name="$placeName" -> material="$material"',
+    );
+
+    if (material.isEmpty) {
+      debugPrint('❌ No material field found in Firestore for "$placeName"');
+      return;
+    }
+
+    showNavigationDialog(
+      context,
+      placeName,
+      placeId,
+      destinationPoiMaterial: material,
+      floorSrc: floorSrc,
+      destinationFloorLabel: _floorLabelFromSrc(floorSrc),
     );
   }
-
-  Future<void> _openNavigationFlow(
-  String placeId,
-  String placeName,
-  String? poiMaterial,
-  String floorSrc,
-) async {
-  final normalizedName = placeName.trim().toLowerCase();
-  final isServicesCategory =
-      widget.categoryName.trim().toLowerCase() == 'services';
-
-  // Services use logical routing from entrances JSON,
-  // so they should NOT require Firestore worldPosition on the tapped doc.
-  if (isServicesCategory) {
-    if (normalizedName == 'female bathroom') {
-      showNavigationDialog(
-        context,
-        'Female Bathroom',
-        'service_bathroom_female',
-        destinationPoiMaterial: '',
-        floorSrc: floorSrc,
-        destinationFloorLabel: _floorLabelFromSrc(floorSrc),
-      );
-      return;
-    }
-
-    if (normalizedName == 'male bathroom') {
-      showNavigationDialog(
-        context,
-        'Male Bathroom',
-        'service_bathroom_male',
-        destinationPoiMaterial: '',
-        floorSrc: floorSrc,
-        destinationFloorLabel: _floorLabelFromSrc(floorSrc),
-      );
-      return;
-    }
-
-    if (normalizedName == 'prayer room') {
-      showNavigationDialog(
-        context,
-        'Prayer Room',
-        'service_prayer_room',
-        destinationPoiMaterial: '',
-        floorSrc: floorSrc,
-        destinationFloorLabel: _floorLabelFromSrc(floorSrc),
-      );
-      return;
-    }
-  }
-
-  // For non‑services, directly proceed to navigation dialog
-  var material = (poiMaterial ?? '').trim();
-  if (material.isEmpty) {
-    material = 'POIMAT_${placeName.trim()}';
-  }
-
-  if (material.toUpperCase().startsWith('POI_')) {
-    material = 'POIMAT_${material.substring(4)}';
-  }
-
-  debugPrint(
-    '🧾 Category selected: name="$placeName" -> material="$material"',
-  );
-
-  if (material.isEmpty) {
-    debugPrint('❌ No material field found in Firestore for "$placeName"');
-    return;
-  }
-
-  showNavigationDialog(
-    context,
-    placeName,
-    placeId,
-    destinationPoiMaterial: material,
-    floorSrc: floorSrc,
-    destinationFloorLabel: _floorLabelFromSrc(floorSrc),
-  );
-}
 
   // ---------- Build ----------
 
@@ -563,15 +432,15 @@ class _CategoryPageState extends State<CategoryPage>
                 flex: 4,
                 child: Padding(
                   padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
+                  child: Stack(
                     children: [
-                      // Place name with navigation arrow
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
+                      Padding(
+                        padding: const EdgeInsets.only(right: 28),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
                               name,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
@@ -581,52 +450,64 @@ class _CategoryPageState extends State<CategoryPage>
                                 color: Color.fromARGB(255, 44, 44, 44),
                               ),
                             ),
-                          ),
-                          const Icon(Icons.north_east, color: kGreen, size: 20),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
+                            const SizedBox(height: 4),
 
-                      // Description
-                      Flexible(
-                        child: Text(
-                          desc,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Colors.black54,
-                            height: 1.3,
-                          ),
-                        ),
-                      ),
-
-                      const SizedBox(height: 6),
-
-                      // Rating (except for services category) - Now uses cached rating
-                      if (widget.categoryName.toLowerCase() != 'services')
-                        FutureBuilder<double?>(
-                          future: _getCachedRating(placeId),
-                          builder: (context, snap) {
-                            if (!snap.hasData) return const SizedBox.shrink();
-                            final r = snap.data ?? 0.0;
-                            if (r == 0.0) return const SizedBox.shrink();
-                            return Row(
-                              children: [
-                                const Icon(Icons.star, color: kGreen, size: 16),
-                                const SizedBox(width: 4),
-                                Text(
-                                  r.toStringAsFixed(1),
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.black87,
-                                  ),
+                            Flexible(
+                              child: Text(
+                                desc,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.black54,
+                                  height: 1.3,
                                 ),
-                              ],
-                            );
-                          },
+                              ),
+                            ),
+
+                            const SizedBox(height: 6),
+
+                            if (widget.categoryName.toLowerCase() != 'services')
+                              FutureBuilder<double?>(
+                                future: _getCachedRating(placeId),
+                                builder: (context, snap) {
+                                  if (!snap.hasData)
+                                    return const SizedBox.shrink();
+                                  final r = snap.data ?? 0.0;
+                                  if (r == 0.0) return const SizedBox.shrink();
+                                  return Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.star,
+                                        color: kGreen,
+                                        size: 16,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        r.toStringAsFixed(1),
+                                        style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.black87,
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                },
+                              ),
+                          ],
                         ),
+                      ),
+
+                      const Positioned(
+                        right: 8,
+                        bottom: 8,
+                        child: Icon(
+                          FontAwesomeIcons.locationArrow,
+                          color: kGreen,
+                          size: 14,
+                        ),
+                      ),
                     ],
                   ),
                 ),

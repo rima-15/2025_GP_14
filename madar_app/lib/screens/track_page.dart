@@ -22,7 +22,6 @@ import 'package:geolocator/geolocator.dart';
 import 'package:flutter/services.dart';
 import 'package:madar_app/nav/navmesh.dart';
 import 'package:madar_app/services/favorites_service.dart';
-import 'package:madar_app/services/favorites_service.dart';
 
 const bool kFeatureEnabled = true;
 const String kSolitaireVenueId =
@@ -315,7 +314,6 @@ class _TrackPageState
   _maintainAttemptedKeys = {};
 
   /// Local approximate start time for step 3 (invitee), recorded the moment
-  /// pendingCount hits 0. Used to show an immediate ~2-min countdown while
   /// pendingCount hits 0. Used to show an immediate ~2-min countdown while
   /// waiting for Firestore to deliver hostStep=5 + suggestDeadline.
   final Map<String, DateTime>
@@ -4144,8 +4142,6 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     // Meeting is transitioning from step 4 → 5 (either all participants
     // responded, or the 10-min wait deadline expired). Show an immediate
     // ~2-min countdown using a local start time so the invitee doesn't see
-    // responded, or the 10-min wait deadline expired). Show an immediate
-    // ~2-min countdown using a local start time so the invitee doesn't see
     // a gap or "00:00" before Firestore delivers hostStep=5+suggestDeadline.
     final waitExpiredForTimer =
         meeting.waitDeadline != null &&
@@ -4224,7 +4220,6 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     // Step 3 = waiting for host to confirm the suggested point.
     // This happens when the host explicitly advanced (hostStep >= 5),
     // OR when all participants responded (pendingCount == 0),
-    // OR when the 10-min wait deadline has expired (some may not have responded
     // OR when the 10-min wait deadline has expired (some may not have responded
     // but the window closed — the accepted participants move to step 3).
     final waitExpired =
@@ -4800,7 +4795,6 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         }
 
         // Session expiry: auto-complete the meeting once expiresAt has passed.
-        // Session expiry: auto-complete the meeting once expiresAt has passed.
         if (confirmedMeeting != null &&
             confirmedMeeting
                     .expiresAt !=
@@ -4852,7 +4846,6 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
         // Setup-phase: all participants responded (or wait deadline expired) and
         // at least one accepted → record approximate step-3 start so invitees
-        // see an immediate ~2-min countdown before Firestore delivers
         // see an immediate ~2-min countdown before Firestore delivers
         // hostStep=5+suggestDeadline.
         if (activeMeeting != null &&
@@ -5560,7 +5553,6 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               children: [
                 Expanded(
                   child: OutlinedButton(
-                  child: OutlinedButton(
                     onPressed: () =>
                         _cancelArrival(
                           meeting,
@@ -5605,7 +5597,6 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                     width: 12,
                   ),
                   Expanded(
-                    child: ElevatedButton(
                     child: ElevatedButton(
                       onPressed: () =>
                           _markArrived(
@@ -6026,7 +6017,6 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                                     refreshKey,
                                   );
                           final until =
-                              _meetingRefreshCooldownUntilByKey[refreshKey];
                               _meetingRefreshCooldownUntilByKey[refreshKey];
                           final isCoolingDown =
                               !isBusy &&
@@ -6846,7 +6836,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 ),
               ),
               child: const Text(
-                'Keep',
+                'Cancel for me',
                 style: TextStyle(
                   color: Colors.black87,
                   fontWeight:
@@ -10051,8 +10041,6 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         content: const Text(
           "You're hosting an in-progress meeting point. Proceeding to accept "
           'this new invitation will cancel it for all participants. '
-          "You're hosting an in-progress meeting point. Proceeding to accept "
-          'this new invitation will cancel it for all participants. '
           'Would you like to proceed?',
           style: TextStyle(
             fontSize: 15,
@@ -10742,11 +10730,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         if (active.isEmpty)
           SizedBox(
             height: 52,
-          SizedBox(
-            height: 52,
             child: Center(
               child: Text(
-                'No active requests',
                 'No active requests',
                 style: TextStyle(
                   fontSize: 13,
@@ -10788,11 +10773,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         if (scheduled.isEmpty)
           SizedBox(
             height: 52,
-          SizedBox(
-            height: 52,
             child: Center(
               child: Text(
-                'No scheduled requests',
                 'No scheduled requests',
                 style: TextStyle(
                   fontSize: 13,
@@ -10871,11 +10853,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         if (active.isEmpty)
           SizedBox(
             height: 52,
-          SizedBox(
-            height: 52,
             child: Center(
               child: Text(
-                'No active requests',
                 'No active requests',
                 style: TextStyle(
                   fontSize: 13,
@@ -10919,11 +10898,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         if (upcoming.isEmpty)
           SizedBox(
             height: 52,
-          SizedBox(
-            height: 52,
             child: Center(
               child: Text(
-                'No scheduled requests',
                 'No scheduled requests',
                 style: TextStyle(
                   fontSize: 13,
@@ -12466,7 +12442,6 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               }
             },
             icon: Icon(
-              Icons.close,
               Icons.close,
               size: 18,
               color: AppColors.kGreen,

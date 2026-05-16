@@ -39,7 +39,7 @@ void showNavigationDialog(
   String? venueId,
   String? trackingNotificationId,
   bool isFriendNavigation =
-      false, // ← ADD
+      false, // ← Friend navigation flag
 }) {
   showModalBottomSheet(
     context: context,
@@ -98,7 +98,9 @@ class NavigateToShopDialog
   final String? dialogSubtitle;
   final String? venueId;
   final String? trackingNotificationId;
-  final bool isFriendNavigation;
+  final bool
+  isFriendNavigation; // ← Friend navigation flag
+
   const NavigateToShopDialog({
     super.key,
     required this.shopName,
@@ -269,6 +271,8 @@ class NavigateToShopDialog
                             trackingNotificationId,
                         flowType:
                             'start',
+                        isFriendNavigation:
+                            isFriendNavigation,
                       ),
                     );
                   },
@@ -543,6 +547,8 @@ class NavigateToShopDialog
               trackingNotificationId:
                   trackingNotificationId,
               flowType: 'start',
+              isFriendNavigation:
+                  isFriendNavigation,
             ),
       );
     });
@@ -632,7 +638,8 @@ class SetYourLocationDialog
   /// edit the start location in-place.
   final bool returnResultOnly;
   final bool embeddedMode;
-  final bool isFriendNavigation;
+  final bool
+  isFriendNavigation; // ← Friend navigation flag
   final ValueChanged<
     Map<String, dynamic>
   >?
@@ -2469,32 +2476,10 @@ const timer = setInterval(function() {
             ),
 
             // Floor Selectors
-            Positioned(
-              top: 12,
-              right: 12,
-              child: Container(
-                padding:
-                    const EdgeInsets.all(
-                      8,
-                    ),
-                decoration: BoxDecoration(
-                  color: Colors.white
-                      .withOpacity(0.9),
-                  borderRadius:
-                      BorderRadius.circular(
-                        8,
-                      ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors
-                          .black
-                          .withOpacity(
-                            0.1,
-                          ),
-                      blurRadius: 4,
-                    ),
-                  ],
-                ),
+            if (_venueMaps.length > 1)
+              Positioned(
+                top: 16,
+                right: 16,
                 child: Column(
                   children:
                       (List<Map<String, String>>.from(
@@ -2627,51 +2612,43 @@ const timer = setInterval(function() {
     String url,
     bool isSelected,
   ) {
-    return SizedBox(
-      width: 44,
-      height: 40,
-      child: ElevatedButton(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: isSelected
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _currentFloorURL = url;
+        });
+        if (_pickedPosGltf != null) {
+          _pushUserPinToJs(
+            _pickedPosGltf!,
+          );
+        }
+      },
+      child: Container(
+        width: 42,
+        height: 36,
+        decoration: BoxDecoration(
+          color: isSelected
               ? AppColors.kGreen
               : Colors.white,
-          foregroundColor: isSelected
-              ? Colors.white
-              : AppColors.kGreen,
-          padding: EdgeInsets.zero,
-          elevation: isSelected ? 2 : 0,
-          shape: RoundedRectangleBorder(
-            borderRadius:
-                BorderRadius.circular(
-                  8,
-                ),
-            side: BorderSide(
-              color: isSelected
-                  ? AppColors.kGreen
-                  : Colors
-                        .grey
-                        .shade300,
+          borderRadius:
+              BorderRadius.circular(8),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black
+                  .withOpacity(0.1),
+              blurRadius: 4,
             ),
-          ),
+          ],
         ),
-        onPressed: () {
-          setState(() {
-            _currentFloorURL = url;
-            // Do NOT nullify _pickedPosGltf, _pickedPosBlender, or _pickedFloorLabel
-          });
-          // After the floor changes, tell the JavaScript side to update the pin visibility.
-          // This will show the pin if the new floor matches the pin's floor, otherwise hide it.
-          if (_pickedPosGltf != null) {
-            _pushUserPinToJs(
-              _pickedPosGltf!,
-            );
-          }
-        },
+        alignment: Alignment.center,
         child: Text(
           label,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 14,
-            fontWeight: FontWeight.bold,
+            fontWeight: FontWeight.w700,
+            color: isSelected
+                ? Colors.white
+                : Colors.black87,
           ),
         ),
       ),

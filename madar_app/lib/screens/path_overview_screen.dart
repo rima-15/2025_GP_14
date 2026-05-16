@@ -33,6 +33,7 @@ class PathOverviewScreen
   final String? destinationFloorLabel;
   final Map<String, double>?
   destinationHitGltf;
+  final bool isFriendNavigation;
 
   const PathOverviewScreen({
     super.key,
@@ -46,6 +47,8 @@ class PathOverviewScreen
     this.originFloorLabel,
     this.destinationFloorLabel,
     this.destinationHitGltf,
+    this.isFriendNavigation =
+        false, // ← default false
   });
 
   @override
@@ -4040,14 +4043,24 @@ const timer = setInterval(function() {
 
     if (!mounted) return;
 
-    // If destinationHitGltf was provided → friend/meeting navigation (needs coordinates)
-    // Otherwise → place navigation (uses placeId)
+    // ── compute availability ONCE ──────────────────────────────────────
+    final bool stairsOk =
+        _isPreferenceAvailableForCurrentTrip(
+          'stairs',
+        );
+    final bool elevatorOk =
+        _isPreferenceAvailableForCurrentTrip(
+          'elevator',
+        );
+    final bool escalatorOk =
+        _isPreferenceAvailableForCurrentTrip(
+          'escalator',
+        );
+
     final bool isFriendNav =
-        widget.destinationHitGltf !=
-        null;
+        widget.isFriendNavigation;
 
     if (isFriendNav) {
-      // Friend/meeting: needs Blender coordinates
       if (_destPosBlender == null) {
         ScaffoldMessenger.of(
           context,
@@ -4100,7 +4113,6 @@ const timer = setInterval(function() {
         ),
       );
     } else {
-      // Place: uses placeId directly
       Navigator.push(
         context,
         MaterialPageRoute(

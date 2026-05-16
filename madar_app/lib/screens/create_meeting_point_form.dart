@@ -14,18 +14,27 @@ import 'package:madar_app/screens/navigation_flow_complete.dart'
 import 'package:madar_app/screens/AR_page.dart';
 import 'package:madar_app/screens/meeting_point_draft_storage.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
+import 'package:madar_app/services/favorites_service.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 
 // ── DEV FLAG ──────────────────────────────────────────────────────────────────
 /// Set to true so the full wizard can be tested even outside a real venue.
 const bool forceVenueForTesting = true;
-const String _kTestVenueName = 'Solitaire';
-const String _kTestVenueId = 'ChIJcYTQDwDjLj4RZEiboV6gZzM';
-const String _kFallbackMapVenueId = 'ChIJcYTQDwDjLj4RZEiboV6gZzM';
+
+/// Set to true to force the "Venue is closed" error for UI testing.
+const bool forceVenueClosedForTesting =
+    false;
+const String _kTestVenueName =
+    'Solitaire';
+const String _kTestVenueId =
+    'ChIJcYTQDwDjLj4RZEiboV6gZzM';
+const String _kFallbackMapVenueId =
+    'ChIJcYTQDwDjLj4RZEiboV6gZzM';
 
 /// Geofence radius in metres – user must be this close to a venue centre.
-const double _kVenueGeofenceMeters = 150;
+const double _kVenueGeofenceMeters =
+    150;
 
 class MeetingPointParticipant {
   const MeetingPointParticipant({
@@ -44,24 +53,34 @@ class MeetingPointParticipant {
   final String userId;
   final String name;
   final String phone;
-  final String status; // pending | accepted | declined
+  final String
+  status; // pending | accepted | declined
   final DateTime? respondedAt;
   final DateTime? updatedAt;
 
   // ── Arrival tracking (populated when meeting status becomes 'active') ──────
-  final String arrivalStatus; // on_the_way | arrived | cancelled
+  final String
+  arrivalStatus; // on_the_way | arrived | cancelled
   final DateTime? arrivedAt;
-  final int estimatedArrivalMinutes; // 1-5 (random)
+  final int
+  estimatedArrivalMinutes; // 1-60, updated from live ETA when available
   final DateTime? locationUpdatedAt;
 
-  bool get isPending => status == 'pending';
-  bool get isAccepted => status == 'accepted';
-  bool get isDeclined => status == 'declined';
-  bool get isCancelledParticipation => status == 'cancelled';
+  bool get isPending =>
+      status == 'pending';
+  bool get isAccepted =>
+      status == 'accepted';
+  bool get isDeclined =>
+      status == 'declined';
+  bool get isCancelledParticipation =>
+      status == 'cancelled';
 
-  bool get isOnTheWay => arrivalStatus == 'on_the_way';
-  bool get isArrived => arrivalStatus == 'arrived';
-  bool get isCancelledArrival => arrivalStatus == 'cancelled';
+  bool get isOnTheWay =>
+      arrivalStatus == 'on_the_way';
+  bool get isArrived =>
+      arrivalStatus == 'arrived';
+  bool get isCancelledArrival =>
+      arrivalStatus == 'cancelled';
 
   MeetingPointParticipant copyWith({
     String? status,
@@ -77,13 +96,22 @@ class MeetingPointParticipant {
       name: name,
       phone: phone,
       status: status ?? this.status,
-      respondedAt: respondedAt ?? this.respondedAt,
-      updatedAt: updatedAt ?? this.updatedAt,
-      arrivalStatus: arrivalStatus ?? this.arrivalStatus,
-      arrivedAt: arrivedAt ?? this.arrivedAt,
+      respondedAt:
+          respondedAt ??
+          this.respondedAt,
+      updatedAt:
+          updatedAt ?? this.updatedAt,
+      arrivalStatus:
+          arrivalStatus ??
+          this.arrivalStatus,
+      arrivedAt:
+          arrivedAt ?? this.arrivedAt,
       estimatedArrivalMinutes:
-          estimatedArrivalMinutes ?? this.estimatedArrivalMinutes,
-      locationUpdatedAt: locationUpdatedAt ?? this.locationUpdatedAt,
+          estimatedArrivalMinutes ??
+          this.estimatedArrivalMinutes,
+      locationUpdatedAt:
+          locationUpdatedAt ??
+          this.locationUpdatedAt,
     );
   }
 
@@ -95,21 +123,41 @@ class MeetingPointParticipant {
       'status': status,
       'respondedAt': respondedAt == null
           ? null
-          : Timestamp.fromDate(respondedAt!),
-      'updatedAt': updatedAt == null ? null : Timestamp.fromDate(updatedAt!),
-      'arrivalStatus': arrivalStatus,
-      'arrivedAt': arrivedAt == null ? null : Timestamp.fromDate(arrivedAt!),
-      'estimatedArrivalMinutes': estimatedArrivalMinutes,
-      'locationUpdatedAt': locationUpdatedAt == null
+          : Timestamp.fromDate(
+              respondedAt!,
+            ),
+      'updatedAt': updatedAt == null
           ? null
-          : Timestamp.fromDate(locationUpdatedAt!),
+          : Timestamp.fromDate(
+              updatedAt!,
+            ),
+      'arrivalStatus': arrivalStatus,
+      'arrivedAt': arrivedAt == null
+          ? null
+          : Timestamp.fromDate(
+              arrivedAt!,
+            ),
+      'estimatedArrivalMinutes':
+          estimatedArrivalMinutes,
+      'locationUpdatedAt':
+          locationUpdatedAt == null
+          ? null
+          : Timestamp.fromDate(
+              locationUpdatedAt!,
+            ),
     };
   }
 
-  static MeetingPointParticipant? fromMap(Map<String, dynamic> raw) {
-    final userId = (raw['userId'] ?? '').toString().trim();
+  static MeetingPointParticipant?
+  fromMap(Map<String, dynamic> raw) {
+    final userId = (raw['userId'] ?? '')
+        .toString()
+        .trim();
     if (userId.isEmpty) return null;
-    final statusRaw = (raw['status'] ?? 'pending').toString().trim();
+    final statusRaw =
+        (raw['status'] ?? 'pending')
+            .toString()
+            .trim();
     var status = 'pending';
     switch (statusRaw) {
       case 'accepted':
@@ -124,27 +172,49 @@ class MeetingPointParticipant {
       default:
         status = 'pending';
     }
-    final arrivalStatusRaw = (raw['arrivalStatus'] ?? 'on_the_way')
-        .toString()
-        .trim();
+    final arrivalStatusRaw =
+        (raw['arrivalStatus'] ??
+                'on_the_way')
+            .toString()
+            .trim();
     final arrivalStatus =
-        const {'on_the_way', 'arrived', 'cancelled'}.contains(arrivalStatusRaw)
+        const {
+          'on_the_way',
+          'arrived',
+          'cancelled',
+        }.contains(arrivalStatusRaw)
         ? arrivalStatusRaw
         : 'on_the_way';
-    final estMins = raw['estimatedArrivalMinutes'];
+    final estMins =
+        raw['estimatedArrivalMinutes'];
     return MeetingPointParticipant(
       userId: userId,
-      name: (raw['name'] ?? '').toString(),
-      phone: (raw['phone'] ?? '').toString(),
+      name: (raw['name'] ?? '')
+          .toString(),
+      phone: (raw['phone'] ?? '')
+          .toString(),
       status: status,
-      respondedAt: _meetingPointAsDateTime(raw['respondedAt']),
-      updatedAt: _meetingPointAsDateTime(raw['updatedAt']),
+      respondedAt:
+          _meetingPointAsDateTime(
+            raw['respondedAt'],
+          ),
+      updatedAt:
+          _meetingPointAsDateTime(
+            raw['updatedAt'],
+          ),
       arrivalStatus: arrivalStatus,
-      arrivedAt: _meetingPointAsDateTime(raw['arrivedAt']),
-      estimatedArrivalMinutes: (estMins is num)
-          ? estMins.toInt().clamp(1, 5)
+      arrivedAt:
+          _meetingPointAsDateTime(
+            raw['arrivedAt'],
+          ),
+      estimatedArrivalMinutes:
+          (estMins is num)
+          ? estMins.toInt().clamp(1, 60)
           : 3,
-      locationUpdatedAt: _meetingPointAsDateTime(raw['locationUpdatedAt']),
+      locationUpdatedAt:
+          _meetingPointAsDateTime(
+            raw['locationUpdatedAt'],
+          ),
     );
   }
 }
@@ -171,7 +241,8 @@ class MeetingPointRecord {
     this.suggestedPoint = '',
     this.suggestedCandidates = const [],
     this.suggestionsComputed = false,
-    this.hostArrivalStatus = 'on_the_way',
+    this.hostArrivalStatus =
+        'on_the_way',
     this.hostArrivedAt,
     this.hostEstimatedMinutes = 3,
     this.hostLocationUpdatedAt,
@@ -185,10 +256,12 @@ class MeetingPointRecord {
   final String venueId;
   final String venueName;
   final List<String> placeCategories;
-  final Map<String, dynamic>? hostLocation;
+  final Map<String, dynamic>?
+  hostLocation;
   final int hostStep;
   final String status;
-  final List<MeetingPointParticipant> participants;
+  final List<MeetingPointParticipant>
+  participants;
   final List<String> participantUserIds;
   final DateTime? createdAt;
   final DateTime? updatedAt;
@@ -198,154 +271,286 @@ class MeetingPointRecord {
   // ── Arrival tracking (populated when status becomes 'active') ─────────────
   final DateTime? confirmedAt;
   final String suggestedPoint;
-  final List<Map<String, dynamic>> suggestedCandidates;
+  final List<Map<String, dynamic>>
+  suggestedCandidates;
   final bool suggestionsComputed;
-  final String hostArrivalStatus; // on_the_way | arrived | cancelled
+  final String
+  hostArrivalStatus; // on_the_way | arrived | cancelled
   final DateTime? hostArrivedAt;
-  final int hostEstimatedMinutes; // 1-5 (random)
+  final int
+  hostEstimatedMinutes; // 1-60, updated from live ETA when available
   final DateTime? hostLocationUpdatedAt;
   final DateTime? expiresAt;
 
   /// Derived from status: the meeting is in setup phase when status == 'pending'.
-  bool get isActive => status.trim().toLowerCase() == 'pending';
+  bool get isActive =>
+      status.trim().toLowerCase() ==
+      'pending';
 
   /// Meeting confirmed — everyone heading to venue.
-  bool get isConfirmed => status.trim().toLowerCase() == 'active';
+  bool get isConfirmed =>
+      status.trim().toLowerCase() ==
+      'active';
 
   /// Sub-state: host is waiting for invitees to respond.
   bool get isWaitingParticipants =>
-      isActive && participants.any((p) => p.isPending);
+      isActive &&
+      participants.any(
+        (p) => p.isPending,
+      );
 
   /// Sub-state: all invitees responded, host must confirm.
   bool get isWaitingHostConfirmation =>
-      isActive && participants.every((p) => !p.isPending);
+      isActive &&
+      participants.every(
+        (p) => !p.isPending,
+      );
 
-  bool isHost(String uid) => uid == hostId;
+  bool isHost(String uid) =>
+      uid == hostId;
 
-  MeetingPointParticipant? participantFor(String uid) {
+  MeetingPointParticipant?
+  participantFor(String uid) {
     for (final p in participants) {
       if (p.userId == uid) return p;
     }
     return null;
   }
 
-  int get invitedCount => participants.length;
-  int get acceptedCount => participants.where((p) => p.isAccepted).length;
-  int get pendingCount => participants.where((p) => p.isPending).length;
+  int get invitedCount =>
+      participants.length;
+  int get acceptedCount => participants
+      .where((p) => p.isAccepted)
+      .length;
+  int get pendingCount => participants
+      .where((p) => p.isPending)
+      .length;
   int get declinedCount => participants
-      .where((p) => p.isDeclined || p.isCancelledParticipation)
+      .where(
+        (p) =>
+            p.isDeclined ||
+            p.isCancelledParticipation,
+      )
       .length;
 
   DateTime? get activeDeadline {
-    if (hostStep == 4) return waitDeadline;
-    if (hostStep == 5) return suggestDeadline;
+    if (hostStep == 4)
+      return waitDeadline;
+    if (hostStep == 5)
+      return suggestDeadline;
     return null;
   }
 
   static MeetingPointRecord? fromDoc(
-    DocumentSnapshot<Map<String, dynamic>> doc,
+    DocumentSnapshot<
+      Map<String, dynamic>
+    >
+    doc,
   ) {
     final data = doc.data();
     if (data == null) return null;
-    final hostId = (data['hostId'] ?? '').toString().trim();
+    final hostId =
+        (data['hostId'] ?? '')
+            .toString()
+            .trim();
     if (hostId.isEmpty) return null;
 
-    final participantsRaw = data['participants'];
-    final participants = (participantsRaw is List)
+    final participantsRaw =
+        data['participants'];
+    final participants =
+        (participantsRaw is List)
         ? participantsRaw
               .whereType<Map>()
               .map(
-                (e) => MeetingPointParticipant.fromMap(
-                  Map<String, dynamic>.from(e),
-                ),
+                (e) =>
+                    MeetingPointParticipant.fromMap(
+                      Map<
+                        String,
+                        dynamic
+                      >.from(e),
+                    ),
               )
-              .whereType<MeetingPointParticipant>()
+              .whereType<
+                MeetingPointParticipant
+              >()
               .toList()
         : <MeetingPointParticipant>[];
 
     // Support both old field name (memberUserIds) and new (participantUserIds).
-    final membersRaw = data['participantUserIds'] ?? data['memberUserIds'];
+    final membersRaw =
+        data['participantUserIds'] ??
+        data['memberUserIds'];
     final members = (membersRaw is List)
         ? membersRaw
-              .map((e) => e?.toString().trim() ?? '')
-              .where((e) => e.isNotEmpty)
+              .map(
+                (e) =>
+                    e
+                        ?.toString()
+                        .trim() ??
+                    '',
+              )
+              .where(
+                (e) => e.isNotEmpty,
+              )
               .toList()
         : <String>[];
 
-    final placeCategoriesRaw = data['placeCategories'];
-    final placeCategories = (placeCategoriesRaw is List)
+    final placeCategoriesRaw =
+        data['placeCategories'];
+    final placeCategories =
+        (placeCategoriesRaw is List)
         ? placeCategoriesRaw
-              .map((e) => e?.toString().trim() ?? '')
-              .where((e) => e.isNotEmpty)
+              .map(
+                (e) =>
+                    e
+                        ?.toString()
+                        .trim() ??
+                    '',
+              )
+              .where(
+                (e) => e.isNotEmpty,
+              )
               .toList()
         : <String>[];
 
-    final hostStepRaw = data['hostStep'];
-    final hostStep = (hostStepRaw is num) ? hostStepRaw.toInt() : 4;
+    final hostStepRaw =
+        data['hostStep'];
+    final hostStep =
+        (hostStepRaw is num)
+        ? hostStepRaw.toInt()
+        : 4;
 
-    final suggestedPoint = (data['suggestedPoint'] ?? '').toString();
-    final suggestionsComputed = data['suggestionsComputed'] == true;
-    final suggestedCandidatesRaw = data['suggestedCandidates'];
-    final suggestedCandidates = (suggestedCandidatesRaw is List)
+    final suggestedPoint =
+        (data['suggestedPoint'] ?? '')
+            .toString();
+    final suggestionsComputed =
+        data['suggestionsComputed'] ==
+        true;
+    final suggestedCandidatesRaw =
+        data['suggestedCandidates'];
+    final suggestedCandidates =
+        (suggestedCandidatesRaw is List)
         ? suggestedCandidatesRaw
               .whereType<Map>()
-              .map((e) => Map<String, dynamic>.from(e))
+              .map(
+                (e) =>
+                    Map<
+                      String,
+                      dynamic
+                    >.from(e),
+              )
               .toList()
         : <Map<String, dynamic>>[];
 
     return MeetingPointRecord(
       id: doc.id,
       hostId: hostId,
-      hostName: (data['hostName'] ?? '').toString(),
-      hostPhone: (data['hostPhone'] ?? '').toString(),
-      venueId: (data['venueId'] ?? '').toString(),
-      venueName: (data['venueName'] ?? '').toString(),
+      hostName: (data['hostName'] ?? '')
+          .toString(),
+      hostPhone:
+          (data['hostPhone'] ?? '')
+              .toString(),
+      venueId: (data['venueId'] ?? '')
+          .toString(),
+      venueName:
+          (data['venueName'] ?? '')
+              .toString(),
       placeCategories: placeCategories,
-      hostLocation: data['hostLocation'] is Map
-          ? Map<String, dynamic>.from(data['hostLocation'] as Map)
+      hostLocation:
+          data['hostLocation'] is Map
+          ? Map<String, dynamic>.from(
+              data['hostLocation']
+                  as Map,
+            )
           : null,
-      hostStep: hostStep.clamp(1, 5).toInt(),
-      status: (data['status'] ?? '').toString(),
+      hostStep: hostStep
+          .clamp(1, 5)
+          .toInt(),
+      status: (data['status'] ?? '')
+          .toString(),
       participants: participants,
       participantUserIds: members,
-      createdAt: _meetingPointAsDateTime(data['createdAt']),
-      updatedAt: _meetingPointAsDateTime(data['updatedAt']),
-      waitDeadline: _meetingPointAsDateTime(data['waitDeadline']),
-      suggestDeadline: _meetingPointAsDateTime(data['suggestDeadline']),
-      confirmedAt: _meetingPointAsDateTime(data['confirmedAt']),
+      createdAt:
+          _meetingPointAsDateTime(
+            data['createdAt'],
+          ),
+      updatedAt:
+          _meetingPointAsDateTime(
+            data['updatedAt'],
+          ),
+      waitDeadline:
+          _meetingPointAsDateTime(
+            data['waitDeadline'],
+          ),
+      suggestDeadline:
+          _meetingPointAsDateTime(
+            data['suggestDeadline'],
+          ),
+      confirmedAt:
+          _meetingPointAsDateTime(
+            data['confirmedAt'],
+          ),
       suggestedPoint: suggestedPoint,
-      suggestedCandidates: suggestedCandidates,
-      suggestionsComputed: suggestionsComputed,
-      hostArrivalStatus: (data['hostArrivalStatus'] ?? 'on_the_way').toString(),
-      hostArrivedAt: _meetingPointAsDateTime(data['hostArrivedAt']),
-      hostEstimatedMinutes: (data['hostEstimatedMinutes'] is num)
-          ? (data['hostEstimatedMinutes'] as num).toInt().clamp(1, 5)
+      suggestedCandidates:
+          suggestedCandidates,
+      suggestionsComputed:
+          suggestionsComputed,
+      hostArrivalStatus:
+          (data['hostArrivalStatus'] ??
+                  'on_the_way')
+              .toString(),
+      hostArrivedAt:
+          _meetingPointAsDateTime(
+            data['hostArrivedAt'],
+          ),
+      hostEstimatedMinutes:
+          (data['hostEstimatedMinutes']
+              is num)
+          ? (data['hostEstimatedMinutes']
+                    as num)
+                .toInt()
+                .clamp(1, 60)
           : 3,
-      hostLocationUpdatedAt: _meetingPointAsDateTime(
-        data['hostLocationUpdatedAt'],
-      ),
-      expiresAt: _meetingPointAsDateTime(data['expiresAt']),
+      hostLocationUpdatedAt:
+          _meetingPointAsDateTime(
+            data['hostLocationUpdatedAt'],
+          ),
+      expiresAt:
+          _meetingPointAsDateTime(
+            data['expiresAt'],
+          ),
     );
   }
 }
 
 class MeetingPointService {
-  static const String collectionName = 'meetingPoints';
+  static const String collectionName =
+      'meetingPoints';
 
-  static CollectionReference<Map<String, dynamic>> get _col =>
-      FirebaseFirestore.instance.collection(collectionName);
+  static CollectionReference<
+    Map<String, dynamic>
+  >
+  get _col => FirebaseFirestore.instance
+      .collection(collectionName);
 
-  static const Duration _kSuggestDuration = Duration(minutes: 5);
+  static const Duration
+  _kSuggestDuration = Duration(
+    minutes: 2,
+  );
 
   // ── Server-clock calibration ───────────────────────────────────────────────
   // Estimated offset: serverTime − localTime. Updated from every live
   // Firestore snapshot so all deadline maths use a consistent clock.
-  static Duration _serverClockOffset = Duration.zero;
+  static Duration _serverClockOffset =
+      Duration.zero;
 
   /// Estimated current server time. Use this instead of [DateTime.now()]
   /// for every deadline computation and display so devices with skewed
   /// local clocks (e.g. emulators) still show consistent countdowns.
-  static DateTime get serverNow => DateTime.now().add(_serverClockOffset);
+  static DateTime get serverNow =>
+      DateTime.now().add(
+        _serverClockOffset,
+      );
 
   /// Call with the `updatedAt` server timestamp from any live Firestore
   /// snapshot to keep the estimated offset accurate.
@@ -354,22 +559,30 @@ class MeetingPointService {
   /// A large difference (> 5 min) means the snapshot came from an old/stale
   /// document, not from a live write — using such a timestamp would corrupt
   /// the offset and make every deadline appear to be in the past or future.
-  static void calibrateFromServerTime(DateTime serverTimestamp) {
-    final candidate = serverTimestamp.difference(DateTime.now());
+  static void calibrateFromServerTime(
+    DateTime serverTimestamp,
+  ) {
+    final candidate = serverTimestamp
+        .difference(DateTime.now());
     // Real server–client clock skew is typically < 30 s.  If the candidate
     // offset is larger than 30 seconds the timestamp is from an old document
     // (e.g. a meeting updated a few minutes ago), not a live write.
-    if (candidate.abs() <= const Duration(seconds: 30)) {
+    if (candidate.abs() <=
+        const Duration(seconds: 30)) {
       _serverClockOffset = candidate;
     }
   }
 
-  static bool _isFullyDeclinedActive(MeetingPointRecord meeting) {
+  static bool _isFullyDeclinedActive(
+    MeetingPointRecord meeting,
+  ) {
     if (!meeting.isActive) return false;
-    if (meeting.participants.isEmpty) return false;
+    if (meeting.participants.isEmpty)
+      return false;
     return meeting.acceptedCount == 0 &&
         meeting.pendingCount == 0 &&
-        meeting.declinedCount == meeting.invitedCount;
+        meeting.declinedCount ==
+            meeting.invitedCount;
   }
 
   static bool _isMeetingBlockingForUser(
@@ -379,17 +592,28 @@ class MeetingPointService {
     // ── Arrival phase (status == 'active') ────────────────────────────────
     if (meeting.isConfirmed) {
       if (meeting.hostId == uid) {
-        return meeting.hostArrivalStatus != 'cancelled';
+        return meeting
+                .hostArrivalStatus !=
+            'cancelled';
       }
-      final me = meeting.participantFor(uid);
-      return me != null && me.isAccepted && me.arrivalStatus != 'cancelled';
+      final me = meeting.participantFor(
+        uid,
+      );
+      return me != null &&
+          me.isAccepted &&
+          me.arrivalStatus !=
+              'cancelled';
     }
 
     // ── Setup phase (status == 'pending') ─────────────────────────────────
     if (!meeting.isActive) return false;
-    if (_isFullyDeclinedActive(meeting)) return false;
-    if (meeting.hostId == uid) return true;
-    final me = meeting.participantFor(uid);
+    if (_isFullyDeclinedActive(meeting))
+      return false;
+    if (meeting.hostId == uid)
+      return true;
+    final me = meeting.participantFor(
+      uid,
+    );
     if (me == null) return false;
     if (me.isDeclined) return false;
     // A pending invitee whose response window has closed should no longer
@@ -397,92 +621,194 @@ class MeetingPointService {
     // 1. The 2-min wait timer expired naturally.
     // 2. The host clicked Proceed early (hostStep jumped to 5 while
     //    waitDeadline was still in the future).
-    if (me.isPending && meeting.hostStep >= 5) return false;
+    if (me.isPending &&
+        meeting.hostStep >= 5)
+      return false;
     if (me.isPending &&
         meeting.waitDeadline != null &&
-        !meeting.waitDeadline!.isAfter(MeetingPointService.serverNow)) {
+        !meeting.waitDeadline!.isAfter(
+          MeetingPointService.serverNow,
+        )) {
       return false;
     }
     return true;
   }
 
-  static Stream<MeetingPointRecord?> watchActiveForCurrentUser() {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null || uid.trim().isEmpty) return Stream.value(null);
+  static Stream<MeetingPointRecord?>
+  watchActiveForCurrentUser() {
+    final uid = FirebaseAuth
+        .instance
+        .currentUser
+        ?.uid;
+    if (uid == null ||
+        uid.trim().isEmpty)
+      return Stream.value(null);
 
-    return _col.where('participantUserIds', arrayContains: uid).snapshots().map(
-      (snap) {
-        final meetings = snap.docs
-            .map(MeetingPointRecord.fromDoc)
-            .whereType<MeetingPointRecord>()
-            .toList();
+    return _col
+        .where(
+          'participantUserIds',
+          arrayContains: uid,
+        )
+        .snapshots()
+        .map((snap) {
+          final meetings = snap.docs
+              .map(
+                MeetingPointRecord
+                    .fromDoc,
+              )
+              .whereType<
+                MeetingPointRecord
+              >()
+              .toList();
 
-        // Calibrate server clock only from ACTIVE/CONFIRMED meetings whose
-        // timestamps are fresh. Old cancelled meetings have stale updatedAt
-        // values that would corrupt _serverClockOffset.
-        if (!snap.metadata.isFromCache) {
-          final anchor = meetings
-              .where((m) => m.isActive || m.isConfirmed)
-              .map((m) => m.updatedAt ?? m.createdAt)
-              .whereType<DateTime>()
-              .fold<DateTime?>(
-                null,
-                (best, t) => best == null || t.isAfter(best) ? t : best,
+          // Calibrate server clock only from ACTIVE/CONFIRMED meetings whose
+          // timestamps are fresh. Old cancelled meetings have stale updatedAt
+          // values that would corrupt _serverClockOffset.
+          if (!snap
+              .metadata
+              .isFromCache) {
+            final anchor = meetings
+                .where(
+                  (m) =>
+                      m.isActive ||
+                      m.isConfirmed,
+                )
+                .map(
+                  (m) =>
+                      m.updatedAt ??
+                      m.createdAt,
+                )
+                .whereType<DateTime>()
+                .fold<DateTime?>(
+                  null,
+                  (best, t) =>
+                      best == null ||
+                          t.isAfter(
+                            best,
+                          )
+                      ? t
+                      : best,
+                );
+            if (anchor != null)
+              calibrateFromServerTime(
+                anchor,
               );
-          if (anchor != null) calibrateFromServerTime(anchor);
-        }
+          }
 
-        meetings.sort((a, b) {
-          final at = a.updatedAt ?? a.createdAt ?? DateTime(1970);
-          final bt = b.updatedAt ?? b.createdAt ?? DateTime(1970);
-          return bt.compareTo(at);
+          meetings.sort((a, b) {
+            final at =
+                a.updatedAt ??
+                a.createdAt ??
+                DateTime(1970);
+            final bt =
+                b.updatedAt ??
+                b.createdAt ??
+                DateTime(1970);
+            return bt.compareTo(at);
+          });
+
+          final active = meetings
+              .where(
+                (m) =>
+                    _isMeetingBlockingForUser(
+                      m,
+                      uid,
+                    ),
+              )
+              .toList();
+          return active.isEmpty
+              ? null
+              : active.first;
         });
-
-        final active = meetings
-            .where((m) => _isMeetingBlockingForUser(m, uid))
-            .toList();
-        return active.isEmpty ? null : active.first;
-      },
-    );
   }
 
   /// Like [watchActiveForCurrentUser] but returns ALL blocking meetings for the
   /// current user, ordered newest-first. Used to show pending invitations as
   /// expandable tiles alongside the active (host/accepted) card.
-  static Stream<List<MeetingPointRecord>> watchAllBlockingForCurrentUser() {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null || uid.trim().isEmpty) return Stream.value([]);
+  static Stream<
+    List<MeetingPointRecord>
+  >
+  watchAllBlockingForCurrentUser() {
+    final uid = FirebaseAuth
+        .instance
+        .currentUser
+        ?.uid;
+    if (uid == null ||
+        uid.trim().isEmpty)
+      return Stream.value([]);
 
-    return _col.where('participantUserIds', arrayContains: uid).snapshots().map((
-      snap,
-    ) {
-      final meetings = snap.docs
-          .map(MeetingPointRecord.fromDoc)
-          .whereType<MeetingPointRecord>()
-          .toList();
+    return _col
+        .where(
+          'participantUserIds',
+          arrayContains: uid,
+        )
+        .snapshots()
+        .map((snap) {
+          final meetings = snap.docs
+              .map(
+                MeetingPointRecord
+                    .fromDoc,
+              )
+              .whereType<
+                MeetingPointRecord
+              >()
+              .toList();
 
-      // Same calibration as watchActiveForCurrentUser: only use fresh
-      // ACTIVE/CONFIRMED meetings to avoid stale cancelled-meeting timestamps.
-      if (!snap.metadata.isFromCache) {
-        final anchor = meetings
-            .where((m) => m.isActive || m.isConfirmed)
-            .map((m) => m.updatedAt ?? m.createdAt)
-            .whereType<DateTime>()
-            .fold<DateTime?>(
-              null,
-              (best, t) => best == null || t.isAfter(best) ? t : best,
-            );
-        if (anchor != null) calibrateFromServerTime(anchor);
-      }
+          // Same calibration as watchActiveForCurrentUser: only use fresh
+          // ACTIVE/CONFIRMED meetings to avoid stale cancelled-meeting timestamps.
+          if (!snap
+              .metadata
+              .isFromCache) {
+            final anchor = meetings
+                .where(
+                  (m) =>
+                      m.isActive ||
+                      m.isConfirmed,
+                )
+                .map(
+                  (m) =>
+                      m.updatedAt ??
+                      m.createdAt,
+                )
+                .whereType<DateTime>()
+                .fold<DateTime?>(
+                  null,
+                  (best, t) =>
+                      best == null ||
+                          t.isAfter(
+                            best,
+                          )
+                      ? t
+                      : best,
+                );
+            if (anchor != null)
+              calibrateFromServerTime(
+                anchor,
+              );
+          }
 
-      meetings.sort((a, b) {
-        final at = a.updatedAt ?? a.createdAt ?? DateTime(1970);
-        final bt = b.updatedAt ?? b.createdAt ?? DateTime(1970);
-        return bt.compareTo(at);
-      });
+          meetings.sort((a, b) {
+            final at =
+                a.updatedAt ??
+                a.createdAt ??
+                DateTime(1970);
+            final bt =
+                b.updatedAt ??
+                b.createdAt ??
+                DateTime(1970);
+            return bt.compareTo(at);
+          });
 
-      return meetings.where((m) => _isMeetingBlockingForUser(m, uid)).toList();
-    });
+          return meetings
+              .where(
+                (m) =>
+                    _isMeetingBlockingForUser(
+                      m,
+                      uid,
+                    ),
+              )
+              .toList();
+        });
   }
 
   /// Keep the meeting point flow consistent even when the host closes the form.
@@ -491,25 +817,41 @@ class MeetingPointService {
   /// - Step 4 expired: cancel if nobody accepted; otherwise move to step 5.
   /// - Step 5 expired: auto-accept (same as your current form behavior).
   /// - All declined: cancel (host or invitee can do this; rules allow it).
-  static Future<void> maybeMaintain(MeetingPointRecord meeting) async {
+  static Future<void> maybeMaintain(
+    MeetingPointRecord meeting,
+  ) async {
     if (!meeting.isActive) return;
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null || uid.trim().isEmpty) return;
+    final uid = FirebaseAuth
+        .instance
+        .currentUser
+        ?.uid;
+    if (uid == null ||
+        uid.trim().isEmpty)
+      return;
 
-    final now = MeetingPointService.serverNow;
+    final now =
+        MeetingPointService.serverNow;
 
     // If everyone declined, end it (prevents ghost active meetings).
     final allDeclined =
-        meeting.participants.isNotEmpty &&
-        meeting.participants.every((p) => p.isDeclined);
+        meeting
+            .participants
+            .isNotEmpty &&
+        meeting.participants.every(
+          (p) => p.isDeclined,
+        );
     if (allDeclined) {
       try {
         await _col.doc(meeting.id).update({
           'status': 'cancelled',
-          'cancellationReason': 'all_participants_declined',
-          'updatedAt': FieldValue.serverTimestamp(),
+          'cancellationReason':
+              'all_participants_declined',
+          'updatedAt':
+              FieldValue.serverTimestamp(),
         });
-        await _markPendingNotificationsCancelled(meeting);
+        await _markPendingNotificationsCancelled(
+          meeting,
+        );
       } catch (_) {}
       return;
     }
@@ -517,13 +859,19 @@ class MeetingPointService {
     // Step 5: all previously-accepted participants cancelled their participation.
     // Nobody is left — cancel the meeting so the host isn't stuck at step 5.
     if (meeting.hostStep >= 5 &&
-        meeting.participants.isNotEmpty &&
-        !meeting.participants.any((p) => p.isAccepted)) {
+        meeting
+            .participants
+            .isNotEmpty &&
+        !meeting.participants.any(
+          (p) => p.isAccepted,
+        )) {
       try {
         await _col.doc(meeting.id).update({
           'status': 'cancelled',
-          'cancellationReason': 'all_participants_left',
-          'updatedAt': FieldValue.serverTimestamp(),
+          'cancellationReason':
+              'all_participants_left',
+          'updatedAt':
+              FieldValue.serverTimestamp(),
         });
       } catch (_) {}
       return;
@@ -535,14 +883,22 @@ class MeetingPointService {
     // host is offline (write will fail silently for non-host users due to
     // Firestore rules, but will succeed as soon as the host's device is live).
     if (meeting.hostStep == 4 &&
-        meeting.participants.isNotEmpty &&
+        meeting
+            .participants
+            .isNotEmpty &&
         meeting.pendingCount == 0 &&
         meeting.acceptedCount > 0) {
       try {
         await _col.doc(meeting.id).update({
           'hostStep': 5,
-          'suggestDeadline': Timestamp.fromDate(now.add(_kSuggestDuration)),
-          'updatedAt': FieldValue.serverTimestamp(),
+          'suggestDeadline':
+              Timestamp.fromDate(
+                now.add(
+                  _kSuggestDuration,
+                ),
+              ),
+          'updatedAt':
+              FieldValue.serverTimestamp(),
         });
       } catch (_) {}
       return;
@@ -550,29 +906,44 @@ class MeetingPointService {
 
     // Timed transitions: any signed-in user can trigger them so the flow
     // continues even when the host has the app closed / logged out.
-    if (meeting.hostStep == 4 && meeting.waitDeadline != null) {
-      if (!meeting.waitDeadline!.isAfter(now)) {
-        if (meeting.acceptedCount <= 0) {
-          final anyCancelledParticipation = meeting.participants.any(
-            (p) => p.isCancelledParticipation,
-          );
+    if (meeting.hostStep == 4 &&
+        meeting.waitDeadline != null) {
+      if (!meeting.waitDeadline!
+          .isAfter(now)) {
+        if (meeting.acceptedCount <=
+            0) {
+          final anyCancelledParticipation =
+              meeting.participants.any(
+                (p) => p
+                    .isCancelledParticipation,
+              );
           try {
             await _col.doc(meeting.id).update({
               'status': 'cancelled',
-              'cancellationReason': anyCancelledParticipation
+              'cancellationReason':
+                  anyCancelledParticipation
                   ? 'all_participants_left'
                   : 'all_participants_declined',
-              'updatedAt': FieldValue.serverTimestamp(),
+              'updatedAt':
+                  FieldValue.serverTimestamp(),
             });
-            await _markPendingNotificationsExpired(meeting);
+            await _markPendingNotificationsExpired(
+              meeting,
+            );
           } catch (_) {}
         } else {
           try {
             await _col.doc(meeting.id).update({
               'hostStep': 5,
               // status stays 'pending'; sub-state derived from hostStep + participants
-              'suggestDeadline': Timestamp.fromDate(now.add(_kSuggestDuration)),
-              'updatedAt': FieldValue.serverTimestamp(),
+              'suggestDeadline':
+                  Timestamp.fromDate(
+                    now.add(
+                      _kSuggestDuration,
+                    ),
+                  ),
+              'updatedAt':
+                  FieldValue.serverTimestamp(),
             });
           } catch (_) {}
         }
@@ -580,43 +951,72 @@ class MeetingPointService {
       return;
     }
 
-    if (meeting.hostStep == 5 && meeting.suggestDeadline != null) {
-      if (!meeting.suggestDeadline!.isAfter(now)) {
+    if (meeting.hostStep == 5 &&
+        meeting.suggestDeadline !=
+            null) {
+      if (!meeting.suggestDeadline!
+          .isAfter(now)) {
         try {
-          await markHostDecision(meetingPointId: meeting.id, accepted: true);
+          await markHostDecision(
+            meetingPointId: meeting.id,
+            accepted: true,
+          );
         } catch (_) {}
       }
       return;
     }
   }
 
-  static Future<void> _markPendingNotificationsCancelled(
+  static Future<void>
+  _markPendingNotificationsCancelled(
     MeetingPointRecord meeting,
   ) async {
-    final pendingIds = meeting.participants
+    final pendingIds = meeting
+        .participants
         .where((p) => p.isPending)
         .map((p) => p.userId)
         .toSet();
     if (pendingIds.isEmpty) return;
 
     try {
-      final batch = FirebaseFirestore.instance.batch();
+      final batch = FirebaseFirestore
+          .instance
+          .batch();
       bool hasUpdates = false;
 
       for (final uid in pendingIds) {
-        final snap = await FirebaseFirestore.instance
+        final snap = await FirebaseFirestore
+            .instance
             .collection('notifications')
-            .where('userId', isEqualTo: uid)
-            .where('type', isEqualTo: 'meetingPointRequest')
+            .where(
+              'userId',
+              isEqualTo: uid,
+            )
+            .where(
+              'type',
+              isEqualTo:
+                  'meetingPointRequest',
+            )
             .get();
         for (final doc in snap.docs) {
-          final payload = doc.data()['data'] as Map<String, dynamic>? ?? {};
+          final payload =
+              doc.data()['data']
+                  as Map<
+                    String,
+                    dynamic
+                  >? ??
+              {};
           final docRequestId =
-              (payload['meetingPointId'] ?? payload['requestId'] ?? '')
+              (payload['meetingPointId'] ??
+                      payload['requestId'] ??
+                      '')
                   .toString();
-          if (docRequestId != meeting.id) continue;
+          if (docRequestId !=
+              meeting.id)
+            continue;
           batch.update(doc.reference, {
-            'requestStatus': 'cancelled',
+            'requestStatus':
+                'cancelled',
             'requiresAction': false,
             'actionTaken': true,
           });
@@ -630,31 +1030,53 @@ class MeetingPointService {
     } catch (_) {}
   }
 
-  static Future<void> _markPendingNotificationsExpired(
+  static Future<void>
+  _markPendingNotificationsExpired(
     MeetingPointRecord meeting,
   ) async {
-    final pendingIds = meeting.participants
+    final pendingIds = meeting
+        .participants
         .where((p) => p.isPending)
         .map((p) => p.userId)
         .toSet();
     if (pendingIds.isEmpty) return;
 
     try {
-      final batch = FirebaseFirestore.instance.batch();
+      final batch = FirebaseFirestore
+          .instance
+          .batch();
       bool hasUpdates = false;
 
       for (final uid in pendingIds) {
-        final snap = await FirebaseFirestore.instance
+        final snap = await FirebaseFirestore
+            .instance
             .collection('notifications')
-            .where('userId', isEqualTo: uid)
-            .where('type', isEqualTo: 'meetingPointRequest')
+            .where(
+              'userId',
+              isEqualTo: uid,
+            )
+            .where(
+              'type',
+              isEqualTo:
+                  'meetingPointRequest',
+            )
             .get();
         for (final doc in snap.docs) {
-          final payload = doc.data()['data'] as Map<String, dynamic>? ?? {};
+          final payload =
+              doc.data()['data']
+                  as Map<
+                    String,
+                    dynamic
+                  >? ??
+              {};
           final docRequestId =
-              (payload['meetingPointId'] ?? payload['requestId'] ?? '')
+              (payload['meetingPointId'] ??
+                      payload['requestId'] ??
+                      '')
                   .toString();
-          if (docRequestId != meeting.id) continue;
+          if (docRequestId !=
+              meeting.id)
+            continue;
           batch.update(doc.reference, {
             'requestStatus': 'expired',
             'requiresAction': false,
@@ -670,18 +1092,31 @@ class MeetingPointService {
     } catch (_) {}
   }
 
-  static Future<MeetingPointRecord?> getById(String meetingPointId) async {
+  static Future<MeetingPointRecord?>
+  getById(String meetingPointId) async {
     final id = meetingPointId.trim();
     if (id.isEmpty) return null;
-    final doc = await _col.doc(id).get();
-    return MeetingPointRecord.fromDoc(doc);
+    final doc = await _col
+        .doc(id)
+        .get();
+    return MeetingPointRecord.fromDoc(
+      doc,
+    );
   }
 
-  static Future<MeetingPointRecord?> getActiveHostedByCurrentUser() async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null || uid.trim().isEmpty) return null;
+  static Future<MeetingPointRecord?>
+  getActiveHostedByCurrentUser() async {
+    final uid = FirebaseAuth
+        .instance
+        .currentUser
+        ?.uid;
+    if (uid == null ||
+        uid.trim().isEmpty)
+      return null;
 
-    final snap = await _col.where('hostId', isEqualTo: uid).get();
+    final snap = await _col
+        .where('hostId', isEqualTo: uid)
+        .get();
     final items = snap.docs
         .map(MeetingPointRecord.fromDoc)
         .whereType<MeetingPointRecord>()
@@ -689,17 +1124,27 @@ class MeetingPointService {
         .toList();
     if (items.isEmpty) return null;
     items.sort((a, b) {
-      final at = a.updatedAt ?? a.createdAt ?? DateTime(1970);
-      final bt = b.updatedAt ?? b.createdAt ?? DateTime(1970);
+      final at =
+          a.updatedAt ??
+          a.createdAt ??
+          DateTime(1970);
+      final bt =
+          b.updatedAt ??
+          b.createdAt ??
+          DateTime(1970);
       return bt.compareTo(at);
     });
     for (final meeting in items) {
-      if (_isFullyDeclinedActive(meeting)) {
+      if (_isFullyDeclinedActive(
+        meeting,
+      )) {
         try {
           await _col.doc(meeting.id).update({
             'status': 'cancelled',
-            'cancellationReason': 'all_participants_declined',
-            'updatedAt': FieldValue.serverTimestamp(),
+            'cancellationReason':
+                'all_participants_declined',
+            'updatedAt':
+                FieldValue.serverTimestamp(),
           });
         } catch (_) {}
         continue;
@@ -709,12 +1154,21 @@ class MeetingPointService {
     return null;
   }
 
-  static Future<MeetingPointRecord?> getBlockingMeetingForCurrentUser() async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null || uid.trim().isEmpty) return null;
+  static Future<MeetingPointRecord?>
+  getBlockingMeetingForCurrentUser() async {
+    final uid = FirebaseAuth
+        .instance
+        .currentUser
+        ?.uid;
+    if (uid == null ||
+        uid.trim().isEmpty)
+      return null;
 
     final snap = await _col
-        .where('participantUserIds', arrayContains: uid)
+        .where(
+          'participantUserIds',
+          arrayContains: uid,
+        )
         .get();
     final meetings = snap.docs
         .map(MeetingPointRecord.fromDoc)
@@ -723,65 +1177,101 @@ class MeetingPointService {
     if (meetings.isEmpty) return null;
 
     meetings.sort((a, b) {
-      final at = a.updatedAt ?? a.createdAt ?? DateTime(1970);
-      final bt = b.updatedAt ?? b.createdAt ?? DateTime(1970);
+      final at =
+          a.updatedAt ??
+          a.createdAt ??
+          DateTime(1970);
+      final bt =
+          b.updatedAt ??
+          b.createdAt ??
+          DateTime(1970);
       return bt.compareTo(at);
     });
 
     for (final meeting in meetings) {
-      if (_isFullyDeclinedActive(meeting) && meeting.hostId == uid) {
+      if (_isFullyDeclinedActive(
+            meeting,
+          ) &&
+          meeting.hostId == uid) {
         try {
           await _col.doc(meeting.id).update({
             'status': 'cancelled',
-            'cancellationReason': 'all_participants_declined',
-            'updatedAt': FieldValue.serverTimestamp(),
+            'cancellationReason':
+                'all_participants_declined',
+            'updatedAt':
+                FieldValue.serverTimestamp(),
           });
         } catch (_) {}
         continue;
       }
-      if (_isMeetingBlockingForUser(meeting, uid)) return meeting;
+      if (_isMeetingBlockingForUser(
+        meeting,
+        uid,
+      ))
+        return meeting;
     }
     return null;
   }
 
-  static Future<(String, DateTime)> createMeetingPoint({
+  static Future<(String, DateTime)>
+  createMeetingPoint({
     required String hostId,
     required String hostName,
     required String hostPhone,
     required String venueId,
     required String venueName,
-    required List<String> placeCategories,
-    required Map<String, dynamic>? hostLocation,
-    required List<MeetingPointParticipant> participants,
+    required List<String>
+    placeCategories,
+    required Map<String, dynamic>?
+    hostLocation,
+    required List<
+      MeetingPointParticipant
+    >
+    participants,
     required Duration waitDuration,
   }) async {
     final docRef = _col.doc();
-    final invitedUserIds = participants.map((p) => p.userId).toSet().toList();
-    final participantUserIds = <String>{hostId, ...invitedUserIds}.toList();
+    final invitedUserIds = participants
+        .map((p) => p.userId)
+        .toSet()
+        .toList();
+    final participantUserIds = <String>{
+      hostId,
+      ...invitedUserIds,
+    }.toList();
 
-    final batch = FirebaseFirestore.instance.batch();
+    final batch = FirebaseFirestore
+        .instance
+        .batch();
     batch.set(docRef, {
       'hostId': hostId,
       'hostName': hostName,
       'hostPhone': hostPhone,
       'venueId': venueId,
       'venueName': venueName,
-      'placeCategories': placeCategories,
+      'placeCategories':
+          placeCategories,
       'hostLocation': hostLocation,
       'hostStep': 4,
       'status': 'pending',
-      'participants': participants.map((p) => p.toMap()).toList(),
+      'participants': participants
+          .map((p) => p.toMap())
+          .toList(),
       'invitedUserIds': invitedUserIds,
-      'participantUserIds': participantUserIds,
+      'participantUserIds':
+          participantUserIds,
       // waitDeadline is NOT set here — it is computed from the confirmed
       // server-side createdAt after the commit so that all devices (host and
       // participants) share the exact same Firestore-server-time-based deadline
       // regardless of their local clock.
-      'waitDurationSeconds': waitDuration.inSeconds,
+      'waitDurationSeconds':
+          waitDuration.inSeconds,
       'waitDeadline': null,
       'suggestDeadline': null,
-      'createdAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
+      'createdAt':
+          FieldValue.serverTimestamp(),
+      'updatedAt':
+          FieldValue.serverTimestamp(),
     });
 
     await batch.commit();
@@ -790,49 +1280,76 @@ class MeetingPointService {
     // final waitDeadline = createdAt + waitDuration.  This ensures every
     // client sees a deadline anchored to Firestore server time.
     final snap = await docRef.get();
-    final serverCreatedAt = (snap.data()?['createdAt'] as Timestamp?)?.toDate();
+    final serverCreatedAt =
+        (snap.data()?['createdAt']
+                as Timestamp?)
+            ?.toDate();
     if (serverCreatedAt != null) {
-      final deadline = serverCreatedAt.add(waitDuration);
+      final deadline = serverCreatedAt
+          .add(waitDuration);
       await docRef.update({
-        'waitDeadline': Timestamp.fromDate(deadline),
-        'updatedAt': FieldValue.serverTimestamp(),
+        'waitDeadline':
+            Timestamp.fromDate(
+              deadline,
+            ),
+        'updatedAt':
+            FieldValue.serverTimestamp(),
       });
       return (docRef.id, deadline);
     }
 
     // Fallback: server timestamp not yet available in cache, use local time.
-    final fallback = DateTime.now().add(waitDuration);
+    final fallback = DateTime.now().add(
+      waitDuration,
+    );
     await docRef.update({
-      'waitDeadline': Timestamp.fromDate(fallback),
-      'updatedAt': FieldValue.serverTimestamp(),
+      'waitDeadline':
+          Timestamp.fromDate(fallback),
+      'updatedAt':
+          FieldValue.serverTimestamp(),
     });
     return (docRef.id, fallback);
   }
 
-  static Future<void> updateHostProgress({
+  static Future<void>
+  updateHostProgress({
     required String meetingPointId,
     required int hostStep,
-    List<MeetingPointParticipant>? participants,
+    List<MeetingPointParticipant>?
+    participants,
     DateTime? waitDeadline,
     DateTime? suggestDeadline,
     String? status,
   }) async {
     final payload = <String, dynamic>{
       'hostStep': hostStep.clamp(1, 5),
-      'updatedAt': FieldValue.serverTimestamp(),
+      'updatedAt':
+          FieldValue.serverTimestamp(),
     };
     if (participants != null) {
-      payload['participants'] = participants.map((p) => p.toMap()).toList();
+      payload['participants'] =
+          participants
+              .map((p) => p.toMap())
+              .toList();
     }
     if (waitDeadline != null) {
-      payload['waitDeadline'] = Timestamp.fromDate(waitDeadline);
+      payload['waitDeadline'] =
+          Timestamp.fromDate(
+            waitDeadline,
+          );
     }
     if (suggestDeadline != null) {
-      payload['suggestDeadline'] = Timestamp.fromDate(suggestDeadline);
+      payload['suggestDeadline'] =
+          Timestamp.fromDate(
+            suggestDeadline,
+          );
     }
-    if (status != null) payload['status'] = status;
+    if (status != null)
+      payload['status'] = status;
 
-    await _col.doc(meetingPointId).update(payload);
+    await _col
+        .doc(meetingPointId)
+        .update(payload);
   }
 
   static Future<void> markHostDecision({
@@ -842,59 +1359,66 @@ class MeetingPointService {
     if (!accepted) {
       await _col.doc(meetingPointId).update({
         'status': 'cancelled',
-        'updatedAt': FieldValue.serverTimestamp(),
+        'updatedAt':
+            FieldValue.serverTimestamp(),
         'hostStep': 5,
-        'cancellationReason': 'host_rejected_suggestion',
+        'cancellationReason':
+            'host_rejected_suggestion',
       });
       return;
     }
 
     // Fetch current meeting to initialize per-participant arrival data.
-    final doc = await _col.doc(meetingPointId).get();
-    final meeting = MeetingPointRecord.fromDoc(doc);
+    final doc = await _col
+        .doc(meetingPointId)
+        .get();
+    final meeting =
+        MeetingPointRecord.fromDoc(doc);
     if (meeting == null) return;
 
-    final rng = math.Random();
-    final hostMins = rng.nextInt(5) + 1;
     final now = DateTime.now();
 
-    // Initialize arrivalStatus + random estimatedArrivalMinutes for all
-    // participants who accepted the invitation.
-    final updatedParticipants = meeting.participants.map((p) {
-      if (!p.isAccepted) return p;
-      return p.copyWith(
-        arrivalStatus: 'on_the_way',
-        estimatedArrivalMinutes: rng.nextInt(5) + 1,
-        locationUpdatedAt: now,
-      );
-    }).toList();
+    // Initialize arrival status for accepted participants and keep their
+    // placeholder ETA until the host device syncs the real path-based value.
+    final updatedParticipants = meeting
+        .participants
+        .map((p) {
+          if (!p.isAccepted) return p;
+          return p.copyWith(
+            arrivalStatus: 'on_the_way',
+            locationUpdatedAt: now,
+          );
+        })
+        .toList();
 
-    // Write an initial expiresAt using the random estimatedArrivalMinutes as a
-    // guaranteed safety baseline — this ensures auto-expiry always works even if
-    // the host device never completes navmesh path calculation.
-    // The host device will overwrite this with a more accurate real-path-based
-    // value once _maybeWriteExpiresAtFromRealEtas() runs.
-    final acceptedETAs = updatedParticipants
-        .where((p) => p.isAccepted)
-        .map((p) => p.estimatedArrivalMinutes);
-    final allETAs = [hostMins, ...acceptedETAs];
-    final largestMins = allETAs.reduce(math.max);
-    final rawSession = Duration(minutes: largestMins * 3);
-    const kMinSession = Duration(minutes: 10);
-    final sessionDuration = rawSession < kMinSession ? kMinSession : rawSession;
-    final expiresAt = now.add(sessionDuration);
+    // Write a fixed minimum expiresAt as a safety baseline so session length
+    // never depends on random placeholder ETAs before the real path ETAs arrive.
+    const kInitialSessionDuration =
+        Duration(minutes: 10);
+    final expiresAt = now.add(
+      kInitialSessionDuration,
+    );
 
     await _col.doc(meetingPointId).update({
       'status': 'active',
       'hostStep': 5,
-      'updatedAt': FieldValue.serverTimestamp(),
-      'confirmedAt': FieldValue.serverTimestamp(),
+      'updatedAt':
+          FieldValue.serverTimestamp(),
+      'confirmedAt':
+          FieldValue.serverTimestamp(),
       'hostArrivalStatus': 'on_the_way',
-      'hostEstimatedMinutes': hostMins,
+      'hostEstimatedMinutes':
+          meeting.hostEstimatedMinutes,
       'hostArrivedAt': null,
-      'hostLocationUpdatedAt': Timestamp.fromDate(now),
-      'expiresAt': Timestamp.fromDate(expiresAt),
-      'participants': updatedParticipants.map((p) => p.toMap()).toList(),
+      'hostLocationUpdatedAt':
+          Timestamp.fromDate(now),
+      'expiresAt': Timestamp.fromDate(
+        expiresAt,
+      ),
+      'participants':
+          updatedParticipants
+              .map((p) => p.toMap())
+              .toList(),
     });
   }
 
@@ -905,50 +1429,226 @@ class MeetingPointService {
     DateTime expiresAt,
   ) async {
     await _col.doc(meetingId).update({
-      'expiresAt': Timestamp.fromDate(expiresAt),
-      'updatedAt': FieldValue.serverTimestamp(),
+      'expiresAt': Timestamp.fromDate(
+        expiresAt,
+      ),
+      'updatedAt':
+          FieldValue.serverTimestamp(),
+    });
+  }
+
+  static bool _sameTimestamp(
+    DateTime? a,
+    DateTime? b,
+  ) {
+    if (a == null && b == null)
+      return true;
+    if (a == null || b == null)
+      return false;
+    return a.millisecondsSinceEpoch ==
+        b.millisecondsSinceEpoch;
+  }
+
+  /// Persist the latest live ETA for a confirmed meeting participant so
+  /// backend late-arrival notifications use the same up-to-date estimate
+  /// shown in the client.
+  static Future<void>
+  syncLiveArrivalEstimate({
+    required String meetingPointId,
+    required String userId,
+    required int etaSeconds,
+    required DateTime locationUpdatedAt,
+  }) async {
+    final trimmedMeetingId =
+        meetingPointId.trim();
+    final trimmedUserId = userId.trim();
+    if (trimmedMeetingId.isEmpty ||
+        trimmedUserId.isEmpty)
+      return;
+    if (etaSeconds <= 0) return;
+
+    final etaMinutes = (etaSeconds / 60)
+        .ceil()
+        .clamp(1, 60);
+    final ref = _col.doc(
+      trimmedMeetingId,
+    );
+
+    await FirebaseFirestore.instance.runTransaction((
+      tx,
+    ) async {
+      final snap = await tx.get(ref);
+      final meeting =
+          MeetingPointRecord.fromDoc(
+            snap,
+          );
+      if (meeting == null ||
+          !meeting.isConfirmed)
+        return;
+
+      if (meeting.isHost(
+        trimmedUserId,
+      )) {
+        final storedLocationAt = meeting
+            .hostLocationUpdatedAt;
+        if (storedLocationAt != null &&
+            !locationUpdatedAt.isAfter(
+              storedLocationAt,
+            )) {
+          return;
+        }
+        final sameEta =
+            meeting
+                .hostEstimatedMinutes ==
+            etaMinutes;
+        final sameLocation =
+            _sameTimestamp(
+              meeting
+                  .hostLocationUpdatedAt,
+              locationUpdatedAt,
+            );
+        if (sameEta && sameLocation)
+          return;
+
+        tx.update(ref, {
+          'hostEstimatedMinutes':
+              etaMinutes,
+          'hostLocationUpdatedAt':
+              Timestamp.fromDate(
+                locationUpdatedAt,
+              ),
+          'updatedAt':
+              FieldValue.serverTimestamp(),
+        });
+        return;
+      }
+
+      final idx = meeting.participants
+          .indexWhere(
+            (p) =>
+                p.userId ==
+                trimmedUserId,
+          );
+      if (idx < 0) return;
+
+      final participant =
+          meeting.participants[idx];
+      if (!participant.isAccepted ||
+          participant
+              .isCancelledArrival ||
+          participant.isArrived) {
+        return;
+      }
+
+      final storedLocationAt =
+          participant.locationUpdatedAt;
+      if (storedLocationAt != null &&
+          !locationUpdatedAt.isAfter(
+            storedLocationAt,
+          )) {
+        return;
+      }
+
+      final sameEta =
+          participant
+              .estimatedArrivalMinutes ==
+          etaMinutes;
+      final sameLocation =
+          _sameTimestamp(
+            participant
+                .locationUpdatedAt,
+            locationUpdatedAt,
+          );
+      if (sameEta && sameLocation)
+        return;
+
+      final updatedParticipants =
+          List<
+            MeetingPointParticipant
+          >.from(meeting.participants);
+      updatedParticipants[idx] =
+          participant.copyWith(
+            estimatedArrivalMinutes:
+                etaMinutes,
+            locationUpdatedAt:
+                locationUpdatedAt,
+          );
+
+      tx.update(ref, {
+        'participants':
+            updatedParticipants
+                .map((p) => p.toMap())
+                .toList(),
+        'updatedAt':
+            FieldValue.serverTimestamp(),
+      });
     });
   }
 
   /// Reconciles a confirmed (arrival-phase) meeting that may be stuck due to
   /// old app code that didn't write meeting-level status transitions.
   /// Safe to call repeatedly — only writes to Firestore when a change is needed.
-  static Future<void> reconcileArrivalPhase(MeetingPointRecord meeting) async {
+  static Future<void>
+  reconcileArrivalPhase(
+    MeetingPointRecord meeting,
+  ) async {
     if (!meeting.isConfirmed) return;
 
     // Session time limit: auto-complete if expiresAt has passed.
-    // Uses 'completed' so it is distinct from host cancellation.
+    // Keep status as 'completed', but include a reason so notifications can
+    // distinguish time-limit completion from everyone-arrived completion.
     if (meeting.expiresAt != null &&
-        !meeting.expiresAt!.isAfter(MeetingPointService.serverNow)) {
+        !meeting.expiresAt!.isAfter(
+          MeetingPointService.serverNow,
+        )) {
       try {
         await _col.doc(meeting.id).update({
           'status': 'completed',
-          'cancellationReason': 'Auto-closed after time limit',
-          'updatedAt': FieldValue.serverTimestamp(),
+          'cancellationReason':
+              'auto-closed after time limit',
+          'updatedAt':
+              FieldValue.serverTimestamp(),
         });
       } catch (_) {}
       return;
     }
 
-    final hostActive = meeting.hostArrivalStatus != 'cancelled';
-    final activeParticipants = meeting.participants
-        .where((p) => p.isAccepted && !p.isCancelledArrival)
+    final hostActive =
+        meeting.hostArrivalStatus !=
+        'cancelled';
+    final activeParticipants = meeting
+        .participants
+        .where(
+          (p) =>
+              p.isAccepted &&
+              !p.isCancelledArrival,
+        )
         .toList();
-    final totalActive = (hostActive ? 1 : 0) + activeParticipants.length;
+    final totalActive =
+        (hostActive ? 1 : 0) +
+        activeParticipants.length;
 
     final payload = <String, dynamic>{
-      'updatedAt': FieldValue.serverTimestamp(),
+      'updatedAt':
+          FieldValue.serverTimestamp(),
     };
     bool needsUpdate = false;
 
     if (totalActive < 2) {
       payload['status'] = 'cancelled';
-      payload['cancellationReason'] = 'all_participants_left';
+      payload['cancellationReason'] =
+          'all_participants_left';
       needsUpdate = true;
     } else {
-      final hostDone = !hostActive || meeting.hostArrivalStatus == 'arrived';
+      final hostDone =
+          !hostActive ||
+          meeting.hostArrivalStatus ==
+              'arrived';
       final allActiveArrived =
-          hostDone && activeParticipants.every((p) => p.isArrived);
+          hostDone &&
+          activeParticipants.every(
+            (p) => p.isArrived,
+          );
       if (allActiveArrived) {
         payload['status'] = 'completed';
         needsUpdate = true;
@@ -957,29 +1657,45 @@ class MeetingPointService {
 
     if (!needsUpdate) return;
     try {
-      await _col.doc(meeting.id).update(payload);
+      await _col
+          .doc(meeting.id)
+          .update(payload);
     } catch (_) {}
   }
 
   /// Cancel the entire meeting for all participants (host only action).
-  static Future<void> cancelMeetingForAll(String meetingPointId) async {
+  static Future<void>
+  cancelMeetingForAll(
+    String meetingPointId,
+  ) async {
     MeetingPointRecord? meeting;
     try {
-      final doc = await _col.doc(meetingPointId).get();
-      meeting = MeetingPointRecord.fromDoc(doc);
+      final doc = await _col
+          .doc(meetingPointId)
+          .get();
+      meeting =
+          MeetingPointRecord.fromDoc(
+            doc,
+          );
     } catch (_) {}
 
     final payload = <String, dynamic>{
       'status': 'cancelled',
-      'updatedAt': FieldValue.serverTimestamp(),
-      'cancellationReason': 'host_cancelled',
+      'updatedAt':
+          FieldValue.serverTimestamp(),
+      'cancellationReason':
+          'host_cancelled',
     };
 
-    await _col.doc(meetingPointId).update(payload);
+    await _col
+        .doc(meetingPointId)
+        .update(payload);
 
     if (meeting != null) {
       try {
-        await _markPendingNotificationsCancelled(meeting);
+        await _markPendingNotificationsCancelled(
+          meeting,
+        );
       } catch (_) {}
     }
   }
@@ -988,121 +1704,202 @@ class MeetingPointService {
   /// Also auto-transitions the meeting to 'completed' when all active participants
   /// have arrived, or to 'cancelled' (with reason 'all_participants_left') when
   /// fewer than two active participants remain.
-  static Future<void> updateArrivalStatus({
+  static Future<void>
+  updateArrivalStatus({
     required String meetingPointId,
     required bool isHost,
     required String userId,
-    required String arrivalStatus, // 'on_the_way' | 'arrived' | 'cancelled'
+    required String
+    arrivalStatus, // 'on_the_way' | 'arrived' | 'cancelled'
     DateTime? arrivedAt,
   }) async {
     // Always read the full document so we can evaluate meeting-level transitions.
-    final doc = await _col.doc(meetingPointId).get();
-    final meeting = MeetingPointRecord.fromDoc(doc);
+    final doc = await _col
+        .doc(meetingPointId)
+        .get();
+    final meeting =
+        MeetingPointRecord.fromDoc(doc);
     if (meeting == null) return;
 
     final payload = <String, dynamic>{
-      'updatedAt': FieldValue.serverTimestamp(),
+      'updatedAt':
+          FieldValue.serverTimestamp(),
     };
-    final shouldUpdateLocation = arrivalStatus == 'arrived';
-    final locationAt = arrivedAt ?? DateTime.now();
+    final shouldUpdateLocation =
+        arrivalStatus == 'arrived';
+    final locationAt =
+        arrivedAt ?? DateTime.now();
 
     // ── Compute new arrival states ─────────────────────────────────────────
-    String newHostArrivalStatus = meeting.hostArrivalStatus;
-    List<MeetingPointParticipant> newParticipants =
-        List<MeetingPointParticipant>.from(meeting.participants);
+    String newHostArrivalStatus =
+        meeting.hostArrivalStatus;
+    List<MeetingPointParticipant>
+    newParticipants =
+        List<
+          MeetingPointParticipant
+        >.from(meeting.participants);
 
     if (isHost) {
-      newHostArrivalStatus = arrivalStatus;
-      payload['hostArrivalStatus'] = arrivalStatus;
-      payload['hostArrivedAt'] = arrivedAt == null
+      newHostArrivalStatus =
+          arrivalStatus;
+      payload['hostArrivalStatus'] =
+          arrivalStatus;
+      payload['hostArrivedAt'] =
+          arrivedAt == null
           ? null
-          : Timestamp.fromDate(arrivedAt);
+          : Timestamp.fromDate(
+              arrivedAt,
+            );
       if (shouldUpdateLocation) {
-        payload['hostLocationUpdatedAt'] = Timestamp.fromDate(locationAt);
+        payload['hostLocationUpdatedAt'] =
+            Timestamp.fromDate(
+              locationAt,
+            );
       }
     } else {
-      final idx = newParticipants.indexWhere((p) => p.userId == userId);
+      final idx = newParticipants
+          .indexWhere(
+            (p) => p.userId == userId,
+          );
       if (idx < 0) return;
-      newParticipants[idx] = newParticipants[idx].copyWith(
-        arrivalStatus: arrivalStatus,
-        arrivedAt: arrivedAt,
-        locationUpdatedAt: shouldUpdateLocation ? locationAt : null,
-      );
-      payload['participants'] = newParticipants.map((p) => p.toMap()).toList();
+      newParticipants[idx] =
+          newParticipants[idx].copyWith(
+            arrivalStatus:
+                arrivalStatus,
+            arrivedAt: arrivedAt,
+            locationUpdatedAt:
+                shouldUpdateLocation
+                ? locationAt
+                : null,
+          );
+      payload['participants'] =
+          newParticipants
+              .map((p) => p.toMap())
+              .toList();
     }
 
     // ── Meeting-level status transitions (only during arrival phase) ──────
     if (meeting.isConfirmed) {
       // "Active" = host or accepted participant who hasn't cancelled their arrival.
-      final hostActive = newHostArrivalStatus != 'cancelled';
-      final activeParticipants = newParticipants
-          .where((p) => p.isAccepted && !p.isCancelledArrival)
-          .toList();
-      final totalActive = (hostActive ? 1 : 0) + activeParticipants.length;
+      final hostActive =
+          newHostArrivalStatus !=
+          'cancelled';
+      final activeParticipants =
+          newParticipants
+              .where(
+                (p) =>
+                    p.isAccepted &&
+                    !p.isCancelledArrival,
+              )
+              .toList();
+      final totalActive =
+          (hostActive ? 1 : 0) +
+          activeParticipants.length;
 
       if (totalActive < 2) {
         // Not enough people left — auto-cancel the meeting.
         payload['status'] = 'cancelled';
-        payload['cancellationReason'] = 'all_participants_left';
+        payload['cancellationReason'] =
+            'all_participants_left';
       } else {
         // Complete when every *active* person has arrived.
         // If the host cancelled ("cancel for me") they are not active,
         // so we don't require them to arrive.
-        final hostDone = !hostActive || newHostArrivalStatus == 'arrived';
+        final hostDone =
+            !hostActive ||
+            newHostArrivalStatus ==
+                'arrived';
         final allActiveArrived =
-            hostDone && activeParticipants.every((p) => p.isArrived);
+            hostDone &&
+            activeParticipants.every(
+              (p) => p.isArrived,
+            );
         if (allActiveArrived) {
-          payload['status'] = 'completed';
+          payload['status'] =
+              'completed';
         }
       }
     }
 
-    await _col.doc(meetingPointId).update(payload);
+    await _col
+        .doc(meetingPointId)
+        .update(payload);
   }
 
-  static Future<void> respondToInvitation({
+  static Future<void>
+  respondToInvitation({
     required String meetingPointId,
     required bool accepted,
     bool cancelParticipation = false,
   }) async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null || uid.trim().isEmpty) return;
+    final uid = FirebaseAuth
+        .instance
+        .currentUser
+        ?.uid;
+    if (uid == null ||
+        uid.trim().isEmpty)
+      return;
 
-    final ref = _col.doc(meetingPointId);
+    final ref = _col.doc(
+      meetingPointId,
+    );
     final doc = await ref.get();
-    final meeting = MeetingPointRecord.fromDoc(doc);
+    final meeting =
+        MeetingPointRecord.fromDoc(doc);
     if (meeting == null) return;
 
-    final index = meeting.participants.indexWhere((p) => p.userId == uid);
+    final index = meeting.participants
+        .indexWhere(
+          (p) => p.userId == uid,
+        );
     if (index < 0) return;
 
     final now = DateTime.now();
     final treatCancelAsDeclined =
-        cancelParticipation && meeting.hostStep >= 5 && !meeting.isConfirmed;
+        cancelParticipation &&
+        meeting.hostStep >= 5 &&
+        !meeting.isConfirmed;
     final newStatus = accepted
         ? 'accepted'
         : (treatCancelAsDeclined
               ? 'declined'
-              : (cancelParticipation ? 'cancelled' : 'declined'));
-    final updatedParticipants = List<MeetingPointParticipant>.from(
-      meeting.participants,
-    );
-    updatedParticipants[index] = updatedParticipants[index].copyWith(
-      status: newStatus,
-      respondedAt: now,
-      updatedAt: now,
-    );
+              : (cancelParticipation
+                    ? 'cancelled'
+                    : 'declined'));
+    final updatedParticipants =
+        List<
+          MeetingPointParticipant
+        >.from(meeting.participants);
+    updatedParticipants[index] =
+        updatedParticipants[index]
+            .copyWith(
+              status: newStatus,
+              respondedAt: now,
+              updatedAt: now,
+            );
 
     final payload = <String, dynamic>{
-      'participants': updatedParticipants.map((p) => p.toMap()).toList(),
-      'updatedAt': FieldValue.serverTimestamp(),
+      'participants':
+          updatedParticipants
+              .map((p) => p.toMap())
+              .toList(),
+      'updatedAt':
+          FieldValue.serverTimestamp(),
     };
 
-    final noPendingLeft = updatedParticipants.every((p) => !p.isPending);
-    final anyAccepted = updatedParticipants.any((p) => p.isAccepted);
-    final anyCancelledParticipation = updatedParticipants.any(
-      (p) => p.isCancelledParticipation,
-    );
+    final noPendingLeft =
+        updatedParticipants.every(
+          (p) => !p.isPending,
+        );
+    final anyAccepted =
+        updatedParticipants.any(
+          (p) => p.isAccepted,
+        );
+    final anyCancelledParticipation =
+        updatedParticipants.any(
+          (p) => p
+              .isCancelledParticipation,
+        );
 
     // Cancel immediately when no invitee is still deciding and nobody accepted.
     // Covers: all declined, all cancelled participation, or a mix of both.
@@ -1110,19 +1907,23 @@ class MeetingPointService {
     // At step 5: invitees should have all responded already (no pending left).
     if (noPendingLeft && !anyAccepted) {
       payload['status'] = 'cancelled';
-      payload['cancellationReason'] = anyCancelledParticipation
+      payload['cancellationReason'] =
+          anyCancelledParticipation
           ? 'all_participants_left'
           : 'all_participants_declined';
     }
 
     // Edge case at step 5: some invitees may still be 'pending' (invitation
     // expired mid-flow) yet no accepted participants remain — cancel now.
-    if (!payload.containsKey('status') &&
+    if (!payload.containsKey(
+          'status',
+        ) &&
         cancelParticipation &&
         meeting.hostStep >= 5 &&
         !anyAccepted) {
       payload['status'] = 'cancelled';
-      payload['cancellationReason'] = meeting.isConfirmed
+      payload['cancellationReason'] =
+          meeting.isConfirmed
           ? 'all_participants_left'
           : 'all_participants_declined';
     }
@@ -1130,39 +1931,59 @@ class MeetingPointService {
     // Auto-advance to step 5 when every invitee has responded and at least
     // one accepted — host no longer needs to manually tap "Proceed", and the
     // transition works even if the host is offline.
-    if (!payload.containsKey('status') &&
+    if (!payload.containsKey(
+          'status',
+        ) &&
         noPendingLeft &&
         anyAccepted &&
         meeting.hostStep == 4) {
       payload['hostStep'] = 5;
-      payload['suggestDeadline'] = Timestamp.fromDate(
-        MeetingPointService.serverNow.add(_kSuggestDuration),
-      );
+      payload['suggestDeadline'] =
+          Timestamp.fromDate(
+            MeetingPointService
+                .serverNow
+                .add(_kSuggestDuration),
+          );
     }
 
     try {
       await ref.update(payload);
     } catch (_) {
       await ref.update({
-        'participants': updatedParticipants.map((p) => p.toMap()).toList(),
-        'updatedAt': FieldValue.serverTimestamp(),
+        'participants':
+            updatedParticipants
+                .map((p) => p.toMap())
+                .toList(),
+        'updatedAt':
+            FieldValue.serverTimestamp(),
       });
     }
   }
 }
 
-DateTime? _meetingPointAsDateTime(dynamic raw) {
-  if (raw is Timestamp) return raw.toDate();
+DateTime? _meetingPointAsDateTime(
+  dynamic raw,
+) {
+  if (raw is Timestamp)
+    return raw.toDate();
   if (raw is DateTime) return raw;
-  if (raw is int) return DateTime.fromMillisecondsSinceEpoch(raw);
-  if (raw is num) return DateTime.fromMillisecondsSinceEpoch(raw.toInt());
-  if (raw is String) return DateTime.tryParse(raw);
+  if (raw is int)
+    return DateTime.fromMillisecondsSinceEpoch(
+      raw,
+    );
+  if (raw is num)
+    return DateTime.fromMillisecondsSinceEpoch(
+      raw.toInt(),
+    );
+  if (raw is String)
+    return DateTime.tryParse(raw);
   return null;
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
-class CreateMeetingPointForm extends StatefulWidget {
+class CreateMeetingPointForm
+    extends StatefulWidget {
   const CreateMeetingPointForm({
     super.key,
     this.resumeDraft = false,
@@ -1178,10 +1999,14 @@ class CreateMeetingPointForm extends StatefulWidget {
   final bool autoAdvanceToStep5;
 
   @override
-  State<CreateMeetingPointForm> createState() => _CreateMeetingPointFormState();
+  State<CreateMeetingPointForm>
+  createState() =>
+      _CreateMeetingPointFormState();
 }
 
-class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
+class _CreateMeetingPointFormState
+    extends
+        State<CreateMeetingPointForm> {
   // ── Wizard state ─────────────────────────────────────────────────────────
   int _step = 1; // 1-5
 
@@ -1192,33 +2017,43 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   String? _venueError;
 
   // ── Step 1: Friends ───────────────────────────────────────────────────────
-  final TextEditingController _phoneCtrl = TextEditingController();
-  final FocusNode _phoneFocus = FocusNode();
+  final TextEditingController
+  _phoneCtrl = TextEditingController();
+  final FocusNode _phoneFocus =
+      FocusNode();
+  final _favService =
+      FavoritesService();
   bool _isPhoneFocused = false;
   bool _isAddingPhone = false;
   bool _phoneValid = true;
   String? _phoneError;
 
-  final List<_Friend> _selectedFriends = [];
+  final List<_Friend> _selectedFriends =
+      [];
 
   /// Active tracked friends inside the same venue.
-  List<_Friend> _activeVenueFriends = [];
-  bool _loadingActiveVenueFriends = false;
+  List<_Friend> _activeVenueFriends =
+      [];
+  bool _loadingActiveVenueFriends =
+      false;
 
   // ── Step 1: Place Type ───────────────────────────────────────────────────
-  final List<String> _allPlaceCategories = [
+  final List<String>
+  _allPlaceCategories = [
     'Any',
     'Café',
     'Restaurant',
     'Shop',
     'Gates',
   ];
-  final Set<String> _selectedPlaceCategories = {'Any'};
+  final Set<String>
+  _selectedPlaceCategories = {'Any'};
 
   // ── Step 2: Location ──────────────────────────────────────────────────────
   _HostLocation? _hostLocation;
   String? _mapVenueIdForLocation;
-  Map<String, double>? _step2InitialUserPinGltf;
+  Map<String, double>?
+  _step2InitialUserPinGltf;
   String? _step2InitialFloorLabel;
   int _step2MapVersion = 0;
 
@@ -1226,9 +2061,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   /// Simulated participant list built from _selectedFriends at step 4 entry.
   List<_Participant> _participants = [];
 
-  /// Step-4 2-minute countdown.
+  /// Step-4 10-minute countdown.
   Timer? _waitTimer;
-  int _waitSecondsLeft = 120; // 2 min
+  int _waitSecondsLeft = 600; // 10 min
   DateTime?
   _pendingWaitDeadline; // deadline computed once before the Firestore commit
 
@@ -1239,22 +2074,31 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   DateTime? _waitDeadline;
 
   /// Delay before auto-advancing to step 5 so the host can see accepted state.
-  static const Duration _kAutoAdvanceDelay = Duration(seconds: 2);
+  static const Duration
+  _kAutoAdvanceDelay = Duration(
+    seconds: 2,
+  );
   Timer? _autoAdvanceTimer;
 
   // ── Step 5: Suggested meeting point ──────────────────────────────────────
-  /// 5-minute timer for host to accept/reject.
+  /// 2-minute timer for host to accept/reject.
   Timer? _suggestTimer;
-  int _suggestSecondsLeft = 300; // 5 min
+  int _suggestSecondsLeft =
+      120; // 2 min
   DateTime? _suggestDeadline;
   String _suggestedPointName = '';
-  List<Map<String, dynamic>> _suggestedCandidates = [];
+  List<Map<String, dynamic>>
+  _suggestedCandidates = [];
   bool _suggestionsComputed = false;
   Map<String, int> _step5DistMap = {};
   bool _step5DistComputing = false;
 
   /// Persists across widget rebuilds for the lifetime of the app process.
-  static final Map<String, Map<String, int>> _distCache = {};
+  static final Map<
+    String,
+    Map<String, int>
+  >
+  _distCache = {};
 
   // ── Cached current user ───────────────────────────────────────────────────
   String? _myPhone;
@@ -1265,24 +2109,41 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   bool _isInitializing = false;
   bool _isSendingInvites = false;
   String? _meetingPointId;
-  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _meetingPointSub;
+  StreamSubscription<
+    DocumentSnapshot<
+      Map<String, dynamic>
+    >
+  >?
+  _meetingPointSub;
 
   // ─── In-session state persistence (steps 1–3) ────────────────────────────
-  static bool _hasSavedEarlyState = false;
+  static bool _hasSavedEarlyState =
+      false;
   static String? _memEarlyUserId;
-  static List<_Friend> _memEarlyFriends = [];
-  static Set<String> _memEarlyCategories = {'Any'};
-  static _HostLocation? _memEarlyHostLocation;
+  static List<_Friend>
+  _memEarlyFriends = [];
+  static Set<String>
+  _memEarlyCategories = {'Any'};
+  static _HostLocation?
+  _memEarlyHostLocation;
   static String? _memEarlyVenueId;
   static int _memEarlyStep = 1;
 
   void _saveEarlyStepsToMemory() {
     if (_step >= 4) return;
     _hasSavedEarlyState = true;
-    _memEarlyUserId = FirebaseAuth.instance.currentUser?.uid;
-    _memEarlyFriends = List.from(_selectedFriends);
-    _memEarlyCategories = Set.from(_selectedPlaceCategories);
-    _memEarlyHostLocation = _hostLocation;
+    _memEarlyUserId = FirebaseAuth
+        .instance
+        .currentUser
+        ?.uid;
+    _memEarlyFriends = List.from(
+      _selectedFriends,
+    );
+    _memEarlyCategories = Set.from(
+      _selectedPlaceCategories,
+    );
+    _memEarlyHostLocation =
+        _hostLocation;
     _memEarlyVenueId = _venueId;
     _memEarlyStep = _step;
   }
@@ -1290,9 +2151,16 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   /// Called after venue detection completes. Restores friends/categories always;
   /// restores location and step only if the detected venue matches the saved one.
   void _tryRestoreEarlyState() {
-    if (!_hasSavedEarlyState || _shouldManageDraft || _step >= 4) return;
-    final currentUid = FirebaseAuth.instance.currentUser?.uid;
-    if (currentUid == null || currentUid != _memEarlyUserId) {
+    if (!_hasSavedEarlyState ||
+        _shouldManageDraft ||
+        _step >= 4)
+      return;
+    final currentUid = FirebaseAuth
+        .instance
+        .currentUser
+        ?.uid;
+    if (currentUid == null ||
+        currentUid != _memEarlyUserId) {
       _clearEarlyMemory();
       return;
     }
@@ -1301,15 +2169,20 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         ..clear()
         ..addAll(_memEarlyFriends);
     }
-    if (_memEarlyCategories.isNotEmpty) {
+    if (_memEarlyCategories
+        .isNotEmpty) {
       _selectedPlaceCategories
         ..clear()
         ..addAll(_memEarlyCategories);
     }
     // Only restore location and step if user is still in same venue
-    if (_venueId != null && _venueId == _memEarlyVenueId) {
-      if (_memEarlyHostLocation != null) _hostLocation = _memEarlyHostLocation;
-      if (_memEarlyStep > 1) _step = _memEarlyStep;
+    if (_venueId != null &&
+        _venueId == _memEarlyVenueId) {
+      if (_memEarlyHostLocation != null)
+        _hostLocation =
+            _memEarlyHostLocation;
+      if (_memEarlyStep > 1)
+        _step = _memEarlyStep;
     }
   }
 
@@ -1327,44 +2200,64 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   @override
   void initState() {
     super.initState();
-    // Suppress the background popup while this form is open.
-    MeetingPointPopupGuard.suppress = true;
     _phoneFocus.addListener(() {
-      setState(() => _isPhoneFocused = _phoneFocus.hasFocus);
+      setState(
+        () => _isPhoneFocused =
+            _phoneFocus.hasFocus,
+      );
     });
+    _favService.load();
     _prepareStep2MapVenueId();
     _loadSavedStep2Location();
     _loadCurrentUser();
     _loadAndResolveVenue();
-    _meetingPointId = widget.meetingPointId?.trim();
-    if (_meetingPointId != null && _meetingPointId!.isNotEmpty) {
+    _meetingPointId = widget
+        .meetingPointId
+        ?.trim();
+    if (_meetingPointId != null &&
+        _meetingPointId!.isNotEmpty) {
       _isInitializing = true;
       _shouldManageDraft = true;
-      _restoreFromMeetingPoint(_meetingPointId!)
+      _restoreFromMeetingPoint(
+            _meetingPointId!,
+          )
           .then((_) {
-            if (mounted && widget.autoAdvanceToStep5 && _step == 4) {
+            if (mounted &&
+                widget
+                    .autoAdvanceToStep5 &&
+                _step == 4) {
               _goNext(); // cancels step-4 timers, inits step-5, sets _step = 5
             }
           })
           .whenComplete(() {
-            if (mounted) setState(() => _isInitializing = false);
+            if (mounted)
+              setState(
+                () => _isInitializing =
+                    false,
+              );
           });
     } else if (widget.resumeDraft) {
       _isInitializing = true;
       _shouldManageDraft = true;
-      _restoreMeetingProgress().whenComplete(() {
-        if (mounted) setState(() => _isInitializing = false);
-      });
+      _restoreMeetingProgress()
+          .whenComplete(() {
+            if (mounted)
+              setState(
+                () => _isInitializing =
+                    false,
+              );
+          });
     }
   }
 
   @override
   void dispose() {
-    // Restore popup guard when the form closes.
-    MeetingPointPopupGuard.suppress = false;
     _saveEarlyStepsToMemory();
-    if (_allowDisposeDraftSave && _shouldManageDraft) {
-      unawaited(_persistDraftIfNeeded());
+    if (_allowDisposeDraftSave &&
+        _shouldManageDraft) {
+      unawaited(
+        _persistDraftIfNeeded(),
+      );
     }
     _phoneCtrl.dispose();
     _phoneFocus.dispose();
@@ -1378,42 +2271,73 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
   // ─── Venue detection ──────────────────────────────────────────────────────
 
-  Future<void> _loadAndResolveVenue() async {
+  Future<void>
+  _loadAndResolveVenue() async {
     setState(() {
       _loadingVenue = true;
       _venueError = null;
     });
 
     try {
-      final snap = await FirebaseFirestore.instance
-          .collection('venues')
-          .orderBy('venueName')
-          .get();
+      final snap =
+          await FirebaseFirestore
+              .instance
+              .collection('venues')
+              .orderBy('venueName')
+              .get();
 
       final venues = snap.docs
           .map((d) {
             final data = d.data();
             return _VenueOption(
               id: d.id,
-              name: (data['venueName'] ?? '').toString(),
-              lat: (data['latitude'] as num?)?.toDouble(),
-              lng: (data['longitude'] as num?)?.toDouble(),
+              name:
+                  (data['venueName'] ??
+                          '')
+                      .toString(),
+              lat:
+                  (data['latitude']
+                          as num?)
+                      ?.toDouble(),
+              lng:
+                  (data['longitude']
+                          as num?)
+                      ?.toDouble(),
             );
           })
-          .where((v) => v.name.isNotEmpty)
+          .where(
+            (v) => v.name.isNotEmpty,
+          )
           .toList();
 
-      final pos = await _getPositionOrNull();
-      final matched = pos == null ? null : _matchVenue(venues, pos);
+      final pos =
+          await _getPositionOrNull();
+      final matched = pos == null
+          ? null
+          : _matchVenue(venues, pos);
 
       if (matched != null) {
-        // User is inside a real venue.
-        _venueId = matched.id;
-        _venueName = matched.name;
-      } else if (forceVenueForTesting && venues.isNotEmpty) {
+        // Check if the matched venue is currently open.
+        final isOpen =
+            await _fetchVenueOpenNow(
+              matched.id,
+            );
+        if (isOpen == false ||
+            forceVenueClosedForTesting) {
+          _venueName = matched.name;
+          _venueError =
+              'Venue is closed';
+        } else {
+          _venueId = matched.id;
+          _venueName = matched.name;
+        }
+      } else if (forceVenueForTesting &&
+          venues.isNotEmpty) {
         // DEV override: prefer a stable 24h test venue.
         _VenueOption? testVenue;
-        if (_kTestVenueId.trim().isNotEmpty) {
+        if (_kTestVenueId
+            .trim()
+            .isNotEmpty) {
           for (final v in venues) {
             if (v.id == _kTestVenueId) {
               testVenue = v;
@@ -1422,18 +2346,30 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           }
         }
         if (testVenue == null) {
-          final expected = _kTestVenueName.toLowerCase();
+          final expected =
+              _kTestVenueName
+                  .toLowerCase();
           for (final v in venues) {
-            final name = v.name.toLowerCase();
-            if (name == expected || name.contains(expected)) {
+            final name = v.name
+                .toLowerCase();
+            if (name == expected ||
+                name.contains(
+                  expected,
+                )) {
               testVenue = v;
               break;
             }
           }
         }
         testVenue ??= venues.first;
-        _venueId = testVenue.id;
-        _venueName = testVenue.name; // no "(DEV)" label shown to user
+        if (forceVenueClosedForTesting) {
+          _venueName = testVenue.name;
+          _venueError =
+              'Venue is closed';
+        } else {
+          _venueId = testVenue.id;
+          _venueName = testVenue.name;
+        }
       } else {
         _venueError =
             'You must be inside a supported venue to create a meeting point.';
@@ -1447,26 +2383,36 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       _prepareStep2MapVenueId();
 
       // Load active venue friends after venue is known.
-      if (_venueId != null) _loadActiveVenueFriends();
+      if (_venueId != null)
+        _loadActiveVenueFriends();
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _loadingVenue = false;
-        _venueError = 'Could not detect venue. Please try again.';
+        _venueError =
+            'Could not detect venue. Please try again.';
         _tryRestoreEarlyState();
       });
       _prepareStep2MapVenueId();
     }
   }
 
-  Future<Position?> _getPositionOrNull() async {
+  Future<Position?>
+  _getPositionOrNull() async {
     try {
-      var perm = await Geolocator.checkPermission();
-      if (perm == LocationPermission.denied) {
-        perm = await Geolocator.requestPermission();
+      var perm =
+          await Geolocator.checkPermission();
+      if (perm ==
+          LocationPermission.denied) {
+        perm =
+            await Geolocator.requestPermission();
       }
-      if (perm == LocationPermission.denied ||
-          perm == LocationPermission.deniedForever)
+      if (perm ==
+              LocationPermission
+                  .denied ||
+          perm ==
+              LocationPermission
+                  .deniedForever)
         return null;
       return await Geolocator.getCurrentPosition();
     } catch (_) {
@@ -1474,18 +2420,25 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     }
   }
 
-  _VenueOption? _matchVenue(List<_VenueOption> venues, Position pos) {
+  _VenueOption? _matchVenue(
+    List<_VenueOption> venues,
+    Position pos,
+  ) {
     _VenueOption? best;
     var bestDist = double.infinity;
     for (final v in venues) {
-      if (v.lat == null || v.lng == null) continue;
-      final d = Geolocator.distanceBetween(
-        pos.latitude,
-        pos.longitude,
-        v.lat!,
-        v.lng!,
-      );
-      if (d <= _kVenueGeofenceMeters && d < bestDist) {
+      if (v.lat == null ||
+          v.lng == null)
+        continue;
+      final d =
+          Geolocator.distanceBetween(
+            pos.latitude,
+            pos.longitude,
+            v.lat!,
+            v.lng!,
+          );
+      if (d <= _kVenueGeofenceMeters &&
+          d < bestDist) {
         best = v;
         bestDist = d;
       }
@@ -1493,60 +2446,272 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     return best;
   }
 
-  bool get _isVenueValid => _venueId != null;
+  /// Fetches the venue's cached hours and returns whether it is currently open.
+  /// Returns null if hours data is unavailable (treated as open).
+  Future<bool?> _fetchVenueOpenNow(
+    String venueId,
+  ) async {
+    try {
+      final snap =
+          await FirebaseFirestore
+              .instance
+              .collection('venues')
+              .doc(venueId)
+              .collection('cache')
+              .doc('googlePlaces')
+              .get();
+      final data = snap.data();
+      if (data == null) return null;
+      final businessStatus =
+          data['businessStatus']
+              as String?;
+      if (businessStatus
+              ?.toLowerCase() ==
+          'closed_temporarily')
+        return false;
+      final openingHours =
+          data['openingHours']
+              as Map<String, dynamic>?;
+      final utcOffset =
+          (data['utcOffset'] as num?)
+              ?.toInt() ??
+          180;
+      final periods =
+          (openingHours?['periods']
+              as List?) ??
+          const [];
+      final weekdayText =
+          (openingHours?['weekday_text']
+                  as List?)
+              ?.cast<String>() ??
+          const [];
+      // 24/7 open
+      if (weekdayText.any(
+        (t) => t.toLowerCase().contains(
+          'open 24 hours',
+        ),
+      )) {
+        return true;
+      }
+      if (periods.length == 1) {
+        final p = periods.first;
+        if (p is Map &&
+            !p.containsKey('close'))
+          return true;
+      }
+      if (periods.isEmpty) return null;
+      final now = DateTime.now()
+          .toUtc();
+      final venueNow = now.add(
+        Duration(minutes: utcOffset),
+      );
+      final dartWeekday =
+          venueNow.weekday;
+      final googleDay = dartWeekday == 7
+          ? 0
+          : dartWeekday;
+      final currentMinutes =
+          venueNow.hour * 60 +
+          venueNow.minute;
+      for (final period in periods) {
+        if (period
+            is! Map<String, dynamic>)
+          continue;
+        final openData =
+            period['open']
+                as Map<
+                  String,
+                  dynamic
+                >?;
+        final closeData =
+            period['close']
+                as Map<
+                  String,
+                  dynamic
+                >?;
+        if (openData == null) continue;
+        final openDay =
+            openData['day'] as int?;
+        final openTime =
+            openData['time'] as String?;
+        if (openDay == null ||
+            openTime == null)
+          continue;
+        final openMins =
+            _parseVenueTime(openTime);
+        if (openMins == null) continue;
+        if (closeData == null) {
+          if (openDay == googleDay)
+            return true;
+          continue;
+        }
+        final closeDay =
+            closeData['day'] as int?;
+        final closeTime =
+            closeData['time']
+                as String?;
+        if (closeDay == null ||
+            closeTime == null)
+          continue;
+        final closeMins =
+            _parseVenueTime(closeTime);
+        if (closeMins == null) continue;
+        if (openDay == closeDay) {
+          if (googleDay == openDay &&
+              currentMinutes >=
+                  openMins &&
+              currentMinutes <
+                  closeMins) {
+            return true;
+          }
+        } else {
+          if (googleDay == openDay &&
+              currentMinutes >=
+                  openMins) {
+            return true;
+          }
+          if (googleDay == closeDay &&
+              currentMinutes <
+                  closeMins) {
+            return true;
+          }
+          int span = closeDay - openDay;
+          if (span < 0) span += 7;
+          if (span > 1) {
+            int offset =
+                googleDay - openDay;
+            if (offset < 0) offset += 7;
+            if (offset > 0 &&
+                offset < span)
+              return true;
+          }
+        }
+      }
+      return false;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static int? _parseVenueTime(
+    String time,
+  ) {
+    if (time.length != 4) return null;
+    final hour = int.tryParse(
+      time.substring(0, 2),
+    );
+    final minute = int.tryParse(
+      time.substring(2, 4),
+    );
+    if (hour == null || minute == null)
+      return null;
+    return hour * 60 + minute;
+  }
+
+  bool get _isVenueValid =>
+      _venueId != null;
 
   // ─── Current user ─────────────────────────────────────────────────────────
 
-  Future<void> _loadCurrentUser() async {
-    final user = FirebaseAuth.instance.currentUser;
+  Future<void>
+  _loadCurrentUser() async {
+    final user = FirebaseAuth
+        .instance
+        .currentUser;
     if (user == null) return;
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
+      final doc =
+          await FirebaseFirestore
+              .instance
+              .collection('users')
+              .doc(user.uid)
+              .get();
       final data = doc.data();
       if (data != null && mounted) {
-        _myPhone = (data['phone'] ?? '').toString();
-        _myName = '${data['firstName'] ?? ''} ${data['lastName'] ?? ''}'.trim();
+        _myPhone = (data['phone'] ?? '')
+            .toString();
+        _myName =
+            '${data['firstName'] ?? ''} ${data['lastName'] ?? ''}'
+                .trim();
       }
     } catch (_) {}
   }
 
   // ─── Active venue friends ─────────────────────────────────────────────────
 
-  Future<void> _loadActiveVenueFriends() async {
+  Future<void>
+  _loadActiveVenueFriends() async {
     if (_venueId == null) return;
-    setState(() => _loadingActiveVenueFriends = true);
+    setState(
+      () => _loadingActiveVenueFriends =
+          true,
+    );
 
     try {
-      final user = FirebaseAuth.instance.currentUser;
+      final user = FirebaseAuth
+          .instance
+          .currentUser;
       if (user == null) return;
 
       // Fetch accepted track requests that are currently active for this venue
       // where I am the sender (I am tracking them).
-      final sentSnap = await FirebaseFirestore.instance
-          .collection('trackRequests')
-          .where('senderId', isEqualTo: user.uid)
-          .where('venueId', isEqualTo: _venueId)
-          .where('status', isEqualTo: 'accepted')
-          .limit(40)
-          .get();
+      final sentSnap =
+          await FirebaseFirestore
+              .instance
+              .collection(
+                'trackRequests',
+              )
+              .where(
+                'senderId',
+                isEqualTo: user.uid,
+              )
+              .where(
+                'venueId',
+                isEqualTo: _venueId,
+              )
+              .where(
+                'status',
+                isEqualTo: 'accepted',
+              )
+              .limit(40)
+              .get();
 
       final now = DateTime.now();
-      final byPhone = <String, _Friend>{};
+      final byPhone =
+          <String, _Friend>{};
 
       for (final doc in sentSnap.docs) {
         final d = doc.data();
-        final start = (d['startAt'] as Timestamp?)?.toDate();
-        final end = (d['endAt'] as Timestamp?)?.toDate();
-        if (start == null || end == null) continue;
-        if (now.isBefore(start) || now.isAfter(end)) continue;
-        final phone = d['receiverPhone']?.toString() ?? '';
-        final receiverId = (d['receiverId'] ?? '').toString().trim();
+        final start =
+            (d['startAt'] as Timestamp?)
+                ?.toDate();
+        final end =
+            (d['endAt'] as Timestamp?)
+                ?.toDate();
+        if (start == null ||
+            end == null)
+          continue;
+        if (now.isBefore(start) ||
+            now.isAfter(end))
+          continue;
+        final phone =
+            d['receiverPhone']
+                ?.toString() ??
+            '';
+        final receiverId =
+            (d['receiverId'] ?? '')
+                .toString()
+                .trim();
         if (phone.isEmpty) continue;
-        final name = (d['receiverName']?.toString().trim().isNotEmpty == true)
-            ? d['receiverName'].toString().trim()
+        final name =
+            (d['receiverName']
+                    ?.toString()
+                    .trim()
+                    .isNotEmpty ==
+                true)
+            ? d['receiverName']
+                  .toString()
+                  .trim()
             : phone;
         byPhone.putIfAbsent(
           phone,
@@ -1561,22 +2726,42 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
       if (!mounted) return;
       setState(() {
-        _activeVenueFriends = byPhone.values.toList();
-        _loadingActiveVenueFriends = false;
+        _activeVenueFriends = byPhone
+            .values
+            .toList();
+        _loadingActiveVenueFriends =
+            false;
       });
     } catch (_) {
-      if (mounted) setState(() => _loadingActiveVenueFriends = false);
+      if (mounted)
+        setState(
+          () =>
+              _loadingActiveVenueFriends =
+                  false,
+        );
     }
   }
 
-  List<_Friend> get _remainingActiveVenueFriends => _activeVenueFriends
-      .where((f) => !_selectedFriends.any((s) => s.phone == f.phone))
-      .toList();
+  List<_Friend>
+  get _remainingActiveVenueFriends =>
+      _activeVenueFriends
+          .where(
+            (f) =>
+                !_selectedFriends.any(
+                  (s) =>
+                      s.phone ==
+                      f.phone,
+                ),
+          )
+          .toList();
 
   // ─── Friend management ────────────────────────────────────────────────────
 
   void _addFriend(_Friend friend) {
-    if (_selectedFriends.any((f) => f.phone == friend.phone)) return;
+    if (_selectedFriends.any(
+      (f) => f.phone == friend.phone,
+    ))
+      return;
     setState(() {
       _selectedFriends.add(friend);
     });
@@ -1584,16 +2769,23 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
   void _removeFriend(_Friend friend) {
     setState(() {
-      _selectedFriends.removeWhere((f) => f.phone == friend.phone);
+      _selectedFriends.removeWhere(
+        (f) => f.phone == friend.phone,
+      );
     });
   }
 
   bool get _canAddPhone {
-    final phone = _phoneCtrl.text.trim();
-    return phone.length == 9 && RegExp(r'^\d{9}$').hasMatch(phone);
+    final phone = _phoneCtrl.text
+        .trim();
+    return phone.length == 9 &&
+        RegExp(
+          r'^\d{9}$',
+        ).hasMatch(phone);
   }
 
-  Future<void> _addFriendByPhone() async {
+  Future<void>
+  _addFriendByPhone() async {
     if (_isAddingPhone) return;
 
     if (!_canAddPhone) {
@@ -1607,28 +2799,39 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     final raw = _phoneCtrl.text.trim();
     final phone = '+966$raw';
 
-    if (_selectedFriends.any((f) => f.phone == phone)) {
+    if (_selectedFriends.any(
+      (f) => f.phone == phone,
+    )) {
       setState(() {
         _phoneValid = false;
-        _phoneError = 'Friend already added';
+        _phoneError =
+            'Friend already added';
       });
       return;
     }
 
-    if (_myPhone != null && _myPhone == phone) {
+    if (_myPhone != null &&
+        _myPhone == phone) {
       setState(() {
         _phoneValid = false;
-        _phoneError = "You can't add yourself";
+        _phoneError =
+            "You can't add yourself";
       });
       return;
     }
 
-    setState(() => _isAddingPhone = true);
+    setState(
+      () => _isAddingPhone = true,
+    );
 
     try {
-      final q = await FirebaseFirestore.instance
+      final q = await FirebaseFirestore
+          .instance
           .collection('users')
-          .where('phone', isEqualTo: phone)
+          .where(
+            'phone',
+            isEqualTo: phone,
+          )
           .limit(1)
           .get();
 
@@ -1647,8 +2850,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       }
 
       final data = q.docs.first.data();
-      final name = '${data['firstName'] ?? ''} ${data['lastName'] ?? ''}'
-          .trim();
+      final name =
+          '${data['firstName'] ?? ''} ${data['lastName'] ?? ''}'
+              .trim();
 
       setState(() {
         _isAddingPhone = false;
@@ -1657,7 +2861,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         _selectedFriends.add(
           _Friend(
             id: q.docs.first.id,
-            name: name.isEmpty ? phone : name,
+            name: name.isEmpty
+                ? phone
+                : name,
             phone: phone,
             isFavorite: false,
           ),
@@ -1669,7 +2875,8 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       setState(() {
         _isAddingPhone = false;
         _phoneValid = false;
-        _phoneError = 'Could not verify. Try again.';
+        _phoneError =
+            'Could not verify. Try again.';
       });
     }
   }
@@ -1679,9 +2886,14 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       "Join me using this invite link:\n"
       "https://madar.app/invite";
 
-  void _showInviteToMadarDialog(String phone) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final dialogPadding = screenWidth < 360 ? 20.0 : 28.0;
+  void _showInviteToMadarDialog(
+    String phone,
+  ) {
+    final screenWidth = MediaQuery.of(
+      context,
+    ).size.width;
+    final dialogPadding =
+        screenWidth < 360 ? 20.0 : 28.0;
 
     showDialog(
       context: context,
@@ -1689,89 +2901,150 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       builder: (BuildContext dialogContext) {
         return Dialog(
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
+            borderRadius:
+                BorderRadius.circular(
+                  24,
+                ),
           ),
           elevation: 0,
-          backgroundColor: Colors.transparent,
+          backgroundColor:
+              Colors.transparent,
           child: Stack(
             clipBehavior: Clip.none,
             children: [
               Container(
-                padding: EdgeInsets.all(dialogPadding),
+                padding: EdgeInsets.all(
+                  dialogPadding,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  borderRadius: BorderRadius.circular(24),
+                  borderRadius:
+                      BorderRadius.circular(
+                        24,
+                      ),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.15),
+                      color: Colors
+                          .black
+                          .withOpacity(
+                            0.15,
+                          ),
                       blurRadius: 20,
-                      offset: const Offset(0, 10),
+                      offset:
+                          const Offset(
+                            0,
+                            10,
+                          ),
                     ),
                   ],
                 ),
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
+                  mainAxisSize:
+                      MainAxisSize.min,
                   children: [
-                    const SizedBox(height: 8),
+                    const SizedBox(
+                      height: 8,
+                    ),
                     Container(
                       width: 80,
                       height: 80,
                       decoration: BoxDecoration(
-                        color: AppColors.kGreen.withOpacity(0.15),
-                        shape: BoxShape.circle,
+                        color: AppColors
+                            .kGreen
+                            .withOpacity(
+                              0.15,
+                            ),
+                        shape: BoxShape
+                            .circle,
                       ),
                       child: const Center(
                         child: Icon(
-                          Icons.person_add_rounded,
+                          Icons
+                              .person_add_rounded,
                           size: 42,
-                          color: AppColors.kGreen,
+                          color: AppColors
+                              .kGreen,
                         ),
                       ),
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(
+                      height: 20,
+                    ),
                     const Text(
                       'Invite to Madar?',
-                      textAlign: TextAlign.center,
+                      textAlign:
+                          TextAlign
+                              .center,
                       style: TextStyle(
                         fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.kGreen,
+                        fontWeight:
+                            FontWeight
+                                .bold,
+                        color: AppColors
+                            .kGreen,
                         height: 1.2,
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(
+                      height: 12,
+                    ),
                     Text(
                       "This person isn't on Madar yet.\nInvite them to start sharing location.",
-                      textAlign: TextAlign.center,
+                      textAlign:
+                          TextAlign
+                              .center,
                       style: TextStyle(
                         fontSize: 15,
                         height: 1.5,
-                        color: Colors.grey[700],
+                        color: Colors
+                            .grey[700],
                       ),
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(
+                      height: 24,
+                    ),
                     SizedBox(
-                      width: double.infinity,
+                      width: double
+                          .infinity,
                       child: ElevatedButton(
                         onPressed: () {
-                          Navigator.of(dialogContext).pop();
-                          _shareInvite(phone);
+                          Navigator.of(
+                            dialogContext,
+                          ).pop();
+                          _shareInvite(
+                            phone,
+                          );
                         },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.kGreen,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          backgroundColor:
+                              AppColors
+                                  .kGreen,
+                          foregroundColor:
+                              Colors
+                                  .white,
+                          padding:
+                              const EdgeInsets.symmetric(
+                                vertical:
+                                    14,
+                              ),
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+                            borderRadius:
+                                BorderRadius.circular(
+                                  12,
+                                ),
                           ),
                           elevation: 0,
                         ),
                         child: const Text(
                           'Send Invite',
                           style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 0.3,
+                            fontSize:
+                                16,
+                            fontWeight:
+                                FontWeight
+                                    .w600,
+                            letterSpacing:
+                                0.3,
                           ),
                         ),
                       ),
@@ -1783,8 +3056,16 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
                 top: 12,
                 right: 12,
                 child: GestureDetector(
-                  onTap: () => Navigator.of(dialogContext).pop(),
-                  child: Icon(Icons.close, size: 22, color: Colors.grey[500]),
+                  onTap: () =>
+                      Navigator.of(
+                        dialogContext,
+                      ).pop(),
+                  child: Icon(
+                    Icons.close,
+                    size: 22,
+                    color: Colors
+                        .grey[500],
+                  ),
                 ),
               ),
             ],
@@ -1794,351 +3075,653 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     );
   }
 
-  Future<void> _shareInvite(String _phone) async {
+  Future<void> _shareInvite(
+    String _phone,
+  ) async {
     try {
-      await Share.share(_inviteMessage, subject: 'Invite to Madar');
+      await Share.share(
+        _inviteMessage,
+        subject: 'Invite to Madar',
+      );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(
           const SnackBar(
-            content: Text('Could not open share. Link copied instead.'),
-            backgroundColor: AppColors.kGreen,
+            content: Text(
+              'Could not open share. Link copied instead.',
+            ),
+            backgroundColor:
+                AppColors.kGreen,
           ),
         );
-        Clipboard.setData(const ClipboardData(text: _inviteMessage));
+        Clipboard.setData(
+          const ClipboardData(
+            text: _inviteMessage,
+          ),
+        );
       }
     }
   }
 
-  static String _normalizePhone(String raw) {
-    var phone = raw.replaceAll(RegExp(r'\s+'), '').replaceAll('-', '');
-    if (phone.startsWith('+966')) phone = phone.substring(4);
-    if (phone.startsWith('966')) phone = phone.substring(3);
-    if (phone.startsWith('05') && phone.length >= 9) phone = phone.substring(2);
-    phone = phone.replaceAll(RegExp(r'[^\d]'), '');
-    if (phone.length >= 9) phone = phone.substring(phone.length - 9);
-    return phone.length == 9 ? '+966$phone' : '';
+  static String _normalizePhone(
+    String raw,
+  ) {
+    var phone = raw
+        .replaceAll(RegExp(r'\s+'), '')
+        .replaceAll('-', '');
+    if (phone.startsWith('+966'))
+      phone = phone.substring(4);
+    if (phone.startsWith('966'))
+      phone = phone.substring(3);
+    if (phone.startsWith('05') &&
+        phone.length >= 9)
+      phone = phone.substring(2);
+    phone = phone.replaceAll(
+      RegExp(r'[^\d]'),
+      '',
+    );
+    if (phone.length >= 9)
+      phone = phone.substring(
+        phone.length - 9,
+      );
+    return phone.length == 9
+        ? '+966$phone'
+        : '';
   }
 
   Future<void> _pickContact() async {
     _phoneFocus.unfocus();
 
     try {
-      final allowed = await FlutterContacts.requestPermission();
+      final allowed =
+          await FlutterContacts.requestPermission();
       if (!allowed) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Contacts permission is required.')),
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Contacts permission is required.',
+            ),
+          ),
         );
         return;
       }
 
-      final contacts = await FlutterContacts.getContacts(withProperties: true);
+      final contacts =
+          await FlutterContacts.getContacts(
+            withProperties: true,
+          );
       final items = <_ContactItem>[];
       final seen = <String>{};
 
       for (final c in contacts) {
         if (c.phones.isEmpty) continue;
-        final name = c.displayName.trim().isEmpty ? 'Unknown' : c.displayName;
+        final name =
+            c.displayName.trim().isEmpty
+            ? 'Unknown'
+            : c.displayName;
         for (final p in c.phones) {
-          final normalized = _normalizePhone(p.number);
-          if (normalized.isEmpty || !seen.add(normalized)) continue;
-          items.add(_ContactItem(name: name, phone: normalized));
+          final normalized =
+              _normalizePhone(p.number);
+          if (normalized.isEmpty ||
+              !seen.add(normalized))
+            continue;
+          items.add(
+            _ContactItem(
+              name: name,
+              phone: normalized,
+            ),
+          );
         }
       }
 
       items.sort(
-        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+        (a, b) => a.name
+            .toLowerCase()
+            .compareTo(
+              b.name.toLowerCase(),
+            ),
       );
       if (!mounted) return;
 
       if (items.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No valid contacts found.')),
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'No valid contacts found.',
+            ),
+          ),
         );
         return;
       }
 
-      final selectedPhone = await Navigator.push<String>(
-        context,
-        MaterialPageRoute(
-          builder: (_) => SelectContactPage(
-            contacts: items,
-            inDbStatus: const <String, bool>{},
-            onInvite: _shareInvite,
-          ),
-        ),
-      );
+      final selectedPhone =
+          await Navigator.push<String>(
+            context,
+            MaterialPageRoute(
+              builder: (_) =>
+                  SelectContactPage(
+                    contacts: items,
+                    inDbStatus:
+                        const <
+                          String,
+                          bool
+                        >{},
+                    onInvite:
+                        _shareInvite,
+                  ),
+            ),
+          );
 
-      if (!mounted || selectedPhone == null) return;
-      final local = selectedPhone.startsWith('+966')
+      if (!mounted ||
+          selectedPhone == null)
+        return;
+      final local =
+          selectedPhone.startsWith(
+            '+966',
+          )
           ? selectedPhone.substring(4)
           : selectedPhone;
 
       setState(() {
         _phoneCtrl.text = local;
-        _phoneCtrl.selection = TextSelection.collapsed(offset: local.length);
+        _phoneCtrl.selection =
+            TextSelection.collapsed(
+              offset: local.length,
+            );
         _phoneValid = true;
         _phoneError = null;
       });
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not load contacts. Try again.')),
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Could not load contacts. Try again.',
+          ),
+        ),
       );
     }
   }
 
-  Future<void> _showFavoritesList() async {
-    final selected = await showModalBottomSheet<List<_Friend>>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _FavoriteListSheet(
-        alreadySelectedPhones: _selectedFriends.map((f) => f.phone).toSet(),
-      ),
-    );
-    if (selected == null || selected.isEmpty) return;
-    for (final f in selected) {
-      _addFriend(f);
+  Future<void>
+  _showFavoritesList() async {
+    final alreadyPhones =
+        _selectedFriends
+            .map((f) => f.phone)
+            .toSet();
+
+    final result =
+        await showModalBottomSheet<
+          List<_Friend>
+        >(
+          context: context,
+          isScrollControlled: true,
+          backgroundColor:
+              Colors.transparent,
+          builder: (_) =>
+              _FavoriteListSheet(
+                alreadySelectedPhones:
+                    alreadyPhones,
+              ),
+        );
+
+    if (result == null) return;
+
+    final finalPhones = result
+        .map((f) => f.phone)
+        .toSet();
+    // Remove friends that were deselected in the sheet
+    setState(() {
+      _selectedFriends.removeWhere(
+        (f) =>
+            alreadyPhones.contains(
+              f.phone,
+            ) &&
+            !finalPhones.contains(
+              f.phone,
+            ),
+      );
+    });
+    // Add newly selected friends
+    for (final f in result) {
+      if (!_selectedFriends.any(
+        (s) => s.phone == f.phone,
+      )) {
+        _addFriend(f);
+      }
     }
   }
 
-  bool get _isResumableDraftStep => _step == 4 || _step == 5;
+  bool get _isResumableDraftStep =>
+      _step == 4 || _step == 5;
 
-  Future<void> _handleExitRequested() async {
+  Future<void>
+  _handleExitRequested() async {
     await _persistDraftIfNeeded();
     if (!mounted) return;
     Navigator.pop(context);
   }
 
-  Future<void> _restoreMeetingProgress() async {
-    final restoredLocal = await _restoreDraftIfAvailable();
+  Future<void>
+  _restoreMeetingProgress() async {
+    final restoredLocal =
+        await _restoreDraftIfAvailable();
     if (restoredLocal) return;
 
     final activeHostMeeting =
         await MeetingPointService.getActiveHostedByCurrentUser();
-    if (!mounted || activeHostMeeting == null) return;
-    await _restoreFromMeetingPoint(activeHostMeeting.id);
+    if (!mounted ||
+        activeHostMeeting == null)
+      return;
+    await _restoreFromMeetingPoint(
+      activeHostMeeting.id,
+    );
   }
 
-  Future<bool> _restoreDraftIfAvailable() async {
-    final snap = await MeetingPointDraftStorage.loadForCurrentUser();
-    if (snap == null || !mounted) return false;
-    if (snap.step < 4 || snap.step > 5) return false;
+  Future<bool>
+  _restoreDraftIfAvailable() async {
+    final snap =
+        await MeetingPointDraftStorage.loadForCurrentUser();
+    if (snap == null || !mounted)
+      return false;
+    if (snap.step < 4 || snap.step > 5)
+      return false;
 
-    final restoredFriends = snap.selectedFriends
+    final restoredFriends = snap
+        .selectedFriends
         .map(_friendFromDraft)
         .whereType<_Friend>()
         .toList();
-    final restoredParticipants = snap.participants
+    final restoredParticipants = snap
+        .participants
         .map(_participantFromDraft)
         .whereType<_Participant>()
         .toList();
 
-    final restoredPlaceCategories = snap.placeCategories.toSet();
-    if (restoredPlaceCategories.isEmpty) restoredPlaceCategories.add('Any');
+    final restoredPlaceCategories = snap
+        .placeCategories
+        .toSet();
+    if (restoredPlaceCategories.isEmpty)
+      restoredPlaceCategories.add(
+        'Any',
+      );
 
-    final host = _hostLocationFromDraft(snap.hostLocationRaw);
-    final restoredWaitLeft = _intFromDynamic(snap.data['waitSecondsLeft'], 600);
-    final restoredSuggestLeft = _intFromDynamic(
-      snap.data['suggestSecondsLeft'],
-      300,
+    final host = _hostLocationFromDraft(
+      snap.hostLocationRaw,
     );
-    final restoredMeetingPointId = (snap.data['meetingPointId'] ?? '')
-        .toString()
-        .trim();
+    final restoredWaitLeft =
+        _intFromDynamic(
+          snap.data['waitSecondsLeft'],
+          600,
+        );
+    final restoredSuggestLeft =
+        _intFromDynamic(
+          snap.data['suggestSecondsLeft'],
+          300,
+        );
+    final restoredMeetingPointId =
+        (snap.data['meetingPointId'] ??
+                '')
+            .toString()
+            .trim();
 
     setState(() {
-      _meetingPointId = restoredMeetingPointId.isEmpty
+      _meetingPointId =
+          restoredMeetingPointId.isEmpty
           ? _meetingPointId
           : restoredMeetingPointId;
       _step = snap.step;
       _venueId = snap.venueId;
-      _venueName = snap.venueName ?? _venueName;
+      _venueName =
+          snap.venueName ?? _venueName;
 
-      _selectedFriends
-        ..clear()
-        ..addAll(restoredFriends);
-      _selectedPlaceCategories
-        ..clear()
-        ..addAll(restoredPlaceCategories);
-
-      if (host != null) {
-        _hostLocation = host;
-      }
-
-      _participants = restoredParticipants.isEmpty
-          ? restoredFriends
-                .map(
-                  (f) => _Participant(
-                    friend: f,
-                    status: _ParticipantStatus.pending,
-                  ),
-                )
-                .toList()
-          : restoredParticipants;
-
-      _waitSecondsLeft = restoredWaitLeft.clamp(0, 120).toInt();
-      _suggestSecondsLeft = restoredSuggestLeft.clamp(0, 300).toInt();
-      _proceedUnlocked = _boolFromDynamic(snap.data['proceedUnlocked'], true);
-      _waitDeadline = _dateFromEpoch(snap.data['waitDeadlineMs']);
-      _suggestDeadline = _dateFromEpoch(snap.data['suggestDeadlineMs']);
-      _proceedUnlockAt = _dateFromEpoch(snap.data['proceedUnlockAtMs']);
-    });
-
-    if (_step == 4) {
-      _startProceedUnlockTimer();
-      _startStep4WaitCountdown();
-    } else if (_step == 5) {
-      _startStep5SuggestCountdown();
-    }
-    if (_meetingPointId != null && _meetingPointId!.isNotEmpty) {
-      _startMeetingSubscription(_meetingPointId!);
-    }
-    return true;
-  }
-
-  Future<void> _restoreFromMeetingPoint(String meetingPointId) async {
-    final meeting = await MeetingPointService.getById(meetingPointId);
-    final myUid = FirebaseAuth.instance.currentUser?.uid;
-    if (!mounted || meeting == null || myUid == null) return;
-    if (!meeting.isHost(myUid)) return;
-
-    _meetingPointId = meeting.id;
-    _shouldManageDraft = true;
-
-    final restoredFriends = meeting.participants
-        .map(
-          (p) => _Friend(
-            id: p.userId,
-            name: p.name.trim().isEmpty ? p.phone : p.name,
-            phone: p.phone,
-            isFavorite: false,
-          ),
-        )
-        .toList();
-
-    final restoredParticipants = meeting.participants
-        .map(_participantFromCloud)
-        .toList();
-
-    final waitLeft = meeting.waitDeadline == null
-        ? _waitSecondsLeft
-        : meeting.waitDeadline!
-              .difference(MeetingPointService.serverNow)
-              .inSeconds
-              .clamp(0, 600);
-    final suggestLeft = meeting.suggestDeadline == null
-        ? _suggestSecondsLeft
-        : meeting.suggestDeadline!
-              .difference(MeetingPointService.serverNow)
-              .inSeconds
-              .clamp(0, 300);
-
-    setState(() {
-      _step = meeting.hostStep.clamp(1, 5).toInt();
-      _venueId = meeting.venueId.isEmpty ? _venueId : meeting.venueId;
-      _venueName = meeting.venueName.isEmpty ? _venueName : meeting.venueName;
       _selectedFriends
         ..clear()
         ..addAll(restoredFriends);
       _selectedPlaceCategories
         ..clear()
         ..addAll(
-          meeting.placeCategories.isEmpty ? {'Any'} : meeting.placeCategories,
+          restoredPlaceCategories,
         );
-      _hostLocation =
-          _hostLocationFromCloud(meeting.hostLocation) ?? _hostLocation;
-      _participants = restoredParticipants;
-      _waitDeadline = meeting.waitDeadline;
-      _suggestDeadline = meeting.suggestDeadline;
-      _waitSecondsLeft = waitLeft.toInt();
-      _suggestSecondsLeft = suggestLeft.toInt();
-      _proceedUnlocked = true;
-      _suggestedPointName = meeting.suggestedPoint;
-      _suggestedCandidates = meeting.suggestedCandidates;
-      _suggestionsComputed = meeting.suggestionsComputed;
+
+      if (host != null) {
+        _hostLocation = host;
+      }
+
+      _participants =
+          restoredParticipants.isEmpty
+          ? restoredFriends
+                .map(
+                  (f) => _Participant(
+                    friend: f,
+                    status:
+                        _ParticipantStatus
+                            .pending,
+                  ),
+                )
+                .toList()
+          : restoredParticipants;
+
+      _waitSecondsLeft =
+          restoredWaitLeft
+              .clamp(0, 600)
+              .toInt();
+      _suggestSecondsLeft =
+          restoredSuggestLeft
+              .clamp(0, 120)
+              .toInt();
+      _proceedUnlocked =
+          _boolFromDynamic(
+            snap.data['proceedUnlocked'],
+            true,
+          );
+      _waitDeadline = _dateFromEpoch(
+        snap.data['waitDeadlineMs'],
+      );
+      _suggestDeadline = _dateFromEpoch(
+        snap.data['suggestDeadlineMs'],
+      );
+      _proceedUnlockAt = _dateFromEpoch(
+        snap.data['proceedUnlockAtMs'],
+      );
     });
 
     if (_step == 4) {
-      _startStep4WaitCountdown();
+      final isWaitExpired =
+          _waitDeadline != null &&
+          !_waitDeadline!.isAfter(
+            MeetingPointService
+                .serverNow,
+          );
+      if (isWaitExpired) {
+        // Same guard as in _restoreFromMeetingPoint: the wait timer expired
+        // while the form was closed. Advance to step 5 without calling
+        // _initStep5, which would create a fresh (wrong) suggestDeadline and
+        // write it to Firestore. The subscription delivers the real state.
+        setState(() => _step = 5);
+      } else {
+        _startProceedUnlockTimer();
+        _startStep4WaitCountdown();
+      }
+    } else if (_step == 5) {
+      _startStep5SuggestCountdown();
+    }
+    if (_meetingPointId != null &&
+        _meetingPointId!.isNotEmpty) {
+      _startMeetingSubscription(
+        _meetingPointId!,
+      );
+    }
+    return true;
+  }
+
+  Future<void> _restoreFromMeetingPoint(
+    String meetingPointId,
+  ) async {
+    final meeting =
+        await MeetingPointService.getById(
+          meetingPointId,
+        );
+    final myUid = FirebaseAuth
+        .instance
+        .currentUser
+        ?.uid;
+    if (!mounted ||
+        meeting == null ||
+        myUid == null)
+      return;
+    if (!meeting.isHost(myUid)) return;
+
+    _meetingPointId = meeting.id;
+    _shouldManageDraft = true;
+
+    final restoredFriends = meeting
+        .participants
+        .map(
+          (p) => _Friend(
+            id: p.userId,
+            name: p.name.trim().isEmpty
+                ? p.phone
+                : p.name,
+            phone: p.phone,
+            isFavorite: false,
+          ),
+        )
+        .toList();
+
+    final restoredParticipants = meeting
+        .participants
+        .map(_participantFromCloud)
+        .toList();
+
+    final waitLeft =
+        meeting.waitDeadline == null
+        ? _waitSecondsLeft
+        : meeting.waitDeadline!
+              .difference(
+                MeetingPointService
+                    .serverNow,
+              )
+              .inSeconds
+              .clamp(0, 600);
+    final suggestLeft =
+        meeting.suggestDeadline == null
+        ? _suggestSecondsLeft
+        : meeting.suggestDeadline!
+              .difference(
+                MeetingPointService
+                    .serverNow,
+              )
+              .inSeconds
+              .clamp(0, 300);
+
+    setState(() {
+      _step = meeting.hostStep
+          .clamp(1, 5)
+          .toInt();
+      _venueId = meeting.venueId.isEmpty
+          ? _venueId
+          : meeting.venueId;
+      _venueName =
+          meeting.venueName.isEmpty
+          ? _venueName
+          : meeting.venueName;
+      _selectedFriends
+        ..clear()
+        ..addAll(restoredFriends);
+      _selectedPlaceCategories
+        ..clear()
+        ..addAll(
+          meeting
+                  .placeCategories
+                  .isEmpty
+              ? {'Any'}
+              : meeting.placeCategories,
+        );
+      _hostLocation =
+          _hostLocationFromCloud(
+            meeting.hostLocation,
+          ) ??
+          _hostLocation;
+      _participants =
+          restoredParticipants;
+      _waitDeadline =
+          meeting.waitDeadline;
+      _suggestDeadline =
+          meeting.suggestDeadline;
+      _waitSecondsLeft = waitLeft
+          .toInt();
+      _suggestSecondsLeft = suggestLeft
+          .toInt();
+      _proceedUnlocked = true;
+      _suggestedPointName =
+          meeting.suggestedPoint;
+      _suggestedCandidates =
+          meeting.suggestedCandidates;
+      _suggestionsComputed =
+          meeting.suggestionsComputed;
+    });
+
+    if (_step == 4) {
+      if (waitLeft > 0) {
+        _startStep4WaitCountdown();
+      } else {
+        // The 2-min wait already expired while the form was closed.
+        // Advance the UI to step 5 now so there is no flicker, but do NOT
+        // call _initStep5() — that would create a fresh suggestDeadline and
+        // write it to Firestore, overwriting the correct deadline that
+        // maybeMaintain already wrote. _startMeetingSubscription (below) will
+        // deliver the real step-5 state (including the correct suggestDeadline)
+        // and _startStep5SuggestCountdown will be triggered from there.
+        setState(() => _step = 5);
+      }
     } else if (_step == 5) {
       _startStep5SuggestCountdown();
       final mid = _meetingPointId;
-      if (mid != null && _distCache.containsKey(mid)) {
+      if (mid != null &&
+          _distCache.containsKey(mid)) {
         // Already computed in a previous session — show instantly.
-        _step5DistMap = Map.of(_distCache[mid]!);
+        _step5DistMap = Map.of(
+          _distCache[mid]!,
+        );
       } else if (_suggestionsComputed) {
-        unawaited(_computeStep5Distances());
+        unawaited(
+          _computeStep5Distances(),
+        );
       }
     }
 
-    _startMeetingSubscription(meeting.id);
+    _startMeetingSubscription(
+      meeting.id,
+    );
   }
 
-  void _startMeetingSubscription(String meetingPointId) {
+  void _startMeetingSubscription(
+    String meetingPointId,
+  ) {
     _meetingPointSub?.cancel();
-    _meetingPointSub = FirebaseFirestore.instance
-        .collection(MeetingPointService.collectionName)
+    _meetingPointSub = FirebaseFirestore
+        .instance
+        .collection(
+          MeetingPointService
+              .collectionName,
+        )
         .doc(meetingPointId)
         .snapshots()
         .listen((doc) {
-          final meeting = MeetingPointRecord.fromDoc(doc);
-          if (!mounted || meeting == null) return;
-          final uid = FirebaseAuth.instance.currentUser?.uid;
-          if (uid == null || !meeting.isHost(uid)) return;
+          final meeting =
+              MeetingPointRecord.fromDoc(
+                doc,
+              );
+          if (!mounted ||
+              meeting == null)
+            return;
+          final uid = FirebaseAuth
+              .instance
+              .currentUser
+              ?.uid;
+          if (uid == null ||
+              !meeting.isHost(uid))
+            return;
 
           // Calibrate server clock from live snapshot.
-          if (!doc.metadata.isFromCache && meeting.updatedAt != null) {
-            MeetingPointService.calibrateFromServerTime(meeting.updatedAt!);
+          if (!doc
+                  .metadata
+                  .isFromCache &&
+              meeting.updatedAt !=
+                  null) {
+            MeetingPointService.calibrateFromServerTime(
+              meeting.updatedAt!,
+            );
           }
 
           // If the meeting was cancelled (all declined, timer expired with no
           // accepts, or host rejected), close the form immediately.
-          if (!meeting.isActive && !meeting.isConfirmed) {
+          if (!meeting.isActive &&
+              !meeting.isConfirmed) {
             unawaited(
               _completeAndClose(
                 success: false,
-                message: 'Meeting point was cancelled.',
+                message:
+                    'Meeting point was cancelled.',
               ),
             );
             return;
           }
 
-          final participants = meeting.participants
-              .map(_participantFromCloud)
+          final participants = meeting
+              .participants
+              .map(
+                _participantFromCloud,
+              )
               .toList();
-          final nextStep = meeting.hostStep.clamp(1, 5).toInt();
-          final waitLeft = meeting.waitDeadline == null
+          final nextStep = meeting
+              .hostStep
+              .clamp(1, 5)
+              .toInt();
+          final waitLeft =
+              meeting.waitDeadline ==
+                  null
               ? _waitSecondsLeft
               : meeting.waitDeadline!
-                    .difference(MeetingPointService.serverNow)
+                    .difference(
+                      MeetingPointService
+                          .serverNow,
+                    )
                     .inSeconds
-                    .clamp(0, 120);
-          final suggestLeft = meeting.suggestDeadline == null
+                    .clamp(0, 600);
+          final suggestLeft =
+              meeting.suggestDeadline ==
+                  null
               ? _suggestSecondsLeft
               : meeting.suggestDeadline!
-                    .difference(MeetingPointService.serverNow)
+                    .difference(
+                      MeetingPointService
+                          .serverNow,
+                    )
                     .inSeconds
                     .clamp(0, 300);
 
           // Never let a stale cached snapshot downgrade a step we've already
           // advanced past locally (e.g. auto-advance race with Firestore cache).
           final prevStep = _step;
-          final effectiveStep = nextStep >= _step ? nextStep : _step;
-          final prevWaitDeadline = _waitDeadline;
-          final prevSuggestDeadline = _suggestDeadline;
+          final effectiveStep =
+              nextStep >= _step
+              ? nextStep
+              : _step;
+          final prevWaitDeadline =
+              _waitDeadline;
+          final prevSuggestDeadline =
+              _suggestDeadline;
           setState(() {
-            _participants = participants;
-            _waitDeadline = meeting.waitDeadline;
-            _suggestDeadline = meeting.suggestDeadline;
-            _waitSecondsLeft = waitLeft.toInt();
-            _suggestSecondsLeft = suggestLeft.toInt();
+            _participants =
+                participants;
+            _waitDeadline =
+                meeting.waitDeadline;
+            _suggestDeadline =
+                meeting.suggestDeadline;
+            _waitSecondsLeft = waitLeft
+                .toInt();
+            _suggestSecondsLeft =
+                suggestLeft.toInt();
             _step = effectiveStep;
-            _suggestedPointName = meeting.suggestedPoint;
-            _suggestedCandidates = meeting.suggestedCandidates;
-            _suggestionsComputed = meeting.suggestionsComputed;
+            _suggestedPointName =
+                meeting.suggestedPoint;
+            _suggestedCandidates =
+                meeting
+                    .suggestedCandidates;
+            _suggestionsComputed =
+                meeting
+                    .suggestionsComputed;
           });
 
           // Compute client-side distances whenever step 5 has suggestions
@@ -2147,14 +3730,17 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
               _suggestionsComputed &&
               _step5DistMap.isEmpty &&
               !_step5DistComputing) {
-            unawaited(_computeStep5Distances());
+            unawaited(
+              _computeStep5Distances(),
+            );
           }
 
           // If Firestore advanced us from step 4 → 5 (e.g. the last participant
           // accepted and their device wrote hostStep=5 via respondToInvitation),
           // cancel the local wait-phase timers so they don't fire
           // _onWaitTimerExpired and reset the step-5 countdown.
-          if (prevStep == 4 && _step >= 5) {
+          if (prevStep == 4 &&
+              _step >= 5) {
             _waitTimer?.cancel();
             _proceedTimer?.cancel();
           }
@@ -2162,23 +3748,36 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           // Only restart countdowns when the deadline itself changed (e.g.
           // step transition) — NOT on every participant accept/decline update.
           if (_step == 4 &&
-              meeting.waitDeadline != null &&
-              meeting.waitDeadline != prevWaitDeadline) {
+              meeting.waitDeadline !=
+                  null &&
+              meeting.waitDeadline !=
+                  prevWaitDeadline) {
             _startStep4WaitCountdown();
           } else if (_step == 5 &&
-              meeting.suggestDeadline != null &&
-              meeting.suggestDeadline != prevSuggestDeadline) {
+              meeting.suggestDeadline !=
+                  null &&
+              meeting.suggestDeadline !=
+                  prevSuggestDeadline) {
             _startStep5SuggestCountdown();
           }
 
           // Auto-advance after a short delay so the host can see who accepted.
           final shouldAutoAdvance =
               _step == 4 &&
-              _participants.isNotEmpty &&
+              _participants
+                  .isNotEmpty &&
               _participants.every(
-                (p) => p.status != _ParticipantStatus.pending,
+                (p) =>
+                    p.status !=
+                    _ParticipantStatus
+                        .pending,
               ) &&
-              _participants.any((p) => p.status == _ParticipantStatus.accepted);
+              _participants.any(
+                (p) =>
+                    p.status ==
+                    _ParticipantStatus
+                        .accepted,
+              );
           if (shouldAutoAdvance) {
             _scheduleAutoAdvance();
           } else {
@@ -2189,69 +3788,124 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   }
 
   void _scheduleAutoAdvance() {
-    if (_autoAdvanceTimer != null) return;
-    _autoAdvanceTimer = Timer(_kAutoAdvanceDelay, () {
-      _autoAdvanceTimer = null;
-      if (!mounted) return;
-      final shouldAdvance =
-          _step == 4 &&
-          _participants.isNotEmpty &&
-          _participants.every((p) => p.status != _ParticipantStatus.pending) &&
-          _participants.any((p) => p.status == _ParticipantStatus.accepted);
-      if (shouldAdvance) {
-        _goNext();
-      }
-    });
+    if (_autoAdvanceTimer != null)
+      return;
+    _autoAdvanceTimer = Timer(
+      _kAutoAdvanceDelay,
+      () {
+        _autoAdvanceTimer = null;
+        if (!mounted) return;
+        final shouldAdvance =
+            _step == 4 &&
+            _participants.isNotEmpty &&
+            _participants.every(
+              (p) =>
+                  p.status !=
+                  _ParticipantStatus
+                      .pending,
+            ) &&
+            _participants.any(
+              (p) =>
+                  p.status ==
+                  _ParticipantStatus
+                      .accepted,
+            );
+        if (shouldAdvance) {
+          _goNext();
+        }
+      },
+    );
   }
 
-  Future<void> _persistDraftIfNeeded() async {
-    if (!_shouldManageDraft || !_isResumableDraftStep) return;
+  Future<void>
+  _persistDraftIfNeeded() async {
+    if (!_shouldManageDraft ||
+        !_isResumableDraftStep)
+      return;
     final payload = <String, dynamic>{
       'step': _step,
       'meetingPointId': _meetingPointId,
       'venueId': _venueId,
       'venueName': _venueName,
-      'placeCategories': _selectedPlaceCategories.toList(),
-      'hostLocation': _hostLocation?.toMap(),
-      'selectedFriends': _selectedFriends.map(_friendToDraft).toList(),
-      'participants': _participants.map(_participantToDraft).toList(),
-      'waitSecondsLeft': _waitSecondsLeft,
-      'suggestSecondsLeft': _suggestSecondsLeft,
-      'proceedUnlocked': _proceedUnlocked,
-      'waitDeadlineMs': _waitDeadline?.millisecondsSinceEpoch,
-      'suggestDeadlineMs': _suggestDeadline?.millisecondsSinceEpoch,
-      'proceedUnlockAtMs': _proceedUnlockAt?.millisecondsSinceEpoch,
-      'updatedAtMs': DateTime.now().millisecondsSinceEpoch,
+      'placeCategories':
+          _selectedPlaceCategories
+              .toList(),
+      'hostLocation': _hostLocation
+          ?.toMap(),
+      'selectedFriends':
+          _selectedFriends
+              .map(_friendToDraft)
+              .toList(),
+      'participants': _participants
+          .map(_participantToDraft)
+          .toList(),
+      'waitSecondsLeft':
+          _waitSecondsLeft,
+      'suggestSecondsLeft':
+          _suggestSecondsLeft,
+      'proceedUnlocked':
+          _proceedUnlocked,
+      'waitDeadlineMs': _waitDeadline
+          ?.millisecondsSinceEpoch,
+      'suggestDeadlineMs':
+          _suggestDeadline
+              ?.millisecondsSinceEpoch,
+      'proceedUnlockAtMs':
+          _proceedUnlockAt
+              ?.millisecondsSinceEpoch,
+      'updatedAtMs': DateTime.now()
+          .millisecondsSinceEpoch,
     };
-    await MeetingPointDraftStorage.saveForCurrentUser(payload);
+    await MeetingPointDraftStorage.saveForCurrentUser(
+      payload,
+    );
     await _syncMeetingPointProgress();
   }
 
-  Future<void> _clearManagedDraft() async {
+  Future<void>
+  _clearManagedDraft() async {
     if (!_shouldManageDraft) return;
     await MeetingPointDraftStorage.clearForCurrentUser();
   }
 
-  Future<void> _syncMeetingPointProgress({String? status}) async {
+  Future<void>
+  _syncMeetingPointProgress({
+    String? status,
+    bool writeSuggestDeadline = false,
+  }) async {
     final id = _meetingPointId;
-    if (id == null || id.trim().isEmpty) return;
+    if (id == null || id.trim().isEmpty)
+      return;
     try {
       await MeetingPointService.updateHostProgress(
         meetingPointId: id,
         hostStep: _step,
-        participants: _participants.map(_participantToCloud).toList(),
-        waitDeadline: _step == 4 ? _waitDeadline : null,
-        suggestDeadline: _step == 5 ? _suggestDeadline : null,
+        participants: _participants
+            .map(_participantToCloud)
+            .toList(),
+        // waitDeadline is set once by createMeetingPoint and must never be
+        // re-written here — doing so risks writing a locally-computed value
+        // that diverges from the authoritative Firestore deadline and corrupts
+        // the card timer after form close.
+        waitDeadline: null,
+        suggestDeadline:
+            (writeSuggestDeadline &&
+                _step == 5)
+            ? _suggestDeadline
+            : null,
         status: status,
       );
     } catch (e) {
-      debugPrint('Failed to sync meeting point progress: $e');
+      debugPrint(
+        'Failed to sync meeting point progress: $e',
+      );
     }
   }
 
   Future<void> _completeAndClose({
     required bool success,
     required String message,
+    Future<void>? pendingWork,
   }) async {
     if (_closeHandled) return;
     _closeHandled = true;
@@ -2259,11 +3913,19 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     await _clearManagedDraft();
     if (success) _clearEarlyMemory();
     if (!mounted) return;
-    Navigator.pop(context);
+    // Pass any in-flight background work (e.g. markHostDecision) back to the
+    // caller so track_page can await it before refreshing its UI.
+    Navigator.pop(context, pendingWork);
     if (success) {
-      SnackbarHelper.showSuccess(context, message);
+      SnackbarHelper.showSuccess(
+        context,
+        message,
+      );
     } else {
-      SnackbarHelper.showError(context, message);
+      SnackbarHelper.showError(
+        context,
+        message,
+      );
     }
   }
 
@@ -2273,69 +3935,112 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
     final unlockAt = _proceedUnlockAt;
     if (unlockAt == null) {
-      setState(() => _proceedUnlocked = true);
+      setState(
+        () => _proceedUnlocked = true,
+      );
       return;
     }
 
-    final remaining = unlockAt.difference(DateTime.now());
+    final remaining = unlockAt
+        .difference(DateTime.now());
     if (remaining.inMilliseconds <= 0) {
-      if (mounted) setState(() => _proceedUnlocked = true);
+      if (mounted)
+        setState(
+          () => _proceedUnlocked = true,
+        );
       return;
     }
 
-    _proceedTimer = Timer(remaining, () {
-      if (!mounted) return;
-      setState(() => _proceedUnlocked = true);
-      unawaited(_persistDraftIfNeeded());
-    });
+    _proceedTimer = Timer(
+      remaining,
+      () {
+        if (!mounted) return;
+        setState(
+          () => _proceedUnlocked = true,
+        );
+        unawaited(
+          _persistDraftIfNeeded(),
+        );
+      },
+    );
   }
 
   void _startStep4WaitCountdown() {
     _waitTimer?.cancel();
-    _waitDeadline ??= MeetingPointService.serverNow.add(
-      Duration(seconds: _waitSecondsLeft),
-    );
+    _waitDeadline ??=
+        MeetingPointService.serverNow
+            .add(
+              Duration(
+                seconds:
+                    _waitSecondsLeft,
+              ),
+            );
 
     void onTick() {
       if (!mounted) return;
       final left = _waitDeadline!
-          .difference(MeetingPointService.serverNow)
+          .difference(
+            MeetingPointService
+                .serverNow,
+          )
           .inSeconds;
       if (left <= 0) {
         _waitTimer?.cancel();
-        setState(() => _waitSecondsLeft = 0);
+        setState(
+          () => _waitSecondsLeft = 0,
+        );
         _onWaitTimerExpired();
         return;
       }
-      setState(() => _waitSecondsLeft = left);
+      setState(
+        () => _waitSecondsLeft = left,
+      );
     }
 
     onTick();
-    _waitTimer = Timer.periodic(const Duration(seconds: 1), (_) => onTick());
+    _waitTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => onTick(),
+    );
   }
 
   void _startStep5SuggestCountdown() {
     _suggestTimer?.cancel();
-    _suggestDeadline ??= MeetingPointService.serverNow.add(
-      Duration(seconds: _suggestSecondsLeft),
-    );
+    // _suggestDeadline must already be set by the caller (from the Firestore
+    // subscription's setState, or by _initStep5 / _restoreFromMeetingPoint).
+    // Do NOT use ??= here: that would silently keep a stale local deadline
+    // instead of adopting the authoritative Firestore value delivered by the
+    // subscription handler.
+    if (_suggestDeadline == null)
+      return;
 
     void onTick() {
       if (!mounted) return;
       final left = _suggestDeadline!
-          .difference(MeetingPointService.serverNow)
+          .difference(
+            MeetingPointService
+                .serverNow,
+          )
           .inSeconds;
       if (left <= 0) {
         _suggestTimer?.cancel();
-        setState(() => _suggestSecondsLeft = 0);
+        setState(
+          () => _suggestSecondsLeft = 0,
+        );
         _acceptSuggestedMeetingPoint();
         return;
       }
-      setState(() => _suggestSecondsLeft = left);
+      setState(
+        () =>
+            _suggestSecondsLeft = left,
+      );
     }
 
     onTick();
-    _suggestTimer = Timer.periodic(const Duration(seconds: 1), (_) => onTick());
+    _suggestTimer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => onTick(),
+    );
   }
 
   // ── Step-5 client-side distance computation (same algorithm as path_overview) ─
@@ -2343,7 +4048,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   /// Converts navmesh floor number string ("0","1") to the asset file label
   /// ("GF","F1") used in navmesh_<label>.json.  Handles both numeric and label
   /// inputs so it works whatever format Firestore stored the floor in.
-  static String _s5FNumToLabel(String fNum) {
+  static String _s5FNumToLabel(
+    String fNum,
+  ) {
     switch (fNum) {
       case '0':
         return 'GF';
@@ -2357,98 +4064,250 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     }
   }
 
-  static String _s5FloorToFNum(String label) {
-    final up = label.toUpperCase().trim();
-    if (up == 'G' || up == 'GF' || up.contains('GROUND')) return '0';
-    final n = up.replaceAll(RegExp(r'[^0-9]'), '');
+  static String _s5FloorToFNum(
+    String label,
+  ) {
+    final up = label
+        .toUpperCase()
+        .trim();
+    if (up == 'G' ||
+        up == 'GF' ||
+        up.contains('GROUND'))
+      return '0';
+    final n = up.replaceAll(
+      RegExp(r'[^0-9]'),
+      '',
+    );
     return n.isEmpty ? label : n;
   }
 
-  static double? _s5ToDouble(dynamic v) {
+  static double? _s5ToDouble(
+    dynamic v,
+  ) {
     if (v == null) return null;
     if (v is num) return v.toDouble();
-    return double.tryParse(v.toString());
+    return double.tryParse(
+      v.toString(),
+    );
   }
 
-  static double _s5PathLen(List<List<double>> pts) {
+  static double _s5PathLen(
+    List<List<double>> pts,
+  ) {
     double sum = 0;
-    for (int i = 1; i < pts.length; i++) {
-      final dx = pts[i][0] - pts[i - 1][0];
-      final dy = pts[i][1] - pts[i - 1][1];
-      sum += math.sqrt(dx * dx + dy * dy);
+    for (
+      int i = 1;
+      i < pts.length;
+      i++
+    ) {
+      final dx =
+          pts[i][0] - pts[i - 1][0];
+      final dy =
+          pts[i][1] - pts[i - 1][1];
+      sum += math.sqrt(
+        dx * dx + dy * dy,
+      );
     }
     return sum;
   }
 
+  static String
+  _s5NormalizeConnectorType(
+    String raw,
+  ) {
+    final t = raw.toLowerCase().trim();
+    if (t == 'stair' || t == 'stairs')
+      return 'stairs';
+    if (t == 'elev' ||
+        t == 'elevator' ||
+        t == 'lift')
+      return 'elevator';
+    if (t == 'esc_up' ||
+        t == 'escalator_up' ||
+        t == 'escalatorup') {
+      return 'escalator_up';
+    }
+    if (t == 'esc_dn' ||
+        t == 'esc_down' ||
+        t == 'escalator_down' ||
+        t == 'escalatordown') {
+      return 'escalator_down';
+    }
+    if (t.contains('esc') ||
+        t.contains('escalator'))
+      return 'escalator';
+    return t;
+  }
+
+  static bool
+  _s5ConnectorDirectionAllowed(
+    String normType,
+    String fromFloor,
+    String toFloor,
+  ) {
+    final from = int.tryParse(
+      fromFloor,
+    );
+    final to = int.tryParse(toFloor);
+    if (from == null || to == null)
+      return true;
+
+    final t = normType.toLowerCase();
+    if (t == 'escalator_up')
+      return from < to;
+    if (t == 'escalator_down')
+      return from > to;
+    return true;
+  }
+
   static String? _s5EpFNum(Map ep) {
-    if (ep['floorNumber'] != null) return ep['floorNumber'].toString();
-    if (ep['f_number'] != null) return ep['f_number'].toString();
-    final floor = ep['floor']?.toString();
+    if (ep['floorNumber'] != null)
+      return ep['floorNumber']
+          .toString();
+    if (ep['f_number'] != null)
+      return ep['f_number'].toString();
+    final floor = ep['floor']
+        ?.toString();
     if (floor != null) {
-      if (int.tryParse(floor) != null) return floor;
+      if (int.tryParse(floor) != null)
+        return floor;
       return _s5FloorToFNum(floor);
     }
-    final lbl = ep['floorLabel'] ?? ep['floor_label'] ?? ep['label'];
-    if (lbl != null) return _s5FloorToFNum(lbl.toString());
+    final lbl =
+        ep['floorLabel'] ??
+        ep['floor_label'] ??
+        ep['label'];
+    if (lbl != null)
+      return _s5FloorToFNum(
+        lbl.toString(),
+      );
     return null;
   }
 
-  Future<void> _computeStep5Distances() async {
+  Future<void>
+  _computeStep5Distances() async {
     if (_step5DistComputing) return;
-    if (_suggestedCandidates.isEmpty) return;
-    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    if (_suggestedCandidates.isEmpty)
+      return;
+    final uid =
+        FirebaseAuth
+            .instance
+            .currentUser
+            ?.uid ??
+        '';
     if (uid.isEmpty) return;
 
-    if (mounted) setState(() => _step5DistComputing = true);
+    if (mounted)
+      setState(
+        () =>
+            _step5DistComputing = true,
+      );
 
-    final raw = _suggestedCandidates.first;
+    final raw =
+        _suggestedCandidates.first;
     final entranceMap = raw['entrance'];
     if (entranceMap is! Map) {
-      if (mounted) setState(() => _step5DistComputing = false);
+      if (mounted)
+        setState(
+          () => _step5DistComputing =
+              false,
+        );
       return;
     }
 
-    final entX = _s5ToDouble(entranceMap['x']) ?? 0.0;
-    final entY = _s5ToDouble(entranceMap['y']) ?? 0.0;
-    final entZ = _s5ToDouble(entranceMap['z']) ?? 0.0;
-    final entFloorRaw = (entranceMap['floor'] ?? '').toString().trim();
+    final entX =
+        _s5ToDouble(entranceMap['x']) ??
+        0.0;
+    final entY =
+        _s5ToDouble(entranceMap['y']) ??
+        0.0;
+    final entZ =
+        _s5ToDouble(entranceMap['z']) ??
+        0.0;
+    final entFloorRaw =
+        (entranceMap['floor'] ?? '')
+            .toString()
+            .trim();
     if (entFloorRaw.isEmpty) {
-      if (mounted) setState(() => _step5DistComputing = false);
+      if (mounted)
+        setState(
+          () => _step5DistComputing =
+              false,
+        );
       return;
     }
     // Normalise: "0" → "GF", "1" → "F1", so navmesh asset loads correctly.
-    final entFNum = _s5FloorToFNum(entFloorRaw);
-    final entNavLabel = _s5FNumToLabel(entFNum);
+    final entFNum = _s5FloorToFNum(
+      entFloorRaw,
+    );
+    final entNavLabel = _s5FNumToLabel(
+      entFNum,
+    );
 
     // All users to compute for: host + accepted participants.
-    final accepted = _participants.where(
-      (p) => p.status == _ParticipantStatus.accepted,
-    );
-    final allUserIds = [uid, ...accepted.map((p) => p.friend.id)];
+    final accepted = _participants
+        .where(
+          (p) =>
+              p.status ==
+              _ParticipantStatus
+                  .accepted,
+        );
+    final allUserIds = [
+      uid,
+      ...accepted.map(
+        (p) => p.friend.id,
+      ),
+    ];
 
     // Fetch each user's Blender position from Firestore.
-    final db = FirebaseFirestore.instance;
-    final Map<String, Map<String, dynamic>> positions = {};
+    final db =
+        FirebaseFirestore.instance;
+    final Map<
+      String,
+      Map<String, dynamic>
+    >
+    positions = {};
     for (final userId in allUserIds) {
       try {
-        final doc = await db.collection('users').doc(userId).get();
+        final doc = await db
+            .collection('users')
+            .doc(userId)
+            .get();
         final data = doc.data() ?? {};
         final bp =
-            ((data['location'] as Map?)?['blenderPosition'] as Map?) ?? {};
+            ((data['location']
+                    as Map?)?['blenderPosition']
+                as Map?) ??
+            {};
         final x = _s5ToDouble(bp['x']);
         final y = _s5ToDouble(bp['y']);
         final z = _s5ToDouble(bp['z']);
-        final floor = (bp['floor'] ?? '').toString().trim();
-        if (x != null && y != null && z != null && floor.isNotEmpty) {
-          positions[userId] = {'x': x, 'y': y, 'z': z, 'floor': floor};
+        final floor =
+            (bp['floor'] ?? '')
+                .toString()
+                .trim();
+        if (x != null &&
+            y != null &&
+            z != null &&
+            floor.isNotEmpty) {
+          positions[userId] = {
+            'x': x,
+            'y': y,
+            'z': z,
+            'floor': floor,
+          };
         }
       } catch (_) {}
     }
 
     // Cache loaded navmeshes by asset label ("GF", "F1", …).
-    final Map<String, NavMesh> nmCache = {};
-    Future<NavMesh?> getNm(String navLabel) async {
-      if (nmCache.containsKey(navLabel)) return nmCache[navLabel];
+    final Map<String, NavMesh> nmCache =
+        {};
+    Future<NavMesh?> getNm(
+      String navLabel,
+    ) async {
+      if (nmCache.containsKey(navLabel))
+        return nmCache[navLabel];
       try {
         final nm = await NavMesh.loadAsset(
           'assets/nav_cor/navmesh_$navLabel.json',
@@ -2461,29 +4320,41 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     }
 
     // Load connectors (needed only for cross-floor paths).
-    List<dynamic> connectorList = const [];
+    List<dynamic> connectorList =
+        const [];
     try {
-      final connRaw = await rootBundle.loadString(
-        'assets/connectors/connectors_merged_local.json',
+      final connRaw = await rootBundle
+          .loadString(
+            'assets/connectors/connectors_merged_local.json',
+          );
+      final decoded = jsonDecode(
+        connRaw,
       );
-      final decoded = jsonDecode(connRaw);
       connectorList = (decoded is List)
           ? decoded
-          : (decoded is Map && decoded['connectors'] is List)
-          ? decoded['connectors'] as List
+          : (decoded is Map &&
+                decoded['connectors']
+                    is List)
+          ? decoded['connectors']
+                as List
           : const [];
     } catch (_) {}
 
     const double unitToMeters = 69.32;
+    const double connectorPenalty = 0.5;
     final Map<String, int> result = {};
 
     for (final userId in allUserIds) {
       final pos = positions[userId];
       if (pos == null) continue;
 
-      final userFloorRaw = pos['floor'] as String;
-      final userFNum = _s5FloorToFNum(userFloorRaw);
-      final userNavLabel = _s5FNumToLabel(userFNum);
+      final userFloorRaw =
+          pos['floor'] as String;
+      final userFNum = _s5FloorToFNum(
+        userFloorRaw,
+      );
+      final userNavLabel =
+          _s5FNumToLabel(userFNum);
       final userPt = [
         pos['x'] as double,
         pos['y'] as double,
@@ -2495,9 +4366,15 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
       if (userFNum == entFNum) {
         // Same floor — direct funneled path.
-        final nm = await getNm(entNavLabel);
+        final nm = await getNm(
+          entNavLabel,
+        );
         if (nm != null) {
-          final pts = nm.findPathFunnelBlenderXY(start: userPt, goal: entPt);
+          final pts = nm
+              .findPathFunnelBlenderXY(
+                start: userPt,
+                goal: entPt,
+              );
           rawDist = _s5PathLen(pts);
         }
       } else {
@@ -2505,8 +4382,25 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         double best = double.infinity;
         for (final c in connectorList) {
           if (c is! Map) continue;
-          final endpoints = c['endpoints'] ?? c['floors'] ?? c['nodes'];
-          if (endpoints is! List) continue;
+          final endpoints =
+              c['endpoints'] ??
+              c['floors'] ??
+              c['nodes'];
+          if (endpoints is! List)
+            continue;
+
+          final normType =
+              _s5NormalizeConnectorType(
+                (c['type'] ?? '')
+                    .toString(),
+              );
+          if (!_s5ConnectorDirectionAllowed(
+            normType,
+            userFNum,
+            entFNum,
+          )) {
+            continue;
+          }
 
           Map? epA, epB;
           for (final ep in endpoints) {
@@ -2515,19 +4409,35 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
             if (f == userFNum) epA = ep;
             if (f == entFNum) epB = ep;
           }
-          if (epA == null || epB == null) continue;
+          if (epA == null ||
+              epB == null)
+            continue;
 
-          (double?, double?, double?) epXYZ(Map ep) {
-            final posMap = ep['position'] is Map ? ep['position'] as Map : null;
+          (double?, double?, double?)
+          epXYZ(Map ep) {
+            final posMap =
+                ep['position'] is Map
+                ? ep['position'] as Map
+                : null;
             return (
-              _s5ToDouble(posMap?['x'] ?? ep['x']),
-              _s5ToDouble(posMap?['y'] ?? ep['y']),
-              _s5ToDouble(posMap?['z'] ?? ep['z']),
+              _s5ToDouble(
+                posMap?['x'] ?? ep['x'],
+              ),
+              _s5ToDouble(
+                posMap?['y'] ?? ep['y'],
+              ),
+              _s5ToDouble(
+                posMap?['z'] ?? ep['z'],
+              ),
             );
           }
 
-          final (ax, ay, az) = epXYZ(epA);
-          final (bx, by, bz) = epXYZ(epB);
+          final (ax, ay, az) = epXYZ(
+            epA,
+          );
+          final (bx, by, bz) = epXYZ(
+            epB,
+          );
           if (ax == null ||
               ay == null ||
               az == null ||
@@ -2537,32 +4447,48 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
             continue;
           }
 
-          final nmA = await getNm(userNavLabel);
-          final nmB = await getNm(entNavLabel);
-          if (nmA == null || nmB == null) continue;
+          final nmA = await getNm(
+            userNavLabel,
+          );
+          final nmB = await getNm(
+            entNavLabel,
+          );
+          if (nmA == null ||
+              nmB == null)
+            continue;
 
-          final ptsA = nmA.findPathFunnelBlenderXY(
-            start: userPt,
-            goal: [ax, ay, az],
-          );
-          final ptsB = nmB.findPathFunnelBlenderXY(
-            start: [bx, by, bz],
-            goal: entPt,
-          );
-          final total = _s5PathLen(ptsA) + _s5PathLen(ptsB);
-          if (total < best) best = total;
+          final ptsA = nmA
+              .findPathFunnelBlenderXY(
+                start: userPt,
+                goal: [ax, ay, az],
+              );
+          final ptsB = nmB
+              .findPathFunnelBlenderXY(
+                start: [bx, by, bz],
+                goal: entPt,
+              );
+          final total =
+              _s5PathLen(ptsA) +
+              _s5PathLen(ptsB) +
+              connectorPenalty;
+          if (total < best)
+            best = total;
         }
-        if (best.isFinite) rawDist = best;
+        if (best.isFinite)
+          rawDist = best;
       }
 
       if (rawDist != null) {
-        result[userId] = (rawDist * unitToMeters).round();
+        result[userId] =
+            (rawDist * unitToMeters)
+                .round();
       }
     }
 
     if (mounted) {
       final mid = _meetingPointId;
-      if (mid != null) _distCache[mid] = result;
+      if (mid != null)
+        _distCache[mid] = result;
       setState(() {
         _step5DistMap = result;
         _step5DistComputing = false;
@@ -2570,12 +4496,18 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     }
   }
 
-  DateTime? _dateFromEpoch(dynamic value) {
+  DateTime? _dateFromEpoch(
+    dynamic value,
+  ) {
     if (value is int) {
-      return DateTime.fromMillisecondsSinceEpoch(value);
+      return DateTime.fromMillisecondsSinceEpoch(
+        value,
+      );
     }
     if (value is num) {
-      return DateTime.fromMillisecondsSinceEpoch(value.toInt());
+      return DateTime.fromMillisecondsSinceEpoch(
+        value.toInt(),
+      );
     }
     if (value is String) {
       return DateTime.tryParse(value);
@@ -2583,25 +4515,40 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     return null;
   }
 
-  int _intFromDynamic(dynamic value, int fallback) {
+  int _intFromDynamic(
+    dynamic value,
+    int fallback,
+  ) {
     if (value is int) return value;
-    if (value is num) return value.toInt();
-    if (value is String) return int.tryParse(value) ?? fallback;
+    if (value is num)
+      return value.toInt();
+    if (value is String)
+      return int.tryParse(value) ??
+          fallback;
     return fallback;
   }
 
-  bool _boolFromDynamic(dynamic value, bool fallback) {
+  bool _boolFromDynamic(
+    dynamic value,
+    bool fallback,
+  ) {
     if (value is bool) return value;
     if (value is num) return value != 0;
     if (value is String) {
-      final v = value.toLowerCase().trim();
-      if (v == 'true' || v == '1') return true;
-      if (v == 'false' || v == '0') return false;
+      final v = value
+          .toLowerCase()
+          .trim();
+      if (v == 'true' || v == '1')
+        return true;
+      if (v == 'false' || v == '0')
+        return false;
     }
     return fallback;
   }
 
-  Map<String, dynamic> _friendToDraft(_Friend f) {
+  Map<String, dynamic> _friendToDraft(
+    _Friend f,
+  ) {
     return {
       'id': f.id,
       'name': f.name,
@@ -2610,34 +4557,63 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     };
   }
 
-  _Friend? _friendFromDraft(Map<String, dynamic> raw) {
-    final phone = (raw['phone'] ?? '').toString().trim();
+  _Friend? _friendFromDraft(
+    Map<String, dynamic> raw,
+  ) {
+    final phone = (raw['phone'] ?? '')
+        .toString()
+        .trim();
     if (phone.isEmpty) return null;
     return _Friend(
       id: (raw['id'] ?? '').toString(),
-      name: (raw['name'] ?? '').toString().trim().isEmpty
+      name:
+          (raw['name'] ?? '')
+              .toString()
+              .trim()
+              .isEmpty
           ? phone
           : raw['name'].toString(),
       phone: phone,
-      isFavorite: _boolFromDynamic(raw['isFavorite'], false),
+      isFavorite: _boolFromDynamic(
+        raw['isFavorite'],
+        false,
+      ),
     );
   }
 
-  Map<String, dynamic> _participantToDraft(_Participant p) {
-    return {'friend': _friendToDraft(p.friend), 'status': p.status.name};
+  Map<String, dynamic>
+  _participantToDraft(_Participant p) {
+    return {
+      'friend': _friendToDraft(
+        p.friend,
+      ),
+      'status': p.status.name,
+    };
   }
 
-  _Participant? _participantFromDraft(Map<String, dynamic> raw) {
+  _Participant? _participantFromDraft(
+    Map<String, dynamic> raw,
+  ) {
     final friendRaw = raw['friend'];
     if (friendRaw is! Map) return null;
-    final friend = _friendFromDraft(Map<String, dynamic>.from(friendRaw));
+    final friend = _friendFromDraft(
+      Map<String, dynamic>.from(
+        friendRaw,
+      ),
+    );
     if (friend == null) return null;
 
-    final status = _statusFromDraft((raw['status'] ?? '').toString());
-    return _Participant(friend: friend, status: status);
+    final status = _statusFromDraft(
+      (raw['status'] ?? '').toString(),
+    );
+    return _Participant(
+      friend: friend,
+      status: status,
+    );
   }
 
-  MeetingPointParticipant _participantToCloud(_Participant p) {
+  MeetingPointParticipant
+  _participantToCloud(_Participant p) {
     return MeetingPointParticipant(
       userId: p.friend.id,
       name: p.friend.name,
@@ -2646,51 +4622,83 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     );
   }
 
-  _Participant _participantFromCloud(MeetingPointParticipant p) {
+  _Participant _participantFromCloud(
+    MeetingPointParticipant p,
+  ) {
     return _Participant(
       friend: _Friend(
         id: p.userId,
-        name: p.name.trim().isEmpty ? p.phone : p.name,
+        name: p.name.trim().isEmpty
+            ? p.phone
+            : p.name,
         phone: p.phone,
         isFavorite: false,
       ),
-      status: _statusFromDraft(p.status),
+      status: _statusFromDraft(
+        p.status,
+      ),
     );
   }
 
-  _ParticipantStatus _statusFromDraft(String raw) {
+  _ParticipantStatus _statusFromDraft(
+    String raw,
+  ) {
     switch (raw) {
       case 'accepted':
-        return _ParticipantStatus.accepted;
+        return _ParticipantStatus
+            .accepted;
       case 'declined':
-        return _ParticipantStatus.declined;
+        return _ParticipantStatus
+            .declined;
       default:
-        return _ParticipantStatus.pending;
+        return _ParticipantStatus
+            .pending;
     }
   }
 
-  _HostLocation? _hostLocationFromDraft(dynamic raw) {
+  _HostLocation? _hostLocationFromDraft(
+    dynamic raw,
+  ) {
     if (raw is! Map) return null;
-    final map = Map<String, dynamic>.from(raw);
-    final lat = (map['latitude'] as num?)?.toDouble();
-    final lng = (map['longitude'] as num?)?.toDouble();
-    if (lat == null || lng == null) return null;
+    final map =
+        Map<String, dynamic>.from(raw);
+    final lat =
+        (map['latitude'] as num?)
+            ?.toDouble();
+    final lng =
+        (map['longitude'] as num?)
+            ?.toDouble();
+    if (lat == null || lng == null)
+      return null;
     return _HostLocation(
       latitude: lat,
       longitude: lng,
-      label: (map['label'] ?? 'Set location').toString(),
+      label:
+          (map['label'] ??
+                  'Set location')
+              .toString(),
     );
   }
 
-  _HostLocation? _hostLocationFromCloud(Map<String, dynamic>? raw) {
+  _HostLocation? _hostLocationFromCloud(
+    Map<String, dynamic>? raw,
+  ) {
     if (raw == null) return null;
-    final lat = (raw['latitude'] as num?)?.toDouble();
-    final lng = (raw['longitude'] as num?)?.toDouble();
-    if (lat == null || lng == null) return null;
+    final lat =
+        (raw['latitude'] as num?)
+            ?.toDouble();
+    final lng =
+        (raw['longitude'] as num?)
+            ?.toDouble();
+    if (lat == null || lng == null)
+      return null;
     return _HostLocation(
       latitude: lat,
       longitude: lng,
-      label: (raw['label'] ?? 'Set location').toString(),
+      label:
+          (raw['label'] ??
+                  'Set location')
+              .toString(),
     );
   }
 
@@ -2713,7 +4721,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       setState(() {});
     } else {
       if (_step == 2) {
-        unawaited(_touchStep2LocationOnNext());
+        unawaited(
+          _touchStep2LocationOnNext(),
+        );
       }
       // Steps 1 → 2 and 2 → 3: simple increment.
       setState(() => _step++);
@@ -2740,31 +4750,51 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       // Build participant list from selected friends.
       _participants = _selectedFriends
           .map(
-            (f) => _Participant(friend: f, status: _ParticipantStatus.pending),
+            (f) => _Participant(
+              friend: f,
+              status: _ParticipantStatus
+                  .pending,
+            ),
           )
           .toList();
     }
 
-    // 2-minute countdown.  Use the deadline that was already committed to
+    // 10-minute countdown.  Use the deadline that was already committed to
     // Firestore so the local timer and the Firestore field are identical.
-    _waitSecondsLeft = 120;
+    _waitSecondsLeft = 600;
     _waitDeadline =
         _pendingWaitDeadline ??
-        MeetingPointService.serverNow.add(const Duration(minutes: 2));
-    _pendingWaitDeadline = null; // consumed
+        MeetingPointService.serverNow
+            .add(
+              const Duration(
+                minutes: 10,
+              ),
+            );
+    _pendingWaitDeadline =
+        null; // consumed
     _startStep4WaitCountdown();
 
     // Unlock "Proceed" after 5 seconds (UI demo).
     _proceedUnlocked = false;
-    _proceedUnlockAt = MeetingPointService.serverNow.add(
-      const Duration(seconds: 5),
-    );
+    _proceedUnlockAt =
+        MeetingPointService.serverNow
+            .add(
+              const Duration(
+                seconds: 5,
+              ),
+            );
     _startProceedUnlockTimer();
 
     if (_meetingPointId != null) {
-      _startMeetingSubscription(_meetingPointId!);
+      _startMeetingSubscription(
+        _meetingPointId!,
+      );
       // status stays 'pending' — sub-state derived from hostStep + participants
-      unawaited(_syncMeetingPointProgress(status: 'pending'));
+      unawaited(
+        _syncMeetingPointProgress(
+          status: 'pending',
+        ),
+      );
     }
     unawaited(_persistDraftIfNeeded());
   }
@@ -2772,17 +4802,26 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   void _onWaitTimerExpired() {
     _waitTimer?.cancel();
 
-    final anyAccepted = _participants.any(
-      (p) => p.status == _ParticipantStatus.accepted,
-    );
+    final anyAccepted = _participants
+        .any(
+          (p) =>
+              p.status ==
+              _ParticipantStatus
+                  .accepted,
+        );
     if (!anyAccepted) {
       // No one accepted → cancel meeting point.
-      unawaited(_syncMeetingPointProgress(status: 'cancelled'));
+      unawaited(
+        _syncMeetingPointProgress(
+          status: 'cancelled',
+        ),
+      );
       if (mounted) {
         unawaited(
           _completeAndClose(
             success: false,
-            message: 'Meeting point cancelled – no participants accepted.',
+            message:
+                'Meeting point cancelled – no participants accepted.',
           ),
         );
       }
@@ -2793,82 +4832,122 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       _initStep5();
       if (mounted) setState(() {});
       // status stays 'pending'; hostStep=5 signals waiting_host_confirmation sub-state
-      unawaited(_persistDraftIfNeeded());
+      unawaited(
+        _persistDraftIfNeeded(),
+      );
     }
   }
 
   void _initStep5() {
-    _suggestSecondsLeft = 300;
-    _suggestDeadline = MeetingPointService.serverNow.add(
-      const Duration(minutes: 5),
-    );
+    _suggestSecondsLeft = 120;
+    _suggestDeadline =
+        MeetingPointService.serverNow
+            .add(
+              const Duration(
+                minutes: 2,
+              ),
+            );
     _suggestedPointName = '';
     _suggestedCandidates = [];
     _suggestionsComputed = false;
     _startStep5SuggestCountdown();
     // status stays 'pending'; hostStep=5 signals waiting_host_confirmation sub-state
-    unawaited(_syncMeetingPointProgress());
+    // writeSuggestDeadline: true — this is the one authoritative write of the deadline
+    unawaited(
+      _syncMeetingPointProgress(
+        writeSuggestDeadline: true,
+      ),
+    );
     unawaited(_persistDraftIfNeeded());
   }
 
   void _acceptSuggestedMeetingPoint() {
     _suggestTimer?.cancel();
-    if (_meetingPointId != null) {
-      unawaited(
-        MeetingPointService.markHostDecision(
-          meetingPointId: _meetingPointId!,
-          accepted: true,
-        ),
-      );
-    }
+    // Fire markHostDecision immediately (no await so the form closes at once).
+    // The resulting Future is passed back to track_page via _completeAndClose so
+    // the track page can await it before refreshing — this ensures the live
+    // Firestore streams already carry status:'active' by the time setState runs.
+    final Future<void>? work =
+        _meetingPointId != null
+        ? MeetingPointService.markHostDecision(
+            meetingPointId:
+                _meetingPointId!,
+            accepted: true,
+          )
+        : null;
     unawaited(
-      _completeAndClose(success: true, message: 'Meeting point accepted!'),
+      _completeAndClose(
+        success: true,
+        message:
+            'Meeting point accepted!',
+        pendingWork: work,
+      ),
     );
   }
 
-  Future<void> _rejectSuggestedMeetingPoint() async {
-    final confirmed = await ConfirmationDialog.showDeleteConfirmation(
-      context,
-      title: 'Reject Meeting Point',
-      message:
-          'Are you sure you want to reject this meeting point? The meeting will be cancelled for all participants.',
-      cancelText: 'Keep',
-      confirmText: 'Reject',
-    );
+  Future<void>
+  _rejectSuggestedMeetingPoint() async {
+    final confirmed =
+        await ConfirmationDialog.showDeleteConfirmation(
+          context,
+          title: 'Reject Meeting Point',
+          message:
+              'Are you sure you want to reject this meeting point? The meeting will be cancelled for all participants.',
+          cancelText: 'Keep',
+          confirmText: 'Reject',
+        );
     if (confirmed != true) return;
     _suggestTimer?.cancel();
     if (_meetingPointId != null) {
       unawaited(
         MeetingPointService.markHostDecision(
-          meetingPointId: _meetingPointId!,
+          meetingPointId:
+              _meetingPointId!,
           accepted: false,
         ),
       );
     }
     unawaited(
-      _completeAndClose(success: false, message: 'Meeting point rejected.'),
+      _completeAndClose(
+        success: false,
+        message:
+            'Meeting point rejected.',
+      ),
     );
   }
 
   // ─── Step-level gate conditions ───────────────────────────────────────────
 
-  bool get _step1CanNext => _isVenueValid && _selectedFriends.isNotEmpty;
-  bool get _step2CanNext => _hostLocation != null;
+  bool get _step1CanNext =>
+      _isVenueValid &&
+      _selectedFriends.isNotEmpty;
+  bool get _step2CanNext =>
+      _hostLocation != null;
 
   /// Proceed is enabled if: unlock timer fired AND at least one accepted + location set.
   bool get _step4CanProceed {
     if (!_proceedUnlocked) return false;
-    return _participants.any((p) => p.status == _ParticipantStatus.accepted);
+    return _participants.any(
+      (p) =>
+          p.status ==
+          _ParticipantStatus.accepted,
+    );
   }
 
   // ─── Firestore meeting point creation ─────────────────────────────────────
 
   Future<void> _sendInvites() async {
-    final host = FirebaseAuth.instance.currentUser;
+    final host = FirebaseAuth
+        .instance
+        .currentUser;
     if (host == null) {
-      throw Exception('You must be signed in to create a meeting point.');
+      throw Exception(
+        'You must be signed in to create a meeting point.',
+      );
     }
-    if (_venueId == null || _venueName == null || _hostLocation == null) {
+    if (_venueId == null ||
+        _venueName == null ||
+        _hostLocation == null) {
       throw Exception(
         'Please complete venue and location before sending invites.',
       );
@@ -2877,31 +4956,49 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     try {
       final blockingMeeting =
           await MeetingPointService.getBlockingMeetingForCurrentUser();
-      if (blockingMeeting != null && blockingMeeting.isActive) {
-        if (blockingMeeting.hostId == host.uid) {
-          throw Exception('You already have an active meeting point.');
+      if (blockingMeeting != null &&
+          blockingMeeting.isActive) {
+        if (blockingMeeting.hostId ==
+            host.uid) {
+          throw Exception(
+            'You already have an active meeting point.',
+          );
         }
-        final me = blockingMeeting.participantFor(host.uid);
-        if (me != null && me.isAccepted) {
-          throw Exception('You already have an active meeting point.');
+        final me = blockingMeeting
+            .participantFor(host.uid);
+        if (me != null &&
+            me.isAccepted) {
+          throw Exception(
+            'You already have an active meeting point.',
+          );
         }
       }
     } on FirebaseException catch (e) {
       // Some rule setups reject the pre-check query. Do not block invite sending
       // when this guard cannot be evaluated server-side.
-      debugPrint('Meeting pre-check skipped due Firestore rules: ${e.code}');
+      debugPrint(
+        'Meeting pre-check skipped due Firestore rules: ${e.code}',
+      );
     }
 
-    final participants = <MeetingPointParticipant>[];
-    final unresolvedFriends = <String>[];
-    for (final friend in _selectedFriends) {
+    final participants =
+        <MeetingPointParticipant>[];
+    final unresolvedFriends =
+        <String>[];
+    for (final friend
+        in _selectedFriends) {
       var userId = friend.id.trim();
       if (userId.isEmpty) {
-        userId = await _resolveUserIdByPhone(friend.phone);
+        userId =
+            await _resolveUserIdByPhone(
+              friend.phone,
+            );
       }
       if (userId.isEmpty) {
         unresolvedFriends.add(
-          friend.name.isNotEmpty ? friend.name : friend.phone,
+          friend.name.isNotEmpty
+              ? friend.name
+              : friend.phone,
         );
         continue;
       }
@@ -2926,9 +5023,13 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       );
     }
 
-    final hostName = (_myName ?? '').trim().isNotEmpty
+    final hostName =
+        (_myName ?? '')
+            .trim()
+            .isNotEmpty
         ? _myName!.trim()
-        : (host.displayName ?? '').trim();
+        : (host.displayName ?? '')
+              .trim();
 
     // createMeetingPoint now returns the server-time-based deadline alongside
     // the document ID.  We use it as _pendingWaitDeadline so the local timer
@@ -2939,16 +5040,25 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       serverDeadline,
     ) = await MeetingPointService.createMeetingPoint(
       hostId: host.uid,
-      hostName: hostName.isNotEmpty ? hostName : 'Host',
-      hostPhone: (_myPhone ?? '').trim(),
+      hostName: hostName.isNotEmpty
+          ? hostName
+          : 'Host',
+      hostPhone: (_myPhone ?? '')
+          .trim(),
       venueId: _venueId!,
       venueName: _venueName!,
-      placeCategories: _selectedPlaceCategories.toList(),
-      hostLocation: _hostLocation?.toMap(),
+      placeCategories:
+          _selectedPlaceCategories
+              .toList(),
+      hostLocation: _hostLocation
+          ?.toMap(),
       participants: participants,
-      waitDuration: const Duration(minutes: 2),
+      waitDuration: const Duration(
+        minutes: 10,
+      ),
     );
-    _pendingWaitDeadline = serverDeadline;
+    _pendingWaitDeadline =
+        serverDeadline;
 
     _meetingPointId = meetingPointId;
 
@@ -2975,20 +5085,30 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
               phone: p.phone,
               isFavorite: false,
             ),
-            status: _statusFromDraft(p.status),
+            status: _statusFromDraft(
+              p.status,
+            ),
           ),
         )
         .toList();
-    _startMeetingSubscription(meetingPointId);
+    _startMeetingSubscription(
+      meetingPointId,
+    );
   }
 
-  Future<String> _resolveUserIdByPhone(String phone) async {
+  Future<String> _resolveUserIdByPhone(
+    String phone,
+  ) async {
     final normalized = phone.trim();
     if (normalized.isEmpty) return '';
     try {
-      final q = await FirebaseFirestore.instance
+      final q = await FirebaseFirestore
+          .instance
           .collection('users')
-          .where('phone', isEqualTo: normalized)
+          .where(
+            'phone',
+            isEqualTo: normalized,
+          )
           .limit(1)
           .get();
       if (q.docs.isEmpty) return '';
@@ -3010,42 +5130,69 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         return false;
       },
       child: Container(
-        height: MediaQuery.of(context).size.height * 0.9,
+        height:
+            MediaQuery.of(
+              context,
+            ).size.height *
+            0.9,
         decoration: const BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.only(
-            topLeft: Radius.circular(24),
-            topRight: Radius.circular(24),
-          ),
+          borderRadius:
+              BorderRadius.only(
+                topLeft:
+                    Radius.circular(24),
+                topRight:
+                    Radius.circular(24),
+              ),
         ),
         child: _isInitializing
-            ? const Center(child: CircularProgressIndicator())
+            ? const Center(
+                child:
+                    CircularProgressIndicator(),
+              )
             : Column(
                 children: [
                   // Drag handle
-                  const SizedBox(height: 12),
+                  const SizedBox(
+                    height: 12,
+                  ),
                   Center(
                     child: Container(
                       width: 40,
                       height: 4,
                       decoration: BoxDecoration(
-                        color: Colors.grey[300],
-                        borderRadius: BorderRadius.circular(2),
+                        color: Colors
+                            .grey[300],
+                        borderRadius:
+                            BorderRadius.circular(
+                              2,
+                            ),
                       ),
                     ),
                   ),
                   _buildHeader(),
                   _buildProgressBar(),
                   if (_step == 5)
-                    Expanded(child: _buildStepBody())
+                    Expanded(
+                      child:
+                          _buildStepBody(),
+                    )
                   else
                     Expanded(
                       child: SingleChildScrollView(
-                        padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
-                        child: _buildStepBody(),
+                        padding:
+                            const EdgeInsets.fromLTRB(
+                              20,
+                              20,
+                              20,
+                              20,
+                            ),
+                        child:
+                            _buildStepBody(),
                       ),
                     ),
-                  if (_step == 5) _buildStep5FixedButtons(),
+                  if (_step == 5)
+                    _buildStep5FixedButtons(),
                   _buildFooter(),
                 ],
               ),
@@ -3066,31 +5213,76 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
     // Timer badge shown on steps 4 and 5 (same rows as subtitle — mirrors
     // non-host "View details" sheet where timer sits next to the step label).
+    // Compute directly from the deadline at build time (same approach as the
+    // card's _currentStepTimerLabel) so the two are always in sync. Falling
+    // back to the integer counter only when the deadline isn't set yet.
     String? timerLabel;
     if (_step == 4) {
-      final mm = (_waitSecondsLeft ~/ 60).toString().padLeft(2, '0');
-      final ss = (_waitSecondsLeft % 60).toString().padLeft(2, '0');
+      final seconds =
+          _waitDeadline != null
+          ? _waitDeadline!
+                .difference(
+                  MeetingPointService
+                      .serverNow,
+                )
+                .inSeconds
+                .clamp(0, 600)
+          : _waitSecondsLeft;
+      final mm = (seconds ~/ 60)
+          .toString()
+          .padLeft(2, '0');
+      final ss = (seconds % 60)
+          .toString()
+          .padLeft(2, '0');
       timerLabel = '$mm:$ss';
     } else if (_step == 5) {
-      final mm = (_suggestSecondsLeft ~/ 60).toString().padLeft(2, '0');
-      final ss = (_suggestSecondsLeft % 60).toString().padLeft(2, '0');
+      final seconds =
+          _suggestDeadline != null
+          ? _suggestDeadline!
+                .difference(
+                  MeetingPointService
+                      .serverNow,
+                )
+                .inSeconds
+                .clamp(0, 300)
+          : _suggestSecondsLeft;
+      final mm = (seconds ~/ 60)
+          .toString()
+          .padLeft(2, '0');
+      final ss = (seconds % 60)
+          .toString()
+          .padLeft(2, '0');
       timerLabel = '$mm:$ss';
     }
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
+      padding:
+          const EdgeInsets.fromLTRB(
+            20,
+            16,
+            12,
+            12,
+          ),
       decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+        border: Border(
+          bottom: BorderSide(
+            color: Colors.grey.shade200,
+          ),
+        ),
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment:
+            CrossAxisAlignment.start,
         children: [
           Container(
             width: 42,
             height: 42,
             decoration: BoxDecoration(
               color: Colors.grey[100],
-              borderRadius: BorderRadius.circular(10),
+              borderRadius:
+                  BorderRadius.circular(
+                    10,
+                  ),
             ),
             child: const Icon(
               Icons.people_outline,
@@ -3101,30 +5293,49 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           const SizedBox(width: 12),
           Expanded(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment:
+                  CrossAxisAlignment
+                      .start,
               children: [
                 const Text(
                   'Create Meeting Point',
                   style: TextStyle(
                     fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.black87,
+                    fontWeight:
+                        FontWeight.w700,
+                    color:
+                        Colors.black87,
                   ),
                 ),
-                const SizedBox(height: 3),
+                const SizedBox(
+                  height: 3,
+                ),
                 // Subtitle row: step description + timer badge
                 Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment:
+                      CrossAxisAlignment
+                          .start,
                   children: [
                     Expanded(
                       child: Text(
-                        subtitles[_step - 1],
-                        style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                        subtitles[_step -
+                            1],
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors
+                              .grey[600],
+                        ),
                       ),
                     ),
-                    if (timerLabel != null) ...[
-                      const SizedBox(width: 8),
-                      MeetingTimerBadge(label: timerLabel),
+                    if (timerLabel !=
+                        null) ...[
+                      const SizedBox(
+                        width: 8,
+                      ),
+                      MeetingTimerBadge(
+                        label:
+                            timerLabel,
+                      ),
                     ],
                   ],
                 ),
@@ -3140,23 +5351,40 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
   Widget _buildProgressBar() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+      padding:
+          const EdgeInsets.fromLTRB(
+            20,
+            12,
+            20,
+            4,
+          ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment:
+            CrossAxisAlignment.start,
         children: [
           ClipRRect(
-            borderRadius: BorderRadius.circular(4),
+            borderRadius:
+                BorderRadius.circular(
+                  4,
+                ),
             child: LinearProgressIndicator(
               value: (_step - 1) / 5,
               minHeight: 3,
-              backgroundColor: Colors.grey.shade200,
-              valueColor: const AlwaysStoppedAnimation(AppColors.kGreen),
+              backgroundColor:
+                  Colors.grey.shade200,
+              valueColor:
+                  const AlwaysStoppedAnimation(
+                    AppColors.kGreen,
+                  ),
             ),
           ),
           const SizedBox(height: 6),
           Text(
             'Step $_step of 5',
-            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey[600],
+            ),
           ),
         ],
       ),
@@ -3190,7 +5418,8 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     final inputsEnabled = _isVenueValid;
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
       children: [
         // ── Venue field (read-only, auto-detected) ──────────────────────────
         _sectionLabel('Venue'),
@@ -3199,21 +5428,31 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         if (_venueError != null) ...[
           const SizedBox(height: 8),
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment:
+                CrossAxisAlignment
+                    .start,
             children: [
               Padding(
-                padding: const EdgeInsets.only(top: 3),
+                padding:
+                    const EdgeInsets.only(
+                      top: 3,
+                    ),
                 child: Icon(
                   Icons.info_outline,
                   size: 14,
-                  color: AppColors.kError,
+                  color:
+                      AppColors.kError,
                 ),
               ),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
                   _venueError!,
-                  style: TextStyle(fontSize: 13, color: AppColors.kError),
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppColors
+                        .kError,
+                  ),
                 ),
               ),
             ],
@@ -3225,58 +5464,97 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         AbsorbPointer(
           absorbing: !inputsEnabled,
           child: Opacity(
-            opacity: inputsEnabled ? 1.0 : 0.45,
+            opacity: inputsEnabled
+                ? 1.0
+                : 0.45,
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment:
+                  CrossAxisAlignment
+                      .start,
               children: [
-                _sectionLabel('Select Friends to Meet'),
-                const SizedBox(height: 14),
+                _sectionLabel(
+                  'Select Friends to Meet',
+                ),
+                const SizedBox(
+                  height: 14,
+                ),
 
                 // Phone + Add + Favorites row
                 _buildPhoneInputRow(),
-                const SizedBox(height: 6),
+                const SizedBox(
+                  height: 6,
+                ),
                 SizedBox(
                   height: 18,
-                  child: (!_phoneValid && _phoneError != null)
+                  child:
+                      (!_phoneValid &&
+                          _phoneError !=
+                              null)
                       ? Text(
                           _phoneError!,
                           style: const TextStyle(
-                            color: AppColors.kError,
-                            fontSize: 13,
+                            color: AppColors
+                                .kError,
+                            fontSize:
+                                13,
                           ),
                         )
                       : null,
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(
+                  height: 14,
+                ),
 
                 // Active tracked friends at venue
                 _buildActiveVenueFriendsList(),
 
                 // Selected friends list
-                if (_selectedFriends.isNotEmpty) ...[
-                  const SizedBox(height: 18),
+                if (_selectedFriends
+                    .isNotEmpty) ...[
+                  const SizedBox(
+                    height: 18,
+                  ),
                   const Text(
                     'Selected friends',
                     style: TextStyle(
                       fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.black87,
+                      fontWeight:
+                          FontWeight
+                              .w600,
+                      color: Colors
+                          .black87,
                     ),
                   ),
-                  const SizedBox(height: 10),
-                  ..._selectedFriends.map(_buildSelectedFriendRow),
-                  const SizedBox(height: 4),
+                  const SizedBox(
+                    height: 10,
+                  ),
+                  ..._selectedFriends.map(
+                    _buildSelectedFriendRow,
+                  ),
+                  const SizedBox(
+                    height: 4,
+                  ),
                   Text(
                     '${_selectedFriends.length} friend${_selectedFriends.length == 1 ? '' : 's'} selected',
-                    style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors
+                          .grey[600],
+                    ),
                   ),
                 ],
 
-                const SizedBox(height: 24),
+                const SizedBox(
+                  height: 24,
+                ),
 
                 // ── Place type (chips) ────────────────────────────────────
-                _sectionLabel('Select Where to Meet Your Friends'),
-                const SizedBox(height: 12),
+                _sectionLabel(
+                  'Select Where to Meet Your Friends',
+                ),
+                const SizedBox(
+                  height: 12,
+                ),
                 _buildPlaceTypeChips(),
               ],
             ),
@@ -3290,20 +5568,33 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   Widget _venueReadOnlyField() {
     final venueLabel =
         _venueName ??
-        (_loadingVenue ? 'Detecting venue...' : 'No venue detected');
+        (_loadingVenue
+            ? 'Detecting venue...'
+            : 'No venue detected');
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      padding:
+          const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 14,
+          ),
       decoration: BoxDecoration(
         color: Colors.grey[100],
-        borderRadius: BorderRadius.circular(12),
+        borderRadius:
+            BorderRadius.circular(12),
         border: Border.all(
-          color: _venueError != null ? AppColors.kError : Colors.grey.shade300,
+          color: _venueError != null
+              ? AppColors.kError
+              : Colors.grey.shade300,
         ),
       ),
       child: Row(
         children: [
-          Icon(Icons.place_outlined, color: AppColors.kGreen, size: 20),
+          Icon(
+            Icons.place_outlined,
+            color: AppColors.kGreen,
+            size: 20,
+          ),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
@@ -3311,13 +5602,21 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
               style: TextStyle(
                 fontSize: 15,
                 // Normal weight so it reads as non-editable
-                fontWeight: FontWeight.w400,
-                color: _venueName != null ? Colors.black54 : Colors.grey[500],
+                fontWeight:
+                    FontWeight.w400,
+                color:
+                    _venueName != null
+                    ? Colors.black54
+                    : Colors.grey[500],
               ),
             ),
           ),
           // Subtle lock to indicate read-only without being obtrusive
-          Icon(Icons.lock_outline, size: 15, color: Colors.grey[400]),
+          Icon(
+            Icons.lock_outline,
+            size: 15,
+            color: Colors.grey[400],
+          ),
         ],
       ),
     );
@@ -3333,60 +5632,106 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           child: TextField(
             controller: _phoneCtrl,
             focusNode: _phoneFocus,
-            keyboardType: TextInputType.number,
+            keyboardType:
+                TextInputType.number,
             inputFormatters: [
-              FilteringTextInputFormatter.digitsOnly,
-              LengthLimitingTextInputFormatter(9),
+              FilteringTextInputFormatter
+                  .digitsOnly,
+              LengthLimitingTextInputFormatter(
+                9,
+              ),
             ],
-            onChanged: (_) => setState(() {
-              _phoneValid = true;
-              _phoneError = null;
-            }),
+            onChanged: (_) =>
+                setState(() {
+                  _phoneValid = true;
+                  _phoneError = null;
+                }),
             decoration: InputDecoration(
-              hintText: _isPhoneFocused ? 'Enter 9 digits' : 'Phone number',
+              hintText: _isPhoneFocused
+                  ? 'Enter 9 digits'
+                  : 'Phone number',
               hintStyle: TextStyle(
                 color: Colors.grey[400],
-                fontWeight: FontWeight.w400,
+                fontWeight:
+                    FontWeight.w400,
               ),
-              prefix: (_isPhoneFocused || _phoneCtrl.text.isNotEmpty)
+              prefix:
+                  (_isPhoneFocused ||
+                      _phoneCtrl
+                          .text
+                          .isNotEmpty)
                   ? Text(
                       '+966 ',
                       style: TextStyle(
-                        color: Colors.grey[400],
+                        color: Colors
+                            .grey[400],
                         fontSize: 15,
-                        fontWeight: FontWeight.w400,
+                        fontWeight:
+                            FontWeight
+                                .w400,
                       ),
                     )
                   : null,
-              suffixIcon: _isPhoneFocused
+              suffixIcon:
+                  _isPhoneFocused
                   ? IconButton(
-                      icon: const Icon(Icons.contacts, color: AppColors.kGreen),
-                      onPressed: _pickContact,
+                      icon: const Icon(
+                        Icons.contacts,
+                        color: AppColors
+                            .kGreen,
+                      ),
+                      onPressed:
+                          _pickContact,
                     )
                   : null,
               filled: true,
-              fillColor: Colors.grey[50],
+              fillColor:
+                  Colors.grey[50],
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: Colors.grey.shade300),
+                borderRadius:
+                    BorderRadius.circular(
+                      12,
+                    ),
+                borderSide: BorderSide(
+                  color: Colors
+                      .grey
+                      .shade300,
+                ),
               ),
               enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius:
+                    BorderRadius.circular(
+                      12,
+                    ),
                 borderSide: BorderSide(
-                  color: _phoneValid ? Colors.grey.shade300 : AppColors.kError,
+                  color: _phoneValid
+                      ? Colors
+                            .grey
+                            .shade300
+                      : AppColors
+                            .kError,
                 ),
               ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(
-                  color: _phoneValid ? AppColors.kGreen : AppColors.kError,
-                  width: 2,
-                ),
-              ),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 14,
-              ),
+              focusedBorder:
+                  OutlineInputBorder(
+                    borderRadius:
+                        BorderRadius.circular(
+                          12,
+                        ),
+                    borderSide: BorderSide(
+                      color: _phoneValid
+                          ? AppColors
+                                .kGreen
+                          : AppColors
+                                .kError,
+                      width: 2,
+                    ),
+                  ),
+              contentPadding:
+                  const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
             ),
           ),
         ),
@@ -3394,18 +5739,32 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
         // Add button
         GestureDetector(
-          onTap: canTapAdd ? _addFriendByPhone : null,
+          onTap: canTapAdd
+              ? _addFriendByPhone
+              : null,
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+            padding:
+                const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 14,
+                ),
             decoration: BoxDecoration(
-              color: canTapAdd ? AppColors.kGreen : Colors.grey[300],
-              borderRadius: BorderRadius.circular(12),
+              color: canTapAdd
+                  ? AppColors.kGreen
+                  : Colors.grey[300],
+              borderRadius:
+                  BorderRadius.circular(
+                    12,
+                  ),
             ),
             child: Text(
               'Add',
               style: TextStyle(
-                color: canTapAdd ? Colors.white : Colors.grey[500],
-                fontWeight: FontWeight.w600,
+                color: canTapAdd
+                    ? Colors.white
+                    : Colors.grey[500],
+                fontWeight:
+                    FontWeight.w600,
                 fontSize: 15,
               ),
             ),
@@ -3421,11 +5780,17 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
             color: AppColors.kGreen,
             size: 28,
           ),
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(
+            12,
+          ),
           style: IconButton.styleFrom(
-            backgroundColor: Colors.grey[100],
+            backgroundColor:
+                Colors.grey[100],
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius:
+                  BorderRadius.circular(
+                    12,
+                  ),
             ),
           ),
         ),
@@ -3433,20 +5798,29 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     );
   }
 
-  Widget _buildActiveVenueFriendsList() {
+  Widget
+  _buildActiveVenueFriendsList() {
     final name = _venueName ?? 'venue';
-    final remaining = _remainingActiveVenueFriends;
+    final remaining =
+        _remainingActiveVenueFriends;
 
-    if (_activeVenueFriends.isEmpty) return const SizedBox.shrink();
+    if (_activeVenueFriends.isEmpty)
+      return const SizedBox.shrink();
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
       children: [
         // Label: "Active tracked friends at [venue]"
         Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment:
+              CrossAxisAlignment.start,
           children: [
-            Icon(Icons.groups_2_outlined, size: 16, color: Colors.grey[600]),
+            Icon(
+              Icons.groups_2_outlined,
+              size: 16,
+              color: Colors.grey[600],
+            ),
             const SizedBox(width: 6),
             Expanded(
               child: Text(
@@ -3454,42 +5828,63 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
                 softWrap: true,
                 style: TextStyle(
                   fontSize: 13,
-                  color: Colors.grey[700],
-                  fontWeight: FontWeight.w500,
+                  color:
+                      Colors.grey[700],
+                  fontWeight:
+                      FontWeight.w500,
                 ),
               ),
             ),
           ],
         ),
         const SizedBox(height: 8),
-        if (_loadingActiveVenueFriends && remaining.isEmpty)
+        if (_loadingActiveVenueFriends &&
+            remaining.isEmpty)
           const SizedBox.shrink()
         else if (remaining.isEmpty)
           Center(
             child: Text(
               'All Active tracked friends added.',
-              textAlign: TextAlign.center,
+              textAlign:
+                  TextAlign.center,
               style: TextStyle(
                 fontSize: 12,
                 color: Colors.grey[600],
-                fontWeight: FontWeight.w400,
+                fontWeight:
+                    FontWeight.w400,
               ),
             ),
           )
         else
-          ...remaining.map((friend) => _buildActiveVenueFriendRow(friend)),
+          ...remaining.map(
+            (friend) =>
+                _buildActiveVenueFriendRow(
+                  friend,
+                ),
+          ),
       ],
     );
   }
 
-  Widget _buildActiveVenueFriendRow(_Friend friend) {
+  Widget _buildActiveVenueFriendRow(
+    _Friend friend,
+  ) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      margin: const EdgeInsets.only(
+        bottom: 6,
+      ),
+      padding:
+          const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 10,
+          ),
       decoration: BoxDecoration(
         color: Colors.grey[50],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade200),
+        borderRadius:
+            BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.grey.shade200,
+        ),
       ),
       child: Row(
         children: [
@@ -3501,24 +5896,38 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
               color: Colors.grey[300],
               shape: BoxShape.circle,
             ),
-            child: Icon(Icons.person, color: Colors.grey[600], size: 20),
+            child: Icon(
+              Icons.person,
+              color: Colors.grey[600],
+              size: 20,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment:
+                  CrossAxisAlignment
+                      .start,
               children: [
                 Text(
                   friend.name,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.black87,
-                  ),
+                  style:
+                      const TextStyle(
+                        fontSize: 14,
+                        fontWeight:
+                            FontWeight
+                                .w600,
+                        color: Colors
+                            .black87,
+                      ),
                 ),
                 Text(
                   friend.phone,
-                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors
+                        .grey[500],
+                  ),
                 ),
               ],
             ),
@@ -3526,21 +5935,27 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
           // Heart icon
           Icon(
-            friend.isFavorite ? Icons.favorite : Icons.favorite_border,
+            friend.isFavorite
+                ? Icons.favorite
+                : Icons.favorite_border,
             size: 22,
-            color: friend.isFavorite ? Colors.red : Colors.grey[400],
+            color: friend.isFavorite
+                ? Colors.red
+                : Colors.grey[400],
           ),
           const SizedBox(width: 10),
 
           // Add button (no background, text-only)
           GestureDetector(
-            onTap: () => _addFriend(friend),
+            onTap: () =>
+                _addFriend(friend),
             child: const Text(
               'Add',
               style: TextStyle(
                 fontSize: 14,
                 color: AppColors.kGreen,
-                fontWeight: FontWeight.w600,
+                fontWeight:
+                    FontWeight.w600,
               ),
             ),
           ),
@@ -3549,14 +5964,25 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     );
   }
 
-  Widget _buildSelectedFriendRow(_Friend friend) {
+  Widget _buildSelectedFriendRow(
+    _Friend friend,
+  ) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      margin: const EdgeInsets.only(
+        bottom: 6,
+      ),
+      padding:
+          const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 10,
+          ),
       decoration: BoxDecoration(
         color: Colors.grey[50],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade200),
+        borderRadius:
+            BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.grey.shade200,
+        ),
       ),
       child: Row(
         children: [
@@ -3568,40 +5994,76 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
               color: Colors.grey[300],
               shape: BoxShape.circle,
             ),
-            child: Icon(Icons.person, color: Colors.grey[600], size: 20),
+            child: Icon(
+              Icons.person,
+              color: Colors.grey[600],
+              size: 20,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment:
+                  CrossAxisAlignment
+                      .start,
               children: [
                 Text(
                   friend.name,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.black87,
-                  ),
+                  style:
+                      const TextStyle(
+                        fontSize: 14,
+                        fontWeight:
+                            FontWeight
+                                .w600,
+                        color: Colors
+                            .black87,
+                      ),
                 ),
                 Text(
                   friend.phone,
-                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors
+                        .grey[500],
+                  ),
                 ),
               ],
             ),
           ),
 
-          // Heart icon
-          Icon(
-            friend.isFavorite ? Icons.favorite : Icons.favorite_border,
-            size: 22,
-            color: friend.isFavorite ? Colors.red : Colors.grey[400],
+          // Heart icon — always reads live from DB, tap toggles favorite
+          GestureDetector(
+            onTap: () async {
+              await _favService.toggle(
+                friend.phone,
+                friend.name,
+              );
+              if (mounted)
+                setState(() {});
+            },
+            child: Icon(
+              _favService.isFavorite(
+                    friend.phone,
+                  )
+                  ? Icons.favorite
+                  : Icons
+                        .favorite_border,
+              size: 22,
+              color:
+                  _favService
+                      .isFavorite(
+                        friend.phone,
+                      )
+                  ? Colors.red
+                  : Colors.grey[400],
+            ),
           ),
           const SizedBox(width: 8),
 
           // Green checkmark / remove indicator
           GestureDetector(
-            onTap: () => _removeFriend(friend),
+            onTap: () =>
+                _removeFriend(friend),
             child: const Icon(
               Icons.check_circle,
               color: AppColors.kGreen,
@@ -3617,8 +6079,12 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     return Wrap(
       spacing: 10,
       runSpacing: 10,
-      children: _allPlaceCategories.map((type) {
-        final selected = _selectedPlaceCategories.contains(type);
+      children: _allPlaceCategories.map((
+        type,
+      ) {
+        final selected =
+            _selectedPlaceCategories
+                .contains(type);
         return GestureDetector(
           onTap: () {
             setState(() {
@@ -3626,30 +6092,60 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
             });
           },
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
+            padding:
+                const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 9,
+                ),
             decoration: BoxDecoration(
               color: selected
-                  ? AppColors.kGreen.withOpacity(0.13)
+                  ? AppColors.kGreen
+                        .withOpacity(
+                          0.13,
+                        )
                   : Colors.transparent,
               border: Border.all(
-                color: selected ? AppColors.kGreen : Colors.grey.shade400,
+                color: selected
+                    ? AppColors.kGreen
+                    : Colors
+                          .grey
+                          .shade400,
               ),
-              borderRadius: BorderRadius.circular(30),
+              borderRadius:
+                  BorderRadius.circular(
+                    30,
+                  ),
             ),
             child: Row(
-              mainAxisSize: MainAxisSize.min,
+              mainAxisSize:
+                  MainAxisSize.min,
               children: [
                 Text(
                   type,
                   style: TextStyle(
                     fontSize: 14,
-                    color: selected ? AppColors.kGreen : Colors.black87,
-                    fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                    color: selected
+                        ? AppColors
+                              .kGreen
+                        : Colors
+                              .black87,
+                    fontWeight: selected
+                        ? FontWeight
+                              .w600
+                        : FontWeight
+                              .w400,
                   ),
                 ),
                 if (selected) ...[
-                  const SizedBox(width: 4),
-                  Icon(Icons.close, size: 14, color: AppColors.kGreen),
+                  const SizedBox(
+                    width: 4,
+                  ),
+                  Icon(
+                    Icons.close,
+                    size: 14,
+                    color: AppColors
+                        .kGreen,
+                  ),
                 ],
               ],
             ),
@@ -3671,16 +6167,24 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     }
 
     // Choosing any specific type should always unselect "Any".
-    _selectedPlaceCategories.remove(any);
+    _selectedPlaceCategories.remove(
+      any,
+    );
 
-    if (_selectedPlaceCategories.contains(type)) {
-      _selectedPlaceCategories.remove(type);
+    if (_selectedPlaceCategories
+        .contains(type)) {
+      _selectedPlaceCategories.remove(
+        type,
+      );
     } else {
-      _selectedPlaceCategories.add(type);
+      _selectedPlaceCategories.add(
+        type,
+      );
     }
 
     // Keep at least one selected.
-    if (_selectedPlaceCategories.isEmpty) {
+    if (_selectedPlaceCategories
+        .isEmpty) {
       _selectedPlaceCategories.add(any);
     }
   }
@@ -3690,17 +6194,28 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   // ─────────────────────────────────────────────────────────────────────────
 
   Widget _buildStep2() {
-    final mapVenueId = _mapVenueIdForLocation;
-    final hintText = _hostLocation != null
+    final mapVenueId =
+        _mapVenueIdForLocation;
+    final hintText =
+        _hostLocation != null
         ? 'Location selected. Tap again to move it.'
         : 'Tap on the 3D map to place your pin.';
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
       children: [
-        _sectionLabel('Set My Location'),
+        _sectionLabel(
+          'Set My Location',
+        ),
         const SizedBox(height: 8),
-        Text(hintText, style: TextStyle(fontSize: 13, color: Colors.grey[600])),
+        Text(
+          hintText,
+          style: TextStyle(
+            fontSize: 13,
+            color: Colors.grey[600],
+          ),
+        ),
         const SizedBox(height: 12),
 
         if (mapVenueId == null)
@@ -3708,11 +6223,23 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
             height: 400,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: Colors.grey.shade50,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.grey.shade200),
+              color:
+                  Colors.grey.shade50,
+              borderRadius:
+                  BorderRadius.circular(
+                    16,
+                  ),
+              border: Border.all(
+                color: Colors
+                    .grey
+                    .shade200,
+              ),
             ),
-            child: const CircularProgressIndicator(color: AppColors.kGreen),
+            child:
+                const CircularProgressIndicator(
+                  color:
+                      AppColors.kGreen,
+                ),
           )
         else
           SizedBox(
@@ -3721,30 +6248,53 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
               key: ValueKey(
                 'meeting_step2_map_${mapVenueId}_$_step2MapVersion',
               ),
-              shopName: _venueName ?? 'Meeting Point',
+              shopName:
+                  _venueName ??
+                  'Meeting Point',
               shopId: mapVenueId,
               venueId: mapVenueId,
               returnResultOnly: true,
-              initialUserPinGltf: _step2InitialUserPinGltf,
-              initialFloorLabel: _step2InitialFloorLabel,
+              initialUserPinGltf:
+                  _step2InitialUserPinGltf,
+              initialFloorLabel:
+                  _step2InitialFloorLabel,
               embeddedMode: true,
               onLocationPicked: (result) {
-                final g = result['gltf'];
-                final floorLabel = (result['floorLabel'] ?? '').toString();
+                final g =
+                    result['gltf'];
+                final floorLabel =
+                    (result['floorLabel'] ??
+                            '')
+                        .toString();
                 if (g is Map) {
-                  final x = (g['x'] as num?)?.toDouble();
-                  final y = (g['y'] as num?)?.toDouble();
-                  final z = (g['z'] as num?)?.toDouble();
-                  if (x != null && y != null && z != null) {
+                  final x =
+                      (g['x'] as num?)
+                          ?.toDouble();
+                  final y =
+                      (g['y'] as num?)
+                          ?.toDouble();
+                  final z =
+                      (g['z'] as num?)
+                          ?.toDouble();
+                  if (x != null &&
+                      y != null &&
+                      z != null) {
                     setState(() {
-                      _step2InitialUserPinGltf = {'x': x, 'y': y, 'z': z};
-                      _step2InitialFloorLabel = floorLabel;
+                      _step2InitialUserPinGltf =
+                          {
+                            'x': x,
+                            'y': y,
+                            'z': z,
+                          };
+                      _step2InitialFloorLabel =
+                          floorLabel;
                     });
                   }
                 }
                 _applyHostLocationFromSetLocationResult(
                   result,
-                  fallback: 'Pinned location',
+                  fallback:
+                      'Pinned location',
                 );
               },
             ),
@@ -3753,7 +6303,8 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         const SizedBox(height: 12),
         PrimaryButton(
           text: 'Scan With Camera',
-          icon: Icons.camera_alt_outlined,
+          icon:
+              Icons.camera_alt_outlined,
           onPressed: _scanWithCamera,
         ),
         const SizedBox(height: 12),
@@ -3763,71 +6314,126 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
   DateTime? _toUtcDate(dynamic v) {
     if (v == null) return null;
-    if (v is Timestamp) return v.toDate().toUtc();
-    if (v is int) return DateTime.fromMillisecondsSinceEpoch(v, isUtc: true);
+    if (v is Timestamp)
+      return v.toDate().toUtc();
+    if (v is int)
+      return DateTime.fromMillisecondsSinceEpoch(
+        v,
+        isUtc: true,
+      );
     if (v is num) {
-      return DateTime.fromMillisecondsSinceEpoch(v.toInt(), isUtc: true);
+      return DateTime.fromMillisecondsSinceEpoch(
+        v.toInt(),
+        isUtc: true,
+      );
     }
-    if (v is String) return DateTime.tryParse(v)?.toUtc();
+    if (v is String)
+      return DateTime.tryParse(
+        v,
+      )?.toUtc();
     return null;
   }
 
-  Map<String, double> _blenderToGltf(Map<String, double> b) {
+  Map<String, double> _blenderToGltf(
+    Map<String, double> b,
+  ) {
     // Blender (Z up) -> glTF (Y up)
-    return {'x': b['x'] ?? 0, 'y': (b['z'] ?? 0), 'z': -(b['y'] ?? 0)};
+    return {
+      'x': b['x'] ?? 0,
+      'y': (b['z'] ?? 0),
+      'z': -(b['y'] ?? 0),
+    };
   }
 
-  Future<void> _loadSavedStep2Location() async {
-    final user = FirebaseAuth.instance.currentUser;
+  Future<void>
+  _loadSavedStep2Location() async {
+    final user = FirebaseAuth
+        .instance
+        .currentUser;
     if (user == null) return;
 
     try {
-      final userDocRef = await _resolveUserDocRef(user);
-      final doc = await userDocRef.get();
+      final userDocRef =
+          await _resolveUserDocRef(
+            user,
+          );
+      final doc = await userDocRef
+          .get();
       final data = doc.data();
       if (data == null) return;
 
       final location = data['location'];
       if (location is! Map) return;
 
-      final updatedAt = _toUtcDate(location['updatedAt']);
+      final updatedAt = _toUtcDate(
+        location['updatedAt'],
+      );
       if (updatedAt != null) {
-        final oneHourAgo = DateTime.now().toUtc().subtract(
-          const Duration(hours: 1),
-        );
-        if (updatedAt.isBefore(oneHourAgo)) return;
+        final oneHourAgo =
+            DateTime.now()
+                .toUtc()
+                .subtract(
+                  const Duration(
+                    hours: 1,
+                  ),
+                );
+        if (updatedAt.isBefore(
+          oneHourAgo,
+        ))
+          return;
       }
 
-      final bp = location['blenderPosition'];
+      final bp =
+          location['blenderPosition'];
       if (bp is! Map) return;
 
-      final x = (bp['x'] as num?)?.toDouble();
-      final y = (bp['y'] as num?)?.toDouble();
-      final z = (bp['z'] as num?)?.toDouble();
+      final x = (bp['x'] as num?)
+          ?.toDouble();
+      final y = (bp['y'] as num?)
+          ?.toDouble();
+      final z = (bp['z'] as num?)
+          ?.toDouble();
       final floorRaw = bp['floor'];
-      if (x == null || y == null || z == null) return;
+      if (x == null ||
+          y == null ||
+          z == null)
+        return;
 
-      final floorLabel = floorRaw == null ? '' : floorRaw.toString();
-      final blenderRaw = {'x': x, 'y': y, 'z': z};
+      final floorLabel =
+          floorRaw == null
+          ? ''
+          : floorRaw.toString();
+      final blenderRaw = {
+        'x': x,
+        'y': y,
+        'z': z,
+      };
 
       NavMesh? nav;
       try {
-        nav = await NavMesh.loadAsset('assets/nav_cor/navmesh_GF.json');
+        nav = await NavMesh.loadAsset(
+          'assets/nav_cor/navmesh_GF.json',
+        );
       } catch (_) {
         nav = null;
       }
 
       final blender = (nav == null)
           ? blenderRaw
-          : nav.snapBlenderPoint(blenderRaw);
-      final gltf = _blenderToGltf(blender);
+          : nav.snapBlenderPoint(
+              blenderRaw,
+            );
+      final gltf = _blenderToGltf(
+        blender,
+      );
 
       if (!mounted) return;
       if (_hostLocation != null) return;
 
       setState(() {
         _step2InitialUserPinGltf = gltf;
-        _step2InitialFloorLabel = floorLabel;
+        _step2InitialFloorLabel =
+            floorLabel;
         _step2MapVersion++;
         _hostLocation = _HostLocation(
           latitude: blender['x'] ?? x,
@@ -3841,12 +6447,16 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   }
 
   Future<void> _scanWithCamera() async {
-    final status = await Permission.camera.request();
+    final status = await Permission
+        .camera
+        .request();
     if (!mounted) return;
 
     if (!status.isGranted) {
       if (status.isPermanentlyDenied) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(
           const SnackBar(
             content: Text(
               'Camera permission required. Please enable in Settings.',
@@ -3855,38 +6465,67 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         );
         openAppSettings();
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Camera permission is required.')),
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Camera permission is required.',
+            ),
+          ),
         );
       }
       return;
     }
 
-    final user = FirebaseAuth.instance.currentUser;
+    final user = FirebaseAuth
+        .instance
+        .currentUser;
     if (user == null) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('You must be signed in.')));
+      ).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'You must be signed in.',
+          ),
+        ),
+      );
       return;
     }
 
-    final scanStartUtc = DateTime.now().toUtc();
-    final userDocRef = await _resolveUserDocRef(user);
+    final scanStartUtc = DateTime.now()
+        .toUtc();
+    final userDocRef =
+        await _resolveUserDocRef(user);
 
     DateTime? toUtcDate(dynamic v) {
       if (v == null) return null;
-      if (v is Timestamp) return v.toDate().toUtc();
-      if (v is int) return DateTime.fromMillisecondsSinceEpoch(v, isUtc: true);
+      if (v is Timestamp)
+        return v.toDate().toUtc();
+      if (v is int)
+        return DateTime.fromMillisecondsSinceEpoch(
+          v,
+          isUtc: true,
+        );
       if (v is num) {
-        return DateTime.fromMillisecondsSinceEpoch(v.toInt(), isUtc: true);
+        return DateTime.fromMillisecondsSinceEpoch(
+          v.toInt(),
+          isUtc: true,
+        );
       }
-      if (v is String) return DateTime.tryParse(v)?.toUtc();
+      if (v is String)
+        return DateTime.tryParse(
+          v,
+        )?.toUtc();
       return null;
     }
 
     NavMesh? nav;
     try {
-      nav = await NavMesh.loadAsset('assets/nav_cor/navmesh_GF.json');
+      nav = await NavMesh.loadAsset(
+        'assets/nav_cor/navmesh_GF.json',
+      );
     } catch (_) {
       nav = null;
     }
@@ -3894,7 +6533,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     bool didReturn = false;
     late final StreamSubscription sub;
 
-    sub = userDocRef.snapshots().listen((snap) async {
+    sub = userDocRef.snapshots().listen((
+      snap,
+    ) async {
       if (didReturn) return;
 
       final data = snap.data();
@@ -3903,59 +6544,93 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       final loc = data['location'];
       if (loc is! Map) return;
 
-      final updatedAtUtc = toUtcDate(loc['updatedAt']);
-      if (updatedAtUtc == null || !updatedAtUtc.isAfter(scanStartUtc)) return;
+      final updatedAtUtc = toUtcDate(
+        loc['updatedAt'],
+      );
+      if (updatedAtUtc == null ||
+          !updatedAtUtc.isAfter(
+            scanStartUtc,
+          ))
+        return;
 
       final bp = loc['blenderPosition'];
       if (bp is! Map) return;
 
-      final x = (bp['x'] as num?)?.toDouble();
-      final y = (bp['y'] as num?)?.toDouble();
-      final z = (bp['z'] as num?)?.toDouble();
+      final x = (bp['x'] as num?)
+          ?.toDouble();
+      final y = (bp['y'] as num?)
+          ?.toDouble();
+      final z = (bp['z'] as num?)
+          ?.toDouble();
       final floor = bp['floor'];
 
-      if (x == null || y == null || z == null) return;
+      if (x == null ||
+          y == null ||
+          z == null)
+        return;
 
-      var snapped = <String, double>{'x': x, 'y': y, 'z': z};
+      var snapped = <String, double>{
+        'x': x,
+        'y': y,
+        'z': z,
+      };
       if (nav != null) {
         try {
-          snapped = nav.snapBlenderPoint(snapped);
+          snapped = nav
+              .snapBlenderPoint(
+                snapped,
+              );
         } catch (_) {}
       }
 
       didReturn = true;
 
-      if (Navigator.of(context).canPop()) {
+      if (Navigator.of(
+        context,
+      ).canPop()) {
         Navigator.of(context).pop();
       }
 
       await sub.cancel();
       if (!mounted) return;
 
-      final snappedGltf = <String, double>{
-        'x': snapped['x'] ?? x,
-        'y': snapped['y'] ?? y,
-        'z': snapped['z'] ?? z,
-      };
+      final snappedGltf =
+          <String, double>{
+            'x': snapped['x'] ?? x,
+            'y': snapped['y'] ?? y,
+            'z': snapped['z'] ?? z,
+          };
 
-      final floorLabelFromScan = floor == null ? '' : floor.toString();
+      final floorLabelFromScan =
+          floor == null
+          ? ''
+          : floor.toString();
       setState(() {
-        _step2InitialUserPinGltf = snappedGltf;
-        _step2InitialFloorLabel = floorLabelFromScan;
+        _step2InitialUserPinGltf =
+            snappedGltf;
+        _step2InitialFloorLabel =
+            floorLabelFromScan;
         _step2MapVersion++;
       });
 
-      await _applyHostLocationFromSetLocationResult({
-        'gltf': snappedGltf,
-        'blender': snapped,
-        'floorLabel': floorLabelFromScan,
-      }, fallback: 'Camera scan');
+      await _applyHostLocationFromSetLocationResult(
+        {
+          'gltf': snappedGltf,
+          'blender': snapped,
+          'floorLabel':
+              floorLabelFromScan,
+        },
+        fallback: 'Camera scan',
+      );
     });
 
     await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => const UnityCameraPage(isScanOnly: true),
+        builder: (_) =>
+            const UnityCameraPage(
+              isScanOnly: true,
+            ),
       ),
     );
 
@@ -3966,86 +6641,138 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     }
   }
 
-  Future<void> _applyHostLocationFromSetLocationResult(
+  Future<void>
+  _applyHostLocationFromSetLocationResult(
     Map<String, dynamic> result, {
     required String fallback,
   }) async {
     final blender = result['blender'];
     final gltf = result['gltf'];
-    final floorLabel = (result['floorLabel'] ?? '').toString().trim();
+    final floorLabel =
+        (result['floorLabel'] ?? '')
+            .toString()
+            .trim();
 
     double? x;
     double? z;
 
     if (blender is Map) {
-      x = (blender['x'] as num?)?.toDouble();
-      z = (blender['z'] as num?)?.toDouble();
+      x = (blender['x'] as num?)
+          ?.toDouble();
+      z = (blender['z'] as num?)
+          ?.toDouble();
     }
 
-    if ((x == null || z == null) && gltf is Map) {
-      x ??= (gltf['x'] as num?)?.toDouble();
-      z ??= (gltf['z'] as num?)?.toDouble();
+    if ((x == null || z == null) &&
+        gltf is Map) {
+      x ??= (gltf['x'] as num?)
+          ?.toDouble();
+      z ??= (gltf['z'] as num?)
+          ?.toDouble();
     }
 
     if (x == null || z == null) {
-      final pos = await _getPositionOrNull();
+      final pos =
+          await _getPositionOrNull();
       x = pos?.latitude;
       z = pos?.longitude;
     }
 
-    if (x == null || z == null || !mounted) return;
+    if (x == null ||
+        z == null ||
+        !mounted)
+      return;
 
     final label = floorLabel.isNotEmpty
         ? 'Current location ($floorLabel)'
         : fallback;
     setState(() {
-      _hostLocation = _HostLocation(latitude: x!, longitude: z!, label: label);
+      _hostLocation = _HostLocation(
+        latitude: x!,
+        longitude: z!,
+        label: label,
+      );
     });
 
     // Persist the picked location to users/{doc}.location.blenderPosition
     // so suggestions can use the latest saved location.
-    await _saveUserLocationFromResult(result);
+    await _saveUserLocationFromResult(
+      result,
+    );
   }
 
-  Map<String, double>? _extractBlenderFromResult(Map<String, dynamic> result) {
+  Map<String, double>?
+  _extractBlenderFromResult(
+    Map<String, dynamic> result,
+  ) {
     final blender = result['blender'];
     if (blender is Map) {
-      final x = (blender['x'] as num?)?.toDouble();
-      final y = (blender['y'] as num?)?.toDouble();
-      final z = (blender['z'] as num?)?.toDouble();
-      if (x != null && y != null && z != null) {
+      final x = (blender['x'] as num?)
+          ?.toDouble();
+      final y = (blender['y'] as num?)
+          ?.toDouble();
+      final z = (blender['z'] as num?)
+          ?.toDouble();
+      if (x != null &&
+          y != null &&
+          z != null) {
         return {'x': x, 'y': y, 'z': z};
       }
     }
 
     final gltf = result['gltf'];
     if (gltf is Map) {
-      final x = (gltf['x'] as num?)?.toDouble();
-      final y = (gltf['y'] as num?)?.toDouble();
-      final z = (gltf['z'] as num?)?.toDouble();
-      if (x != null && y != null && z != null) {
+      final x = (gltf['x'] as num?)
+          ?.toDouble();
+      final y = (gltf['y'] as num?)
+          ?.toDouble();
+      final z = (gltf['z'] as num?)
+          ?.toDouble();
+      if (x != null &&
+          y != null &&
+          z != null) {
         // glTF (Y up) -> Blender (Z up)
-        return {'x': x, 'y': -z, 'z': y};
+        return {
+          'x': x,
+          'y': -z,
+          'z': y,
+        };
       }
     }
 
     return null;
   }
 
-  Future<void> _saveUserLocationFromResult(Map<String, dynamic> result) async {
-    final blender = _extractBlenderFromResult(result);
+  Future<void>
+  _saveUserLocationFromResult(
+    Map<String, dynamic> result,
+  ) async {
+    final blender =
+        _extractBlenderFromResult(
+          result,
+        );
     if (blender == null) return;
 
-    final user = FirebaseAuth.instance.currentUser;
+    final user = FirebaseAuth
+        .instance
+        .currentUser;
     if (user == null) return;
 
-    final floorLabel = (result['floorLabel'] ?? '').toString().trim();
-    final floorValue = floorLabel.isNotEmpty
+    final floorLabel =
+        (result['floorLabel'] ?? '')
+            .toString()
+            .trim();
+    final floorValue =
+        floorLabel.isNotEmpty
         ? floorLabel
-        : (_step2InitialFloorLabel ?? '');
+        : (_step2InitialFloorLabel ??
+              '');
 
     try {
-      final userDocRef = await _resolveUserDocRef(user);
+      final userDocRef =
+          await _resolveUserDocRef(
+            user,
+          );
       await userDocRef.update({
         'location.blenderPosition': {
           'x': blender['x'],
@@ -4053,110 +6780,185 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           'z': blender['z'],
           'floor': floorValue,
         },
-        'location.updatedAt': FieldValue.serverTimestamp(),
+        'location.updatedAt':
+            FieldValue.serverTimestamp(),
       });
     } catch (e) {
-      debugPrint('❌ Failed to save user location from meeting form: $e');
+      debugPrint(
+        '❌ Failed to save user location from meeting form: $e',
+      );
     }
   }
 
-  Future<void> _touchStep2LocationOnNext() async {
+  Future<void>
+  _touchStep2LocationOnNext() async {
     if (_hostLocation == null) return;
 
-    final user = FirebaseAuth.instance.currentUser;
+    final user = FirebaseAuth
+        .instance
+        .currentUser;
     if (user == null) return;
 
-    final gltf = _step2InitialUserPinGltf;
-    if (gltf != null && gltf.isNotEmpty) {
-      final floorLabel = (_step2InitialFloorLabel ?? '').toString().trim();
-      await _saveUserLocationFromResult({
-        'gltf': gltf,
-        'floorLabel': floorLabel,
-      });
+    final gltf =
+        _step2InitialUserPinGltf;
+    if (gltf != null &&
+        gltf.isNotEmpty) {
+      final floorLabel =
+          (_step2InitialFloorLabel ??
+                  '')
+              .toString()
+              .trim();
+      await _saveUserLocationFromResult(
+        {
+          'gltf': gltf,
+          'floorLabel': floorLabel,
+        },
+      );
       return;
     }
 
     try {
-      final userDocRef = await _resolveUserDocRef(user);
+      final userDocRef =
+          await _resolveUserDocRef(
+            user,
+          );
       await userDocRef.update({
-        'location.updatedAt': FieldValue.serverTimestamp(),
+        'location.updatedAt':
+            FieldValue.serverTimestamp(),
       });
     } catch (e) {
-      debugPrint('Failed to touch user location timestamp: $e');
+      debugPrint(
+        'Failed to touch user location timestamp: $e',
+      );
     }
   }
 
-  Future<DocumentReference<Map<String, dynamic>>> _resolveUserDocRef(
-    User user,
-  ) async {
-    final users = FirebaseFirestore.instance.collection('users');
+  Future<
+    DocumentReference<
+      Map<String, dynamic>
+    >
+  >
+  _resolveUserDocRef(User user) async {
+    final users = FirebaseFirestore
+        .instance
+        .collection('users');
 
     final email = user.email;
-    if (email != null && email.isNotEmpty) {
-      final snap = await users.where('email', isEqualTo: email).limit(1).get();
+    if (email != null &&
+        email.isNotEmpty) {
+      final snap = await users
+          .where(
+            'email',
+            isEqualTo: email,
+          )
+          .limit(1)
+          .get();
       if (snap.docs.isNotEmpty) {
-        return snap.docs.first.reference;
+        return snap
+            .docs
+            .first
+            .reference;
       }
     }
 
     final phone = user.phoneNumber;
-    if (phone != null && phone.isNotEmpty) {
-      final snap = await users.where('phone', isEqualTo: phone).limit(1).get();
+    if (phone != null &&
+        phone.isNotEmpty) {
+      final snap = await users
+          .where(
+            'phone',
+            isEqualTo: phone,
+          )
+          .limit(1)
+          .get();
       if (snap.docs.isNotEmpty) {
-        return snap.docs.first.reference;
+        return snap
+            .docs
+            .first
+            .reference;
       }
     }
 
     return users.doc(user.uid);
   }
 
-  Future<String> _resolveMapVenueId() async {
-    Future<bool> hasMap(String id) async {
-      if (id.trim().isEmpty) return false;
+  Future<String>
+  _resolveMapVenueId() async {
+    Future<bool> hasMap(
+      String id,
+    ) async {
+      if (id.trim().isEmpty)
+        return false;
       try {
-        final doc = await FirebaseFirestore.instance
-            .collection('venues')
-            .doc(id.trim())
-            .get(const GetOptions(source: Source.serverAndCache));
+        final doc =
+            await FirebaseFirestore
+                .instance
+                .collection('venues')
+                .doc(id.trim())
+                .get(
+                  const GetOptions(
+                    source: Source
+                        .serverAndCache,
+                  ),
+                );
         final data = doc.data();
         return data != null &&
             data['map'] is List &&
-            (data['map'] as List).isNotEmpty;
+            (data['map'] as List)
+                .isNotEmpty;
       } catch (_) {
         return false;
       }
     }
 
-    if (_venueId != null && await hasMap(_venueId!)) {
+    if (_venueId != null &&
+        await hasMap(_venueId!)) {
       return _venueId!;
     }
 
-    if (await hasMap(_kFallbackMapVenueId)) {
+    if (await hasMap(
+      _kFallbackMapVenueId,
+    )) {
       return _kFallbackMapVenueId;
     }
 
     try {
-      final snap = await FirebaseFirestore.instance
-          .collection('venues')
-          .limit(50)
-          .get(const GetOptions(source: Source.serverAndCache));
+      final snap =
+          await FirebaseFirestore
+              .instance
+              .collection('venues')
+              .limit(50)
+              .get(
+                const GetOptions(
+                  source: Source
+                      .serverAndCache,
+                ),
+              );
       for (final d in snap.docs) {
         final data = d.data();
-        if (data['map'] is List && (data['map'] as List).isNotEmpty) {
+        if (data['map'] is List &&
+            (data['map'] as List)
+                .isNotEmpty) {
           return d.id;
         }
       }
     } catch (_) {}
 
-    return (_venueId ?? _kFallbackMapVenueId).trim();
+    return (_venueId ??
+            _kFallbackMapVenueId)
+        .trim();
   }
 
-  Future<void> _prepareStep2MapVenueId() async {
-    final resolved = await _resolveMapVenueId();
+  Future<void>
+  _prepareStep2MapVenueId() async {
+    final resolved =
+        await _resolveMapVenueId();
     if (!mounted) return;
-    if (_mapVenueIdForLocation != resolved) {
+    if (_mapVenueIdForLocation !=
+        resolved) {
       setState(() {
-        _mapVenueIdForLocation = resolved;
+        _mapVenueIdForLocation =
+            resolved;
         _step2MapVersion++;
       });
     }
@@ -4168,7 +6970,8 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
   Widget _buildStep3() {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
       children: [
         _sectionLabel('Summary'),
         const SizedBox(height: 16),
@@ -4176,69 +6979,106 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         // Green left-border summary card (no filled background)
         IntrinsicHeight(
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+            crossAxisAlignment:
+                CrossAxisAlignment
+                    .stretch,
             children: [
               // Green vertical line
               Container(
                 width: 3,
                 decoration: BoxDecoration(
-                  color: AppColors.kGreen,
-                  borderRadius: BorderRadius.circular(2),
+                  color:
+                      AppColors.kGreen,
+                  borderRadius:
+                      BorderRadius.circular(
+                        2,
+                      ),
                 ),
               ),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment:
+                      CrossAxisAlignment
+                          .start,
                   children: [
-                    _summaryRow('Venue', _venueName ?? '—'),
-                    const SizedBox(height: 10),
+                    _summaryRow(
+                      'Venue',
+                      _venueName ?? '—',
+                    ),
+                    const SizedBox(
+                      height: 10,
+                    ),
                     _summaryRow(
                       'Where to meet',
-                      _selectedPlaceCategories.join(', '),
+                      _selectedPlaceCategories
+                          .join(', '),
                     ),
-                    const SizedBox(height: 10),
+                    const SizedBox(
+                      height: 10,
+                    ),
                     _summaryRow(
                       'My location',
-                      _hostLocation != null
+                      _hostLocation !=
+                              null
                           ? 'Current location set'
                           : 'Not set',
                     ),
-                    const SizedBox(height: 10),
+                    const SizedBox(
+                      height: 10,
+                    ),
                     const Text(
                       'Invited friends',
                       style: TextStyle(
                         fontSize: 13,
-                        color: Colors.black54,
-                        fontWeight: FontWeight.w500,
+                        color: Colors
+                            .black54,
+                        fontWeight:
+                            FontWeight
+                                .w500,
                       ),
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(
+                      height: 6,
+                    ),
                     ..._selectedFriends.map(
                       (f) => Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
+                        padding:
+                            const EdgeInsets.only(
+                              bottom: 4,
+                            ),
                         child: Row(
                           children: [
                             Container(
                               width: 28,
-                              height: 28,
+                              height:
+                                  28,
                               decoration: BoxDecoration(
-                                color: Colors.grey[200],
-                                shape: BoxShape.circle,
+                                color: Colors
+                                    .grey[200],
+                                shape: BoxShape
+                                    .circle,
                               ),
                               child: Icon(
-                                Icons.person,
-                                size: 15,
-                                color: Colors.grey[600],
+                                Icons
+                                    .person,
+                                size:
+                                    15,
+                                color: Colors
+                                    .grey[600],
                               ),
                             ),
-                            const SizedBox(width: 8),
+                            const SizedBox(
+                              width: 8,
+                            ),
                             Expanded(
                               child: Text(
                                 '${f.name} · ${f.phone}',
                                 style: const TextStyle(
-                                  fontSize: 13,
-                                  color: Colors.black87,
+                                  fontSize:
+                                      13,
+                                  color:
+                                      Colors.black87,
                                 ),
                               ),
                             ),
@@ -4257,9 +7097,13 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     );
   }
 
-  Widget _summaryRow(String label, String value) {
+  Widget _summaryRow(
+    String label,
+    String value,
+  ) {
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
       children: [
         SizedBox(
           width: 130,
@@ -4267,11 +7111,13 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
             '$label:',
             maxLines: 1,
             softWrap: false,
-            overflow: TextOverflow.ellipsis,
+            overflow:
+                TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: 13,
               color: Colors.black54,
-              fontWeight: FontWeight.w500,
+              fontWeight:
+                  FontWeight.w500,
             ),
           ),
         ),
@@ -4281,7 +7127,8 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
             style: const TextStyle(
               fontSize: 13,
               color: Colors.black87,
-              fontWeight: FontWeight.w600,
+              fontWeight:
+                  FontWeight.w600,
             ),
           ),
         ),
@@ -4289,9 +7136,12 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     );
   }
 
-  Future<void> _sendInvitesAndAdvance() async {
+  Future<void>
+  _sendInvitesAndAdvance() async {
     if (_isSendingInvites) return;
-    setState(() => _isSendingInvites = true);
+    setState(
+      () => _isSendingInvites = true,
+    );
     try {
       await _sendInvites();
       if (!mounted) return;
@@ -4300,13 +7150,20 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
         _step = 4;
         _isSendingInvites = false;
       });
-      unawaited(_persistDraftIfNeeded());
+      unawaited(
+        _persistDraftIfNeeded(),
+      );
     } catch (e) {
       if (!mounted) return;
-      setState(() => _isSendingInvites = false);
+      setState(
+        () => _isSendingInvites = false,
+      );
       SnackbarHelper.showError(
         context,
-        e.toString().replaceFirst('Exception: ', ''),
+        e.toString().replaceFirst(
+          'Exception: ',
+          '',
+        ),
       );
     }
   }
@@ -4317,23 +7174,32 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
   Widget _buildStep4() {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
       children: [
-        _sectionLabel('Waiting for participants'),
+        _sectionLabel(
+          'Waiting for participants',
+        ),
         const SizedBox(height: 16),
 
         // Participant rows
-        ..._participants.map(_buildParticipantRow),
+        ..._participants.map(
+          _buildParticipantRow,
+        ),
 
         const SizedBox(height: 7),
 
         // Hint text
         Align(
-          alignment: Alignment.centerLeft,
+          alignment:
+              Alignment.centerLeft,
           child: Text(
             'Note: you can proceed with participants who accepted, or cancel the meeting point for all.',
             textAlign: TextAlign.left,
-            style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey[400],
+            ),
           ),
         ),
         const SizedBox(height: 20),
@@ -4341,26 +7207,45 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
     );
   }
 
-  Widget _buildParticipantRow(_Participant p) {
-    final statusText = p.status == _ParticipantStatus.accepted
+  Widget _buildParticipantRow(
+    _Participant p,
+  ) {
+    final statusText =
+        p.status ==
+            _ParticipantStatus.accepted
         ? 'Accepted'
-        : p.status == _ParticipantStatus.declined
+        : p.status ==
+              _ParticipantStatus
+                  .declined
         ? 'Declined'
         : 'Pending';
 
-    final statusColor = p.status == _ParticipantStatus.accepted
+    final statusColor =
+        p.status ==
+            _ParticipantStatus.accepted
         ? AppColors.kGreen
-        : p.status == _ParticipantStatus.declined
+        : p.status ==
+              _ParticipantStatus
+                  .declined
         ? AppColors.kError
         : Colors.orange[600]!;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      margin: const EdgeInsets.only(
+        bottom: 8,
+      ),
+      padding:
+          const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 10,
+          ),
       decoration: BoxDecoration(
         color: Colors.grey[50],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade200),
+        borderRadius:
+            BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.grey.shade200,
+        ),
       ),
       child: Row(
         children: [
@@ -4372,50 +7257,94 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
               color: Colors.grey[300],
               shape: BoxShape.circle,
             ),
-            child: Icon(Icons.person, color: Colors.grey[600], size: 20),
+            child: Icon(
+              Icons.person,
+              color: Colors.grey[600],
+              size: 20,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment:
+                  CrossAxisAlignment
+                      .start,
               children: [
                 Text(
                   p.friend.name,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.black87,
-                  ),
+                  style:
+                      const TextStyle(
+                        fontSize: 14,
+                        fontWeight:
+                            FontWeight
+                                .w600,
+                        color: Colors
+                            .black87,
+                      ),
                 ),
                 Text(
                   p.friend.phone,
-                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors
+                        .grey[500],
+                  ),
                 ),
               ],
             ),
           ),
 
-          // Heart
-          Icon(
-            p.friend.isFavorite ? Icons.favorite : Icons.favorite_border,
-            size: 22,
-            color: p.friend.isFavorite ? Colors.red : Colors.grey[400],
+          // Heart — live from DB, tap toggles favorite
+          GestureDetector(
+            onTap: () async {
+              await _favService.toggle(
+                p.friend.phone,
+                p.friend.name,
+              );
+              if (mounted)
+                setState(() {});
+            },
+            child: Icon(
+              _favService.isFavorite(
+                    p.friend.phone,
+                  )
+                  ? Icons.favorite
+                  : Icons
+                        .favorite_border,
+              size: 22,
+              color:
+                  _favService
+                      .isFavorite(
+                        p.friend.phone,
+                      )
+                  ? Colors.red
+                  : Colors.grey[400],
+            ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 8),
 
           // Status chip
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            padding:
+                const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
             decoration: BoxDecoration(
-              color: statusColor.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(20),
+              color: statusColor
+                  .withOpacity(0.12),
+              borderRadius:
+                  BorderRadius.circular(
+                    20,
+                  ),
             ),
             child: Text(
               statusText,
               style: TextStyle(
                 fontSize: 12,
                 color: statusColor,
-                fontWeight: FontWeight.w600,
+                fontWeight:
+                    FontWeight.w600,
               ),
             ),
           ),
@@ -4429,81 +7358,122 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   // ─────────────────────────────────────────────────────────────────────────
 
   Widget _buildStep5() {
-    final hasSuggestion = _suggestedPointName.trim().isNotEmpty;
-    final showEmpty = !hasSuggestion && _suggestionsComputed;
+    final hasSuggestion =
+        _suggestedPointName
+            .trim()
+            .isNotEmpty;
+    final showEmpty =
+        !hasSuggestion &&
+        _suggestionsComputed;
     final primaryName = hasSuggestion
         ? _suggestedPointName.trim()
-        : (showEmpty ? 'No suitable meeting point found' : 'Calculating...');
+        : (showEmpty
+              ? 'No suitable meeting point found'
+              : 'Calculating...');
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+    return SingleChildScrollView(
+      padding:
+          const EdgeInsets.fromLTRB(
+            20,
+            12,
+            20,
+            20,
+          ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
+        crossAxisAlignment:
+            CrossAxisAlignment.center,
         children: [
-          // Big pin icon centred
+          // Pin icon centred
           Container(
-            width: 96,
-            height: 96,
+            width: 72,
+            height: 72,
             decoration: BoxDecoration(
-              color: AppColors.kGreen.withOpacity(0.1),
+              color: AppColors.kGreen
+                  .withOpacity(0.1),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.place, color: AppColors.kGreen, size: 52),
+            child: const Icon(
+              Icons.place,
+              color: AppColors.kGreen,
+              size: 40,
+            ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 14),
 
           const Text(
             'The most suitable meeting point is',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 14, color: Colors.black54),
+            style: TextStyle(
+              fontSize: 14,
+              color: Colors.black54,
+            ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           Text(
             '"$primaryName"',
             textAlign: TextAlign.center,
             style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.w700,
-              color: hasSuggestion ? Colors.black87 : Colors.grey[500],
+              fontSize: 22,
+              fontWeight:
+                  FontWeight.w700,
+              color: hasSuggestion
+                  ? Colors.black87
+                  : Colors.grey[500],
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           if (hasSuggestion)
             Text(
               'If you don\'t decide, it will be auto-accepted when the timer runs out.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+              textAlign:
+                  TextAlign.center,
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey[500],
+              ),
             ),
           if (showEmpty) ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             Text(
               'Try different categories or make sure everyone\'s location is available.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              textAlign:
+                  TextAlign.center,
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey[600],
+              ),
             ),
           ],
 
-          const SizedBox(height: 24),
+          const SizedBox(height: 16),
 
           // ── Participants with distances ────────────────────────────────────
-          Expanded(child: _buildStep5ParticipantList()),
+          _buildStep5ParticipantList(),
         ],
       ),
     );
   }
 
   Widget _buildStep5FixedButtons() {
-    final hasSuggestion = _suggestedPointName.trim().isNotEmpty;
+    final hasSuggestion =
+        _suggestedPointName
+            .trim()
+            .isNotEmpty;
     return Container(
-      padding: EdgeInsets.fromLTRB(
-        20,
-        12,
-        20,
-        MediaQuery.of(context).padding.bottom + 12,
-      ),
+      padding:
+          const EdgeInsets.fromLTRB(
+            20,
+            12,
+            20,
+            12,
+          ),
       decoration: BoxDecoration(
         color: Colors.white,
-        border: Border(top: BorderSide(color: Colors.grey.shade200)),
+        border: Border(
+          top: BorderSide(
+            color: Colors.grey.shade200,
+          ),
+        ),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -4512,12 +7482,18 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
             width: double.infinity,
             height: 52,
             child: ElevatedButton(
-              onPressed: hasSuggestion ? _acceptSuggestedMeetingPoint : null,
+              onPressed: hasSuggestion
+                  ? _acceptSuggestedMeetingPoint
+                  : null,
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.kGreen,
+                backgroundColor:
+                    AppColors.kGreen,
                 elevation: 0,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius:
+                      BorderRadius.circular(
+                        12,
+                      ),
                 ),
               ),
               child: const Text(
@@ -4525,7 +7501,8 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: 16,
-                  fontWeight: FontWeight.w600,
+                  fontWeight:
+                      FontWeight.w600,
                 ),
               ),
             ),
@@ -4533,7 +7510,9 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           const SizedBox(height: 10),
           SecondaryButton(
             text: 'Reject',
-            onPressed: hasSuggestion ? _rejectSuggestedMeetingPoint : null,
+            onPressed: hasSuggestion
+                ? _rejectSuggestedMeetingPoint
+                : null,
           ),
         ],
       ),
@@ -4541,10 +7520,16 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
   }
 
   Widget _buildStep5ParticipantList() {
-    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    final uid =
+        FirebaseAuth
+            .instance
+            .currentUser
+            ?.uid ??
+        '';
 
     // Use client-side funneled distances (same algorithm as path_overview).
-    final Map<String, int> distMap = _step5DistMap;
+    final Map<String, int> distMap =
+        _step5DistMap;
 
     String formatTime(int meters) {
       final secs = meters / 1.4;
@@ -4554,15 +7539,27 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
     // Accepted non-host participants + those who declined during step 5.
     final accepted = _participants
-        .where((p) => p.status == _ParticipantStatus.accepted)
+        .where(
+          (p) =>
+              p.status ==
+              _ParticipantStatus
+                  .accepted,
+        )
         .toList();
     final declined = _participants
-        .where((p) => p.status == _ParticipantStatus.declined)
+        .where(
+          (p) =>
+              p.status ==
+              _ParticipantStatus
+                  .declined,
+        )
         .toList();
 
-    if (accepted.isEmpty && uid.isEmpty) return const SizedBox.shrink();
+    if (accepted.isEmpty && uid.isEmpty)
+      return const SizedBox.shrink();
 
-    final isComputing = _step5DistComputing;
+    final isComputing =
+        _step5DistComputing;
 
     Widget participantTile({
       required String name,
@@ -4571,8 +7568,12 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       required bool isDeclined,
       int? distMeters,
     }) {
-      final statusColor = isDeclined ? AppColors.kError : AppColors.kGreen;
-      final statusText = isDeclined ? 'Declined' : 'Accepted';
+      final statusColor = isDeclined
+          ? AppColors.kError
+          : AppColors.kGreen;
+      final statusText = isDeclined
+          ? 'Declined'
+          : 'Accepted';
 
       // Time label: shown inline with name, or a tiny spinner while computing.
       Widget? timeWidget;
@@ -4583,28 +7584,40 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
             style: TextStyle(
               fontSize: 12,
               color: Colors.grey[500],
-              fontWeight: FontWeight.w500,
+              fontWeight:
+                  FontWeight.w500,
             ),
           );
         } else if (isComputing) {
           timeWidget = SizedBox(
             width: 10,
             height: 10,
-            child: CircularProgressIndicator(
-              strokeWidth: 1.5,
-              color: Colors.grey[400],
-            ),
+            child:
+                CircularProgressIndicator(
+                  strokeWidth: 1.5,
+                  color:
+                      Colors.grey[400],
+                ),
           );
         }
       }
 
       return Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        margin: const EdgeInsets.only(
+          bottom: 8,
+        ),
+        padding:
+            const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 12,
+            ),
         decoration: BoxDecoration(
           color: Colors.grey[50],
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey.shade200),
+          borderRadius:
+              BorderRadius.circular(12),
+          border: Border.all(
+            color: Colors.grey.shade200,
+          ),
         ),
         child: Row(
           children: [
@@ -4615,62 +7628,124 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
                 color: Colors.grey[200],
                 shape: BoxShape.circle,
               ),
-              child: Icon(Icons.person, color: Colors.grey[600], size: 20),
+              child: Icon(
+                Icons.person,
+                color: Colors.grey[600],
+                size: 20,
+              ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment:
+                    CrossAxisAlignment
+                        .start,
                 children: [
                   // Name + time on the same row
                   Row(
                     children: [
                       Flexible(
                         child: Text(
-                          isHost ? 'Me (Host)' : name,
-                          overflow: TextOverflow.ellipsis,
+                          isHost
+                              ? 'Me (Host)'
+                              : name,
+                          overflow:
+                              TextOverflow
+                                  .ellipsis,
                           style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.black87,
+                            fontSize:
+                                13,
+                            fontWeight:
+                                FontWeight
+                                    .w600,
+                            color: Colors
+                                .black87,
                           ),
                         ),
                       ),
-                      if (timeWidget != null) ...[
-                        const SizedBox(width: 6),
+                      if (timeWidget !=
+                          null) ...[
+                        const SizedBox(
+                          width: 6,
+                        ),
                         timeWidget,
                       ],
                     ],
                   ),
                   // Phone below name (skip for host)
-                  if (!isHost && phone.isNotEmpty)
+                  if (!isHost &&
+                      phone.isNotEmpty)
                     Text(
                       phone,
-                      style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors
+                            .grey[500],
+                      ),
                     ),
                 ],
               ),
             ),
             const SizedBox(width: 8),
-            if (!isHost)
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 4,
+            if (!isHost) ...[
+              // Heart — live from DB, tap toggles favorite
+              GestureDetector(
+                onTap: () async {
+                  await _favService
+                      .toggle(
+                        phone,
+                        name,
+                      );
+                  if (mounted)
+                    setState(() {});
+                },
+                child: Icon(
+                  _favService
+                          .isFavorite(
+                            phone,
+                          )
+                      ? Icons.favorite
+                      : Icons
+                            .favorite_border,
+                  size: 22,
+                  color:
+                      _favService
+                          .isFavorite(
+                            phone,
+                          )
+                      ? Colors.red
+                      : Colors
+                            .grey[400],
                 ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
                 decoration: BoxDecoration(
-                  color: statusColor.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(20),
+                  color: statusColor
+                      .withValues(
+                        alpha: 0.12,
+                      ),
+                  borderRadius:
+                      BorderRadius.circular(
+                        20,
+                      ),
                 ),
                 child: Text(
                   statusText,
                   style: TextStyle(
                     fontSize: 12,
                     color: statusColor,
-                    fontWeight: FontWeight.w600,
+                    fontWeight:
+                        FontWeight.w600,
                   ),
                 ),
               ),
+            ],
           ],
         ),
       );
@@ -4692,7 +7767,8 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           phone: p.friend.phone,
           isHost: false,
           isDeclined: false,
-          distMeters: distMap[p.friend.id],
+          distMeters:
+              distMap[p.friend.id],
         ),
       ),
       ...declined.map(
@@ -4706,68 +7782,63 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       ),
     ];
 
-    // ≤2 tiles: natural height (no scroll, no fixed box).
-    // 3+ tiles: capped at ~2.4 tiles tall with a visible scrollbar.
-    const double tileHeight = 76; // name + phone + margin
-    final isScrollable = tiles.length > 2;
-
-    final listWidget = isScrollable
-        ? Scrollbar(
-            thumbVisibility: true,
-            radius: const Radius.circular(4),
-            child: SizedBox(
-              height: tileHeight * 2.4,
-              child: ListView(
-                padding: EdgeInsets.zero,
-                physics: const ClampingScrollPhysics(),
-                children: tiles,
-              ),
-            ),
-          )
-        : Column(children: tiles);
-
+    // The outer body is a SingleChildScrollView, so all tiles render at natural
+    // height and are reachable by scrolling the body.
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment:
+          CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Text(
-              'Participants',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: Colors.grey[700],
-              ),
-            ),
-            if (isScrollable) ...[
-              const SizedBox(width: 6),
-              Icon(Icons.expand_more, size: 14, color: Colors.grey[400]),
-            ],
-          ],
+        Text(
+          'Participants',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: Colors.grey[700],
+          ),
         ),
         const SizedBox(height: 8),
-        ScrollConfiguration(
-          behavior: ScrollConfiguration.of(context).copyWith(scrollbars: true),
-          child: listWidget,
-        ),
+        ...tiles,
       ],
     );
   }
 
-  Widget _buildSuggestedCandidateTile(Map<String, dynamic> raw, int index) {
-    final name = (raw['placeName'] ?? '').toString().trim();
-    final entrance = raw['entrance'] is Map ? raw['entrance'] as Map : null;
-    final floor = entrance?['floor']?.toString().trim() ?? '';
+  Widget _buildSuggestedCandidateTile(
+    Map<String, dynamic> raw,
+    int index,
+  ) {
+    final name =
+        (raw['placeName'] ?? '')
+            .toString()
+            .trim();
+    final entrance =
+        raw['entrance'] is Map
+        ? raw['entrance'] as Map
+        : null;
+    final floor =
+        entrance?['floor']
+            ?.toString()
+            .trim() ??
+        '';
     final rank = index + 1;
-    if (name.isEmpty) return const SizedBox.shrink();
+    if (name.isEmpty)
+      return const SizedBox.shrink();
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      margin: const EdgeInsets.only(
+        bottom: 8,
+      ),
+      padding:
+          const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 10,
+          ),
       decoration: BoxDecoration(
         color: Colors.grey[50],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade200),
+        borderRadius:
+            BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.grey.shade200,
+        ),
       ),
       child: Row(
         children: [
@@ -4775,7 +7846,8 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
             width: 26,
             height: 26,
             decoration: BoxDecoration(
-              color: AppColors.kGreen.withOpacity(0.15),
+              color: AppColors.kGreen
+                  .withOpacity(0.15),
               shape: BoxShape.circle,
             ),
             alignment: Alignment.center,
@@ -4783,7 +7855,8 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
               '$rank',
               style: const TextStyle(
                 fontSize: 12,
-                fontWeight: FontWeight.w700,
+                fontWeight:
+                    FontWeight.w700,
                 color: AppColors.kGreen,
               ),
             ),
@@ -4791,20 +7864,30 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
           const SizedBox(width: 10),
           Expanded(
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment:
+                  CrossAxisAlignment
+                      .start,
               children: [
                 Text(
                   name,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.black87,
-                  ),
+                  style:
+                      const TextStyle(
+                        fontSize: 14,
+                        fontWeight:
+                            FontWeight
+                                .w600,
+                        color: Colors
+                            .black87,
+                      ),
                 ),
                 if (floor.isNotEmpty)
                   Text(
                     'Floor: $floor',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors
+                          .grey[600],
+                    ),
                   ),
               ],
             ),
@@ -4820,54 +7903,77 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 
   Widget _buildFooter() {
     // Step 5 manages its own CTAs inside the body; no bottom footer.
-    if (_step == 5) return const SizedBox.shrink();
+    if (_step == 5)
+      return const SizedBox.shrink();
 
     return Container(
       padding: EdgeInsets.fromLTRB(
         20,
         12,
         20,
-        MediaQuery.of(context).padding.bottom + 12,
+        MediaQuery.of(
+              context,
+            ).padding.bottom +
+            12,
       ),
       decoration: BoxDecoration(
         color: Colors.white,
-        border: Border(top: BorderSide(color: Colors.grey.shade200)),
+        border: Border(
+          top: BorderSide(
+            color: Colors.grey.shade200,
+          ),
+        ),
       ),
       child: Row(
         children: [
           // Back button (shown from step 2 onwards, except step 4)
-          if (_step > 1 && _step != 4) ...[
+          if (_step > 1 &&
+              _step != 4) ...[
             Expanded(
-              child: SecondaryButton(text: 'Back', onPressed: _goBack),
+              child: SecondaryButton(
+                text: 'Back',
+                onPressed: _goBack,
+              ),
             ),
             const SizedBox(width: 12),
           ],
 
           // Next / Proceed button
           Expanded(
-            flex: _step > 1 && _step != 4 ? 2 : 1,
-            child: _buildPrimaryFooterButton(),
+            flex:
+                _step > 1 && _step != 4
+                ? 2
+                : 1,
+            child:
+                _buildPrimaryFooterButton(),
           ),
         ],
       ),
     );
   }
 
-  Future<void> _cancelMeetingPointFromForm() async {
-    final confirmed = await ConfirmationDialog.showDeleteConfirmation(
-      context,
-      title: 'Cancel Meeting Point',
-      message:
-          'Are you sure you want to cancel this meeting point for all participants?',
-      cancelText: 'Keep',
-      confirmText: 'Cancel Meeting',
-    );
+  Future<void>
+  _cancelMeetingPointFromForm() async {
+    final confirmed =
+        await ConfirmationDialog.showDeleteConfirmation(
+          context,
+          title: 'Cancel Meeting Point',
+          message:
+              'Are you sure you want to cancel this meeting point for all participants?',
+          cancelText: 'Keep',
+          confirmText: 'Cancel Meeting',
+        );
     if (confirmed != true) return;
     _waitTimer?.cancel();
-    unawaited(_syncMeetingPointProgress(status: 'cancelled'));
+    unawaited(
+      _syncMeetingPointProgress(
+        status: 'cancelled',
+      ),
+    );
     await _completeAndClose(
       success: false,
-      message: 'Meeting point cancelled.',
+      message:
+          'Meeting point cancelled.',
     );
   }
 
@@ -4882,20 +7988,31 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
             width: double.infinity,
             height: 52,
             child: ElevatedButton(
-              onPressed: enabled ? _goNext : null,
+              onPressed: enabled
+                  ? _goNext
+                  : null,
               style: ElevatedButton.styleFrom(
-                backgroundColor: enabled ? AppColors.kGreen : Colors.grey[300],
+                backgroundColor: enabled
+                    ? AppColors.kGreen
+                    : Colors.grey[300],
                 elevation: 0,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius:
+                      BorderRadius.circular(
+                        12,
+                      ),
                 ),
               ),
               child: Text(
                 'Proceed',
                 style: TextStyle(
-                  color: enabled ? Colors.white : Colors.grey[500],
+                  color: enabled
+                      ? Colors.white
+                      : Colors
+                            .grey[500],
                   fontSize: 15,
-                  fontWeight: FontWeight.w600,
+                  fontWeight:
+                      FontWeight.w600,
                 ),
               ),
             ),
@@ -4906,7 +8023,8 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
             height: 52,
             child: SecondaryButton(
               text: 'Cancel',
-              onPressed: _cancelMeetingPointFromForm,
+              onPressed:
+                  _cancelMeetingPointFromForm,
             ),
           ),
         ],
@@ -4918,28 +8036,40 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
       return PrimaryButton(
         text: 'Send Invites',
         isLoading: _isSendingInvites,
-        onPressed: _sendInvitesAndAdvance,
+        onPressed:
+            _sendInvitesAndAdvance,
       );
     }
 
     // Steps 1 and 2: "Next"
-    final enabled = _step == 1 ? _step1CanNext : _step2CanNext;
+    final enabled = _step == 1
+        ? _step1CanNext
+        : _step2CanNext;
     return SizedBox(
       width: double.infinity,
       height: 52,
       child: ElevatedButton(
-        onPressed: enabled ? _goNext : null,
+        onPressed: enabled
+            ? _goNext
+            : null,
         style: ElevatedButton.styleFrom(
-          backgroundColor: enabled ? AppColors.kGreen : Colors.grey[300],
+          backgroundColor: enabled
+              ? AppColors.kGreen
+              : Colors.grey[300],
           elevation: 0,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius:
+                BorderRadius.circular(
+                  12,
+                ),
           ),
         ),
         child: Text(
           'Next',
           style: TextStyle(
-            color: enabled ? Colors.white : Colors.grey[500],
+            color: enabled
+                ? Colors.white
+                : Colors.grey[500],
             fontSize: 15,
             fontWeight: FontWeight.w600,
           ),
@@ -4968,45 +8098,104 @@ class _CreateMeetingPointFormState extends State<CreateMeetingPointForm> {
 // FAVORITES LIST SHEET  (matches exact pattern from TrackRequestDialog)
 // ═════════════════════════════════════════════════════════════════════════════
 
-class _FavoriteListSheet extends StatefulWidget {
-  const _FavoriteListSheet({required this.alreadySelectedPhones});
-  final Set<String> alreadySelectedPhones;
+class _FavoriteListSheet
+    extends StatefulWidget {
+  const _FavoriteListSheet({
+    required this.alreadySelectedPhones,
+  });
+  final Set<String>
+  alreadySelectedPhones;
 
   @override
-  State<_FavoriteListSheet> createState() => _FavoriteListSheetState();
+  State<_FavoriteListSheet>
+  createState() =>
+      _FavoriteListSheetState();
 }
 
-class _FavoriteListSheetState extends State<_FavoriteListSheet> {
-  final _searchCtrl = TextEditingController();
+class _FavoriteListSheetState
+    extends State<_FavoriteListSheet> {
+  final _searchCtrl =
+      TextEditingController();
 
-  // Stub favorites – replace with real Firestore query.
-  final List<_Friend> _allFavorites = [
-    _Friend(
-      id: '1',
-      name: 'Mona Saleh',
-      phone: '+966557225235',
-      isFavorite: true,
-    ),
-    _Friend(
-      id: '2',
-      name: 'ar saeed',
-      phone: '+966334333333',
-      isFavorite: true,
-    ),
-    _Friend(id: '3', name: 'Ameera', phone: '+966503347974', isFavorite: true),
-    _Friend(id: '4', name: 'Amjad', phone: '+966503347973', isFavorite: true),
-  ];
-
-  late List<_Friend> _filtered;
-  final List<_Friend> _picked = [];
+  List<_Friend> _allFavorites = [];
+  List<_Friend> _filtered = [];
+  final Set<String> _checkedPhones = {};
+  bool _loadingFavorites = true;
 
   @override
   void initState() {
     super.initState();
-    _filtered = _allFavorites
-        .where((f) => !widget.alreadySelectedPhones.contains(f.phone))
-        .toList();
     _searchCtrl.addListener(_filter);
+    _loadFavorites();
+  }
+
+  Future<void> _loadFavorites() async {
+    try {
+      final uid = FirebaseAuth
+          .instance
+          .currentUser
+          ?.uid;
+      if (uid == null) {
+        setState(
+          () =>
+              _loadingFavorites = false,
+        );
+        return;
+      }
+      final snap =
+          await FirebaseFirestore
+              .instance
+              .collection('users')
+              .doc(uid)
+              .get();
+      final raw = snap
+          .data()?['favoriteFriends'];
+      final list = raw is List
+          ? raw
+                .map(
+                  (e) => _Friend(
+                    id:
+                        (e['phone'] ??
+                                '')
+                            .toString(),
+                    name:
+                        (e['name'] ??
+                                '')
+                            .toString(),
+                    phone:
+                        (e['phone'] ??
+                                '')
+                            .toString(),
+                    isFavorite: true,
+                  ),
+                )
+                .toList()
+          : <_Friend>[];
+      if (mounted) {
+        setState(() {
+          _allFavorites = list;
+          _filtered = List.from(list);
+          _checkedPhones.addAll(
+            list
+                .where(
+                  (f) => widget
+                      .alreadySelectedPhones
+                      .contains(
+                        f.phone,
+                      ),
+                )
+                .map((f) => f.phone),
+          );
+          _loadingFavorites = false;
+        });
+      }
+    } catch (_) {
+      if (mounted)
+        setState(
+          () =>
+              _loadingFavorites = false,
+        );
+    }
   }
 
   @override
@@ -5015,12 +8204,29 @@ class _FavoriteListSheetState extends State<_FavoriteListSheet> {
     super.dispose();
   }
 
+  void _toggleFriend(_Friend f) {
+    setState(() {
+      _checkedPhones.contains(f.phone)
+          ? _checkedPhones.remove(
+              f.phone,
+            )
+          : _checkedPhones.add(f.phone);
+    });
+  }
+
   void _filter() {
-    final q = _searchCtrl.text.toLowerCase();
+    final q = _searchCtrl.text
+        .toLowerCase();
     setState(() {
       _filtered = _allFavorites
-          .where((f) => !widget.alreadySelectedPhones.contains(f.phone))
-          .where((f) => f.name.toLowerCase().contains(q) || f.phone.contains(q))
+          .where(
+            (f) =>
+                q.isEmpty ||
+                f.name
+                    .toLowerCase()
+                    .contains(q) ||
+                f.phone.contains(q),
+          )
           .toList();
     });
   }
@@ -5028,7 +8234,16 @@ class _FavoriteListSheetState extends State<_FavoriteListSheet> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: MediaQuery.of(context).size.height * 0.85,
+      height:
+          MediaQuery.of(
+            context,
+          ).size.height *
+          0.85,
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(
+          context,
+        ).viewInsets.bottom,
+      ),
       decoration: const BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.only(
@@ -5045,42 +8260,75 @@ class _FavoriteListSheetState extends State<_FavoriteListSheet> {
             height: 4,
             decoration: BoxDecoration(
               color: Colors.grey[300],
-              borderRadius: BorderRadius.circular(2),
+              borderRadius:
+                  BorderRadius.circular(
+                    2,
+                  ),
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 8, 10),
+            padding:
+                const EdgeInsets.fromLTRB(
+                  20,
+                  16,
+                  8,
+                  10,
+                ),
             child: Row(
               children: [
                 IconButton(
-                  icon: const Icon(Icons.arrow_back, color: AppColors.kGreen),
-                  onPressed: () => Navigator.pop(context),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
+                  icon: const Icon(
+                    Icons.arrow_back,
+                    color: AppColors
+                        .kGreen,
+                  ),
+                  onPressed: () =>
+                      Navigator.pop(
+                        context,
+                      ),
+                  padding:
+                      EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(),
                 ),
                 const Expanded(
                   child: Text(
                     'Favorite list',
-                    textAlign: TextAlign.center,
+                    textAlign: TextAlign
+                        .center,
                     style: TextStyle(
                       fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.black87,
+                      fontWeight:
+                          FontWeight
+                              .w600,
+                      color: Colors
+                          .black87,
                     ),
                   ),
                 ),
                 TextButton(
-                  onPressed: _picked.isEmpty
-                      ? null
-                      : () => Navigator.pop(context, _picked),
-                  child: Text(
-                    'Add',
+                  onPressed: () => Navigator.pop(
+                    context,
+                    _allFavorites
+                        .where(
+                          (
+                            f,
+                          ) => _checkedPhones
+                              .contains(
+                                f.phone,
+                              ),
+                        )
+                        .toList(),
+                  ),
+                  child: const Text(
+                    'Done',
                     style: TextStyle(
                       fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: _picked.isEmpty
-                          ? Colors.grey[400]
-                          : AppColors.kGreen,
+                      fontWeight:
+                          FontWeight
+                              .w600,
+                      color: AppColors
+                          .kGreen,
                     ),
                   ),
                 ),
@@ -5088,100 +8336,198 @@ class _FavoriteListSheetState extends State<_FavoriteListSheet> {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding:
+                const EdgeInsets.symmetric(
+                  horizontal: 16,
+                ),
             child: TextField(
               controller: _searchCtrl,
               decoration: InputDecoration(
                 hintText: 'Search',
-                hintStyle: TextStyle(color: Colors.grey[400]),
-                prefixIcon: Icon(Icons.search, color: Colors.grey[500]),
+                hintStyle: TextStyle(
+                  color:
+                      Colors.grey[400],
+                ),
+                prefixIcon: Icon(
+                  Icons.search,
+                  color:
+                      Colors.grey[500],
+                ),
                 filled: true,
                 fillColor: Colors.white,
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
+                enabledBorder:
+                    OutlineInputBorder(
+                      borderRadius:
+                          BorderRadius.circular(
+                            12,
+                          ),
+                      borderSide:
+                          BorderSide(
+                            color: Colors
+                                .grey
+                                .shade300,
+                          ),
+                    ),
+                focusedBorder:
+                    OutlineInputBorder(
+                      borderRadius:
+                          BorderRadius.circular(
+                            12,
+                          ),
+                      borderSide:
+                          BorderSide(
+                            color: Colors
+                                .grey
+                                .shade300,
+                          ),
+                    ),
+                contentPadding:
+                    const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
               ),
-              cursorColor: AppColors.kGreen,
+              cursorColor:
+                  AppColors.kGreen,
             ),
           ),
           const SizedBox(height: 12),
           Expanded(
-            child: ListView.separated(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              itemCount: _filtered.length,
-              separatorBuilder: (_, __) =>
-                  const Divider(height: 1, thickness: 0.5),
-              itemBuilder: (ctx, i) {
-                final f = _filtered[i];
-                final selected = _picked.contains(f);
-                return ListTile(
-                  contentPadding: const EdgeInsets.symmetric(vertical: 6),
-                  leading: Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: Colors.grey[300],
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      Icons.person,
-                      color: Colors.grey[600],
-                      size: 22,
-                    ),
-                  ),
-                  title: Text(
-                    f.name,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.black87,
-                    ),
-                  ),
-                  subtitle: Text(
-                    f.phone,
-                    style: TextStyle(fontSize: 13, color: Colors.grey[500]),
-                  ),
-                  trailing: GestureDetector(
-                    onTap: () => setState(() {
-                      selected ? _picked.remove(f) : _picked.add(f);
-                    }),
-                    child: Container(
-                      width: 26,
-                      height: 26,
-                      decoration: BoxDecoration(
-                        color: selected ? AppColors.kGreen : Colors.transparent,
-                        border: Border.all(
-                          color: selected
-                              ? AppColors.kGreen
-                              : Colors.grey.shade300,
-                          width: 2,
-                        ),
-                        borderRadius: BorderRadius.circular(6),
+            child: _loadingFavorites
+                ? const AppLoadingIndicator()
+                : _filtered.isEmpty
+                ? Center(
+                    child: Text(
+                      _searchCtrl
+                              .text
+                              .isEmpty
+                          ? "You haven't added any favorite friends yet."
+                          : 'No results found. Try again',
+                      style: TextStyle(
+                        color: Colors
+                            .grey[400],
+                        fontSize: 15,
                       ),
-                      child: selected
-                          ? const Icon(
-                              Icons.check,
-                              color: Colors.white,
-                              size: 16,
-                            )
-                          : null,
+                      textAlign:
+                          TextAlign
+                              .center,
                     ),
+                  )
+                : ListView.separated(
+                    padding:
+                        const EdgeInsets.symmetric(
+                          horizontal:
+                              20,
+                        ),
+                    itemCount: _filtered
+                        .length,
+                    separatorBuilder:
+                        (_, __) =>
+                            const Divider(
+                              height: 1,
+                              thickness:
+                                  0.5,
+                            ),
+                    itemBuilder: (ctx, i) {
+                      final f =
+                          _filtered[i];
+                      final isChecked =
+                          _checkedPhones
+                              .contains(
+                                f.phone,
+                              );
+                      return ListTile(
+                        contentPadding:
+                            const EdgeInsets.symmetric(
+                              vertical:
+                                  6,
+                            ),
+                        leading: Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: Colors
+                                .grey[300],
+                            shape: BoxShape
+                                .circle,
+                          ),
+                          child: Icon(
+                            Icons
+                                .person,
+                            color: Colors
+                                .grey[600],
+                            size: 22,
+                          ),
+                        ),
+                        title: Text(
+                          f.name,
+                          style: const TextStyle(
+                            fontSize:
+                                15,
+                            fontWeight:
+                                FontWeight
+                                    .w600,
+                            color: Colors
+                                .black87,
+                          ),
+                        ),
+                        subtitle: Text(
+                          f.phone,
+                          style: TextStyle(
+                            fontSize:
+                                13,
+                            color: Colors
+                                .grey[400],
+                          ),
+                        ),
+                        trailing: GestureDetector(
+                          onTap: () =>
+                              _toggleFriend(
+                                f,
+                              ),
+                          child: Container(
+                            key: ValueKey(
+                              '${f.phone}_$isChecked',
+                            ),
+                            width: 26,
+                            height: 26,
+                            decoration: BoxDecoration(
+                              color:
+                                  isChecked
+                                  ? AppColors.kGreen
+                                  : Colors.transparent,
+                              border: Border.all(
+                                color:
+                                    isChecked
+                                    ? AppColors.kGreen
+                                    : Colors.grey.shade300,
+                                width:
+                                    2,
+                              ),
+                              borderRadius:
+                                  BorderRadius.circular(
+                                    6,
+                                  ),
+                            ),
+                            child:
+                                isChecked
+                                ? const Icon(
+                                    Icons.check,
+                                    color:
+                                        Colors.white,
+                                    size:
+                                        16,
+                                  )
+                                : null,
+                          ),
+                        ),
+                        onTap: () =>
+                            _toggleFriend(
+                              f,
+                            ),
+                      );
+                    },
                   ),
-                  onTap: () => setState(() {
-                    selected ? _picked.remove(f) : _picked.add(f);
-                  }),
-                );
-              },
-            ),
           ),
         ],
       ),
@@ -5191,16 +8537,21 @@ class _FavoriteListSheetState extends State<_FavoriteListSheet> {
 
 // ═════════════════════════════════════════════════════════════════════════════
 class _ContactItem {
-  const _ContactItem({required this.name, required this.phone});
+  const _ContactItem({
+    required this.name,
+    required this.phone,
+  });
 
   final String name;
   final String phone;
 }
 
-class SelectContactPage extends StatefulWidget {
+class SelectContactPage
+    extends StatefulWidget {
   final List<_ContactItem> contacts;
   final Map<String, bool> inDbStatus;
-  final void Function(String phone) onInvite;
+  final void Function(String phone)
+  onInvite;
 
   const SelectContactPage({
     super.key,
@@ -5210,19 +8561,28 @@ class SelectContactPage extends StatefulWidget {
   });
 
   @override
-  State<SelectContactPage> createState() => _SelectContactPageState();
+  State<SelectContactPage>
+  createState() =>
+      _SelectContactPageState();
 }
 
-class _SelectContactPageState extends State<SelectContactPage> {
-  final _searchController = TextEditingController();
-  late Map<String, bool> _localInDbStatus;
+class _SelectContactPageState
+    extends State<SelectContactPage> {
+  final _searchController =
+      TextEditingController();
+  late Map<String, bool>
+  _localInDbStatus;
   bool _isCheckingDb = false;
 
   @override
   void initState() {
     super.initState();
-    _localInDbStatus = Map.from(widget.inDbStatus);
-    _searchController.addListener(() => setState(() {}));
+    _localInDbStatus = Map.from(
+      widget.inDbStatus,
+    );
+    _searchController.addListener(
+      () => setState(() {}),
+    );
     _checkRemainingContacts();
   }
 
@@ -5232,12 +8592,16 @@ class _SelectContactPageState extends State<SelectContactPage> {
     super.dispose();
   }
 
-  Future<void> _checkRemainingContacts() async {
+  Future<void>
+  _checkRemainingContacts() async {
     if (_isCheckingDb) return;
     _isCheckingDb = true;
 
     final toCheck = widget.contacts
-        .where((c) => !_localInDbStatus.containsKey(c.phone))
+        .where(
+          (c) => !_localInDbStatus
+              .containsKey(c.phone),
+        )
         .toList();
 
     if (toCheck.isEmpty) {
@@ -5246,27 +8610,45 @@ class _SelectContactPageState extends State<SelectContactPage> {
     }
 
     const batchSize = 10;
-    for (var i = 0; i < toCheck.length; i += batchSize) {
+    for (
+      var i = 0;
+      i < toCheck.length;
+      i += batchSize
+    ) {
       if (!mounted) return;
-      final batch = toCheck.skip(i).take(batchSize).toList();
+      final batch = toCheck
+          .skip(i)
+          .take(batchSize)
+          .toList();
 
       await Future.wait(
         batch.map((item) async {
           try {
-            final query = await FirebaseFirestore.instance
-                .collection('users')
-                .where('phone', isEqualTo: item.phone)
-                .limit(1)
-                .get();
+            final query =
+                await FirebaseFirestore
+                    .instance
+                    .collection('users')
+                    .where(
+                      'phone',
+                      isEqualTo:
+                          item.phone,
+                    )
+                    .limit(1)
+                    .get();
             if (mounted) {
               setState(() {
-                _localInDbStatus[item.phone] = query.docs.isNotEmpty;
+                _localInDbStatus[item
+                    .phone] = query
+                    .docs
+                    .isNotEmpty;
               });
             }
           } catch (_) {
             if (mounted) {
               setState(() {
-                _localInDbStatus[item.phone] = false;
+                _localInDbStatus[item
+                        .phone] =
+                    false;
               });
             }
           }
@@ -5277,19 +8659,35 @@ class _SelectContactPageState extends State<SelectContactPage> {
     _isCheckingDb = false;
   }
 
-  List<_ContactItem> get _filteredItems {
-    final q = _searchController.text.trim().toLowerCase();
-    if (q.isEmpty) return widget.contacts;
+  List<_ContactItem>
+  get _filteredItems {
+    final q = _searchController.text
+        .trim()
+        .toLowerCase();
+    if (q.isEmpty)
+      return widget.contacts;
     return widget.contacts
-        .where((i) => i.name.toLowerCase().contains(q) || i.phone.contains(q))
+        .where(
+          (i) =>
+              i.name
+                  .toLowerCase()
+                  .contains(q) ||
+              i.phone.contains(q),
+        )
         .toList();
   }
 
-  Map<String, List<_ContactItem>> get _grouped {
-    final map = <String, List<_ContactItem>>{};
+  Map<String, List<_ContactItem>>
+  get _grouped {
+    final map =
+        <String, List<_ContactItem>>{};
     for (final i in _filteredItems) {
-      final letter = i.name.isNotEmpty ? i.name[0].toUpperCase() : '#';
-      map.putIfAbsent(letter, () => []).add(i);
+      final letter = i.name.isNotEmpty
+          ? i.name[0].toUpperCase()
+          : '#';
+      map
+          .putIfAbsent(letter, () => [])
+          .add(i);
     }
     return map;
   }
@@ -5303,23 +8701,33 @@ class _SelectContactPageState extends State<SelectContactPage> {
       Color(0xFFE91E63),
       Color(0xFFFF5722),
     ];
-    return colors[name.hashCode.abs() % colors.length];
+    return colors[name.hashCode.abs() %
+        colors.length];
   }
 
   String _initial(String name) {
-    final parts = name.trim().split(RegExp(r'\s+'));
+    final parts = name.trim().split(
+      RegExp(r'\s+'),
+    );
     if (parts.length >= 2) {
-      final a = parts[0].isNotEmpty ? parts[0][0] : '';
-      final b = parts[1].isNotEmpty ? parts[1][0] : '';
+      final a = parts[0].isNotEmpty
+          ? parts[0][0]
+          : '';
+      final b = parts[1].isNotEmpty
+          ? parts[1][0]
+          : '';
       return (a + b).toUpperCase();
     }
-    return name.isNotEmpty ? name[0].toUpperCase() : '?';
+    return name.isNotEmpty
+        ? name[0].toUpperCase()
+        : '?';
   }
 
   @override
   Widget build(BuildContext context) {
     final grouped = _grouped;
-    final keys = grouped.keys.toList()..sort();
+    final keys = grouped.keys.toList()
+      ..sort();
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -5327,8 +8735,12 @@ class _SelectContactPageState extends State<SelectContactPage> {
         backgroundColor: Colors.white,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: AppColors.kGreen),
-          onPressed: () => Navigator.pop(context),
+          icon: const Icon(
+            Icons.arrow_back,
+            color: AppColors.kGreen,
+          ),
+          onPressed: () =>
+              Navigator.pop(context),
         ),
         centerTitle: true,
         title: const Text(
@@ -5343,100 +8755,194 @@ class _SelectContactPageState extends State<SelectContactPage> {
       body: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding:
+                const EdgeInsets.symmetric(
+                  horizontal: 12,
+                ),
             child: TextField(
-              controller: _searchController,
+              controller:
+                  _searchController,
               decoration: InputDecoration(
                 hintText: 'Search',
-                hintStyle: TextStyle(color: Colors.grey[400]),
-                prefixIcon: Icon(Icons.search, color: Colors.grey.shade600),
+                hintStyle: TextStyle(
+                  color:
+                      Colors.grey[400],
+                ),
+                prefixIcon: Icon(
+                  Icons.search,
+                  color: Colors
+                      .grey
+                      .shade600,
+                ),
                 filled: true,
                 fillColor: Colors.white,
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
+                  borderRadius:
+                      BorderRadius.circular(
+                        12,
+                      ),
+                  borderSide:
+                      BorderSide(
+                        color: Colors
+                            .grey
+                            .shade300,
+                      ),
                 ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
+                enabledBorder:
+                    OutlineInputBorder(
+                      borderRadius:
+                          BorderRadius.circular(
+                            12,
+                          ),
+                      borderSide:
+                          BorderSide(
+                            color: Colors
+                                .grey
+                                .shade300,
+                          ),
+                    ),
+                focusedBorder:
+                    OutlineInputBorder(
+                      borderRadius:
+                          BorderRadius.circular(
+                            12,
+                          ),
+                      borderSide:
+                          BorderSide(
+                            color: Colors
+                                .grey
+                                .shade300,
+                          ),
+                    ),
+                contentPadding:
+                    const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
               ),
-              cursorColor: AppColors.kGreen,
+              cursorColor:
+                  AppColors.kGreen,
             ),
           ),
           const SizedBox(height: 16),
           Expanded(
-            child: widget.contacts.isEmpty
+            child:
+                widget.contacts.isEmpty
                 ? const Center(
-                    child: CircularProgressIndicator(color: AppColors.kGreen),
+                    child:
+                        CircularProgressIndicator(
+                          color: AppColors
+                              .kGreen,
+                        ),
                   )
                 : keys.isEmpty
                 ? Center(
                     child: Text(
-                      'No contacts',
-                      style: TextStyle(color: Colors.grey[600]),
+                      'No matching contacts',
+                      style: TextStyle(
+                        fontSize: 15,
+                        color: Colors
+                            .grey[400],
+                      ),
                     ),
                   )
                 : Stack(
                     children: [
                       ListView.builder(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        itemCount: keys.fold<int>(
-                          0,
-                          (sum, k) => sum + 1 + grouped[k]!.length,
-                        ),
+                        padding:
+                            const EdgeInsets.symmetric(
+                              horizontal:
+                                  16,
+                            ),
+                        itemCount: keys
+                            .fold<int>(
+                              0,
+                              (
+                                sum,
+                                k,
+                              ) =>
+                                  sum +
+                                  1 +
+                                  grouped[k]!
+                                      .length,
+                            ),
                         itemBuilder: (context, index) {
                           int total = 0;
-                          for (final k in keys) {
-                            final list = grouped[k]!;
-                            if (index == total) {
+                          for (final k
+                              in keys) {
+                            final list =
+                                grouped[k]!;
+                            if (index ==
+                                total) {
                               return Padding(
                                 padding: const EdgeInsets.only(
-                                  top: 8,
-                                  bottom: 4,
+                                  top:
+                                      8,
+                                  bottom:
+                                      4,
                                 ),
                                 child: Text(
                                   k,
                                   style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w700,
-                                    color: Colors.grey[600],
+                                    fontSize:
+                                        16,
+                                    fontWeight:
+                                        FontWeight.w700,
+                                    color:
+                                        Colors.grey[600],
                                   ),
                                 ),
                               );
                             }
                             total += 1;
-                            final rowIndex = index - total;
-                            if (rowIndex < list.length) {
-                              final item = list[rowIndex];
-                              final inDb = _localInDbStatus[item.phone];
-                              final loading = !_localInDbStatus.containsKey(
-                                item.phone,
-                              );
+                            final rowIndex =
+                                index -
+                                total;
+                            if (rowIndex <
+                                list.length) {
+                              final item =
+                                  list[rowIndex];
+                              final inDb =
+                                  _localInDbStatus[item
+                                      .phone];
+                              final loading =
+                                  !_localInDbStatus.containsKey(
+                                    item.phone,
+                                  );
                               return _ContactRow(
-                                name: item.name,
-                                phone: item.phone,
-                                avatarColor: _avatarColor(item.name),
-                                initial: _initial(item.name),
-                                inDb: inDb,
-                                loading: loading,
-                                onInvite: () => widget.onInvite(item.phone),
+                                name: item
+                                    .name,
+                                phone: item
+                                    .phone,
+                                avatarColor:
+                                    _avatarColor(
+                                      item.name,
+                                    ),
+                                initial:
+                                    _initial(
+                                      item.name,
+                                    ),
+                                inDb:
+                                    inDb,
+                                loading:
+                                    loading,
+                                onInvite: () =>
+                                    widget.onInvite(
+                                      item.phone,
+                                    ),
                                 onTap: () {
-                                  if (inDb == true) {
-                                    Navigator.pop(context, item.phone);
+                                  if (inDb ==
+                                      true) {
+                                    Navigator.pop(
+                                      context,
+                                      item.phone,
+                                    );
                                   }
                                 },
                               );
                             }
-                            total += list.length;
+                            total += list
+                                .length;
                           }
                           return const SizedBox.shrink();
                         },
@@ -5448,11 +8954,17 @@ class _SelectContactPageState extends State<SelectContactPage> {
                         child: Center(
                           child: SingleChildScrollView(
                             child: Column(
-                              mainAxisSize: MainAxisSize.min,
+                              mainAxisSize:
+                                  MainAxisSize
+                                      .min,
                               children: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ#'
-                                  .split('')
+                                  .split(
+                                    '',
+                                  )
                                   .map(
-                                    (c) => Padding(
+                                    (
+                                      c,
+                                    ) => Padding(
                                       padding: const EdgeInsets.symmetric(
                                         vertical: 1,
                                       ),
@@ -5480,7 +8992,8 @@ class _SelectContactPageState extends State<SelectContactPage> {
   }
 }
 
-class _ContactRow extends StatelessWidget {
+class _ContactRow
+    extends StatelessWidget {
   final String name;
   final String phone;
   final Color avatarColor;
@@ -5502,7 +9015,8 @@ class _ContactRow extends StatelessWidget {
   });
 
   String get _displayPhone {
-    if (phone.startsWith('+966') && phone.length == 13) {
+    if (phone.startsWith('+966') &&
+        phone.length == 13) {
       final digits = phone.substring(4);
       return '+966 ${digits.substring(0, 2)} ${digits.substring(2, 5)} ${digits.substring(5)}';
     }
@@ -5511,20 +9025,28 @@ class _ContactRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final showInvite = inDb == false && !loading;
+    final showInvite =
+        inDb == false && !loading;
 
     return ListTile(
-      contentPadding: const EdgeInsets.symmetric(vertical: 4),
+      contentPadding:
+          const EdgeInsets.symmetric(
+            vertical: 4,
+          ),
       leading: Container(
         width: 44,
         height: 44,
-        decoration: BoxDecoration(color: avatarColor, shape: BoxShape.circle),
+        decoration: BoxDecoration(
+          color: avatarColor,
+          shape: BoxShape.circle,
+        ),
         child: Center(
           child: Text(
             initial,
             style: const TextStyle(
               color: Colors.white,
-              fontWeight: FontWeight.w600,
+              fontWeight:
+                  FontWeight.w600,
               fontSize: 16,
             ),
           ),
@@ -5540,36 +9062,53 @@ class _ContactRow extends StatelessWidget {
       ),
       subtitle: Text(
         _displayPhone,
-        style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+        style: TextStyle(
+          fontSize: 14,
+          color: Colors.grey[600],
+        ),
       ),
       trailing: loading
           ? const SizedBox(
               width: 24,
               height: 24,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: AppColors.kGreen,
-              ),
+              child:
+                  CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppColors
+                        .kGreen,
+                  ),
             )
           : showInvite
           ? OutlinedButton(
               onPressed: onInvite,
               style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.kGreen,
-                side: const BorderSide(color: AppColors.kGreen),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 6,
+                foregroundColor:
+                    AppColors.kGreen,
+                side: const BorderSide(
+                  color:
+                      AppColors.kGreen,
                 ),
+                padding:
+                    const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 6,
+                    ),
                 minimumSize: Size.zero,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
+                  borderRadius:
+                      BorderRadius.circular(
+                        20,
+                      ),
                 ),
               ),
-              child: const Text('Invite'),
+              child: const Text(
+                'Invite',
+              ),
             )
           : null,
-      onTap: inDb == true ? onTap : null,
+      onTap: inDb == true
+          ? onTap
+          : null,
     );
   }
 }
@@ -5605,7 +9144,8 @@ class _Friend {
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is _Friend &&
-          runtimeType == other.runtimeType &&
+          runtimeType ==
+              other.runtimeType &&
           phone == other.phone;
 
   @override
@@ -5629,14 +9169,26 @@ class _HostLocation {
   };
 }
 
-enum _ParticipantStatus { pending, accepted, declined }
+enum _ParticipantStatus {
+  pending,
+  accepted,
+  declined,
+}
 
 class _Participant {
-  const _Participant({required this.friend, required this.status});
+  const _Participant({
+    required this.friend,
+    required this.status,
+  });
   final _Friend friend;
   final _ParticipantStatus status;
 
-  _Participant copyWith({_ParticipantStatus? status}) {
-    return _Participant(friend: friend, status: status ?? this.status);
+  _Participant copyWith({
+    _ParticipantStatus? status,
+  }) {
+    return _Participant(
+      friend: friend,
+      status: status ?? this.status,
+    );
   }
 }

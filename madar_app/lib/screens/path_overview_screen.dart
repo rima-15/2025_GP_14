@@ -510,6 +510,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
   bool _jsReady = false;
   int _readyComputeRetry = 0;
   Map<String, double>? _pendingUserPinGltf;
+  String _startPinFloorLabel = '';
   String? _pendingPoiToHighlight;
 
   // --- Entrances only (no POI index) ---
@@ -678,13 +679,16 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
 
     await _pushPathToJs();
 
-    final startLabel = _desiredStartFloorLabel.isNotEmpty
-        ? _desiredStartFloorLabel
-        : _currentFloorLabel();
+    final startLabel = _startPinFloorLabel.isNotEmpty
+        ? _startPinFloorLabel
+        : (_desiredStartFloorLabel.isNotEmpty
+              ? _desiredStartFloorLabel
+              : _originFloorLabel);
+
     final startF = _toFNumber(startLabel);
     final currF = _currentFNumber();
 
-    if (_pendingUserPinGltf != null && currF == startF) {
+    if (_pendingUserPinGltf != null && startF.isNotEmpty && currF == startF) {
       await _pushUserPinToJsPath(_pendingUserPinGltf!);
     } else {
       await _clearUserPinFromJs();
@@ -773,12 +777,6 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
   Future<void> _pushUserPinToJsPath(Map<String, double> gltf) async {
     final c = _webCtrl;
     if (c == null || !_jsReady) return;
-
-    final originF = _toFNumber(_originFloorLabel);
-    if (originF.isNotEmpty && originF != _currentFNumber()) {
-      await _clearUserPinFromJs();
-      return;
-    }
 
     final x = gltf['x'];
     final y = gltf['y'];
@@ -1439,7 +1437,10 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     return null;
   }
 
-  void _setStartPinFromBlender(Map<String, double>? blender) {
+  void _setStartPinFromBlender(
+    Map<String, double>? blender,
+    String? floorLabel,
+  ) {
     if (blender == null) return;
 
     _pendingUserPinGltf = _blenderToGltf({
@@ -1447,6 +1448,8 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       'y': blender['y'] ?? 0.0,
       'z': blender['z'] ?? 0.0,
     });
+
+    _startPinFloorLabel = (floorLabel ?? '').trim();
   }
 
   List<List<double>> _shortcutPathBySampling(
@@ -1578,7 +1581,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
         return;
       }
 
-      _setStartPinFromBlender(effectiveStart);
+      _setStartPinFromBlender(effectiveStart, effectiveStartFloor);
 
       if (_destEntrances != null &&
           _destEntrances!.length > 1 &&

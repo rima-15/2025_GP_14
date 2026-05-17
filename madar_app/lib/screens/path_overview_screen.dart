@@ -28,8 +28,7 @@ class PathOverviewScreen extends StatefulWidget {
   final List<Map<String, String>>? venueMaps;
   final String? originFloorLabel;
   final String? destinationFloorLabel;
-  final Map<String, double>?
-  destinationHitGltf;
+  final Map<String, double>? destinationHitGltf;
   final bool isFriendNavigation;
 
   const PathOverviewScreen({
@@ -44,8 +43,7 @@ class PathOverviewScreen extends StatefulWidget {
     this.originFloorLabel,
     this.destinationFloorLabel,
     this.destinationHitGltf,
-    this.isFriendNavigation =
-        false, // ← default false
+    this.isFriendNavigation = false, // ← default false
   });
 
   @override
@@ -2758,21 +2756,11 @@ const timer = setInterval(function() {
     if (!mounted) return;
 
     // ── compute availability ONCE ──────────────────────────────────────
-    final bool stairsOk =
-        _isPreferenceAvailableForCurrentTrip(
-          'stairs',
-        );
-    final bool elevatorOk =
-        _isPreferenceAvailableForCurrentTrip(
-          'elevator',
-        );
-    final bool escalatorOk =
-        _isPreferenceAvailableForCurrentTrip(
-          'escalator',
-        );
+    final bool stairsOk = _isPreferenceAvailableForCurrentTrip('stairs');
+    final bool elevatorOk = _isPreferenceAvailableForCurrentTrip('elevator');
+    final bool escalatorOk = _isPreferenceAvailableForCurrentTrip('escalator');
 
-    final bool isFriendNav =
-        widget.isFriendNavigation;
+    final bool isFriendNav = widget.isFriendNavigation;
 
     if (isFriendNav) {
       if (_destPosBlender == null) {
@@ -3692,6 +3680,9 @@ const timer = setInterval(function() {
     final bool isDisabled = !enabled;
     final bool showAsSelected = isSelected && !isDisabled;
 
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isSmall = screenWidth < 390;
+
     return Opacity(
       opacity: isDisabled ? 0.45 : 1.0,
       child: GestureDetector(
@@ -3700,7 +3691,10 @@ const timer = setInterval(function() {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
           curve: Curves.easeOut,
-          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+          padding: EdgeInsets.symmetric(
+            vertical: isSmall ? 8 : 10,
+            horizontal: isSmall ? 6 : 12,
+          ),
           decoration: BoxDecoration(
             color: showAsSelected ? const Color(0xFFE8E9E0) : Colors.white,
             borderRadius: BorderRadius.circular(20),
@@ -3722,25 +3716,35 @@ const timer = setInterval(function() {
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
                 icon,
-                size: 20,
+                size: isSmall ? 18 : 20,
                 color: isDisabled
                     ? Colors.grey[400]
                     : (showAsSelected ? AppColors.kGreen : Colors.grey[500]),
               ),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: isDisabled
-                      ? Colors.grey[400]
-                      : (showAsSelected ? AppColors.kGreen : Colors.grey[600]),
-                  fontWeight: showAsSelected
-                      ? FontWeight.w700
-                      : FontWeight.w500,
+              SizedBox(width: isSmall ? 4 : 6),
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: isSmall ? 12 : 13,
+                      color: isDisabled
+                          ? Colors.grey[400]
+                          : (showAsSelected
+                                ? AppColors.kGreen
+                                : Colors.grey[600]),
+                      fontWeight: showAsSelected
+                          ? FontWeight.w700
+                          : FontWeight.w500,
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -3765,10 +3769,7 @@ const timer = setInterval(function() {
           color: isSelected ? AppColors.kGreen : Colors.white,
           borderRadius: BorderRadius.circular(8),
           boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.1),
-              blurRadius: 4,
-            ),
+            BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 4),
           ],
         ),
         alignment: Alignment.center,

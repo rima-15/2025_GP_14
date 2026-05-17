@@ -411,7 +411,10 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
 
     return AppBar(
       backgroundColor: Colors.white,
+      surfaceTintColor: Colors.transparent,
+      shadowColor: Colors.transparent,
       elevation: 0,
+      scrolledUnderElevation: 0,
       centerTitle: true,
       automaticallyImplyLeading: false,
       leading: IconButton(

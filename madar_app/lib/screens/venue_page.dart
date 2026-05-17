@@ -4,8 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:firebase_storage/firebase_storage.dart'
-    as storage;
+import 'package:firebase_storage/firebase_storage.dart' as storage;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:madar_app/api/venue_cache_service.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
@@ -14,9 +13,7 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
 import 'package:webview_flutter/webview_flutter.dart'
-    show
-        JavaScriptMessage,
-        WebViewController;
+    show JavaScriptMessage, WebViewController;
 import 'category_page.dart';
 import 'navigation_flow_complete.dart';
 
@@ -24,9 +21,7 @@ import 'navigation_flow_complete.dart';
 // Constants
 // ----------------------------------------------------------------------------
 
-const Color kPrimaryGreen = Color(
-  0xFF777D63,
-);
+const Color kPrimaryGreen = Color(0xFF777D63);
 
 // ----------------------------------------------------------------------------
 // Venue Page
@@ -57,20 +52,17 @@ class VenuePage extends StatefulWidget {
   });
 
   @override
-  State<VenuePage> createState() =>
-      _VenuePageState();
+  State<VenuePage> createState() => _VenuePageState();
 }
 
-class _VenuePageState
-    extends State<VenuePage>
+class _VenuePageState extends State<VenuePage>
     with AutomaticKeepAliveClientMixin {
   @override
   bool get wantKeepAlive => true;
 
   // ---------- Constants ----------
 
-  static const double _headerHeight =
-      180;
+  static const double _headerHeight = 180;
   static const double _topRadius = 35;
 
   // ---------- State ----------
@@ -92,36 +84,22 @@ class _VenuePageState
   String? _venuePhone;
 
   String _currentFloor = '';
-  List<Map<String, String>> _venueMaps =
-      [];
+  List<Map<String, String>> _venueMaps = [];
   bool _mapsLoading = false;
 
   // ---------- Caching ----------
 
-  static final storage.FirebaseStorage
-  _coversStorage =
-      storage
-          .FirebaseStorage.instanceFor(
-        bucket:
-            'gs://madar-database.firebasestorage.app',
+  static final storage.FirebaseStorage _coversStorage =
+      storage.FirebaseStorage.instanceFor(
+        bucket: 'gs://madar-database.firebasestorage.app',
       );
-  static final Map<String, String>
-  _urlCache = {};
-  static final Map<
-    String,
-    Map<String, dynamic>
-  >
-  _hoursCache = {};
-  static final Map<
-    String,
-    Map<String, String>
-  >
-  _contactsCache = {};
+  static final Map<String, String> _urlCache = {};
+  static final Map<String, Map<String, dynamic>> _hoursCache = {};
+  static final Map<String, Map<String, String>> _contactsCache = {};
 
-  late final VenueCacheService _cache =
-      VenueCacheService(
-        FirebaseFirestore.instance,
-      );
+  late final VenueCacheService _cache = VenueCacheService(
+    FirebaseFirestore.instance,
+  );
 
   @override
   void initState() {
@@ -129,10 +107,8 @@ class _VenuePageState
     _address = widget.dbAddress;
 
     // Check for cached data
-    final cachedHours =
-        _hoursCache[widget.placeId];
-    final cachedContacts =
-        _contactsCache[widget.placeId];
+    final cachedHours = _hoursCache[widget.placeId];
+    final cachedContacts = _contactsCache[widget.placeId];
 
     if (cachedHours != null) {
       _applyHours(cachedHours);
@@ -142,10 +118,8 @@ class _VenuePageState
     }
 
     if (cachedContacts != null) {
-      _venueWebsite =
-          cachedContacts['website'];
-      _venuePhone =
-          cachedContacts['phone'];
+      _venueWebsite = cachedContacts['website'];
+      _venuePhone = cachedContacts['phone'];
     } else {
       _loadVenueContacts();
     }
@@ -160,10 +134,8 @@ class _VenuePageState
   Future<void> _loadHours() async {
     // Try Google Place Details API first
     try {
-      final key =
-          dotenv.env['GOOGLE_API_KEY'];
-      if (key != null &&
-          widget.placeId.isNotEmpty) {
+      final key = dotenv.env['GOOGLE_API_KEY'];
+      if (key != null && widget.placeId.isNotEmpty) {
         final uri = Uri.parse(
           'https://maps.googleapis.com/maps/api/place/details/json'
           '?place_id=${Uri.encodeComponent(widget.placeId)}'
@@ -171,59 +143,26 @@ class _VenuePageState
           '&key=$key',
         );
 
-        final res = await http
-            .get(uri)
-            .timeout(
-              const Duration(
-                seconds: 12,
-              ),
-            );
+        final res = await http.get(uri).timeout(const Duration(seconds: 12));
         if (res.statusCode == 200) {
-          final data =
-              json.decode(res.body)
-                  as Map<
-                    String,
-                    dynamic
-                  >;
+          final data = json.decode(res.body) as Map<String, dynamic>;
           if (data['status'] == 'OK' &&
-              data['result']
-                  is Map<
-                    String,
-                    dynamic
-                  >) {
-            final result =
-                Map<
-                  String,
-                  dynamic
-                >.from(
-                  data['result'] as Map,
-                );
+              data['result'] is Map<String, dynamic>) {
+            final result = Map<String, dynamic>.from(data['result'] as Map);
 
             final normalized = <String, dynamic>{
-              'current_opening_hours':
-                  result['current_opening_hours'],
-              'opening_hours':
-                  result['opening_hours'],
-              'utc_offset':
-                  result['utc_offset'],
-              'types':
-                  (result['types']
-                          as List?)
-                      ?.cast<String>(),
-              'business_status':
-                  result['business_status'],
+              'current_opening_hours': result['current_opening_hours'],
+              'opening_hours': result['opening_hours'],
+              'utc_offset': result['utc_offset'],
+              'types': (result['types'] as List?)?.cast<String>(),
+              'business_status': result['business_status'],
               '_source': 'api',
-              '_ts': DateTime.now()
-                  .millisecondsSinceEpoch,
+              '_ts': DateTime.now().millisecondsSinceEpoch,
             };
 
-            _hoursCache[widget
-                    .placeId] =
-                normalized;
+            _hoursCache[widget.placeId] = normalized;
             _applyHours(normalized);
-            setState(
-              () => _loading = false,
-            );
+            setState(() => _loading = false);
             return;
           }
         }
@@ -231,10 +170,8 @@ class _VenuePageState
     } catch (_) {}
 
     // Fallback to cached API data
-    final cached =
-        _hoursCache[widget.placeId];
-    if (cached != null &&
-        cached['_source'] == 'api') {
+    final cached = _hoursCache[widget.placeId];
+    if (cached != null && cached['_source'] == 'api') {
       _applyHours(cached);
       setState(() => _loading = false);
       return;
@@ -243,49 +180,35 @@ class _VenuePageState
     // Final fallback: monthly meta from DB
     try {
       final meta = await _cache
-          .getMonthlyMeta(
-            widget.placeId,
-          )
-          .timeout(
-            const Duration(seconds: 10),
-          );
+          .getMonthlyMeta(widget.placeId)
+          .timeout(const Duration(seconds: 10));
 
-      final resultLike =
-          <String, dynamic>{};
+      final resultLike = <String, dynamic>{};
       if (meta.openingHours != null) {
-        resultLike['current_opening_hours'] =
-            meta.openingHours;
+        resultLike['current_opening_hours'] = meta.openingHours;
       }
       if (meta.rating != null) {
-        resultLike['rating'] =
-            meta.rating;
+        resultLike['rating'] = meta.rating;
       }
       if (meta.businessStatus != null) {
-        resultLike['business_status'] =
-            meta.businessStatus;
+        resultLike['business_status'] = meta.businessStatus;
       }
       if (meta.types != null) {
-        resultLike['types'] =
-            meta.types;
+        resultLike['types'] = meta.types;
       }
       resultLike['_source'] = 'db';
-      resultLike['_ts'] = DateTime.now()
-          .millisecondsSinceEpoch;
+      resultLike['_ts'] = DateTime.now().millisecondsSinceEpoch;
 
-      _hoursCache[widget.placeId] =
-          resultLike;
+      _hoursCache[widget.placeId] = resultLike;
       _applyHours(resultLike);
     } catch (e) {
-      setState(
-        () => _error = e.toString(),
-      );
+      setState(() => _error = e.toString());
     } finally {
       setState(() => _loading = false);
     }
   }
 
-  Future<void>
-  _prefetchAllVenueImages() async {
+  Future<void> _prefetchAllVenueImages() async {
     for (final p in widget.imagePaths) {
       if (p.isEmpty) continue;
       try {
@@ -294,67 +217,33 @@ class _VenuePageState
             await _coversStorage
                 .ref(p)
                 .getDownloadURL()
-                .timeout(
-                  const Duration(
-                    seconds: 8,
-                  ),
-                );
+                .timeout(const Duration(seconds: 8));
         _urlCache[p] = url;
-        final provider =
-            CachedNetworkImageProvider(
-              url,
-              cacheKey: p,
-            );
-        provider.resolve(
-          const ImageConfiguration(),
-        );
+        final provider = CachedNetworkImageProvider(url, cacheKey: p);
+        provider.resolve(const ImageConfiguration());
       } catch (_) {}
     }
   }
 
-  Future<void>
-  _loadVenueContacts() async {
+  Future<void> _loadVenueContacts() async {
     try {
-      final doc =
-          await FirebaseFirestore
-              .instance
-              .collection('venues')
-              .doc(widget.placeId)
-              .get(
-                const GetOptions(
-                  source: Source
-                      .serverAndCache,
-                ),
-              );
+      final doc = await FirebaseFirestore.instance
+          .collection('venues')
+          .doc(widget.placeId)
+          .get(const GetOptions(source: Source.serverAndCache));
       final data = doc.data();
       if (data != null) {
-        final site =
-            (data['venueWebsite'] ?? '')
-                .toString()
-                .trim();
-        final phone =
-            (data['venuePhone'] ?? '')
-                .toString()
-                .trim();
+        final site = (data['venueWebsite'] ?? '').toString().trim();
+        final phone = (data['venuePhone'] ?? '').toString().trim();
 
-        _contactsCache[widget.placeId] =
-            {
-              'website': site.isNotEmpty
-                  ? site
-                  : '',
-              'phone': phone.isNotEmpty
-                  ? phone
-                  : '',
-            };
+        _contactsCache[widget.placeId] = {
+          'website': site.isNotEmpty ? site : '',
+          'phone': phone.isNotEmpty ? phone : '',
+        };
 
         setState(() {
-          _venueWebsite =
-              site.isNotEmpty
-              ? site
-              : null;
-          _venuePhone = phone.isNotEmpty
-              ? phone
-              : null;
+          _venueWebsite = site.isNotEmpty ? site : null;
+          _venuePhone = phone.isNotEmpty ? phone : null;
         });
       }
     } catch (_) {}
@@ -364,59 +253,29 @@ class _VenuePageState
     setState(() => _mapsLoading = true);
 
     try {
-      final doc =
-          await FirebaseFirestore
-              .instance
-              .collection('venues')
-              .doc(widget.placeId)
-              .get(
-                const GetOptions(
-                  source: Source
-                      .serverAndCache,
-                ),
-              );
+      final doc = await FirebaseFirestore.instance
+          .collection('venues')
+          .doc(widget.placeId)
+          .get(const GetOptions(source: Source.serverAndCache));
 
       final data = doc.data();
 
-      if (data != null &&
-          data['map'] is List) {
-        final maps =
-            (data['map'] as List)
-                .cast<
-                  Map<String, dynamic>
-                >();
+      if (data != null && data['map'] is List) {
+        final maps = (data['map'] as List).cast<Map<String, dynamic>>();
 
-        final convertedMaps = maps.map((
-          map,
-        ) {
-          final floorNumber =
-              (map['floorNumber'] ?? '')
-                  .toString();
-          final mapURL =
-              (map['mapURL'] ?? '')
-                  .toString();
-          return {
-            'floorNumber': floorNumber,
-            'mapURL': mapURL,
-          };
+        final convertedMaps = maps.map((map) {
+          final floorNumber = (map['floorNumber'] ?? '').toString();
+          final mapURL = (map['mapURL'] ?? '').toString();
+          return {'floorNumber': floorNumber, 'mapURL': mapURL};
         }).toList();
 
-        setState(
-          () => _venueMaps =
-              convertedMaps,
-        );
+        setState(() => _venueMaps = convertedMaps);
 
         if (convertedMaps.isNotEmpty) {
-          final firstMap =
-              convertedMaps.first;
-          final firstMapURL =
-              firstMap['mapURL'];
-          if (firstMapURL != null &&
-              firstMapURL.isNotEmpty) {
-            setState(
-              () => _currentFloor =
-                  firstMapURL,
-            );
+          final firstMap = convertedMaps.first;
+          final firstMapURL = firstMap['mapURL'];
+          if (firstMapURL != null && firstMapURL.isNotEmpty) {
+            setState(() => _currentFloor = firstMapURL);
           }
         }
       } else {
@@ -425,52 +284,28 @@ class _VenuePageState
     } catch (e) {
       setState(() => _venueMaps = []);
     } finally {
-      setState(
-        () => _mapsLoading = false,
-      );
+      setState(() => _mapsLoading = false);
     }
   }
 
   // ---------- Apply Hours Data ----------
 
-  void _applyHours(
-    Map<String, dynamic> res,
-  ) {
+  void _applyHours(Map<String, dynamic> res) {
     final currentOpening =
-        (res['current_opening_hours']
-            as Map<String, dynamic>?) ??
-        {};
-    final opening =
-        currentOpening.isNotEmpty
+        (res['current_opening_hours'] as Map<String, dynamic>?) ?? {};
+    final opening = currentOpening.isNotEmpty
         ? currentOpening
-        : (res['opening_hours']
-                  as Map<
-                    String,
-                    dynamic
-                  >?) ??
-              {};
+        : (res['opening_hours'] as Map<String, dynamic>?) ?? {};
 
     List<String> weekdayText =
-        (opening['weekday_text']
-                as List?)
-            ?.cast<String>() ??
-        const [];
-    final periods =
-        (opening['periods'] as List?) ??
-        const [];
-    final utcOffset =
-        res['utc_offset'] as int?;
-    final types =
-        (res['types'] as List?)
-            ?.cast<String>() ??
-        const [];
-    final businessStatus =
-        res['business_status']
-            as String?;
+        (opening['weekday_text'] as List?)?.cast<String>() ?? const [];
+    final periods = (opening['periods'] as List?) ?? const [];
+    final utcOffset = res['utc_offset'] as int?;
+    final types = (res['types'] as List?)?.cast<String>() ?? const [];
+    final businessStatus = res['business_status'] as String?;
 
     // Assume 24h for airports without hours
-    if (weekdayText.isEmpty &&
-        types.contains('airport')) {
+    if (weekdayText.isEmpty && types.contains('airport')) {
       weekdayText = const [
         'Sunday: Open 24 hours',
         'Monday: Open 24 hours',
@@ -484,24 +319,14 @@ class _VenuePageState
 
     // Ensure Sunday-first order
     if (weekdayText.isNotEmpty &&
-        weekdayText.first
-            .toLowerCase()
-            .startsWith('monday')) {
-      final idxSun = weekdayText
-          .indexWhere(
-            (l) => l
-                .toLowerCase()
-                .startsWith('sunday'),
-          );
+        weekdayText.first.toLowerCase().startsWith('monday')) {
+      final idxSun = weekdayText.indexWhere(
+        (l) => l.toLowerCase().startsWith('sunday'),
+      );
       if (idxSun > 0) {
         weekdayText = [
-          ...weekdayText.sublist(
-            idxSun,
-          ),
-          ...weekdayText.sublist(
-            0,
-            idxSun,
-          ),
+          ...weekdayText.sublist(idxSun),
+          ...weekdayText.sublist(0, idxSun),
         ];
       }
     }
@@ -514,8 +339,7 @@ class _VenuePageState
     _weekdayText = weekdayText;
 
     // Compute open/closed status locally from stored data
-    final computedOpenNow =
-        _computeLocalOpenNow();
+    final computedOpenNow = _computeLocalOpenNow();
 
     setState(() {
       _openNow = computedOpenNow;
@@ -541,13 +365,8 @@ class _VenuePageState
 
     // Check for 24/7 open (single period with no close)
     if (_periods.length == 1) {
-      final period =
-          _periods.first
-              as Map<String, dynamic>?;
-      if (period != null &&
-          !period.containsKey(
-            'close',
-          )) {
+      final period = _periods.first as Map<String, dynamic>?;
+      if (period != null && !period.containsKey('close')) {
         // Open 24/7
         return true;
       }
@@ -555,83 +374,53 @@ class _VenuePageState
 
     // Get current time in venue's timezone
     final now = DateTime.now().toUtc();
-    final venueOffset =
-        _utcOffsetMinutes ??
-        180; // Default to UTC+3 (Riyadh)
-    final venueNow = now.add(
-      Duration(minutes: venueOffset),
-    );
+    final venueOffset = _utcOffsetMinutes ?? 180; // Default to UTC+3 (Riyadh)
+    final venueNow = now.add(Duration(minutes: venueOffset));
 
     // Google API uses 0=Sunday, 1=Monday, ..., 6=Saturday
     // Dart's DateTime.weekday: 1=Monday, ..., 7=Sunday
     // Convert Dart weekday to Google format
-    final dartWeekday = venueNow
-        .weekday; // 1-7 (Mon-Sun)
-    final googleDay = dartWeekday == 7
-        ? 0
-        : dartWeekday; // 0-6 (Sun-Sat)
+    final dartWeekday = venueNow.weekday; // 1-7 (Mon-Sun)
+    final googleDay = dartWeekday == 7 ? 0 : dartWeekday; // 0-6 (Sun-Sat)
 
-    final currentTimeMinutes =
-        venueNow.hour * 60 +
-        venueNow.minute;
+    final currentTimeMinutes = venueNow.hour * 60 + venueNow.minute;
 
     // Check each period to see if we're within opening hours
     for (final period in _periods) {
-      if (period
-          is! Map<String, dynamic>)
-        continue;
+      if (period is! Map<String, dynamic>) continue;
 
-      final openData =
-          period['open']
-              as Map<String, dynamic>?;
-      final closeData =
-          period['close']
-              as Map<String, dynamic>?;
+      final openData = period['open'] as Map<String, dynamic>?;
+      final closeData = period['close'] as Map<String, dynamic>?;
 
       if (openData == null) continue;
 
-      final openDay =
-          openData['day'] as int?;
-      final openTime =
-          openData['time'] as String?;
+      final openDay = openData['day'] as int?;
+      final openTime = openData['time'] as String?;
 
-      if (openDay == null ||
-          openTime == null)
-        continue;
+      if (openDay == null || openTime == null) continue;
 
       // Parse open time (format: "HHMM")
-      final openMinutes =
-          _parseTimeToMinutes(openTime);
+      final openMinutes = _parseTimeToMinutes(openTime);
       if (openMinutes == null) continue;
 
       // Handle case where there's no close (24 hours for that day)
       if (closeData == null) {
-        if (openDay == googleDay)
-          return true;
+        if (openDay == googleDay) return true;
         continue;
       }
 
-      final closeDay =
-          closeData['day'] as int?;
-      final closeTime =
-          closeData['time'] as String?;
+      final closeDay = closeData['day'] as int?;
+      final closeTime = closeData['time'] as String?;
 
-      if (closeDay == null ||
-          closeTime == null)
-        continue;
+      if (closeDay == null || closeTime == null) continue;
 
-      final closeMinutes =
-          _parseTimeToMinutes(
-            closeTime,
-          );
-      if (closeMinutes == null)
-        continue;
+      final closeMinutes = _parseTimeToMinutes(closeTime);
+      if (closeMinutes == null) continue;
 
       // Check if current time falls within this period
       final isOpen = _isWithinPeriod(
         currentDay: googleDay,
-        currentMinutes:
-            currentTimeMinutes,
+        currentMinutes: currentTimeMinutes,
         openDay: openDay,
         openMinutes: openMinutes,
         closeDay: closeDay,
@@ -645,18 +434,11 @@ class _VenuePageState
   }
 
   /// Parse time string "HHMM" to minutes since midnight
-  int? _parseTimeToMinutes(
-    String time,
-  ) {
+  int? _parseTimeToMinutes(String time) {
     if (time.length != 4) return null;
-    final hour = int.tryParse(
-      time.substring(0, 2),
-    );
-    final minute = int.tryParse(
-      time.substring(2, 4),
-    );
-    if (hour == null || minute == null)
-      return null;
+    final hour = int.tryParse(time.substring(0, 2));
+    final minute = int.tryParse(time.substring(2, 4));
+    if (hour == null || minute == null) return null;
     return hour * 60 + minute;
   }
 
@@ -673,10 +455,8 @@ class _VenuePageState
     // Same day period
     if (openDay == closeDay) {
       if (currentDay == openDay &&
-          currentMinutes >=
-              openMinutes &&
-          currentMinutes <
-              closeMinutes) {
+          currentMinutes >= openMinutes &&
+          currentMinutes < closeMinutes) {
         return true;
       }
       return false;
@@ -684,14 +464,12 @@ class _VenuePageState
 
     // Overnight period (closes next day)
     // Check if we're in the opening part (after open time on open day)
-    if (currentDay == openDay &&
-        currentMinutes >= openMinutes) {
+    if (currentDay == openDay && currentMinutes >= openMinutes) {
       return true;
     }
 
     // Check if we're in the closing part (before close time on close day)
-    if (currentDay == closeDay &&
-        currentMinutes < closeMinutes) {
+    if (currentDay == closeDay && currentMinutes < closeMinutes) {
       return true;
     }
 
@@ -702,12 +480,9 @@ class _VenuePageState
 
     if (daySpan > 1) {
       // Check if current day is between open and close days
-      int currentOffset =
-          currentDay - openDay;
-      if (currentOffset < 0)
-        currentOffset += 7;
-      if (currentOffset > 0 &&
-          currentOffset < daySpan) {
+      int currentOffset = currentDay - openDay;
+      if (currentOffset < 0) currentOffset += 7;
+      if (currentOffset > 0 && currentOffset < daySpan) {
         return true;
       }
     }
@@ -719,26 +494,15 @@ class _VenuePageState
 
   Future<String?> _imageUrlForPath(
     String path, {
-    Duration timeout = const Duration(
-      seconds: 8,
-    ),
+    Duration timeout = const Duration(seconds: 8),
   }) async {
     if (path.isEmpty) return null;
-    if (_urlCache.containsKey(path))
-      return _urlCache[path];
+    if (_urlCache.containsKey(path)) return _urlCache[path];
     try {
-      final ref = _coversStorage.ref(
-        path,
-      );
-      final url = await ref
-          .getDownloadURL()
-          .timeout(timeout);
+      final ref = _coversStorage.ref(path);
+      final url = await ref.getDownloadURL().timeout(timeout);
       _urlCache[path] = url;
-      CachedNetworkImageProvider(
-        url,
-      ).resolve(
-        const ImageConfiguration(),
-      );
+      CachedNetworkImageProvider(url).resolve(const ImageConfiguration());
       return url;
     } catch (_) {
       return null;
@@ -747,12 +511,8 @@ class _VenuePageState
 
   Future<void> _openInMaps() async {
     final id = widget.placeId;
-    final hasLL =
-        widget.lat != null &&
-        widget.lng != null;
-    final nameEnc = Uri.encodeComponent(
-      widget.name,
-    );
+    final hasLL = widget.lat != null && widget.lng != null;
+    final nameEnc = Uri.encodeComponent(widget.name);
     final ll = hasLL
         ? '${widget.lat!.toStringAsFixed(6)},${widget.lng!.toStringAsFixed(6)}'
         : null;
@@ -770,19 +530,14 @@ class _VenuePageState
     );
 
     final Uri geo = hasLL
-        ? Uri.parse(
-            'geo:$ll?q=$ll($nameEnc)',
-          )
-        : Uri.parse(
-            'geo:0,0?q=$nameEnc',
-          );
+        ? Uri.parse('geo:$ll?q=$ll($nameEnc)')
+        : Uri.parse('geo:0,0?q=$nameEnc');
 
     if (Platform.isIOS) {
       if (await canLaunchUrl(primary)) {
         final ok = await launchUrl(
           primary,
-          mode: LaunchMode
-              .externalApplication,
+          mode: LaunchMode.externalApplication,
         );
         if (ok) return;
       }
@@ -790,36 +545,21 @@ class _VenuePageState
           ? Uri.parse(
               'comgooglemaps://?q=$nameEnc&center=$ll&zoom=17&query_place_id=$id',
             )
-          : Uri.parse(
-              'comgooglemaps://?q=$nameEnc&query_place_id=$id',
-            );
+          : Uri.parse('comgooglemaps://?q=$nameEnc&query_place_id=$id');
       if (await canLaunchUrl(iosGmm)) {
         final ok = await launchUrl(
           iosGmm,
-          mode: LaunchMode
-              .externalApplication,
+          mode: LaunchMode.externalApplication,
         );
         if (ok) return;
       }
-      await launchUrl(
-        alt,
-        mode: LaunchMode
-            .externalApplication,
-      );
+      await launchUrl(alt, mode: LaunchMode.externalApplication);
       return;
     }
 
-    for (final uri in [
-      primary,
-      alt,
-      geo,
-    ]) {
+    for (final uri in [primary, alt, geo]) {
       if (await canLaunchUrl(uri)) {
-        final ok = await launchUrl(
-          uri,
-          mode: LaunchMode
-              .externalApplication,
-        );
+        final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
         if (ok) return;
       }
     }
@@ -827,34 +567,21 @@ class _VenuePageState
 
   Future<void> _openWebsite() async {
     final raw = _venueWebsite?.trim();
-    if (raw == null || raw.isEmpty)
-      return;
-    final normalized =
-        raw.startsWith('http://') ||
-            raw.startsWith('https://')
+    if (raw == null || raw.isEmpty) return;
+    final normalized = raw.startsWith('http://') || raw.startsWith('https://')
         ? raw
         : 'https://$raw';
     final uri = Uri.parse(normalized);
     if (await canLaunchUrl(uri)) {
-      await launchUrl(
-        uri,
-        mode: LaunchMode
-            .externalApplication,
-      );
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
   }
 
   Future<void> _callVenue() async {
     final raw = _venuePhone?.trim();
-    if (raw == null || raw.isEmpty)
-      return;
-    final cleaned = raw.replaceAll(
-      RegExp(r'[()\s-]'),
-      '',
-    );
-    final uri = Uri.parse(
-      'tel:$cleaned',
-    );
+    if (raw == null || raw.isEmpty) return;
+    final cleaned = raw.replaceAll(RegExp(r'[()\s-]'), '');
+    final uri = Uri.parse('tel:$cleaned');
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri);
     }
@@ -863,96 +590,63 @@ class _VenuePageState
   // ---------- Display Helpers ----------
 
   String _getVenueTypeDisplay() {
-    if (widget.venueType == null ||
-        widget.venueType!.isEmpty) {
+    if (widget.venueType == null || widget.venueType!.isEmpty) {
       return 'Venue';
     }
 
-    final type = widget.venueType!
-        .toLowerCase();
-    if (type == 'malls' ||
-        type == 'mall') {
+    final type = widget.venueType!.toLowerCase();
+    if (type == 'malls' || type == 'mall') {
       return 'Shopping mall';
-    } else if (type == 'stadiums' ||
-        type == 'stadium') {
+    } else if (type == 'stadiums' || type == 'stadium') {
       return 'Stadium';
-    } else if (type == 'airports' ||
-        type == 'airport') {
+    } else if (type == 'airports' || type == 'airport') {
       return 'Airport';
     }
 
-    return widget.venueType![0]
-            .toUpperCase() +
-        widget.venueType!.substring(1);
+    return widget.venueType![0].toUpperCase() + widget.venueType!.substring(1);
   }
 
   bool _isOpen24Hours() {
-    if (_weekdayText.isEmpty)
-      return false;
+    if (_weekdayText.isEmpty) return false;
     return _weekdayText.every(
       (line) =>
-          line.toLowerCase().contains(
-            '24',
-          ) ||
-          line.toLowerCase().contains(
-            'open 24',
-          ),
+          line.toLowerCase().contains('24') ||
+          line.toLowerCase().contains('open 24'),
     );
   }
 
   bool _isTemporarilyClosed() {
-    return _businessStatus
-            ?.toLowerCase() ==
-        'closed_temporarily';
+    return _businessStatus?.toLowerCase() == 'closed_temporarily';
   }
 
   bool _hasVaryingHours() {
-    if (_weekdayText.isEmpty)
-      return false;
+    if (_weekdayText.isEmpty) return false;
     return _weekdayText.any(
       (line) =>
-          line.toLowerCase().contains(
-            'vary',
-          ) ||
-          line.toLowerCase().contains(
-            'event',
-          ),
+          line.toLowerCase().contains('vary') ||
+          line.toLowerCase().contains('event'),
     );
   }
 
   String _getOpeningStatus() {
-    if (_isTemporarilyClosed())
-      return 'Temporarily Closed';
-    if (_isOpen24Hours())
-      return 'Open 24 Hours';
-    if (_hasVaryingHours())
-      return 'Hours Vary';
+    if (_isTemporarilyClosed()) return 'Temporarily Closed';
+    if (_isOpen24Hours()) return 'Open 24 Hours';
+    if (_hasVaryingHours()) return 'Hours Vary';
     if (_openNow == true) return 'Open';
-    if (_openNow == false)
-      return 'Closed';
+    if (_openNow == false) return 'Closed';
     return 'Not Available';
   }
 
   String _normalizeHoursLine(String s) {
     return s
-        .replaceAll(
-          RegExp(
-            r'[\u2012\u2013\u2014\u2212\-]+',
-          ),
-          '-',
-        )
-        .replaceAll(
-          RegExp(r'[\u202F\u00A0]'),
-          ' ',
-        )
+        .replaceAll(RegExp(r'[\u2012\u2013\u2014\u2212\-]+'), '-')
+        .replaceAll(RegExp(r'[\u202F\u00A0]'), ' ')
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
   }
 
   String _getOpeningTime() {
-    if (_isTemporarilyClosed() ||
-        _isOpen24Hours() ||
-        _hasVaryingHours()) {
+    if (_isTemporarilyClosed() || _isOpen24Hours() || _hasVaryingHours()) {
       return '';
     }
 
@@ -969,36 +663,22 @@ class _VenuePageState
       'Saturday',
     ];
 
-    final line = _weekdayText
-        .firstWhere(
-          (l) => l
-              .toLowerCase()
-              .startsWith(
-                labelsSunFirst[today]
-                    .toLowerCase(),
-              ),
-          orElse: () => '',
-        );
+    final line = _weekdayText.firstWhere(
+      (l) => l.toLowerCase().startsWith(labelsSunFirst[today].toLowerCase()),
+      orElse: () => '',
+    );
 
     if (line.isEmpty) return '';
 
     String timePart = line.contains(':')
-        ? line
-              .split(':')
-              .sublist(1)
-              .join(':')
-              .trim()
+        ? line.split(':').sublist(1).join(':').trim()
         : '';
 
-    if (timePart.isEmpty ||
-        timePart.toLowerCase() ==
-            'closed') {
+    if (timePart.isEmpty || timePart.toLowerCase() == 'closed') {
       return '';
     }
 
-    timePart = _normalizeHoursLine(
-      timePart,
-    );
+    timePart = _normalizeHoursLine(timePart);
 
     final m = RegExp(
       r'^\s*(\d{1,2}:\d{2})\s*(?:([AP]M))?\s*-\s*(\d{1,2}:\d{2})\s*([AP]M)\s*$',
@@ -1007,8 +687,7 @@ class _VenuePageState
 
     if (m != null) {
       final startTime = m.group(1)!;
-      final startMer =
-          (m.group(2) ?? m.group(4))!;
+      final startMer = (m.group(2) ?? m.group(4))!;
       final endTime = m.group(3)!;
       final endMer = m.group(4)!;
 
@@ -1025,19 +704,15 @@ class _VenuePageState
         r'[-–]\s*(\d{1,2}:\d{2}\s?[AP]M)',
         caseSensitive: false,
       ).firstMatch(timePart);
-      if (matchClose != null)
-        return 'Closes at ${matchClose.group(1)}';
+      if (matchClose != null) return 'Closes at ${matchClose.group(1)}';
     } else {
       final matchOpenLoose = RegExp(
         r'(\d{1,2}:\d{2})(?:\s?([AP]M))?',
         caseSensitive: false,
       ).firstMatch(timePart);
       if (matchOpenLoose != null) {
-        final t = matchOpenLoose.group(
-          1,
-        )!;
-        final mer = matchOpenLoose
-            .group(2);
+        final t = matchOpenLoose.group(1)!;
+        final mer = matchOpenLoose.group(2);
         return 'Opens at ${mer == null ? t : '$t $mer'}';
       }
     }
@@ -1046,42 +721,25 @@ class _VenuePageState
   }
 
   Color _getStatusColor() {
-    if (_isTemporarilyClosed())
-      return Colors.red;
-    if (_isOpen24Hours())
-      return Colors.green;
-    if (_hasVaryingHours())
-      return Colors.orange;
-    if (_openNow == true)
-      return Colors.green;
-    if (_openNow == false)
-      return const Color.fromRGBO(
-        244,
-        67,
-        54,
-        1,
-      );
+    if (_isTemporarilyClosed()) return Colors.red;
+    if (_isOpen24Hours()) return Colors.green;
+    if (_hasVaryingHours()) return Colors.orange;
+    if (_openNow == true) return Colors.green;
+    if (_openNow == false) return const Color.fromRGBO(244, 67, 54, 1);
     return Colors.orange;
   }
 
-  void _showImageOverlay(
-    int startIndex,
-  ) {
-    final imagesToShow = widget
-        .imagePaths
-        .skip(1)
-        .toList();
+  void _showImageOverlay(int startIndex) {
+    final imagesToShow = widget.imagePaths.skip(1).toList();
 
     showDialog(
       context: context,
-      barrierColor: Colors.black
-          .withOpacity(0.9),
-      builder: (context) =>
-          _ImageOverlay(
-            imagePaths: imagesToShow,
-            startIndex: startIndex,
-            getUrlFor: _imageUrlForPath,
-          ),
+      barrierColor: Colors.black.withOpacity(0.9),
+      builder: (context) => _ImageOverlay(
+        imagePaths: imagesToShow,
+        startIndex: startIndex,
+        getUrlFor: _imageUrlForPath,
+      ),
     );
   }
 
@@ -1091,81 +749,45 @@ class _VenuePageState
   Widget build(BuildContext context) {
     super.build(context);
 
-    final screenWidth = MediaQuery.of(
-      context,
-    ).size.width;
-    final isSmallScreen =
-        screenWidth < 360;
-    final horizontalPadding =
-        isSmallScreen ? 12.0 : 16.0;
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isSmallScreen = screenWidth < 360;
+    final horizontalPadding = isSmallScreen ? 12.0 : 16.0;
 
-    final hasWebsite =
-        (_venueWebsite != null &&
-        _venueWebsite!.isNotEmpty);
-    final hasPhone =
-        (_venuePhone != null &&
-        _venuePhone!.isNotEmpty);
+    final hasWebsite = (_venueWebsite != null && _venueWebsite!.isNotEmpty);
+    final hasPhone = (_venuePhone != null && _venuePhone!.isNotEmpty);
     final bool isMall =
-        widget.venueType
-                ?.toLowerCase() ==
-            'malls' ||
-        widget.venueType
-                ?.toLowerCase() ==
-            'mall';
-    final bool isSolitaire = widget.name
-        .toLowerCase()
-        .contains('solitaire');
+        widget.venueType?.toLowerCase() == 'malls' ||
+        widget.venueType?.toLowerCase() == 'mall';
+    final bool isSolitaire = widget.name.toLowerCase().contains('solitaire');
 
-    final String effectiveVenueId =
-        (isMall && !isSolitaire)
+    final String effectiveVenueId = (isMall && !isSolitaire)
         ? 'ChIJcYTQDwDjLj4RZEiboV6gZzM'
         : widget.placeId;
 
     return Scaffold(
-      backgroundColor:
-          Colors.grey.shade100,
+      backgroundColor: Colors.white,
       extendBodyBehindAppBar: true,
       appBar: AppBar(
-        backgroundColor:
-            Colors.transparent,
+        backgroundColor: Colors.transparent,
         elevation: 0,
         leading: Container(
-          margin: const EdgeInsets.all(
-            8,
+          margin: const EdgeInsets.all(8),
+          decoration: const BoxDecoration(
+            color: Color.fromARGB(145, 255, 255, 255),
+            shape: BoxShape.circle,
           ),
-          decoration:
-              const BoxDecoration(
-                color: Color.fromARGB(
-                  145,
-                  255,
-                  255,
-                  255,
-                ),
-                shape: BoxShape.circle,
-              ),
           child: IconButton(
-            icon: const Icon(
-              Icons.arrow_back,
-              color: kPrimaryGreen,
-              size: 20,
-            ),
-            onPressed: () =>
-                Navigator.pop(context),
+            icon: const Icon(Icons.arrow_back, color: kPrimaryGreen, size: 20),
+            onPressed: () => Navigator.pop(context),
           ),
         ),
       ),
       body: _loading
           ? Center(
-              child:
-                  CircularProgressIndicator(
-                    color:
-                        kPrimaryGreen,
-                    backgroundColor:
-                        kPrimaryGreen
-                            .withOpacity(
-                              0.2,
-                            ),
-                  ),
+              child: CircularProgressIndicator(
+                color: kPrimaryGreen,
+                backgroundColor: kPrimaryGreen.withOpacity(0.2),
+              ),
             )
           : _error != null
           ? Center(child: Text(_error!))
@@ -1173,252 +795,161 @@ class _VenuePageState
               padding: EdgeInsets.zero,
               children: [
                 // Hero image
-                if (widget
-                    .imagePaths
-                    .isNotEmpty)
+                if (widget.imagePaths.isNotEmpty)
                   _buildHeroImage()
                 else
                   SizedBox(
-                    height:
-                        _headerHeight,
+                    height: _headerHeight,
                     child: Container(
-                      color: Colors
-                          .grey
-                          .shade200,
+                      color: Colors.grey.shade200,
                       child: const Center(
-                        child: Icon(
-                          Icons
-                              .image_not_supported,
-                          size: 48,
-                        ),
+                        child: Icon(Icons.image_not_supported, size: 48),
                       ),
                     ),
                   ),
 
                 // White content section
                 Transform.translate(
-                  offset: const Offset(
-                    0,
-                    -_topRadius,
-                  ),
+                  offset: const Offset(0, -_topRadius),
                   child: Container(
                     decoration: const BoxDecoration(
-                      color:
-                          Colors.white,
+                      color: Colors.white,
                       borderRadius: BorderRadius.only(
-                        topLeft:
-                            Radius.circular(
-                              _topRadius,
-                            ),
-                        topRight:
-                            Radius.circular(
-                              _topRadius,
-                            ),
+                        topLeft: Radius.circular(_topRadius),
+                        topRight: Radius.circular(_topRadius),
                       ),
                     ),
                     child: Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment
-                              .start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const SizedBox(
-                          height: 20,
-                        ),
+                        const SizedBox(height: 20),
 
                         // Venue name and type
                         Padding(
                           padding: EdgeInsets.symmetric(
-                            horizontal:
-                                horizontalPadding,
+                            horizontal: horizontalPadding,
                           ),
                           child: Column(
-                            crossAxisAlignment:
-                                CrossAxisAlignment
-                                    .start,
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                widget
-                                    .name,
+                                widget.name,
                                 style: TextStyle(
-                                  fontSize:
-                                      isSmallScreen
-                                      ? 20
-                                      : 22,
-                                  fontWeight:
-                                      FontWeight.w700,
-                                  color:
-                                      kPrimaryGreen,
+                                  fontSize: isSmallScreen ? 20 : 22,
+                                  fontWeight: FontWeight.w700,
+                                  color: kPrimaryGreen,
                                 ),
                               ),
-                              const SizedBox(
-                                height:
-                                    4,
-                              ),
+                              const SizedBox(height: 4),
                               Text(
                                 _getVenueTypeDisplay(),
                                 style: TextStyle(
-                                  fontSize:
-                                      14,
-                                  color: Colors
-                                      .grey
-                                      .shade600,
+                                  fontSize: 14,
+                                  color: Colors.grey.shade600,
                                 ),
                               ),
                             ],
                           ),
                         ),
-                        const SizedBox(
-                          height: 20,
-                        ),
+                        const SizedBox(height: 20),
 
                         // Action buttons
                         Padding(
                           padding: EdgeInsets.symmetric(
-                            horizontal:
-                                horizontalPadding,
+                            horizontal: horizontalPadding,
                           ),
                           child: Row(
                             children: [
                               Expanded(
                                 child: _actionButton(
-                                  icon:
-                                      Icons.location_on_outlined,
-                                  label:
-                                      'Location',
-                                  onTap:
-                                      _openInMaps,
+                                  icon: Icons.location_on_outlined,
+                                  label: 'Location',
+                                  onTap: _openInMaps,
                                 ),
                               ),
                               if (hasWebsite) ...[
-                                const SizedBox(
-                                  width:
-                                      12,
-                                ),
+                                const SizedBox(width: 12),
                                 Expanded(
                                   child: _actionButton(
-                                    icon:
-                                        Icons.language,
-                                    label:
-                                        'Website',
-                                    onTap:
-                                        _openWebsite,
+                                    icon: Icons.language,
+                                    label: 'Website',
+                                    onTap: _openWebsite,
                                   ),
                                 ),
                               ],
                               if (hasPhone) ...[
-                                const SizedBox(
-                                  width:
-                                      12,
-                                ),
+                                const SizedBox(width: 12),
                                 Expanded(
                                   child: _actionButton(
-                                    icon:
-                                        Icons.phone_outlined,
-                                    label:
-                                        'Call',
-                                    onTap:
-                                        _callVenue,
+                                    icon: Icons.phone_outlined,
+                                    label: 'Call',
+                                    onTap: _callVenue,
                                   ),
                                 ),
                               ],
                             ],
                           ),
                         ),
-                        const SizedBox(
-                          height: 24,
-                        ),
+                        const SizedBox(height: 24),
 
                         // Photo strip
-                        if (widget
-                                .imagePaths
-                                .length >
-                            1)
+                        if (widget.imagePaths.length > 1)
                           Padding(
                             padding: EdgeInsets.symmetric(
-                              horizontal:
-                                  horizontalPadding,
+                              horizontal: horizontalPadding,
                             ),
-                            child:
-                                _buildPhotoStrip(),
+                            child: _buildPhotoStrip(),
                           ),
-                        const SizedBox(
-                          height: 24,
-                        ),
+                        const SizedBox(height: 24),
 
                         // About section
                         Padding(
                           padding: EdgeInsets.symmetric(
-                            horizontal:
-                                horizontalPadding,
+                            horizontal: horizontalPadding,
                           ),
                           child: Column(
-                            crossAxisAlignment:
-                                CrossAxisAlignment
-                                    .start,
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
                                 'About',
                                 style: TextStyle(
-                                  fontSize:
-                                      14,
-                                  fontWeight:
-                                      FontWeight.w600,
-                                  color: Colors
-                                      .grey
-                                      .shade500,
-                                  letterSpacing:
-                                      0.5,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.grey.shade500,
+                                  letterSpacing: 0.5,
                                 ),
                               ),
-                              const SizedBox(
-                                height:
-                                    8,
-                              ),
+                              const SizedBox(height: 8),
                               _buildExpandableText(
-                                widget
-                                    .description,
+                                widget.description,
                                 _aboutExpanded,
                                 () => setState(
-                                  () => _aboutExpanded =
-                                      !_aboutExpanded,
+                                  () => _aboutExpanded = !_aboutExpanded,
                                 ),
                               ),
                             ],
                           ),
                         ),
-                        const SizedBox(
-                          height: 20,
-                        ),
+                        const SizedBox(height: 20),
 
                         // Opening hours section
                         Padding(
                           padding: EdgeInsets.symmetric(
-                            horizontal:
-                                horizontalPadding,
+                            horizontal: horizontalPadding,
                           ),
                           child: Column(
-                            crossAxisAlignment:
-                                CrossAxisAlignment
-                                    .start,
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
                                 'Opening Hours',
                                 style: TextStyle(
-                                  fontSize:
-                                      14,
-                                  fontWeight:
-                                      FontWeight.w600,
-                                  color: Colors
-                                      .grey
-                                      .shade500,
-                                  letterSpacing:
-                                      0.5,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.grey.shade500,
+                                  letterSpacing: 0.5,
                                 ),
                               ),
-                              const SizedBox(
-                                height:
-                                    8,
-                              ),
+                              const SizedBox(height: 8),
                               _buildOpeningHours(),
                             ],
                           ),
@@ -1427,15 +958,11 @@ class _VenuePageState
                         // Divider
                         Padding(
                           padding: EdgeInsets.symmetric(
-                            horizontal:
-                                horizontalPadding,
-                            vertical:
-                                20,
+                            horizontal: horizontalPadding,
+                            vertical: 20,
                           ),
                           child: Divider(
-                            color: Colors
-                                .grey
-                                .shade200,
+                            color: Colors.grey.shade200,
                             height: 1,
                           ),
                         ),
@@ -1443,32 +970,21 @@ class _VenuePageState
                         // Floor Map section
                         Padding(
                           padding: EdgeInsets.symmetric(
-                            horizontal:
-                                horizontalPadding,
+                            horizontal: horizontalPadding,
                           ),
                           child: Column(
-                            crossAxisAlignment:
-                                CrossAxisAlignment
-                                    .start,
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
                                 'Map',
                                 style: TextStyle(
-                                  fontSize:
-                                      14,
-                                  fontWeight:
-                                      FontWeight.w600,
-                                  color: Colors
-                                      .grey
-                                      .shade500,
-                                  letterSpacing:
-                                      0.5,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.grey.shade500,
+                                  letterSpacing: 0.5,
                                 ),
                               ),
-                              const SizedBox(
-                                height:
-                                    12,
-                              ),
+                              const SizedBox(height: 12),
                               _buildFloorMapViewer(),
                             ],
                           ),
@@ -1477,15 +993,11 @@ class _VenuePageState
                         // Divider
                         Padding(
                           padding: EdgeInsets.symmetric(
-                            horizontal:
-                                horizontalPadding,
-                            vertical:
-                                20,
+                            horizontal: horizontalPadding,
+                            vertical: 20,
                           ),
                           child: Divider(
-                            color: Colors
-                                .grey
-                                .shade200,
+                            color: Colors.grey.shade200,
                             height: 1,
                           ),
                         ),
@@ -1493,43 +1005,29 @@ class _VenuePageState
                         // Discover More section
                         Padding(
                           padding: EdgeInsets.symmetric(
-                            horizontal:
-                                horizontalPadding,
+                            horizontal: horizontalPadding,
                           ),
                           child: Text(
                             'Discover More',
                             style: TextStyle(
-                              fontSize:
-                                  14,
-                              fontWeight:
-                                  FontWeight
-                                      .w600,
-                              color: Colors
-                                  .grey
-                                  .shade500,
-                              letterSpacing:
-                                  0.5,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.grey.shade500,
+                              letterSpacing: 0.5,
                             ),
                           ),
                         ),
-                        const SizedBox(
-                          height: 12,
-                        ),
+                        const SizedBox(height: 12),
 
                         SizedBox(
                           height: 180,
                           child: _DiscoverMoreSection(
-                            venueId:
-                                effectiveVenueId,
-                            getUrlFor:
-                                _imageUrlForCategory,
-                            currentFloorSrc:
-                                _currentFloor,
+                            venueId: effectiveVenueId,
+                            getUrlFor: _imageUrlForCategory,
+                            currentFloorSrc: _currentFloor,
                           ),
                         ),
-                        const SizedBox(
-                          height: 24,
-                        ),
+                        const SizedBox(height: 24),
                       ],
                     ),
                   ),
@@ -1542,55 +1040,28 @@ class _VenuePageState
   // ---------- UI Builders ----------
 
   Widget _buildHeroImage() {
-    final path =
-        widget.imagePaths.isNotEmpty
-        ? widget.imagePaths.first
-        : '';
+    final path = widget.imagePaths.isNotEmpty ? widget.imagePaths.first : '';
 
     // Use initial cover URL if provided (passed from home page)
-    if (widget.initialCoverUrl !=
-            null &&
-        widget
-            .initialCoverUrl!
-            .isNotEmpty) {
+    if (widget.initialCoverUrl != null && widget.initialCoverUrl!.isNotEmpty) {
       // Cache the URL for future use
       if (path.isNotEmpty) {
-        _urlCache[path] =
-            widget.initialCoverUrl!;
+        _urlCache[path] = widget.initialCoverUrl!;
       }
       return SizedBox(
         height: _headerHeight,
         width: double.infinity,
         child: CachedNetworkImage(
-          imageUrl:
-              widget.initialCoverUrl!,
-          cacheKey: path.isNotEmpty
-              ? path
-              : widget.initialCoverUrl,
+          imageUrl: widget.initialCoverUrl!,
+          cacheKey: path.isNotEmpty ? path : widget.initialCoverUrl,
           fit: BoxFit.cover,
-          placeholder: (context, url) =>
-              Container(
-                color: Colors
-                    .grey
-                    .shade200,
-              ),
-          errorWidget:
-              (
-                context,
-                url,
-                error,
-              ) => Container(
-                color: Colors
-                    .grey
-                    .shade200,
-                child: const Center(
-                  child: Icon(
-                    Icons
-                        .image_not_supported,
-                    size: 48,
-                  ),
-                ),
-              ),
+          placeholder: (context, url) => Container(color: Colors.grey.shade200),
+          errorWidget: (context, url, error) => Container(
+            color: Colors.grey.shade200,
+            child: const Center(
+              child: Icon(Icons.image_not_supported, size: 48),
+            ),
+          ),
         ),
       );
     }
@@ -1600,12 +1071,7 @@ class _VenuePageState
         height: _headerHeight,
         child: Container(
           color: Colors.grey.shade200,
-          child: const Center(
-            child: Icon(
-              Icons.image_not_supported,
-              size: 48,
-            ),
-          ),
+          child: const Center(child: Icon(Icons.image_not_supported, size: 48)),
         ),
       );
     }
@@ -1619,29 +1085,13 @@ class _VenuePageState
           imageUrl: _urlCache[path]!,
           cacheKey: path,
           fit: BoxFit.cover,
-          placeholder: (context, url) =>
-              Container(
-                color: Colors
-                    .grey
-                    .shade200,
-              ),
-          errorWidget:
-              (
-                context,
-                url,
-                error,
-              ) => Container(
-                color: Colors
-                    .grey
-                    .shade200,
-                child: const Center(
-                  child: Icon(
-                    Icons
-                        .image_not_supported,
-                    size: 48,
-                  ),
-                ),
-              ),
+          placeholder: (context, url) => Container(color: Colors.grey.shade200),
+          errorWidget: (context, url, error) => Container(
+            color: Colors.grey.shade200,
+            child: const Center(
+              child: Icon(Icons.image_not_supported, size: 48),
+            ),
+          ),
         ),
       );
     }
@@ -1650,38 +1100,22 @@ class _VenuePageState
     return FutureBuilder<String?>(
       future: _imageUrlForPath(path),
       builder: (context, snap) {
-        if (snap.connectionState ==
-            ConnectionState.waiting) {
+        if (snap.connectionState == ConnectionState.waiting) {
           return SizedBox(
             height: _headerHeight,
             child: Container(
-              color:
-                  Colors.grey.shade200,
+              color: Colors.grey.shade200,
               child: Center(
                 child: FutureBuilder(
-                  future:
-                      Future.delayed(
-                        const Duration(
-                          milliseconds:
-                              500,
-                        ),
-                      ),
+                  future: Future.delayed(const Duration(milliseconds: 500)),
                   builder: (context, delaySnap) {
-                    if (delaySnap
-                            .connectionState ==
-                        ConnectionState
-                            .waiting) {
+                    if (delaySnap.connectionState == ConnectionState.waiting) {
                       return const SizedBox.shrink();
                     }
                     return CircularProgressIndicator(
                       strokeWidth: 2,
-                      color:
-                          kPrimaryGreen,
-                      backgroundColor:
-                          kPrimaryGreen
-                              .withOpacity(
-                                0.2,
-                              ),
+                      color: kPrimaryGreen,
+                      backgroundColor: kPrimaryGreen.withOpacity(0.2),
                     );
                   },
                 ),
@@ -1689,20 +1123,13 @@ class _VenuePageState
             ),
           );
         }
-        if (snap.hasError ||
-            snap.data == null ||
-            snap.data!.isEmpty) {
+        if (snap.hasError || snap.data == null || snap.data!.isEmpty) {
           return SizedBox(
             height: _headerHeight,
             child: Container(
-              color:
-                  Colors.grey.shade200,
+              color: Colors.grey.shade200,
               child: const Center(
-                child: Icon(
-                  Icons
-                      .image_not_supported,
-                  size: 48,
-                ),
+                child: Icon(Icons.image_not_supported, size: 48),
               ),
             ),
           );
@@ -1714,30 +1141,14 @@ class _VenuePageState
             imageUrl: snap.data!,
             cacheKey: path,
             fit: BoxFit.cover,
-            placeholder:
-                (context, url) =>
-                    Container(
-                      color: Colors
-                          .grey
-                          .shade200,
-                    ),
-            errorWidget:
-                (
-                  context,
-                  url,
-                  error,
-                ) => Container(
-                  color: Colors
-                      .grey
-                      .shade200,
-                  child: const Center(
-                    child: Icon(
-                      Icons
-                          .image_not_supported,
-                      size: 48,
-                    ),
-                  ),
-                ),
+            placeholder: (context, url) =>
+                Container(color: Colors.grey.shade200),
+            errorWidget: (context, url, error) => Container(
+              color: Colors.grey.shade200,
+              child: const Center(
+                child: Icon(Icons.image_not_supported, size: 48),
+              ),
+            ),
           ),
         );
       },
@@ -1752,53 +1163,43 @@ class _VenuePageState
     return InkWell(
       onTap: onTap,
       child: Container(
-        padding:
-            const EdgeInsets.symmetric(
-              vertical: 10,
-              horizontal: 12,
-            ),
+        height: 46,
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
         decoration: BoxDecoration(
           color: Colors.grey.shade100,
-          borderRadius:
-              BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(8),
         ),
-        child: Row(
-          mainAxisAlignment:
-              MainAxisAlignment.center,
-          children: [
-            Icon(
-              icon,
-              color: kPrimaryGreen,
-              size: 20,
-            ),
-            const SizedBox(width: 6),
-            Flexible(
-              child: Text(
-                label,
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: kPrimaryGreen,
-                  fontWeight:
-                      FontWeight.w500,
+        child: Center(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, color: kPrimaryGreen, size: 20),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  maxLines: 1,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: kPrimaryGreen,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
-                overflow: TextOverflow
-                    .ellipsis,
-              ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
   }
 
   Widget _buildPhotoStrip() {
-    final images =
-        widget.imagePaths.length > 1
+    final images = widget.imagePaths.length > 1
         ? widget.imagePaths.sublist(1)
         : const <String>[];
 
-    if (images.isEmpty)
-      return const SizedBox.shrink();
+    if (images.isEmpty) return const SizedBox.shrink();
 
     return _PhotoStripWidget(
       images: images,
@@ -1819,78 +1220,49 @@ class _VenuePageState
     );
 
     const double arrowSlotWidth = 32;
-    const EdgeInsets arrowPad =
-        EdgeInsets.symmetric(
-          horizontal: 6,
-        );
+    const EdgeInsets arrowPad = EdgeInsets.symmetric(horizontal: 6);
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final probe =
-            TextPainter(
-              text: TextSpan(
-                text: text,
-                style: style,
-              ),
-              maxLines: 2,
-              textDirection:
-                  TextDirection.ltr,
-            )..layout(
-              maxWidth:
-                  constraints.maxWidth -
-                  arrowSlotWidth,
-            );
-        final exceeded =
-            probe.didExceedMaxLines;
+        final probe = TextPainter(
+          text: TextSpan(text: text, style: style),
+          maxLines: 2,
+          textDirection: TextDirection.ltr,
+        )..layout(maxWidth: constraints.maxWidth - arrowSlotWidth);
+        final exceeded = probe.didExceedMaxLines;
 
         if (!exceeded) {
-          return Text(
-            text,
-            style: style,
-          );
+          return Text(text, style: style);
         }
 
         return Row(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
               child: Text(
                 text,
-                maxLines: isExpanded
-                    ? null
-                    : 2,
+                maxLines: isExpanded ? null : 2,
                 overflow: isExpanded
-                    ? TextOverflow
-                          .visible
-                    : TextOverflow
-                          .ellipsis,
+                    ? TextOverflow.visible
+                    : TextOverflow.ellipsis,
                 style: style,
               ),
             ),
             SizedBox(
               width: arrowSlotWidth,
               child: Align(
-                alignment:
-                    Alignment.topCenter,
+                alignment: Alignment.topCenter,
                 child: InkWell(
                   onTap: onTap,
-                  borderRadius:
-                      BorderRadius.circular(
-                        8,
-                      ),
+                  borderRadius: BorderRadius.circular(8),
                   child: Padding(
                     padding: arrowPad,
                     child: Icon(
                       isExpanded
-                          ? Icons
-                                .keyboard_arrow_up
-                          : Icons
-                                .keyboard_arrow_down,
+                          ? Icons.keyboard_arrow_up
+                          : Icons.keyboard_arrow_down,
                       size: 22,
-                      color: Colors
-                          .grey
-                          .shade600,
+                      color: Colors.grey.shade600,
                     ),
                   ),
                 ),
@@ -1907,20 +1279,15 @@ class _VenuePageState
     final time = _getOpeningTime();
 
     return Column(
-      crossAxisAlignment:
-          CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         GestureDetector(
           onTap: () {
-            if (_weekdayText
-                    .isNotEmpty &&
+            if (_weekdayText.isNotEmpty &&
                 !_isOpen24Hours() &&
                 !_isTemporarilyClosed() &&
                 !_hasVaryingHours()) {
-              setState(
-                () => _hoursExpanded =
-                    !_hoursExpanded,
-              );
+              setState(() => _hoursExpanded = !_hoursExpanded);
             }
           },
           child: Row(
@@ -1928,29 +1295,21 @@ class _VenuePageState
               Expanded(
                 child: Row(
                   children: [
-                    if (status
-                        .isNotEmpty)
+                    if (status.isNotEmpty)
                       Text(
                         status,
                         style: TextStyle(
                           fontSize: 15,
-                          color:
-                              _getStatusColor(),
-                          fontWeight:
-                              FontWeight
-                                  .w600,
+                          color: _getStatusColor(),
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                    if (status
-                            .isNotEmpty &&
-                        time.isNotEmpty)
+                    if (status.isNotEmpty && time.isNotEmpty)
                       Text(
                         ' • ',
                         style: TextStyle(
                           fontSize: 15,
-                          color: Colors
-                              .grey
-                              .shade600,
+                          color: Colors.grey.shade600,
                         ),
                       ),
                     if (time.isNotEmpty)
@@ -1958,85 +1317,50 @@ class _VenuePageState
                         child: Text(
                           time,
                           style: const TextStyle(
-                            fontSize:
-                                15,
-                            color: Colors
-                                .black87,
+                            fontSize: 15,
+                            color: Colors.black87,
                           ),
-                          overflow:
-                              TextOverflow
-                                  .ellipsis,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                   ],
                 ),
               ),
-              if (_weekdayText
-                      .isNotEmpty &&
+              if (_weekdayText.isNotEmpty &&
                   !_isOpen24Hours() &&
                   !_isTemporarilyClosed() &&
                   !_hasVaryingHours())
                 InkWell(
-                  onTap: () => setState(
-                    () => _hoursExpanded =
-                        !_hoursExpanded,
-                  ),
-                  borderRadius:
-                      BorderRadius.circular(
-                        8,
-                      ),
+                  onTap: () => setState(() => _hoursExpanded = !_hoursExpanded),
+                  borderRadius: BorderRadius.circular(8),
                   child: Padding(
-                    padding:
-                        const EdgeInsets.only(
-                          left: 8,
-                          right: 6,
-                        ),
+                    padding: const EdgeInsets.only(left: 8, right: 6),
                     child: Icon(
                       _hoursExpanded
-                          ? Icons
-                                .keyboard_arrow_up
-                          : Icons
-                                .keyboard_arrow_down,
+                          ? Icons.keyboard_arrow_up
+                          : Icons.keyboard_arrow_down,
                       size: 22,
-                      color: Colors
-                          .grey
-                          .shade600,
+                      color: Colors.grey.shade600,
                     ),
                   ),
                 ),
             ],
           ),
         ),
-        if (_hoursExpanded &&
-            _weekdayText.isNotEmpty)
+        if (_hoursExpanded && _weekdayText.isNotEmpty)
           Padding(
-            padding:
-                const EdgeInsets.only(
-                  top: 12,
-                ),
+            padding: const EdgeInsets.only(top: 12),
             child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment
-                      .start,
-              children: _weekdayText.map((
-                line,
-              ) {
-                final parts = line
-                    .split(':');
-                if (parts.length < 2)
-                  return const SizedBox.shrink();
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: _weekdayText.map((line) {
+                final parts = line.split(':');
+                if (parts.length < 2) return const SizedBox.shrink();
 
-                final day = parts[0]
-                    .trim();
-                final hours = parts
-                    .sublist(1)
-                    .join(':')
-                    .trim();
+                final day = parts[0].trim();
+                final hours = parts.sublist(1).join(':').trim();
 
-                final now =
-                    DateTime.now();
-                final today =
-                    now.weekday % 7;
+                final now = DateTime.now();
+                final today = now.weekday % 7;
                 const days = [
                   'Sunday',
                   'Monday',
@@ -2046,52 +1370,31 @@ class _VenuePageState
                   'Friday',
                   'Saturday',
                 ];
-                final isToday =
-                    day.toLowerCase() ==
-                    days[today]
-                        .toLowerCase();
+                final isToday = day.toLowerCase() == days[today].toLowerCase();
 
                 return Padding(
-                  padding:
-                      const EdgeInsets.only(
-                        bottom: 8,
-                      ),
+                  padding: const EdgeInsets.only(bottom: 8),
                   child: Row(
-                    mainAxisAlignment:
-                        MainAxisAlignment
-                            .spaceBetween,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
                         day,
                         style: TextStyle(
                           fontSize: 14,
-                          fontWeight:
-                              isToday
-                              ? FontWeight
-                                    .w600
-                              : FontWeight
-                                    .normal,
-                          color: isToday
-                              ? Colors
-                                    .black
-                              : Colors
-                                    .grey
-                                    .shade700,
+                          fontWeight: isToday
+                              ? FontWeight.w600
+                              : FontWeight.normal,
+                          color: isToday ? Colors.black : Colors.grey.shade700,
                         ),
                       ),
                       Flexible(
                         child: Text(
                           hours,
                           style: TextStyle(
-                            fontSize:
-                                14,
-                            color: Colors
-                                .grey
-                                .shade600,
+                            fontSize: 14,
+                            color: Colors.grey.shade600,
                           ),
-                          overflow:
-                              TextOverflow
-                                  .ellipsis,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ],
@@ -2104,27 +1407,16 @@ class _VenuePageState
     );
   }
 
-  Future<String?> _imageUrlForCategory(
-    String path,
-  ) async {
+  Future<String?> _imageUrlForCategory(String path) async {
     if (path.isEmpty) return null;
-    if (_urlCache.containsKey(path))
-      return _urlCache[path];
+    if (_urlCache.containsKey(path)) return _urlCache[path];
     try {
-      final ref = _coversStorage.ref(
-        path,
+      final ref = _coversStorage.ref(path);
+      final url = await ref.getDownloadURL().timeout(
+        const Duration(seconds: 8),
       );
-      final url = await ref
-          .getDownloadURL()
-          .timeout(
-            const Duration(seconds: 8),
-          );
       _urlCache[path] = url;
-      CachedNetworkImageProvider(
-        url,
-      ).resolve(
-        const ImageConfiguration(),
-      );
+      CachedNetworkImageProvider(url).resolve(const ImageConfiguration());
       return url;
     } catch (_) {
       return null;
@@ -2137,61 +1429,40 @@ class _VenuePageState
         height: 200,
         decoration: BoxDecoration(
           color: Colors.grey.shade100,
-          borderRadius:
-              BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(8),
         ),
         child: Center(
           child: Column(
-            mainAxisAlignment:
-                MainAxisAlignment
-                    .center,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               CircularProgressIndicator(
                 color: kPrimaryGreen,
-                backgroundColor:
-                    kPrimaryGreen
-                        .withOpacity(
-                          0.2,
-                        ),
+                backgroundColor: kPrimaryGreen.withOpacity(0.2),
               ),
               const SizedBox(height: 8),
-              const Text(
-                'Loading maps...',
-              ),
+              const Text('Loading maps...'),
             ],
           ),
         ),
       );
     }
 
-    final hasMaps =
-        _venueMaps.isNotEmpty;
+    final hasMaps = _venueMaps.isNotEmpty;
 
     if (!hasMaps) {
       return Container(
         height: 200,
         decoration: BoxDecoration(
           color: Colors.grey.shade100,
-          borderRadius:
-              BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(8),
         ),
         child: Center(
           child: Column(
-            mainAxisAlignment:
-                MainAxisAlignment
-                    .center,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                Icons.map_outlined,
-                size: 48,
-                color: Colors
-                    .grey
-                    .shade400,
-              ),
+              Icon(Icons.map_outlined, size: 48, color: Colors.grey.shade400),
               const SizedBox(height: 8),
-              const Text(
-                'No floor maps available',
-              ),
+              const Text('No floor maps available'),
             ],
           ),
         ),
@@ -2210,12 +1481,10 @@ class _VenuePageState
 // Image Overlay
 // ----------------------------------------------------------------------------
 
-class _ImageOverlay
-    extends StatefulWidget {
+class _ImageOverlay extends StatefulWidget {
   final List<String> imagePaths;
   final int startIndex;
-  final Future<String?> Function(String)
-  getUrlFor;
+  final Future<String?> Function(String) getUrlFor;
 
   const _ImageOverlay({
     required this.imagePaths,
@@ -2224,23 +1493,18 @@ class _ImageOverlay
   });
 
   @override
-  State<_ImageOverlay> createState() =>
-      _ImageOverlayState();
+  State<_ImageOverlay> createState() => _ImageOverlayState();
 }
 
-class _ImageOverlayState
-    extends State<_ImageOverlay> {
-  late final PageController
-  _pageController;
+class _ImageOverlayState extends State<_ImageOverlay> {
+  late final PageController _pageController;
   late int _currentIndex;
 
   @override
   void initState() {
     super.initState();
     _currentIndex = widget.startIndex;
-    _pageController = PageController(
-      initialPage: widget.startIndex,
-    );
+    _pageController = PageController(initialPage: widget.startIndex);
   }
 
   @override
@@ -2257,76 +1521,44 @@ class _ImageOverlayState
         children: [
           PageView.builder(
             controller: _pageController,
-            onPageChanged: (index) =>
-                setState(
-                  () => _currentIndex =
-                      index,
-                ),
-            itemCount: widget
-                .imagePaths
-                .length,
+            onPageChanged: (index) => setState(() => _currentIndex = index),
+            itemCount: widget.imagePaths.length,
             itemBuilder: (context, index) {
               return Center(
                 child: FutureBuilder<String?>(
-                  future: widget.getUrlFor(
-                    widget
-                        .imagePaths[index],
-                  ),
+                  future: widget.getUrlFor(widget.imagePaths[index]),
                   builder: (context, snap) {
-                    if (snap.connectionState ==
-                        ConnectionState
-                            .waiting) {
+                    if (snap.connectionState == ConnectionState.waiting) {
                       return FutureBuilder(
                         future: Future.delayed(
-                          const Duration(
-                            milliseconds:
-                                500,
-                          ),
+                          const Duration(milliseconds: 500),
                         ),
-                        builder:
-                            (
-                              context,
-                              delaySnap,
-                            ) {
-                              if (delaySnap
-                                      .connectionState ==
-                                  ConnectionState
-                                      .waiting) {
-                                return const SizedBox.shrink();
-                              }
-                              return CircularProgressIndicator(
-                                strokeWidth:
-                                    2,
-                                color: Colors
-                                    .white,
-                                backgroundColor: Colors
-                                    .white
-                                    .withOpacity(
-                                      0.3,
-                                    ),
-                              );
-                            },
+                        builder: (context, delaySnap) {
+                          if (delaySnap.connectionState ==
+                              ConnectionState.waiting) {
+                            return const SizedBox.shrink();
+                          }
+                          return CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                            backgroundColor: Colors.white.withOpacity(0.3),
+                          );
+                        },
                       );
                     }
                     if (snap.hasError ||
-                        snap.data ==
-                            null ||
-                        snap
-                            .data!
-                            .isEmpty) {
+                        snap.data == null ||
+                        snap.data!.isEmpty) {
                       return const Icon(
                         Icons.error,
-                        color: Colors
-                            .white,
+                        color: Colors.white,
                         size: 48,
                       );
                     }
                     return InteractiveViewer(
                       child: CachedNetworkImage(
-                        imageUrl:
-                            snap.data!,
-                        fit: BoxFit
-                            .contain,
+                        imageUrl: snap.data!,
+                        fit: BoxFit.contain,
                       ),
                     );
                   },
@@ -2335,22 +1567,11 @@ class _ImageOverlayState
             },
           ),
           Positioned(
-            top:
-                MediaQuery.of(
-                  context,
-                ).padding.top +
-                8,
+            top: MediaQuery.of(context).padding.top + 8,
             right: 16,
             child: IconButton(
-              icon: const Icon(
-                Icons.close,
-                color: Colors.white,
-                size: 30,
-              ),
-              onPressed: () =>
-                  Navigator.pop(
-                    context,
-                  ),
+              icon: const Icon(Icons.close, color: Colors.white, size: 30),
+              onPressed: () => Navigator.pop(context),
             ),
           ),
           Positioned(
@@ -2363,8 +1584,7 @@ class _ImageOverlayState
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 16,
-                  fontWeight:
-                      FontWeight.w500,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ),
@@ -2379,11 +1599,9 @@ class _ImageOverlayState
 // Floor Map Widgets
 // ----------------------------------------------------------------------------
 
-class _FloorMapViewer
-    extends StatefulWidget {
+class _FloorMapViewer extends StatefulWidget {
   final String currentFloor;
-  final String
-  placeId; // Firestore document ID of the place
+  final String placeId; // Firestore document ID of the place
 
   const _FloorMapViewer({
     super.key,
@@ -2392,91 +1610,54 @@ class _FloorMapViewer
   });
 
   @override
-  State<_FloorMapViewer>
-  createState() =>
-      _FloorMapViewerState();
+  State<_FloorMapViewer> createState() => _FloorMapViewerState();
 }
 
-class _FloorMapViewerState
-    extends State<_FloorMapViewer> {
+class _FloorMapViewerState extends State<_FloorMapViewer> {
   Size _viewerSize = Size.zero;
   bool _showPopup = false;
-  final TransformationController _tc =
-      TransformationController();
+  final TransformationController _tc = TransformationController();
 
-  String _displayNameFromMaterial(
-    String material,
-  ) {
-    final m = material
-        .trim()
-        .toUpperCase();
+  String _displayNameFromMaterial(String material) {
+    final m = material.trim().toUpperCase();
 
     if (m.contains('BATHROOM')) {
-      if (m.contains('SHARED'))
-        return 'Bathroom';
-      if (m.contains('FEMALE'))
-        return 'Female Bathroom';
-      if (m.contains('MALE'))
-        return 'Male Bathroom';
+      if (m.contains('SHARED')) return 'Bathroom';
+      if (m.contains('FEMALE')) return 'Female Bathroom';
+      if (m.contains('MALE')) return 'Male Bathroom';
       return 'Bathroom';
     }
 
     if (m.contains('PRAYER')) {
-      if (m.contains('SHARED'))
-        return 'Prayer Room';
-      if (m.contains('FEMALE'))
-        return 'Female Prayer Room';
-      if (m.contains('MALE'))
-        return 'Male Prayer Room';
+      if (m.contains('SHARED')) return 'Prayer Room';
+      if (m.contains('FEMALE')) return 'Female Prayer Room';
+      if (m.contains('MALE')) return 'Male Prayer Room';
       return 'Prayer Room';
     }
 
     return material
-        .replaceFirst(
-          RegExp(
-            r'^POIMAT_',
-            caseSensitive: false,
-          ),
-          '',
-        )
-        .replaceAll(
-          RegExp(r'\.\d+$'),
-          '',
-        )
+        .replaceFirst(RegExp(r'^POIMAT_', caseSensitive: false), '')
+        .replaceAll(RegExp(r'\.\d+$'), '')
         .replaceAll('_', ' ')
         .trim();
   }
 
-  Future<void> _handlePoiMessage(
-    String raw,
-  ) async {
+  Future<void> _handlePoiMessage(String raw) async {
     Map<String, dynamic>? data;
     try {
-      data =
-          jsonDecode(raw)
-              as Map<String, dynamic>;
+      data = jsonDecode(raw) as Map<String, dynamic>;
     } catch (_) {
       return;
     }
 
     // When hotspot "Navigate" is clicked inside the 3D view
     if (data["type"] == "navigate") {
-      final dest =
-          (data["destinationPoi"]
-                  as String?)
-              ?.trim();
-      if (dest == null || dest.isEmpty)
-        return;
+      final dest = (data["destinationPoi"] as String?)?.trim();
+      if (dest == null || dest.isEmpty) return;
 
-      final displayName =
-          _displayNameFromMaterial(
-            dest,
-          );
+      final displayName = _displayNameFromMaterial(dest);
 
-      final cleanPlaceId =
-          displayName.isEmpty
-          ? dest
-          : displayName;
+      final cleanPlaceId = displayName.isEmpty ? dest : displayName;
 
       showNavigationDialog(
         context,
@@ -2485,40 +1666,19 @@ class _FloorMapViewerState
         destinationPoiMaterial: dest,
         floorSrc: widget.currentFloor,
         destinationHitGltf: (() {
-          final posStr =
-              (data?["position"]
-                      as String?)
-                  ?.trim() ??
-              "";
-          if (posStr.isEmpty)
-            return null;
+          final posStr = (data?["position"] as String?)?.trim() ?? "";
+          if (posStr.isEmpty) return null;
 
-          final parts = posStr.split(
-            RegExp(r"\s+"),
-          );
-          if (parts.length < 3)
-            return null;
+          final parts = posStr.split(RegExp(r"\s+"));
+          if (parts.length < 3) return null;
 
-          final x = double.tryParse(
-            parts[0],
-          );
-          final y = double.tryParse(
-            parts[1],
-          );
-          final z = double.tryParse(
-            parts[2],
-          );
+          final x = double.tryParse(parts[0]);
+          final y = double.tryParse(parts[1]);
+          final z = double.tryParse(parts[2]);
 
-          if (x == null ||
-              y == null ||
-              z == null)
-            return null;
+          if (x == null || y == null || z == null) return null;
 
-          return {
-            "x": x,
-            "y": y,
-            "z": z,
-          };
+          return {"x": x, "y": y, "z": z};
         })(),
       );
       return;
@@ -2531,59 +1691,36 @@ class _FloorMapViewerState
     }
   }
 
-  void _showNavigateChoiceSheet(
-    String destinationPoi,
-  ) {
+  void _showNavigateChoiceSheet(String destinationPoi) {
     showModalBottomSheet(
       context: context,
       showDragHandle: true,
       builder: (sheetContext) {
-        final shopName =
-            _displayNameFromMaterial(
-              destinationPoi,
-            );
+        final shopName = _displayNameFromMaterial(destinationPoi);
 
         return Padding(
-          padding: const EdgeInsets.all(
-            16,
-          ),
+          padding: const EdgeInsets.all(16),
           child: Column(
-            mainAxisSize:
-                MainAxisSize.min,
+            mainAxisSize: MainAxisSize.min,
             children: [
               const Text(
                 "Set your location",
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight:
-                      FontWeight.bold,
-                ),
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
-              const SizedBox(
-                height: 12,
-              ),
+              const SizedBox(height: 12),
 
               ListTile(
-                leading: const Icon(
-                  Icons.location_pin,
-                ),
-                title: const Text(
-                  "Use Pin on Map",
-                ),
+                leading: const Icon(Icons.location_pin),
+                title: const Text("Use Pin on Map"),
                 onTap: () {
-                  Navigator.pop(
-                    sheetContext,
-                  );
+                  Navigator.pop(sheetContext);
                   Navigator.push(
                     context,
                     MaterialPageRoute(
                       builder: (_) => PinStartLocationScreen(
-                        floorSrc: widget
-                            .currentFloor,
-                        destinationPoi:
-                            destinationPoi,
-                        shopName:
-                            shopName,
+                        floorSrc: widget.currentFloor,
+                        destinationPoi: destinationPoi,
+                        shopName: shopName,
                         placeId: widget
                             .placeId, // Firestore document ID of the place
                       ),
@@ -2593,30 +1730,20 @@ class _FloorMapViewerState
               ),
 
               ListTile(
-                leading: const Icon(
-                  Icons.camera_alt,
-                ),
-                title: const Text(
-                  "Use Camera",
-                ),
+                leading: const Icon(Icons.camera_alt),
+                title: const Text("Use Camera"),
                 onTap: () {
-                  Navigator.pop(
-                    sheetContext,
-                  );
+                  Navigator.pop(sheetContext);
                   Navigator.push(
                     context,
                     MaterialPageRoute(
                       builder: (_) => PathOverviewScreen(
-                        shopName:
-                            shopName,
+                        shopName: shopName,
                         shopId: widget
                             .placeId, // Firestore document ID of the place
-                        startingMethod:
-                            'camera',
-                        destinationPoiMaterial:
-                            destinationPoi,
-                        floorSrc: widget
-                            .currentFloor,
+                        startingMethod: 'camera',
+                        destinationPoiMaterial: destinationPoi,
+                        floorSrc: widget.currentFloor,
                       ),
                     ),
                   );
@@ -2631,13 +1758,10 @@ class _FloorMapViewerState
 
   @override
   Widget build(BuildContext context) {
-    final currentFloor =
-        widget.currentFloor;
+    final currentFloor = widget.currentFloor;
 
     if (currentFloor.isEmpty) {
-      return _buildError(
-        'No map selected',
-      );
+      return _buildError('No map selected');
     }
 
     return Stack(
@@ -2651,15 +1775,11 @@ class _FloorMapViewerState
           autoRotate: false,
           cameraControls: true,
           backgroundColor: Colors.white,
-          cameraOrbit:
-              "0deg 65deg 2.5m",
-          minCameraOrbit:
-              "auto 0deg auto",
-          maxCameraOrbit:
-              "auto 90deg auto",
+          cameraOrbit: "0deg 65deg 2.5m",
+          minCameraOrbit: "auto 0deg auto",
+          maxCameraOrbit: "auto 90deg auto",
           cameraTarget: "0m 0m 0m",
-          relatedJs:
-              r'''console.log("✅ relatedJs injected");
+          relatedJs: r'''console.log("✅ relatedJs injected");
 
 // ---------------------------
 // Channels
@@ -3191,30 +2311,16 @@ var timer = setInterval(function() {
           javascriptChannels: {
             JavascriptChannel(
               'JS_TEST_CHANNEL',
-              onMessageReceived:
-                  (
-                    JavaScriptMessage
-                    message,
-                  ) {
-                    debugPrint(
-                      "✅ JS_TEST_CHANNEL: ${message.message}",
-                    );
-                  },
+              onMessageReceived: (JavaScriptMessage message) {
+                debugPrint("✅ JS_TEST_CHANNEL: ${message.message}");
+              },
             ),
             JavascriptChannel(
               'POI_CHANNEL',
-              onMessageReceived:
-                  (
-                    JavaScriptMessage
-                    message,
-                  ) {
-                    debugPrint(
-                      "🟦 POI_CHANNEL: ${message.message}",
-                    );
-                    _handlePoiMessage(
-                      message.message,
-                    );
-                  },
+              onMessageReceived: (JavaScriptMessage message) {
+                debugPrint("🟦 POI_CHANNEL: ${message.message}");
+                _handlePoiMessage(message.message);
+              },
             ),
           },
         ),
@@ -3227,14 +2333,9 @@ var timer = setInterval(function() {
       color: Colors.grey.shade100,
       child: Center(
         child: Column(
-          mainAxisAlignment:
-              MainAxisAlignment.center,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(
-              Icons.error_outline,
-              size: 48,
-              color: Colors.red,
-            ),
+            const Icon(Icons.error_outline, size: 48, color: Colors.red),
             const SizedBox(height: 8),
             Text(message),
           ],
@@ -3248,15 +2349,11 @@ var timer = setInterval(function() {
 // Pin Start Location Screen (tap to set user location on 3D map)
 // ----------------------------------------------------------------------------
 
-class PinStartLocationScreen
-    extends StatefulWidget {
-  final String
-  floorSrc; // GLB url/path for the currently selected floor
-  final String
-  destinationPoi; // POIMAT_* id
+class PinStartLocationScreen extends StatefulWidget {
+  final String floorSrc; // GLB url/path for the currently selected floor
+  final String destinationPoi; // POIMAT_* id
   final String shopName; // display name
-  final String
-  placeId; // Firestore document ID of the place
+  final String placeId; // Firestore document ID of the place
 
   const PinStartLocationScreen({
     super.key,
@@ -3267,28 +2364,20 @@ class PinStartLocationScreen
   });
 
   @override
-  State<PinStartLocationScreen>
-  createState() =>
-      _PinStartLocationScreenState();
+  State<PinStartLocationScreen> createState() => _PinStartLocationScreenState();
 }
 
-class _PinStartLocationScreenState
-    extends
-        State<PinStartLocationScreen> {
-  Map<String, dynamic>?
-  _picked; // {x,y,z,floor}
+class _PinStartLocationScreenState extends State<PinStartLocationScreen> {
+  Map<String, dynamic>? _picked; // {x,y,z,floor}
   bool _saving = false;
   String? _saveError;
 
-  WebViewController?
-  _webCtrl; // Flutter -> JS
+  WebViewController? _webCtrl; // Flutter -> JS
   bool _jsBridgeReady = false;
   String _inferFloorLabel(String src) {
     // Try to infer a human-readable floor label from the GLB src (URL or asset).
     final uri = Uri.tryParse(src);
-    final last =
-        (uri?.pathSegments.isNotEmpty ??
-            false)
+    final last = (uri?.pathSegments.isNotEmpty ?? false)
         ? uri!.pathSegments.last
         : src.split('/').last;
     final name = last.split('?').first;
@@ -3297,43 +2386,29 @@ class _PinStartLocationScreenState
       r'(floor|level|lvl|f)\s*([0-9]+)',
       caseSensitive: false,
     ).firstMatch(name);
-    if (m != null)
-      return '${m.group(1)!.toLowerCase()}${m.group(2)}';
+    if (m != null) return '${m.group(1)!.toLowerCase()}${m.group(2)}';
 
     // Fallback: filename without extension
-    return name.replaceAll(
-      RegExp(
-        r'\.(glb|gltf)\b',
-        caseSensitive: false,
-      ),
-      '',
-    );
+    return name.replaceAll(RegExp(r'\.(glb|gltf)\b', caseSensitive: false), '');
   }
 
   /// Normalize floor label for database storage.
   /// - "GF" -> "F0"
   /// - "f1"/"floor1"/"level1" -> "F1"
-  String _normalizeFloorForDb(
-    String floorLabel,
-  ) {
+  String _normalizeFloorForDb(String floorLabel) {
     final f = floorLabel.trim();
     if (f.isEmpty) return f;
     final up = f.toUpperCase();
     if (up == 'GF') return 'F0';
 
-    final m1 = RegExp(
-      r'^F\s*(\d+)$',
-      caseSensitive: false,
-    ).firstMatch(f);
-    if (m1 != null)
-      return 'F${m1.group(1)}';
+    final m1 = RegExp(r'^F\s*(\d+)$', caseSensitive: false).firstMatch(f);
+    if (m1 != null) return 'F${m1.group(1)}';
 
     final m2 = RegExp(
       r'(?:FLOOR|LEVEL|LVL|F)\s*(\d+)',
       caseSensitive: false,
     ).firstMatch(f);
-    if (m2 != null)
-      return 'F${m2.group(1)}';
+    if (m2 != null) return 'F${m2.group(1)}';
 
     return up;
   }
@@ -3344,38 +2419,28 @@ class _PinStartLocationScreenState
     required double z,
     required String floor,
   }) async {
-    final user = FirebaseAuth
-        .instance
-        .currentUser;
+    final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      throw Exception(
-        'No signed-in user. Please sign in first.',
-      );
+      throw Exception('No signed-in user. Please sign in first.');
     }
 
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .set({
-          'location': {
-            'blenderPosition': {
-              'x': x,
-              'y': y,
-              'z': z,
-              'floor': floor,
-              'updatedAt':
-                  FieldValue.serverTimestamp(),
-            },
-          },
-        }, SetOptions(merge: true));
+    await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+      'location': {
+        'blenderPosition': {
+          'x': x,
+          'y': y,
+          'z': z,
+          'floor': floor,
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+      },
+    }, SetOptions(merge: true));
   }
 
   void _handlePoiMessage(String raw) {
     Map<String, dynamic>? data;
     try {
-      data =
-          jsonDecode(raw)
-              as Map<String, dynamic>;
+      data = jsonDecode(raw) as Map<String, dynamic>;
     } catch (_) {
       return;
     }
@@ -3384,23 +2449,13 @@ class _PinStartLocationScreenState
       final pos = data['position'];
       if (pos is Map) {
         final floorRaw =
-            (data['floor']
-                as String?) ??
-            _inferFloorLabel(
-              widget.floorSrc,
-            );
-        final floor =
-            _normalizeFloorForDb(
-              floorRaw,
-            );
+            (data['floor'] as String?) ?? _inferFloorLabel(widget.floorSrc);
+        final floor = _normalizeFloorForDb(floorRaw);
         setState(() {
           _picked = {
-            'x': (pos['x'] as num)
-                .toDouble(),
-            'y': (pos['y'] as num)
-                .toDouble(),
-            'z': (pos['z'] as num)
-                .toDouble(),
+            'x': (pos['x'] as num).toDouble(),
+            'y': (pos['y'] as num).toDouble(),
+            'z': (pos['z'] as num).toDouble(),
             'floor': floor,
           };
           _saveError = null;
@@ -3409,11 +2464,9 @@ class _PinStartLocationScreenState
     }
   }
 
-  Future<void>
-  _confirmAndProceed() async {
+  Future<void> _confirmAndProceed() async {
     final picked = _picked;
-    if (picked == null || _saving)
-      return;
+    if (picked == null || _saving) return;
 
     setState(() {
       _saving = true;
@@ -3425,8 +2478,7 @@ class _PinStartLocationScreenState
         x: (picked['x'] as double),
         y: (picked['y'] as double),
         z: (picked['z'] as double),
-        floor:
-            (picked['floor'] as String),
+        floor: (picked['floor'] as String),
       );
 
       if (!mounted) return;
@@ -3435,64 +2487,43 @@ class _PinStartLocationScreenState
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (_) =>
-              PathOverviewScreen(
-                shopName:
-                    widget.shopName,
-                shopId: widget
-                    .placeId, // Firestore document ID of the place
-                startingMethod: 'pin',
-                destinationPoiMaterial:
-                    widget
-                        .destinationPoi,
-                floorSrc:
-                    widget.floorSrc,
-              ),
+          builder: (_) => PathOverviewScreen(
+            shopName: widget.shopName,
+            shopId: widget.placeId, // Firestore document ID of the place
+            startingMethod: 'pin',
+            destinationPoiMaterial: widget.destinationPoi,
+            floorSrc: widget.floorSrc,
+          ),
         ),
       );
     } catch (e) {
       if (!mounted) return;
-      setState(
-        () => _saveError = e.toString(),
-      );
+      setState(() => _saveError = e.toString());
     } finally {
-      if (mounted)
-        setState(() => _saving = false);
+      if (mounted) setState(() => _saving = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final floorLabel = _inferFloorLabel(
-      widget.floorSrc,
-    );
+    final floorLabel = _inferFloorLabel(widget.floorSrc);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          'Set your location',
-        ),
-      ),
+      appBar: AppBar(title: const Text('Set your location')),
       body: Stack(
         children: [
           // 3D map: tap anywhere to set starting location
           ModelViewer(
-            key: ValueKey(
-              'pin_${widget.floorSrc}',
-            ),
+            key: ValueKey('pin_${widget.floorSrc}'),
             src: widget.floorSrc,
             alt: "3D Floor Map",
             ar: false,
             autoRotate: false,
             cameraControls: true,
-            backgroundColor:
-                Colors.white,
-            cameraOrbit:
-                "0deg 65deg 2.5m",
-            minCameraOrbit:
-                "auto 0deg auto",
-            maxCameraOrbit:
-                "auto 90deg auto",
+            backgroundColor: Colors.white,
+            cameraOrbit: "0deg 65deg 2.5m",
+            minCameraOrbit: "auto 0deg auto",
+            maxCameraOrbit: "auto 90deg auto",
             cameraTarget: "0m 0m 0m",
             relatedJs: r'''
 console.log("✅ PinStartLocation relatedJs injected");
@@ -3657,62 +2688,35 @@ setupViewer();
 postToTest("PinStartLocation JS alive");
 
 ''',
-            onWebViewCreated:
-                (controller) {
-                  _webCtrl = controller;
-                  _jsBridgeReady =
-                      false;
-                },
+            onWebViewCreated: (controller) {
+              _webCtrl = controller;
+              _jsBridgeReady = false;
+            },
             javascriptChannels: {
               JavascriptChannel(
                 'JS_TEST_CHANNEL',
-                onMessageReceived:
-                    (
-                      JavaScriptMessage
-                      message,
-                    ) {
-                      debugPrint(
-                        "✅ JS_TEST_CHANNEL (pin): ${message.message}",
-                      );
+                onMessageReceived: (JavaScriptMessage message) {
+                  debugPrint("✅ JS_TEST_CHANNEL (pin): ${message.message}");
 
-                      if (!_jsBridgeReady &&
-                          message
-                              .message
-                              .contains(
-                                'PinStartLocation JS alive',
-                              )) {
-                        _jsBridgeReady =
-                            true;
-                        final dest = widget
-                            .destinationPoi
-                            .trim();
-                        if (dest
-                            .isNotEmpty) {
-                          final safe =
-                              jsonEncode(
-                                dest,
-                              );
-                          _webCtrl?.runJavaScript(
-                            'window.highlightPoiFromFlutter($safe);',
-                          );
-                        }
-                      }
-                    },
+                  if (!_jsBridgeReady &&
+                      message.message.contains('PinStartLocation JS alive')) {
+                    _jsBridgeReady = true;
+                    final dest = widget.destinationPoi.trim();
+                    if (dest.isNotEmpty) {
+                      final safe = jsonEncode(dest);
+                      _webCtrl?.runJavaScript(
+                        'window.highlightPoiFromFlutter($safe);',
+                      );
+                    }
+                  }
+                },
               ),
               JavascriptChannel(
                 'POI_CHANNEL',
-                onMessageReceived:
-                    (
-                      JavaScriptMessage
-                      message,
-                    ) {
-                      debugPrint(
-                        "🟦 POI_CHANNEL (pin): ${message.message}",
-                      );
-                      _handlePoiMessage(
-                        message.message,
-                      );
-                    },
+                onMessageReceived: (JavaScriptMessage message) {
+                  debugPrint("🟦 POI_CHANNEL (pin): ${message.message}");
+                  _handlePoiMessage(message.message);
+                },
               ),
             },
           ),
@@ -3724,97 +2728,57 @@ postToTest("PinStartLocation JS alive");
             child: SafeArea(
               top: false,
               child: Container(
-                padding:
-                    const EdgeInsets.all(
-                      14,
-                    ),
+                padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  borderRadius:
-                      BorderRadius.circular(
-                        14,
-                      ),
+                  borderRadius: BorderRadius.circular(14),
                   boxShadow: const [
                     BoxShadow(
                       blurRadius: 16,
-                      offset: Offset(
-                        0,
-                        8,
-                      ),
-                      color: Color(
-                        0x22000000,
-                      ),
+                      offset: Offset(0, 8),
+                      color: Color(0x22000000),
                     ),
                   ],
                 ),
                 child: Column(
-                  mainAxisSize:
-                      MainAxisSize.min,
-                  crossAxisAlignment:
-                      CrossAxisAlignment
-                          .stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     const Text(
                       'Tap on the map to set your starting location.',
                       style: TextStyle(
                         fontSize: 14,
-                        fontWeight:
-                            FontWeight
-                                .w600,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                    const SizedBox(
-                      height: 8,
-                    ),
+                    const SizedBox(height: 8),
                     Text(
                       _picked == null
                           ? 'Floor: $floorLabel'
                           : 'Selected: x=${(_picked!['x'] as double).toStringAsFixed(3)}, '
                                 'y=${(_picked!['y'] as double).toStringAsFixed(3)}, '
                                 'z=${(_picked!['z'] as double).toStringAsFixed(3)}  |  floor=${_picked!['floor']}',
-                      style:
-                          const TextStyle(
-                            fontSize:
-                                12,
-                          ),
+                      style: const TextStyle(fontSize: 12),
                     ),
-                    if (_saveError !=
-                        null) ...[
-                      const SizedBox(
-                        height: 8,
-                      ),
+                    if (_saveError != null) ...[
+                      const SizedBox(height: 8),
                       Text(
                         _saveError!,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Colors
-                              .red,
-                        ),
+                        style: const TextStyle(fontSize: 12, color: Colors.red),
                       ),
                     ],
-                    const SizedBox(
-                      height: 10,
-                    ),
+                    const SizedBox(height: 10),
                     ElevatedButton(
-                      onPressed:
-                          (_picked ==
-                                  null ||
-                              _saving)
+                      onPressed: (_picked == null || _saving)
                           ? null
                           : _confirmAndProceed,
                       child: _saving
                           ? const SizedBox(
-                              height:
-                                  18,
+                              height: 18,
                               width: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth:
-                                    2,
-                              ),
+                              child: CircularProgressIndicator(strokeWidth: 2),
                             )
-                          : const Text(
-                              'Confirm location',
-                            ),
+                          : const Text('Confirm location'),
                     ),
                   ],
                 ),
@@ -3827,12 +2791,9 @@ postToTest("PinStartLocation JS alive");
   }
 }
 
-class _TrianglePainter
-    extends CustomPainter {
+class _TrianglePainter extends CustomPainter {
   final Color color;
-  const _TrianglePainter({
-    required this.color,
-  });
+  const _TrianglePainter({required this.color});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -3840,29 +2801,21 @@ class _TrianglePainter
     final path = Path()
       ..moveTo(0, 0)
       ..lineTo(size.width, 0)
-      ..lineTo(
-        size.width / 2,
-        size.height,
-      )
+      ..lineTo(size.width / 2, size.height)
       ..close();
 
     canvas.drawPath(path, p);
   }
 
   @override
-  bool shouldRepaint(
-    covariant _TrianglePainter
-    oldDelegate,
-  ) => oldDelegate.color != color;
+  bool shouldRepaint(covariant _TrianglePainter oldDelegate) =>
+      oldDelegate.color != color;
 }
 
-class _FloorMapSection
-    extends StatefulWidget {
-  final List<Map<String, String>>
-  venueMaps;
+class _FloorMapSection extends StatefulWidget {
+  final List<Map<String, String>> venueMaps;
   final String initialFloor;
-  final String
-  placeId; // Firestore document ID of the place
+  final String placeId; // Firestore document ID of the place
 
   const _FloorMapSection({
     required this.venueMaps,
@@ -3871,13 +2824,10 @@ class _FloorMapSection
   });
 
   @override
-  State<_FloorMapSection>
-  createState() =>
-      _FloorMapSectionState();
+  State<_FloorMapSection> createState() => _FloorMapSectionState();
 }
 
-class _FloorMapSectionState
-    extends State<_FloorMapSection> {
+class _FloorMapSectionState extends State<_FloorMapSection> {
   late String _currentFloor;
 
   @override
@@ -3888,70 +2838,43 @@ class _FloorMapSectionState
 
   @override
   Widget build(BuildContext context) {
-    final sortedMaps = [
-      ...widget.venueMaps,
-    ];
+    final sortedMaps = [...widget.venueMaps];
 
     int floorRank(String floor) {
-      final f = floor
-          .trim()
-          .toUpperCase();
+      final f = floor.trim().toUpperCase();
 
-      if (f == 'GF' ||
-          f == 'G' ||
-          f == 'GROUND')
-        return 0; // Ground first
-      if (f == 'B1')
-        return -1; // if you ever add basements, put them before GF
+      if (f == 'GF' || f == 'G' || f == 'GROUND') return 0; // Ground first
+      if (f == 'B1') return -1; // if you ever add basements, put them before GF
 
       // F1, F2, F3...
-      final m = RegExp(
-        r'F(\d+)',
-      ).firstMatch(f);
-      if (m != null)
-        return int.parse(m.group(1)!);
+      final m = RegExp(r'F(\d+)').firstMatch(f);
+      if (m != null) return int.parse(m.group(1)!);
 
       return 999; // unknown floors go last
     }
 
     // If you want GF at the bottom and F1 above it, sort DESCENDING
     sortedMaps.sort((a, b) {
-      final ra = floorRank(
-        a['floorNumber'] ?? '',
-      );
-      final rb = floorRank(
-        b['floorNumber'] ?? '',
-      );
-      return rb.compareTo(
-        ra,
-      ); // ✅ reverse order: F1 above GF
+      final ra = floorRank(a['floorNumber'] ?? '');
+      final rb = floorRank(b['floorNumber'] ?? '');
+      return rb.compareTo(ra); // ✅ reverse order: F1 above GF
     });
 
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius:
-            BorderRadius.circular(12),
-        border: Border.all(
-          color: Colors.grey.shade300,
-        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade300),
       ),
       child: Column(
         children: [
           Container(
             height: 250,
             decoration: const BoxDecoration(
-              borderRadius:
-                  BorderRadius.only(
-                    topLeft:
-                        Radius.circular(
-                          12,
-                        ),
-                    topRight:
-                        Radius.circular(
-                          12,
-                        ),
-                  ),
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(12),
+                topRight: Radius.circular(12),
+              ),
             ),
             child: Stack(
               children: [
@@ -3959,38 +2882,20 @@ class _FloorMapSectionState
                   key: ValueKey(
                     _currentFloor,
                   ), // ✅ forces rebuild when floor changes
-                  currentFloor:
-                      _currentFloor,
-                  placeId:
-                      widget.placeId,
+                  currentFloor: _currentFloor,
+                  placeId: widget.placeId,
                 ),
-                if (widget
-                        .venueMaps
-                        .length >
-                    1)
+                if (widget.venueMaps.length > 1)
                   Positioned(
                     top: 16,
                     right: 16,
                     child: Column(
-                      children: sortedMaps.map((
-                        map,
-                      ) {
-                        final floorNumber =
-                            map['floorNumber'] ??
-                            '';
-                        final mapURL =
-                            map['mapURL'] ??
-                            '';
+                      children: sortedMaps.map((map) {
+                        final floorNumber = map['floorNumber'] ?? '';
+                        final mapURL = map['mapURL'] ?? '';
                         return Padding(
-                          padding:
-                              const EdgeInsets.only(
-                                bottom:
-                                    8,
-                              ),
-                          child: _buildFloorButton(
-                            floorNumber,
-                            mapURL,
-                          ),
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: _buildFloorButton(floorNumber, mapURL),
                         );
                       }).toList(),
                     ),
@@ -4003,31 +2908,18 @@ class _FloorMapSectionState
     );
   }
 
-  Widget _buildFloorButton(
-    String label,
-    String mapURL,
-  ) {
-    final isSelected =
-        _currentFloor == mapURL;
+  Widget _buildFloorButton(String label, String mapURL) {
+    final isSelected = _currentFloor == mapURL;
     return GestureDetector(
-      onTap: () => setState(
-        () => _currentFloor = mapURL,
-      ),
+      onTap: () => setState(() => _currentFloor = mapURL),
       child: Container(
         width: 42,
         height: 36,
         decoration: BoxDecoration(
-          color: isSelected
-              ? kPrimaryGreen
-              : Colors.white,
-          borderRadius:
-              BorderRadius.circular(8),
+          color: isSelected ? kPrimaryGreen : Colors.white,
+          borderRadius: BorderRadius.circular(8),
           boxShadow: [
-            BoxShadow(
-              color: Colors.black
-                  .withOpacity(0.1),
-              blurRadius: 4,
-            ),
+            BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 4),
           ],
         ),
         alignment: Alignment.center,
@@ -4036,9 +2928,7 @@ class _FloorMapSectionState
           style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w700,
-            color: isSelected
-                ? Colors.white
-                : Colors.black87,
+            color: isSelected ? Colors.white : Colors.black87,
           ),
         ),
       ),
@@ -4050,11 +2940,9 @@ class _FloorMapSectionState
 // Discover More Section
 // ----------------------------------------------------------------------------
 
-class _DiscoverMoreSection
-    extends StatefulWidget {
+class _DiscoverMoreSection extends StatefulWidget {
   final String venueId;
-  final Future<String?> Function(String)
-  getUrlFor;
+  final Future<String?> Function(String) getUrlFor;
 
   /// Current floor source (usually the current mapURL) so CategoryPage opens on the same floor.
   final String currentFloorSrc;
@@ -4066,21 +2954,16 @@ class _DiscoverMoreSection
   });
 
   @override
-  State<_DiscoverMoreSection>
-  createState() =>
-      _DiscoverMoreSectionState();
+  State<_DiscoverMoreSection> createState() => _DiscoverMoreSectionState();
 }
 
-class _DiscoverMoreSectionState
-    extends State<_DiscoverMoreSection>
+class _DiscoverMoreSectionState extends State<_DiscoverMoreSection>
     with AutomaticKeepAliveClientMixin {
   @override
   bool get wantKeepAlive => true;
 
-  final Map<String, String>
-  _cachedUrls = {};
-  final Map<String, CategoryData>
-  _categoryData = {};
+  final Map<String, String> _cachedUrls = {};
+  final Map<String, CategoryData> _categoryData = {};
   bool _urlsLoaded = false;
 
   @override
@@ -4091,34 +2974,24 @@ class _DiscoverMoreSectionState
 
   Future<void> _loadCategories() async {
     try {
-      final snapshot =
-          await FirebaseFirestore
-              .instance
-              .collection('venues')
-              .doc(widget.venueId)
-              .collection('categories')
-              .get();
+      final snapshot = await FirebaseFirestore.instance
+          .collection('venues')
+          .doc(widget.venueId)
+          .collection('categories')
+          .get();
 
       for (final doc in snapshot.docs) {
         final data = doc.data();
-        final imagePath =
-            data['categoryImage'] ??
-            'images/default.jpg';
+        final imagePath = data['categoryImage'] ?? 'images/default.jpg';
 
         if (imagePath.isNotEmpty) {
           try {
-            final url = await widget
-                .getUrlFor(imagePath);
-            if (url != null &&
-                mounted) {
-              _cachedUrls[imagePath] =
-                  url;
-              _categoryData[doc
-                  .id] = CategoryData(
+            final url = await widget.getUrlFor(imagePath);
+            if (url != null && mounted) {
+              _cachedUrls[imagePath] = url;
+              _categoryData[doc.id] = CategoryData(
                 id: doc.id,
-                name:
-                    data['categoryName'] ??
-                    'Unnamed',
+                name: data['categoryName'] ?? 'Unnamed',
                 image: imagePath,
               );
             }
@@ -4127,9 +3000,7 @@ class _DiscoverMoreSectionState
       }
 
       if (mounted) {
-        setState(
-          () => _urlsLoaded = true,
-        );
+        setState(() => _urlsLoaded = true);
       }
     } catch (_) {}
   }
@@ -4138,28 +3009,20 @@ class _DiscoverMoreSectionState
   Widget build(BuildContext context) {
     super.build(context);
 
-    if (!_urlsLoaded ||
-        _categoryData.isEmpty) {
+    if (!_urlsLoaded || _categoryData.isEmpty) {
       return Center(
-        child:
-            CircularProgressIndicator(
-              color: kPrimaryGreen,
-              backgroundColor:
-                  kPrimaryGreen
-                      .withOpacity(0.2),
-            ),
+        child: CircularProgressIndicator(
+          color: kPrimaryGreen,
+          backgroundColor: kPrimaryGreen.withOpacity(0.2),
+        ),
       );
     }
 
-    final categories = _categoryData
-        .values
-        .toList();
+    final categories = _categoryData.values.toList();
 
     // Sort categories
     int priorityFor(String name) {
-      final n = name
-          .trim()
-          .toLowerCase();
+      final n = name.trim().toLowerCase();
       switch (n) {
         case 'shops':
           return 0;
@@ -4179,32 +3042,22 @@ class _DiscoverMoreSectionState
       final aPri = priorityFor(a.name);
       final bPri = priorityFor(b.name);
 
-      if (aPri != bPri)
-        return aPri.compareTo(bPri);
+      if (aPri != bPri) return aPri.compareTo(bPri);
 
       if (aPri == 100) {
-        return a.name
-            .toLowerCase()
-            .compareTo(
-              b.name.toLowerCase(),
-            );
+        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
       }
       return 0;
     });
 
     return ListView.separated(
       scrollDirection: Axis.horizontal,
-      padding:
-          const EdgeInsets.symmetric(
-            horizontal: 16,
-          ),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       itemCount: categories.length,
-      separatorBuilder: (_, __) =>
-          const SizedBox(width: 12),
+      separatorBuilder: (_, __) => const SizedBox(width: 12),
       itemBuilder: (context, i) {
         final cat = categories[i];
-        final cachedUrl =
-            _cachedUrls[cat.image];
+        final cachedUrl = _cachedUrls[cat.image];
 
         return GestureDetector(
           key: ValueKey(cat.id),
@@ -4213,13 +3066,11 @@ class _DiscoverMoreSectionState
               context,
               MaterialPageRoute(
                 builder: (_) => CategoryPage(
-                  categoryName:
-                      cat.name,
-                  venueId:
-                      widget.venueId,
+                  categoryName: cat.name,
+                  venueId: widget.venueId,
                   categoryId: cat.id,
-                  currentFloorSrc: widget
-                      .currentFloorSrc, // current floor mapURL
+                  currentFloorSrc:
+                      widget.currentFloorSrc, // current floor mapURL
                 ),
               ),
             );
@@ -4228,93 +3079,46 @@ class _DiscoverMoreSectionState
             width: 130,
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius:
-                  BorderRadius.circular(
-                    8,
-                  ),
+              borderRadius: BorderRadius.circular(8),
             ),
             child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment
-                      .start,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 ClipRRect(
-                  borderRadius:
-                      BorderRadius.circular(
-                        8,
-                      ),
-                  child:
-                      cachedUrl != null
+                  borderRadius: BorderRadius.circular(8),
+                  child: cachedUrl != null
                       ? CachedNetworkImage(
-                          imageUrl:
-                              cachedUrl,
-                          cacheKey:
-                              cat.image,
+                          imageUrl: cachedUrl,
+                          cacheKey: cat.image,
                           height: 130,
                           width: 130,
-                          fit: BoxFit
-                              .cover,
-                          placeholder:
-                              (
-                                context,
-                                url,
-                              ) => Container(
-                                color: Colors
-                                    .grey
-                                    .shade200,
-                              ),
-                          errorWidget:
-                              (
-                                context,
-                                url,
-                                error,
-                              ) => Container(
-                                height:
-                                    130,
-                                width:
-                                    130,
-                                color: Colors
-                                    .grey
-                                    .shade200,
-                                child: const Icon(
-                                  Icons
-                                      .image_not_supported,
-                                ),
-                              ),
+                          fit: BoxFit.cover,
+                          placeholder: (context, url) =>
+                              Container(color: Colors.grey.shade200),
+                          errorWidget: (context, url, error) => Container(
+                            height: 130,
+                            width: 130,
+                            color: Colors.grey.shade200,
+                            child: const Icon(Icons.image_not_supported),
+                          ),
                         )
                       : Container(
                           height: 130,
                           width: 130,
-                          color: Colors
-                              .grey
-                              .shade200,
+                          color: Colors.grey.shade200,
                         ),
                 ),
                 Padding(
-                  padding:
-                      const EdgeInsets.all(
-                        8,
-                      ),
+                  padding: const EdgeInsets.all(8),
                   child: Text(
                     cat.name,
-                    textAlign:
-                        TextAlign.left,
+                    textAlign: TextAlign.left,
                     maxLines: 2,
-                    overflow:
-                        TextOverflow
-                            .ellipsis,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      fontWeight:
-                          FontWeight
-                              .w600,
+                      fontWeight: FontWeight.w600,
                       fontSize: 14,
-                      color:
-                          Color.fromARGB(
-                            255,
-                            44,
-                            44,
-                            44,
-                          ),
+                      color: Color.fromARGB(255, 44, 44, 44),
                     ),
                   ),
                 ),
@@ -4336,23 +3140,17 @@ class CategoryData {
   final String name;
   final String image;
 
-  CategoryData({
-    required this.id,
-    required this.name,
-    required this.image,
-  });
+  CategoryData({required this.id, required this.name, required this.image});
 }
 
 // ----------------------------------------------------------------------------
 // Photo Strip Widget
 // ----------------------------------------------------------------------------
 
-class _PhotoStripWidget
-    extends StatefulWidget {
+class _PhotoStripWidget extends StatefulWidget {
   final List<String> images;
   final void Function(int) onImageTap;
-  final Future<String?> Function(String)
-  getUrlFor;
+  final Future<String?> Function(String) getUrlFor;
 
   const _PhotoStripWidget({
     required this.images,
@@ -4361,19 +3159,15 @@ class _PhotoStripWidget
   });
 
   @override
-  State<_PhotoStripWidget>
-  createState() =>
-      _PhotoStripWidgetState();
+  State<_PhotoStripWidget> createState() => _PhotoStripWidgetState();
 }
 
-class _PhotoStripWidgetState
-    extends State<_PhotoStripWidget>
+class _PhotoStripWidgetState extends State<_PhotoStripWidget>
     with AutomaticKeepAliveClientMixin {
   @override
   bool get wantKeepAlive => true;
 
-  final Map<String, String>
-  _cachedUrls = {};
+  final Map<String, String> _cachedUrls = {};
   bool _urlsLoaded = false;
 
   @override
@@ -4386,17 +3180,14 @@ class _PhotoStripWidgetState
     for (final path in widget.images) {
       if (path.isEmpty) continue;
       try {
-        final url = await widget
-            .getUrlFor(path);
+        final url = await widget.getUrlFor(path);
         if (url != null && mounted) {
           _cachedUrls[path] = url;
         }
       } catch (_) {}
     }
     if (mounted) {
-      setState(
-        () => _urlsLoaded = true,
-      );
+      setState(() => _urlsLoaded = true);
     }
   }
 
@@ -4404,85 +3195,44 @@ class _PhotoStripWidgetState
   Widget build(BuildContext context) {
     super.build(context);
 
-    final width =
-        MediaQuery.of(
-          context,
-        ).size.width -
-        32;
-    final pageCount =
-        (widget.images.length / 3)
-            .ceil();
+    final width = MediaQuery.of(context).size.width - 32;
+    final pageCount = (widget.images.length / 3).ceil();
 
     return SizedBox(
       height: 200,
       child: ListView.builder(
-        scrollDirection:
-            Axis.horizontal,
+        scrollDirection: Axis.horizontal,
         itemCount: pageCount,
-        physics:
-            const BouncingScrollPhysics(),
+        physics: const BouncingScrollPhysics(),
         itemBuilder: (context, page) {
           final start = page * 3;
 
-          String? img0 =
-              (start <
-                  widget.images.length)
+          String? img0 = (start < widget.images.length)
               ? widget.images[start]
               : null;
-          String? img1 =
-              (start + 1 <
-                  widget.images.length)
+          String? img1 = (start + 1 < widget.images.length)
               ? widget.images[start + 1]
               : null;
-          String? img2 =
-              (start + 2 <
-                  widget.images.length)
+          String? img2 = (start + 2 < widget.images.length)
               ? widget.images[start + 2]
               : null;
 
           return Container(
             width: width,
-            margin: EdgeInsets.only(
-              right:
-                  page == pageCount - 1
-                  ? 0
-                  : 12,
-            ),
+            margin: EdgeInsets.only(right: page == pageCount - 1 ? 0 : 12),
             child: Row(
               children: [
-                Expanded(
-                  flex: 2,
-                  child:
-                      _gridImageOrBlank(
-                        img0,
-                        true,
-                        start,
-                      ),
-                ),
-                const SizedBox(
-                  width: 8,
-                ),
+                Expanded(flex: 2, child: _gridImageOrBlank(img0, true, start)),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Column(
                     children: [
                       Expanded(
-                        child:
-                            _gridImageOrBlank(
-                              img1,
-                              false,
-                              start + 1,
-                            ),
+                        child: _gridImageOrBlank(img1, false, start + 1),
                       ),
-                      const SizedBox(
-                        height: 8,
-                      ),
+                      const SizedBox(height: 8),
                       Expanded(
-                        child:
-                            _gridImageOrBlank(
-                              img2,
-                              false,
-                              start + 2,
-                            ),
+                        child: _gridImageOrBlank(img2, false, start + 2),
                       ),
                     ],
                   ),
@@ -4495,40 +3245,25 @@ class _PhotoStripWidgetState
     );
   }
 
-  Widget _gridImageOrBlank(
-    String? path,
-    bool large,
-    int index,
-  ) {
+  Widget _gridImageOrBlank(String? path, bool large, int index) {
     if (path == null || path.isEmpty) {
       return Container(
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius:
-              BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(8),
         ),
       );
     }
-    return _gridImage(
-      path,
-      large,
-      index,
-    );
+    return _gridImage(path, large, index);
   }
 
-  Widget _gridImage(
-    String path,
-    bool large,
-    int index,
-  ) {
+  Widget _gridImage(String path, bool large, int index) {
     final cachedUrl = _cachedUrls[path];
 
     return GestureDetector(
-      onTap: () =>
-          widget.onImageTap(index),
+      onTap: () => widget.onImageTap(index),
       child: ClipRRect(
-        borderRadius:
-            BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(8),
         child: cachedUrl != null
             ? CachedNetworkImage(
                 imageUrl: cachedUrl,
@@ -4536,50 +3271,23 @@ class _PhotoStripWidgetState
                 fit: BoxFit.cover,
                 width: double.infinity,
                 height: double.infinity,
-                placeholder:
-                    (context, url) =>
-                        Container(
-                          color: Colors
-                              .grey
-                              .shade200,
-                        ),
-                errorWidget:
-                    (
-                      context,
-                      url,
-                      error,
-                    ) => Container(
-                      color: Colors
-                          .grey
-                          .shade200,
-                      child: const Icon(
-                        Icons.error,
-                        size: 24,
-                      ),
-                    ),
+                placeholder: (context, url) =>
+                    Container(color: Colors.grey.shade200),
+                errorWidget: (context, url, error) => Container(
+                  color: Colors.grey.shade200,
+                  child: const Icon(Icons.error, size: 24),
+                ),
               )
             : Container(
-                color: Colors
-                    .grey
-                    .shade200,
+                color: Colors.grey.shade200,
                 child: Center(
                   child: !_urlsLoaded
                       ? CircularProgressIndicator(
-                          strokeWidth:
-                              2,
-                          color:
-                              kPrimaryGreen,
-                          backgroundColor:
-                              kPrimaryGreen
-                                  .withOpacity(
-                                    0.2,
-                                  ),
+                          strokeWidth: 2,
+                          color: kPrimaryGreen,
+                          backgroundColor: kPrimaryGreen.withOpacity(0.2),
                         )
-                      : const Icon(
-                          Icons
-                              .image_not_supported,
-                          size: 24,
-                        ),
+                      : const Icon(Icons.image_not_supported, size: 24),
                 ),
               ),
       ),

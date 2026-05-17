@@ -30,43 +30,33 @@ void showNavigationDialog(
   String shopId, {
   String destinationPoiMaterial = '',
   String floorSrc = '',
-  Map<String, double>?
-  destinationHitGltf,
+  Map<String, double>? destinationHitGltf,
   String? destinationFloorLabel,
   bool returnResultOnly = false,
   String? dialogTitle,
   String? dialogSubtitle,
   String? venueId,
   String? trackingNotificationId,
-  bool isFriendNavigation =
-      false, // ← Friend navigation flag
+  bool isFriendNavigation = false, // ← Friend navigation flag
 }) {
   showModalBottomSheet(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    builder: (context) =>
-        NavigateToShopDialog(
-          shopName: shopName,
-          shopId: shopId,
-          destinationPoiMaterial:
-              destinationPoiMaterial,
-          floorSrc: floorSrc,
-          destinationHitGltf:
-              destinationHitGltf,
-          destinationFloorLabel:
-              destinationFloorLabel,
-          returnResultOnly:
-              returnResultOnly,
-          dialogTitle: dialogTitle,
-          dialogSubtitle:
-              dialogSubtitle,
-          venueId: venueId,
-          trackingNotificationId:
-              trackingNotificationId,
-          isFriendNavigation:
-              isFriendNavigation,
-        ),
+    builder: (context) => NavigateToShopDialog(
+      shopName: shopName,
+      shopId: shopId,
+      destinationPoiMaterial: destinationPoiMaterial,
+      floorSrc: floorSrc,
+      destinationHitGltf: destinationHitGltf,
+      destinationFloorLabel: destinationFloorLabel,
+      returnResultOnly: returnResultOnly,
+      dialogTitle: dialogTitle,
+      dialogSubtitle: dialogSubtitle,
+      venueId: venueId,
+      trackingNotificationId: trackingNotificationId,
+      isFriendNavigation: isFriendNavigation,
+    ),
   );
 }
 
@@ -74,8 +64,7 @@ void showNavigationDialog(
 // 2. NAVIGATE TO SHOP DIALOG
 // ============================================================================
 
-class NavigateToShopDialog
-    extends StatelessWidget {
+class NavigateToShopDialog extends StatelessWidget {
   final String shopName;
   final String shopId;
 
@@ -86,8 +75,7 @@ class NavigateToShopDialog
   final String floorSrc;
 
   /// Destination hit point in glTF coords from the map hotspot (optional)
-  final Map<String, double>?
-  destinationHitGltf;
+  final Map<String, double>? destinationHitGltf;
 
   /// Optional destination floor label (e.g. "GF", "F1").
   /// When provided, multi-floor routing can use connectors even if the POI JSON
@@ -98,8 +86,7 @@ class NavigateToShopDialog
   final String? dialogSubtitle;
   final String? venueId;
   final String? trackingNotificationId;
-  final bool
-  isFriendNavigation; // ← Friend navigation flag
+  final bool isFriendNavigation; // ← Friend navigation flag
 
   const NavigateToShopDialog({
     super.key,
@@ -119,23 +106,13 @@ class NavigateToShopDialog
 
   @override
   Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(
-      context,
-    ).size.height;
-    final isSmallScreen =
-        screenHeight < 700;
-    final titleText =
-        (dialogTitle != null &&
-            dialogTitle!
-                .trim()
-                .isNotEmpty)
+    final screenHeight = MediaQuery.of(context).size.height;
+    final isSmallScreen = screenHeight < 700;
+    final titleText = (dialogTitle != null && dialogTitle!.trim().isNotEmpty)
         ? dialogTitle!.trim()
         : 'Navigate to $shopName';
     final subtitleText =
-        (dialogSubtitle != null &&
-            dialogSubtitle!
-                .trim()
-                .isNotEmpty)
+        (dialogSubtitle != null && dialogSubtitle!.trim().isNotEmpty)
         ? dialogSubtitle!.trim()
         : 'First, set your starting point.';
 
@@ -156,58 +133,33 @@ class NavigateToShopDialog
             height: 4,
             decoration: BoxDecoration(
               color: Colors.grey[300],
-              borderRadius:
-                  BorderRadius.circular(
-                    2,
-                  ),
+              borderRadius: BorderRadius.circular(2),
             ),
           ),
 
           // Header matched to "Set Your Location" style
           Padding(
-            padding:
-                const EdgeInsets.fromLTRB(
-                  20,
-                  10,
-                  20,
-                  10,
-                ),
+            padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
             child: Row(
               children: [
                 Expanded(
                   child: Column(
-                    crossAxisAlignment:
-                        CrossAxisAlignment
-                            .start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         titleText,
                         style: TextStyle(
-                          fontSize:
-                              isSmallScreen
-                              ? 20
-                              : 22,
-                          fontWeight:
-                              FontWeight
-                                  .w600,
-                          color: AppColors
-                              .kGreen,
+                          fontSize: isSmallScreen ? 20 : 22,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.kGreen,
                         ),
                         maxLines: 2,
-                        overflow:
-                            TextOverflow
-                                .ellipsis,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(
-                        height: 2,
-                      ),
+                      const SizedBox(height: 2),
                       Text(
                         subtitleText,
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors
-                              .grey[600],
-                        ),
+                        style: TextStyle(fontSize: 14, color: Colors.grey[600]),
                       ),
                     ],
                   ),
@@ -219,64 +171,33 @@ class NavigateToShopDialog
           const SizedBox(height: 30),
 
           Padding(
-            padding:
-                const EdgeInsets.symmetric(
-                  horizontal: 20,
-                ),
+            padding: const EdgeInsets.symmetric(horizontal: 20),
             child: SecondaryButton(
               text: 'Pin on Map',
-              icon: Icons
-                  .location_on_outlined,
+              icon: Icons.location_on_outlined,
               onPressed: () {
-                Navigator.of(
-                  context,
-                ).pop();
-                Future.delayed(
-                  const Duration(
-                    milliseconds: 50,
-                  ),
-                  () {
-                    if (!context
-                        .mounted)
-                      return;
-                    showModalBottomSheet(
-                      context:
-                          Navigator.of(
-                            context,
-                            rootNavigator:
-                                true,
-                          ).context,
-                      isScrollControlled:
-                          true,
-                      backgroundColor:
-                          Colors
-                              .transparent,
-                      builder: (context) => SetYourLocationDialog(
-                        shopName:
-                            shopName,
-                        shopId: shopId,
-                        destinationPoiMaterial:
-                            destinationPoiMaterial,
-                        floorSrc:
-                            floorSrc,
-                        destinationHitGltf:
-                            destinationHitGltf,
-                        destinationFloorLabel:
-                            destinationFloorLabel,
-                        returnResultOnly:
-                            returnResultOnly,
-                        venueId:
-                            venueId,
-                        trackingNotificationId:
-                            trackingNotificationId,
-                        flowType:
-                            'start',
-                        isFriendNavigation:
-                            isFriendNavigation,
-                      ),
-                    );
-                  },
-                );
+                Navigator.of(context).pop();
+                Future.delayed(const Duration(milliseconds: 50), () {
+                  if (!context.mounted) return;
+                  showModalBottomSheet(
+                    context: Navigator.of(context, rootNavigator: true).context,
+                    isScrollControlled: true,
+                    backgroundColor: Colors.transparent,
+                    builder: (context) => SetYourLocationDialog(
+                      shopName: shopName,
+                      shopId: shopId,
+                      destinationPoiMaterial: destinationPoiMaterial,
+                      floorSrc: floorSrc,
+                      destinationHitGltf: destinationHitGltf,
+                      destinationFloorLabel: destinationFloorLabel,
+                      returnResultOnly: returnResultOnly,
+                      venueId: venueId,
+                      trackingNotificationId: trackingNotificationId,
+                      flowType: 'start',
+                      isFriendNavigation: isFriendNavigation,
+                    ),
+                  );
+                });
               },
             ),
           ),
@@ -284,21 +205,15 @@ class NavigateToShopDialog
           const SizedBox(height: 12),
 
           Padding(
-            padding:
-                const EdgeInsets.symmetric(
-                  horizontal: 20,
-                ),
+            padding: const EdgeInsets.symmetric(horizontal: 20),
             child: PrimaryButton(
               text: 'Scan With Camera',
-              icon: Icons
-                  .camera_alt_outlined,
+              icon: Icons.camera_alt_outlined,
               onPressed: () async {
-                final rootCtx =
-                    Navigator.of(
-                      context,
-                      rootNavigator:
-                          true,
-                    ).context;
+                final rootCtx = Navigator.of(
+                  context,
+                  rootNavigator: true,
+                ).context;
 
                 Navigator.pop(context);
 
@@ -309,22 +224,14 @@ class NavigateToShopDialog
                   destinationPoiMaterial,
                   floorSrc,
                   destinationHitGltf,
-                  returnResultOnly:
-                      returnResultOnly,
+                  returnResultOnly: returnResultOnly,
                   venueId: venueId,
-                  trackingNotificationId:
-                      trackingNotificationId,
+                  trackingNotificationId: trackingNotificationId,
                 );
               },
             ),
           ),
-          SizedBox(
-            height:
-                MediaQuery.of(
-                  context,
-                ).padding.bottom +
-                35,
-          ),
+          SizedBox(height: MediaQuery.of(context).padding.bottom + 35),
         ],
       ),
     );
@@ -336,23 +243,18 @@ class NavigateToShopDialog
     String shopId,
     String destinationPoiMaterial,
     String floorSrc,
-    Map<String, double>?
-    destinationHitGltf, {
+    Map<String, double>? destinationHitGltf, {
     bool returnResultOnly = false,
     String? venueId,
     String? trackingNotificationId,
   }) async {
     // 1) Camera permission
-    final status = await Permission
-        .camera
-        .request();
+    final status = await Permission.camera.request();
     if (!context.mounted) return;
 
     if (!status.isGranted) {
       if (status.isPermanentlyDenied) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
               'Camera permission required. Please enable in Settings.',
@@ -361,89 +263,54 @@ class NavigateToShopDialog
         );
         openAppSettings();
       } else {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Camera permission is required.',
-            ),
-          ),
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Camera permission is required.')),
         );
       }
       return;
     }
 
     // 2) Ensure signed-in
-    final user = FirebaseAuth
-        .instance
-        .currentUser;
+    final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'You must be signed in.',
-          ),
-        ),
-      );
+      ).showSnackBar(const SnackBar(content: Text('You must be signed in.')));
       return;
     }
 
     // 3) Baseline time (like your old scan logic)
-    final scanStartUtc = DateTime.now()
-        .toUtc();
+    final scanStartUtc = DateTime.now().toUtc();
 
     // 4) Resolve correct users doc (email/uid)
-    final userDocRef =
-        await _resolveUserDocRef(user);
+    final userDocRef = await _resolveUserDocRef(user);
 
     // 5) Helper: convert Firestore timestamp to DateTime UTC
     DateTime? _toUtcDate(dynamic v) {
       if (v == null) return null;
-      if (v is Timestamp)
-        return v.toDate().toUtc();
-      if (v is int)
-        return DateTime.fromMillisecondsSinceEpoch(
-          v,
-          isUtc: true,
-        );
+      if (v is Timestamp) return v.toDate().toUtc();
+      if (v is int) return DateTime.fromMillisecondsSinceEpoch(v, isUtc: true);
       if (v is num)
-        return DateTime.fromMillisecondsSinceEpoch(
-          v.toInt(),
-          isUtc: true,
-        );
-      if (v is String)
-        return DateTime.tryParse(
-          v,
-        )?.toUtc();
+        return DateTime.fromMillisecondsSinceEpoch(v.toInt(), isUtc: true);
+      if (v is String) return DateTime.tryParse(v)?.toUtc();
       return null;
     }
 
     // 6) Try loading navmesh for snapping (do NOT block if fails)
     NavMesh? nav;
     try {
-      nav = await NavMesh.loadAsset(
-        'assets/nav_cor/navmesh_GF.json',
-      );
-      debugPrint(
-        '✅ Navmesh loaded for scan snapping',
-      );
+      nav = await NavMesh.loadAsset('assets/nav_cor/navmesh_GF.json');
+      debugPrint('✅ Navmesh loaded for scan snapping');
     } catch (e) {
       nav = null;
-      debugPrint(
-        '⚠️ Navmesh not available for scan snapping: $e',
-      );
+      debugPrint('⚠️ Navmesh not available for scan snapping: $e');
     }
 
     bool didReturn = false;
     late final StreamSubscription sub;
 
     // 7) Listen for DB update (users doc)
-    sub = userDocRef.snapshots().listen((
-      snap,
-    ) async {
+    sub = userDocRef.snapshots().listen((snap) async {
       if (didReturn) return;
 
       final data = snap.data();
@@ -453,46 +320,27 @@ class NavigateToShopDialog
       if (loc is! Map) return;
 
       // Must be updated after scan started
-      final updatedAtUtc = _toUtcDate(
-        loc['updatedAt'],
-      );
+      final updatedAtUtc = _toUtcDate(loc['updatedAt']);
       if (updatedAtUtc == null) return;
 
       // Ignore old cached/previous updates
-      if (!updatedAtUtc.isAfter(
-        scanStartUtc,
-      ))
-        return;
+      if (!updatedAtUtc.isAfter(scanStartUtc)) return;
 
       final bp = loc['blenderPosition'];
       if (bp is! Map) return;
 
-      final x = (bp['x'] as num?)
-          ?.toDouble();
-      final y = (bp['y'] as num?)
-          ?.toDouble();
-      final z = (bp['z'] as num?)
-          ?.toDouble();
-      final floor =
-          bp['floor']; // keep whatever Unity sends
+      final x = (bp['x'] as num?)?.toDouble();
+      final y = (bp['y'] as num?)?.toDouble();
+      final z = (bp['z'] as num?)?.toDouble();
+      final floor = bp['floor']; // keep whatever Unity sends
 
-      if (x == null ||
-          y == null ||
-          z == null)
-        return;
+      if (x == null || y == null || z == null) return;
 
       // 8) Snap to closest allowed point (navmesh if available)
-      var snapped = <String, double>{
-        'x': x,
-        'y': y,
-        'z': z,
-      };
+      var snapped = <String, double>{'x': x, 'y': y, 'z': z};
       if (nav != null) {
         try {
-          snapped = nav!
-              .snapBlenderPoint(
-                snapped,
-              );
+          snapped = nav!.snapBlenderPoint(snapped);
         } catch (_) {
           // keep raw
         }
@@ -501,55 +349,40 @@ class NavigateToShopDialog
       didReturn = true;
 
       // 9) Close Unity page (top route)
-      if (Navigator.of(
-        context,
-      ).canPop()) {
+      if (Navigator.of(context).canPop()) {
         Navigator.of(context).pop();
       }
 
       await sub.cancel();
       if (!context.mounted) return;
-      final snappedGltf =
-          <String, double>{
-            'x': snapped['x'] ?? x,
-            'y': snapped['y'] ?? y,
-            'z': snapped['z'] ?? z,
-          };
+      final snappedGltf = <String, double>{
+        'x': snapped['x'] ?? x,
+        'y': snapped['y'] ?? y,
+        'z': snapped['z'] ?? z,
+      };
 
       // 10) Show the Pin-on-Map UI again (so you can see the pin and press Confirm)
 
-      final floorLabelFromScan =
-          floor == null
-          ? ''
-          : floor.toString();
+      final floorLabelFromScan = floor == null ? '' : floor.toString();
 
       showModalBottomSheet(
         context: context,
         isScrollControlled: true,
-        backgroundColor:
-            Colors.transparent,
-        builder: (_) =>
-            SetYourLocationDialog(
-              shopName: shopName,
-              shopId: shopId,
-              destinationPoiMaterial:
-                  destinationPoiMaterial,
-              floorSrc: floorSrc,
-              destinationHitGltf:
-                  destinationHitGltf,
-              initialUserPinGltf:
-                  snappedGltf,
-              initialFloorLabel:
-                  floorLabelFromScan,
-              returnResultOnly:
-                  returnResultOnly,
-              venueId: venueId,
-              trackingNotificationId:
-                  trackingNotificationId,
-              flowType: 'start',
-              isFriendNavigation:
-                  isFriendNavigation,
-            ),
+        backgroundColor: Colors.transparent,
+        builder: (_) => SetYourLocationDialog(
+          shopName: shopName,
+          shopId: shopId,
+          destinationPoiMaterial: destinationPoiMaterial,
+          floorSrc: floorSrc,
+          destinationHitGltf: destinationHitGltf,
+          initialUserPinGltf: snappedGltf,
+          initialFloorLabel: floorLabelFromScan,
+          returnResultOnly: returnResultOnly,
+          venueId: venueId,
+          trackingNotificationId: trackingNotificationId,
+          flowType: 'start',
+          isFriendNavigation: isFriendNavigation,
+        ),
       );
     });
 
@@ -557,10 +390,7 @@ class NavigateToShopDialog
     await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) =>
-            const UnityCameraPage(
-              isScanOnly: true,
-            ),
+        builder: (_) => const UnityCameraPage(isScanOnly: true),
       ),
     );
 
@@ -572,31 +402,16 @@ class NavigateToShopDialog
     }
   }
 
-  Future<
-    DocumentReference<
-      Map<String, dynamic>
-    >
-  >
-  _resolveUserDocRef(User user) async {
-    final users = FirebaseFirestore
-        .instance
-        .collection('users');
+  Future<DocumentReference<Map<String, dynamic>>> _resolveUserDocRef(
+    User user,
+  ) async {
+    final users = FirebaseFirestore.instance.collection('users');
 
     final email = user.email;
-    if (email != null &&
-        email.isNotEmpty) {
-      final snap = await users
-          .where(
-            'email',
-            isEqualTo: email,
-          )
-          .limit(1)
-          .get();
+    if (email != null && email.isNotEmpty) {
+      final snap = await users.where('email', isEqualTo: email).limit(1).get();
       if (snap.docs.isNotEmpty) {
-        return snap
-            .docs
-            .first
-            .reference;
+        return snap.docs.first.reference;
       }
     }
 
@@ -605,8 +420,7 @@ class NavigateToShopDialog
   }
 }
 
-class SetYourLocationDialog
-    extends StatefulWidget {
+class SetYourLocationDialog extends StatefulWidget {
   final String shopName;
   final String shopId;
 
@@ -617,13 +431,11 @@ class SetYourLocationDialog
   final String floorSrc;
 
   /// Destination hit point in glTF coords from the map hotspot (optional)
-  final Map<String, double>?
-  destinationHitGltf;
+  final Map<String, double>? destinationHitGltf;
 
   /// Optional destination floor label (e.g. "GF", "F1").
   final String? destinationFloorLabel;
-  final Map<String, double>?
-  initialUserPinGltf;
+  final Map<String, double>? initialUserPinGltf;
   final String? initialFloorLabel;
   final String? venueId;
   final String? trackingNotificationId;
@@ -638,12 +450,8 @@ class SetYourLocationDialog
   /// edit the start location in-place.
   final bool returnResultOnly;
   final bool embeddedMode;
-  final bool
-  isFriendNavigation; // ← Friend navigation flag
-  final ValueChanged<
-    Map<String, dynamic>
-  >?
-  onLocationPicked;
+  final bool isFriendNavigation; // ← Friend navigation flag
+  final ValueChanged<Map<String, dynamic>>? onLocationPicked;
 
   const SetYourLocationDialog({
     super.key,
@@ -667,25 +475,18 @@ class SetYourLocationDialog
   });
 
   @override
-  State<SetYourLocationDialog>
-  createState() =>
-      _SetYourLocationDialogState();
+  State<SetYourLocationDialog> createState() => _SetYourLocationDialogState();
 }
 
-class _SetYourLocationDialogState
-    extends
-        State<SetYourLocationDialog> {
+class _SetYourLocationDialogState extends State<SetYourLocationDialog> {
   String _currentFloorURL = '';
-  List<Map<String, String>> _venueMaps =
-      [];
+  List<Map<String, String>> _venueMaps = [];
   bool _mapsLoading = true;
   bool _jsReady = false;
-  Map<String, double>?
-  _pendingUserPinGltf;
+  Map<String, double>? _pendingUserPinGltf;
   NavMesh? _navmeshF1;
 
-  WebViewController?
-  _webCtrl; // for Flutter -> JS calls (move snapped pin)
+  WebViewController? _webCtrl; // for Flutter -> JS calls (move snapped pin)
 
   bool _jsBridgeReady =
       false; // becomes true after JS runs (prevents calling setUserPinFromFlutter too early)
@@ -696,8 +497,7 @@ class _SetYourLocationDialogState
   _pendingPoiToHighlight; // destination POI material to highlight once JS is ready
 
   // User-picked start location (BlenderPosition)
-  Map<String, double>?
-  _pickedPosGltf; // what model-viewer returns (Y-up)
+  Map<String, double>? _pickedPosGltf; // what model-viewer returns (Y-up)
   Map<String, double>?
   _pickedPosBlender; // converted for navmesh + Firestore (Z-up)
   String _pickedFloorLabel = '';
@@ -709,60 +509,40 @@ class _SetYourLocationDialogState
     super.initState();
 
     // Open the correct floor if the caller provided it (Path/Pin flow).
-    if (widget.floorSrc
-        .trim()
-        .isNotEmpty) {
-      _currentFloorURL = widget.floorSrc
-          .trim();
+    if (widget.floorSrc.trim().isNotEmpty) {
+      _currentFloorURL = widget.floorSrc.trim();
     }
 
     // Destination highlight only (NO PATH on this screen).
-    final dest = widget
-        .destinationPoiMaterial
-        .trim();
+    final dest = widget.destinationPoiMaterial.trim();
     if (dest.isNotEmpty) {
       _pendingPoiToHighlight = dest;
-    } else if (widget.shopId
-        .trim()
-        .startsWith('POIMAT_')) {
+    } else if (widget.shopId.trim().startsWith('POIMAT_')) {
       // VenuePage often passes POI material as shopId
-      _pendingPoiToHighlight = widget
-          .shopId
-          .trim();
+      _pendingPoiToHighlight = widget.shopId.trim();
     } else {
       _pendingPoiToHighlight = null;
     }
 
     // Destination pin picker should not highlight any POI
-    if (widget.flowType ==
-        'destination') {
+    if (widget.flowType == 'destination') {
       _pendingPoiToHighlight = null;
     }
 
-    if (widget.initialUserPinGltf !=
-        null) {
-      final g =
-          widget.initialUserPinGltf!;
+    if (widget.initialUserPinGltf != null) {
+      final g = widget.initialUserPinGltf!;
       _pickedPosGltf = g;
-      _pickedPosBlender =
-          _gltfToBlender(g);
+      _pickedPosBlender = _gltfToBlender(g);
     }
-    if (widget.initialFloorLabel !=
-            null &&
-        widget.initialFloorLabel!
-            .trim()
-            .isNotEmpty) {
-      _pickedFloorLabel = widget
-          .initialFloorLabel!
-          .trim();
+    if (widget.initialFloorLabel != null &&
+        widget.initialFloorLabel!.trim().isNotEmpty) {
+      _pickedFloorLabel = widget.initialFloorLabel!.trim();
     }
 
     _loadVenueMaps();
 
     // Only load saved location if this is a start‑point picker (not destination)
-    if (widget.flowType == 'start' &&
-        widget.initialUserPinGltf ==
-            null) {
+    if (widget.flowType == 'start' && widget.initialUserPinGltf == null) {
       _loadUserBlenderPosition();
     }
 
@@ -772,59 +552,35 @@ class _SetYourLocationDialogState
 
   Future<void> _loadNavmeshF1() async {
     try {
-      final m = await NavMesh.loadAsset(
-        'assets/nav_cor/navmesh_GF.json',
-      );
+      final m = await NavMesh.loadAsset('assets/nav_cor/navmesh_GF.json');
       if (!mounted) return;
       setState(() => _navmeshF1 = m);
-      debugPrint(
-        '✅ Navmesh loaded (F1) for snapping',
-      );
+      debugPrint('✅ Navmesh loaded (F1) for snapping');
     } catch (e) {
-      debugPrint(
-        '❌ Failed to load navmesh_GF.json: $e',
-      );
+      debugPrint('❌ Failed to load navmesh_GF.json: $e');
     }
   }
 
   DateTime? _toUtcDate(dynamic v) {
     if (v == null) return null;
-    if (v is Timestamp)
-      return v.toDate().toUtc();
-    if (v is int)
-      return DateTime.fromMillisecondsSinceEpoch(
-        v,
-        isUtc: true,
-      );
+    if (v is Timestamp) return v.toDate().toUtc();
+    if (v is int) return DateTime.fromMillisecondsSinceEpoch(v, isUtc: true);
     if (v is num)
-      return DateTime.fromMillisecondsSinceEpoch(
-        v.toInt(),
-        isUtc: true,
-      );
-    if (v is String)
-      return DateTime.tryParse(
-        v,
-      )?.toUtc();
+      return DateTime.fromMillisecondsSinceEpoch(v.toInt(), isUtc: true);
+    if (v is String) return DateTime.tryParse(v)?.toUtc();
     return null;
   }
 
   /// Loads the last saved user location (if any). It reads from:
   /// users/{uid}.location.blenderPosition {x,y,z,floor}
   /// and sets the UI state (and preferred floor) accordingly.
-  Future<void>
-  _loadUserBlenderPosition() async {
-    final user = FirebaseAuth
-        .instance
-        .currentUser;
+  Future<void> _loadUserBlenderPosition() async {
+    final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
     try {
-      final userDocRef =
-          await _resolveUserDocRef(
-            user,
-          );
-      final doc = await userDocRef
-          .get();
+      final userDocRef = await _resolveUserDocRef(user);
+      final doc = await userDocRef.get();
 
       final data = doc.data();
       if (data == null) return;
@@ -833,70 +589,37 @@ class _SetYourLocationDialogState
       if (location is! Map) return;
 
       // Timestamp check (already present)
-      final updatedAt = _toUtcDate(
-        location['updatedAt'],
-      );
+      final updatedAt = _toUtcDate(location['updatedAt']);
       if (updatedAt != null) {
-        final oneHourAgo =
-            DateTime.now()
-                .toUtc()
-                .subtract(
-                  const Duration(
-                    hours: 1,
-                  ),
-                );
-        if (updatedAt.isBefore(
-          oneHourAgo,
-        )) {
-          debugPrint(
-            '📍 Saved location is older than 1 hour – not loading.',
-          );
+        final oneHourAgo = DateTime.now().toUtc().subtract(
+          const Duration(hours: 1),
+        );
+        if (updatedAt.isBefore(oneHourAgo)) {
+          debugPrint('📍 Saved location is older than 1 hour – not loading.');
           return;
         }
       } else {
-        debugPrint(
-          '📍 No updatedAt found – proceeding without time check.',
-        );
+        debugPrint('📍 No updatedAt found – proceeding without time check.');
       }
 
-      final bp =
-          location['blenderPosition'];
+      final bp = location['blenderPosition'];
       if (bp is! Map) return;
 
-      final x = (bp['x'] as num?)
-          ?.toDouble();
-      final y = (bp['y'] as num?)
-          ?.toDouble();
-      final z = (bp['z'] as num?)
-          ?.toDouble();
+      final x = (bp['x'] as num?)?.toDouble();
+      final y = (bp['y'] as num?)?.toDouble();
+      final z = (bp['z'] as num?)?.toDouble();
       final floorRaw = bp['floor'];
-      if (x == null ||
-          y == null ||
-          z == null)
-        return;
+      if (x == null || y == null || z == null) return;
 
-      final floorLabel =
-          floorRaw == null
-          ? ''
-          : floorRaw.toString();
+      final floorLabel = floorRaw == null ? '' : floorRaw.toString();
 
       if (!mounted) return;
-      final blenderRaw = {
-        'x': x,
-        'y': y,
-        'z': z,
-      };
+      final blenderRaw = {'x': x, 'y': y, 'z': z};
 
-      final blender =
-          (_navmeshF1 != null)
-          ? _navmeshF1!
-                .snapBlenderPoint(
-                  blenderRaw,
-                )
+      final blender = (_navmeshF1 != null)
+          ? _navmeshF1!.snapBlenderPoint(blenderRaw)
           : blenderRaw;
-      final gltf = _blenderToGltf(
-        blender,
-      );
+      final gltf = _blenderToGltf(blender);
 
       setState(() {
         _pickedPosBlender = blender;
@@ -906,89 +629,58 @@ class _SetYourLocationDialogState
 
       // Send pin (will be pending if WebView not ready)
       if (_pickedPosGltf != null) {
-        _pushUserPinToJs(
-          _pickedPosGltf!,
-        );
+        _pushUserPinToJs(_pickedPosGltf!);
       }
 
       // Switch to the saved floor if maps are already loaded
-      if (floorLabel.isNotEmpty &&
-          _venueMaps.isNotEmpty) {
-        final match = _venueMaps
-            .firstWhere(
-              (m) =>
-                  (m['F_number'] ??
-                      '') ==
-                  floorLabel,
-              orElse: () => const {
-                'mapURL': '',
-              },
-            );
+      if (floorLabel.isNotEmpty && _venueMaps.isNotEmpty) {
+        final match = _venueMaps.firstWhere(
+          (m) => (m['F_number'] ?? '') == floorLabel,
+          orElse: () => const {'mapURL': ''},
+        );
 
-        final url =
-            match['mapURL'] ?? '';
+        final url = match['mapURL'] ?? '';
         if (url.isNotEmpty && mounted) {
           setState(() {
             _currentFloorURL = url;
           });
           // ✅ Re‑send the pin after floor change so it appears on the correct floor
           if (_pickedPosGltf != null) {
-            _pushUserPinToJs(
-              _pickedPosGltf!,
-            );
+            _pushUserPinToJs(_pickedPosGltf!);
           }
         }
       }
     } catch (e) {
-      debugPrint(
-        'Error loading user blenderPosition: $e',
-      );
+      debugPrint('Error loading user blenderPosition: $e');
     }
   }
 
   String _floorLabelForUrl(String url) {
     for (final m in _venueMaps) {
       if ((m['mapURL'] ?? '') == url)
-        return (m['floorNumber'] ?? '')
-            .toString();
+        return (m['floorNumber'] ?? '').toString();
     }
     return '';
   }
 
   String _fNumberForUrl(String url) {
     for (final m in _venueMaps) {
-      if ((m['mapURL'] ?? '') == url)
-        return (m['F_number'] ?? '')
-            .toString();
+      if ((m['mapURL'] ?? '') == url) return (m['F_number'] ?? '').toString();
     }
     return '';
   }
 
-  Map<String, double> _gltfToBlender(
-    Map<String, double> g,
-  ) {
+  Map<String, double> _gltfToBlender(Map<String, double> g) {
     // glTF (Y up) -> Blender (Z up)
-    return {
-      'x': g['x'] ?? 0,
-      'y': -(g['z'] ?? 0),
-      'z': (g['y'] ?? 0),
-    };
+    return {'x': g['x'] ?? 0, 'y': -(g['z'] ?? 0), 'z': (g['y'] ?? 0)};
   }
 
-  Map<String, double> _blenderToGltf(
-    Map<String, double> b,
-  ) {
+  Map<String, double> _blenderToGltf(Map<String, double> b) {
     // Blender (Z up) -> glTF (Y up)
-    return {
-      'x': b['x'] ?? 0,
-      'y': (b['z'] ?? 0),
-      'z': -(b['y'] ?? 0),
-    };
+    return {'x': b['x'] ?? 0, 'y': (b['z'] ?? 0), 'z': -(b['y'] ?? 0)};
   }
 
-  Future<void> _pushUserPinToJs(
-    Map<String, double> gltf,
-  ) async {
+  Future<void> _pushUserPinToJs(Map<String, double> gltf) async {
     final c = _webCtrl;
     if (c == null) {
       // No WebView yet – store the pin so it can be sent later
@@ -1004,23 +696,13 @@ class _SetYourLocationDialogState
     final x = gltf['x'];
     final y = gltf['y'];
     final z = gltf['z'];
-    if (x == null ||
-        y == null ||
-        z == null)
-      return;
+    if (x == null || y == null || z == null) return;
 
-    final saved = _pickedFloorLabel
-        .trim(); // "0"/"1"
-    final current = _fNumberForUrl(
-      _currentFloorURL,
-    ); // "0"/"1"
-    debugPrint(
-      '📌 _pushUserPinToJs: saved="$saved", current="$current"',
-    );
+    final saved = _pickedFloorLabel.trim(); // "0"/"1"
+    final current = _fNumberForUrl(_currentFloorURL); // "0"/"1"
+    debugPrint('📌 _pushUserPinToJs: saved="$saved", current="$current"');
 
-    if (saved.isNotEmpty &&
-        current.isNotEmpty &&
-        saved != current) {
+    if (saved.isNotEmpty && current.isNotEmpty && saved != current) {
       try {
         await c.runJavaScript(
           'window.clearUserPinFromFlutter && window.clearUserPinFromFlutter();',
@@ -1029,39 +711,27 @@ class _SetYourLocationDialogState
       return;
     }
 
-    final js =
-        'window.setUserPinFromFlutter($x, $y, $z);';
+    final js = 'window.setUserPinFromFlutter($x, $y, $z);';
     try {
       await c.runJavaScript(js);
     } catch (e) {
-      debugPrint(
-        '❌ runJavaScript failed: $e',
-      );
+      debugPrint('❌ runJavaScript failed: $e');
     }
   }
 
-  Future<void>
-  _pushDestinationHighlightToJs() async {
+  Future<void> _pushDestinationHighlightToJs() async {
     final c = _webCtrl;
     final name = _pendingPoiToHighlight;
-    if (c == null ||
-        name == null ||
-        name.trim().isEmpty)
-      return;
+    if (c == null || name == null || name.trim().isEmpty) return;
 
     if (!_jsBridgeReady) return;
 
-    final safe = jsonEncode(
-      name.trim(),
-    ); // ensures quotes/escaping
-    final js =
-        'window.highlightPoiFromFlutter($safe);';
+    final safe = jsonEncode(name.trim()); // ensures quotes/escaping
+    final js = 'window.highlightPoiFromFlutter($safe);';
     try {
       await c.runJavaScript(js);
     } catch (e) {
-      debugPrint(
-        '❌ highlight runJavaScript failed: $e',
-      );
+      debugPrint('❌ highlight runJavaScript failed: $e');
     }
   }
 
@@ -1619,8 +1289,7 @@ const timer = setInterval(function() {
 
       if (decoded is! Map) return;
       final obj = decoded;
-      final type = (obj['type'] ?? '')
-          .toString();
+      final type = (obj['type'] ?? '').toString();
 
       if (type == 'pin_picker_ready') {
         _jsBridgeReady = true;
@@ -1640,108 +1309,70 @@ const timer = setInterval(function() {
         final ok = obj['ok'] == true;
         if (!ok) {
           // ---- Show error message for invalid tap ----
-          final reason =
-              (obj['reason'] ?? '')
-                  .toString();
+          final reason = (obj['reason'] ?? '').toString();
           String message;
-          if (reason ==
-              'not_allowed_floor') {
-            message =
-                'Please tap on a walkable floor area.';
-          } else if (reason ==
-              'not_floor_normal') {
-            message =
-                'Cannot place pin here. Tap on the floor.';
+          if (reason == 'not_allowed_floor') {
+            message = 'Please tap on a walkable floor area.';
+          } else if (reason == 'not_floor_normal') {
+            message = 'Cannot place pin here. Tap on the floor.';
           } else {
-            message =
-                'Invalid location. Please tap on a walkable area.';
+            message = 'Invalid location. Please tap on a walkable area.';
           }
 
           _pinErrorTimer?.cancel();
           setState(() {
             _pinErrorMessage = message;
           });
-          _pinErrorTimer = Timer(
-            const Duration(seconds: 2),
-            () {
-              if (mounted) {
-                setState(() {
-                  _pinErrorMessage =
-                      null;
-                });
-              }
-            },
-          );
+          _pinErrorTimer = Timer(const Duration(seconds: 2), () {
+            if (mounted) {
+              setState(() {
+                _pinErrorMessage = null;
+              });
+            }
+          });
           return;
         }
 
         final pos = obj['position'];
         if (pos is Map) {
-          final x = (pos['x'] as num?)
-              ?.toDouble();
-          final y = (pos['y'] as num?)
-              ?.toDouble();
-          final z = (pos['z'] as num?)
-              ?.toDouble();
-          if (x == null ||
-              y == null ||
-              z == null)
-            return;
+          final x = (pos['x'] as num?)?.toDouble();
+          final y = (pos['y'] as num?)?.toDouble();
+          final z = (pos['z'] as num?)?.toDouble();
+          if (x == null || y == null || z == null) return;
 
-          final gltf = {
-            'x': x,
-            'y': y,
-            'z': z,
-          };
-          final blender =
-              _gltfToBlender(gltf);
+          final gltf = {'x': x, 'y': y, 'z': z};
+          final blender = _gltfToBlender(gltf);
 
           // snap in Blender-space (corridor floor)
           final nav = _navmeshF1;
-          final snappedBlender =
-              (nav == null)
+          final snappedBlender = (nav == null)
               ? blender
               : nav.snapBlenderPoint(
                   blender,
                 ); // we'll add this helper in navmesh.dart
 
-          final snappedGltf =
-              _blenderToGltf(
-                snappedBlender,
-              );
+          final snappedGltf = _blenderToGltf(snappedBlender);
 
-          final floor = _fNumberForUrl(
-            _currentFloorURL,
-          ); // "0","1","2"
+          final floor = _fNumberForUrl(_currentFloorURL); // "0","1","2"
 
           setState(() {
-            _pickedPosGltf =
-                snappedGltf;
-            _pickedPosBlender =
-                snappedBlender;
+            _pickedPosGltf = snappedGltf;
+            _pickedPosBlender = snappedBlender;
             _pickedFloorLabel = floor;
           });
 
-          widget.onLocationPicked?.call(
-            {
-              'gltf': snappedGltf,
-              'blender': snappedBlender,
-              'floorLabel': floor,
-            },
-          );
+          widget.onLocationPicked?.call({
+            'gltf': snappedGltf,
+            'blender': snappedBlender,
+            'floorLabel': floor,
+          });
 
           // ✅ Move the visible pin to the snapped position (Flutter -> JS)
           _pushUserPinToJs(snappedGltf);
 
-          debugPrint(
-            '📌 PIN glTF: $gltf',
-          );
-          debugPrint(
-            '📌 PIN Blender: $blender',
-          );
-          debugPrint(
-            '📌 SNAPPED Blender: $snappedBlender',
-          );
+          debugPrint('📌 PIN glTF: $gltf');
+          debugPrint('📌 PIN Blender: $blender');
+          debugPrint('📌 SNAPPED Blender: $snappedBlender');
         }
       }
     } catch (_) {
@@ -1749,52 +1380,27 @@ const timer = setInterval(function() {
     }
   }
 
-  Future<
-    DocumentReference<
-      Map<String, dynamic>
-    >
-  >
-  _resolveUserDocRef(User user) async {
-    final users = FirebaseFirestore
-        .instance
-        .collection('users');
+  Future<DocumentReference<Map<String, dynamic>>> _resolveUserDocRef(
+    User user,
+  ) async {
+    final users = FirebaseFirestore.instance.collection('users');
 
     // If your users collection uses auto-generated document IDs (as in your screenshot),
     // we find the doc by email and update that doc instead of creating a new {uid} doc.
     final email = user.email;
-    if (email != null &&
-        email.isNotEmpty) {
-      final snap = await users
-          .where(
-            'email',
-            isEqualTo: email,
-          )
-          .limit(1)
-          .get();
+    if (email != null && email.isNotEmpty) {
+      final snap = await users.where('email', isEqualTo: email).limit(1).get();
       if (snap.docs.isNotEmpty) {
-        return snap
-            .docs
-            .first
-            .reference;
+        return snap.docs.first.reference;
       }
     }
 
     // Fallback: try phone (for phone-auth users with auto-generated doc IDs)
     final phone = user.phoneNumber;
-    if (phone != null &&
-        phone.isNotEmpty) {
-      final snap = await users
-          .where(
-            'phone',
-            isEqualTo: phone,
-          )
-          .limit(1)
-          .get();
+    if (phone != null && phone.isNotEmpty) {
+      final snap = await users.where('phone', isEqualTo: phone).limit(1).get();
       if (snap.docs.isNotEmpty) {
-        return snap
-            .docs
-            .first
-            .reference;
+        return snap.docs.first.reference;
       }
     }
 
@@ -1802,51 +1408,33 @@ const timer = setInterval(function() {
     return users.doc(user.uid);
   }
 
-  Future<bool>
-  _saveBlenderPosition() async {
+  Future<bool> _saveBlenderPosition() async {
     final pos = _pickedPosBlender;
     if (pos == null) return false;
 
-    final user = FirebaseAuth
-        .instance
-        .currentUser;
+    final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       if (!mounted) return false;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'You must be signed in to save your location.',
-          ),
+          content: Text('You must be signed in to save your location.'),
         ),
       );
       return false;
     }
 
-    final floorLabel =
-        _pickedFloorLabel.isNotEmpty
+    final floorLabel = _pickedFloorLabel.isNotEmpty
         ? _pickedFloorLabel
-        : _floorLabelForUrl(
-            _currentFloorURL,
-          );
+        : _floorLabelForUrl(_currentFloorURL);
 
     // Store canonical floor id (F_number) when available (e.g. "0","1"...).
-    final fNumberStr = _fNumberForUrl(
-      _currentFloorURL,
-    );
-    final floorValue =
-        fNumberStr.isNotEmpty
-        ? (int.tryParse(fNumberStr) ??
-              fNumberStr)
-        : (int.tryParse(floorLabel) ??
-              floorLabel);
+    final fNumberStr = _fNumberForUrl(_currentFloorURL);
+    final floorValue = fNumberStr.isNotEmpty
+        ? (int.tryParse(fNumberStr) ?? fNumberStr)
+        : (int.tryParse(floorLabel) ?? floorLabel);
 
     try {
-      final userDocRef =
-          await _resolveUserDocRef(
-            user,
-          );
+      final userDocRef = await _resolveUserDocRef(user);
 
       // Save under location.{blenderPosition,updatedAt}
       // Using dotted keys avoids overwriting future location.multisetPosition.
@@ -1855,29 +1443,19 @@ const timer = setInterval(function() {
           'x': pos['x'],
           'y': pos['y'],
           'z': pos['z'],
-          'floor': floorValue
-              .toString(),
+          'floor': floorValue.toString(),
         },
-        'location.updatedAt':
-            FieldValue.serverTimestamp(),
+        'location.updatedAt': FieldValue.serverTimestamp(),
       });
 
       if (!mounted) return true;
       return true;
     } catch (e) {
-      debugPrint(
-        '❌ Failed to save location: $e',
-      );
+      debugPrint('❌ Failed to save location: $e');
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Failed to save location: $e',
-            ),
-          ),
-        );
+        ).showSnackBar(SnackBar(content: Text('Failed to save location: $e')));
       }
       // Don't rethrow — keep UI alive.
       return false;
@@ -1889,175 +1467,102 @@ const timer = setInterval(function() {
     setState(() => _mapsLoading = true);
 
     try {
-      const String solitaireId =
-          'ChIJcYTQDwDjLj4RZEiboV6gZzM';
-      final String providedId =
-          (widget.venueId ?? '').trim();
+      const String solitaireId = 'ChIJcYTQDwDjLj4RZEiboV6gZzM';
+      final String providedId = (widget.venueId ?? '').trim();
 
       // Try the provided venueId first; if it has no map data, fall back to
       // Solitaire so the 3D map always renders even when the meeting-point's
       // venueId points to a venue document that hasn't been given a map yet.
       final List<String> candidates = [
-        if (providedId.isNotEmpty)
-          providedId,
+        if (providedId.isNotEmpty) providedId,
         solitaireId,
       ];
 
-      for (final venueId
-          in candidates) {
-        final doc =
-            await FirebaseFirestore
-                .instance
-                .collection('venues')
-                .doc(venueId)
-                .get(
-                  const GetOptions(
-                    source: Source
-                        .serverAndCache,
-                  ),
-                );
+      for (final venueId in candidates) {
+        final doc = await FirebaseFirestore.instance
+            .collection('venues')
+            .doc(venueId)
+            .get(const GetOptions(source: Source.serverAndCache));
 
         final data = doc.data();
-        if (data == null ||
-            data['map'] is! List)
-          continue;
+        if (data == null || data['map'] is! List) continue;
 
-        final maps =
-            (data['map'] as List)
-                .cast<
-                  Map<String, dynamic>
-                >();
+        final maps = (data['map'] as List).cast<Map<String, dynamic>>();
         if (maps.isEmpty) continue;
 
-        final convertedMaps = maps.map((
-          m,
-        ) {
+        final convertedMaps = maps.map((m) {
           return {
-            'F_number':
-                (m['F_number'] ?? '')
-                    .toString(),
-            'floorNumber':
-                (m['floorNumber'] ?? '')
-                    .toString(),
-            'mapURL':
-                (m['mapURL'] ?? '')
-                    .toString(),
+            'F_number': (m['F_number'] ?? '').toString(),
+            'floorNumber': (m['floorNumber'] ?? '').toString(),
+            'mapURL': (m['mapURL'] ?? '').toString(),
           };
         }).toList();
 
         if (mounted) {
           setState(() {
             _venueMaps = convertedMaps;
-            if (convertedMaps
-                .isNotEmpty) {
-              _currentFloorURL =
-                  convertedMaps
-                      .first['mapURL'] ??
-                  '';
+            if (convertedMaps.isNotEmpty) {
+              _currentFloorURL = convertedMaps.first['mapURL'] ?? '';
 
               // If we already loaded a saved floor, prefer that.
               // IMPORTANT: _pickedFloorLabel might be "0"/"1" from Unity (F_number), not "GF"/"F1".
-              if (_pickedFloorLabel
-                  .isNotEmpty) {
-                Map<String, String>
-                match;
+              if (_pickedFloorLabel.isNotEmpty) {
+                Map<String, String> match;
 
                 // 1) Try match by F_number ("0","1"...)
-                match = convertedMaps
-                    .firstWhere(
-                      (m) =>
-                          (m['F_number'] ??
-                              '') ==
-                          _pickedFloorLabel,
-                      orElse: () =>
-                          const {
-                            'mapURL':
-                                '',
-                          },
-                    );
+                match = convertedMaps.firstWhere(
+                  (m) => (m['F_number'] ?? '') == _pickedFloorLabel,
+                  orElse: () => const {'mapURL': ''},
+                );
 
                 // 2) Fallback: match by floorNumber ("GF","F1"...)
-                if ((match['mapURL'] ??
-                        '')
-                    .isEmpty) {
-                  match = convertedMaps
-                      .firstWhere(
-                        (m) =>
-                            (m['floorNumber'] ??
-                                '') ==
-                            _pickedFloorLabel,
-                        orElse: () =>
-                            const {
-                              'mapURL':
-                                  '',
-                            },
-                      );
+                if ((match['mapURL'] ?? '').isEmpty) {
+                  match = convertedMaps.firstWhere(
+                    (m) => (m['floorNumber'] ?? '') == _pickedFloorLabel,
+                    orElse: () => const {'mapURL': ''},
+                  );
                 }
 
-                final url =
-                    match['mapURL'] ??
-                    '';
+                final url = match['mapURL'] ?? '';
                 if (url.isNotEmpty) {
-                  _currentFloorURL =
-                      url;
+                  _currentFloorURL = url;
                 }
               }
             }
           });
-          if (mounted &&
-              _pickedPosGltf != null) {
-            _pushUserPinToJs(
-              _pickedPosGltf!,
-            );
+          if (mounted && _pickedPosGltf != null) {
+            _pushUserPinToJs(_pickedPosGltf!);
           }
         }
         break; // Maps loaded successfully — stop trying candidates.
       }
     } catch (e) {
-      debugPrint(
-        "Error loading maps in dialog: $e",
-      );
+      debugPrint("Error loading maps in dialog: $e");
     } finally {
-      if (mounted)
-        setState(
-          () => _mapsLoading = false,
-        );
+      if (mounted) setState(() => _mapsLoading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(
-      context,
-    ).size.height;
+    final screenHeight = MediaQuery.of(context).size.height;
 
     final pinPlaced =
         _pickedPosGltf != null &&
-        _pickedFloorLabel ==
-            _fNumberForUrl(
-              _currentFloorURL,
-            );
+        _pickedFloorLabel == _fNumberForUrl(_currentFloorURL);
 
     // Inside build, after pinPlaced is defined
-    final bool isDestinationFlow =
-        widget.flowType ==
-        'destination';
+    final bool isDestinationFlow = widget.flowType == 'destination';
     final String effectiveTitle =
-        (widget.headerTitle != null &&
-            widget.headerTitle!
-                .trim()
-                .isNotEmpty)
+        (widget.headerTitle != null && widget.headerTitle!.trim().isNotEmpty)
         ? widget.headerTitle!.trim()
         : (isDestinationFlow
               ? 'Set Destination Location'
               : 'Set Your Location');
 
     final String effectiveSubtitle =
-        (widget.headerSubtitle !=
-                null &&
-            widget.headerSubtitle!
-                .trim()
-                .isNotEmpty)
+        (widget.headerSubtitle != null &&
+            widget.headerSubtitle!.trim().isNotEmpty)
         ? widget.headerSubtitle!.trim()
         : (pinPlaced
               ? (isDestinationFlow
@@ -2067,29 +1572,18 @@ const timer = setInterval(function() {
                     ? 'Tap on the 3D map to place your destination pin.'
                     : 'Tap on the 3D map to place your pin.'));
     // Match venue_page ordering: higher floors first (F2, F1, ... , GF last)
-    final sortedMaps =
-        List<Map<String, String>>.from(
-          _venueMaps,
-        );
+    final sortedMaps = List<Map<String, String>>.from(_venueMaps);
 
     int floorRank(String s) {
       final f = s.trim().toUpperCase();
       if (f == 'GF') return 0;
-      if (f.startsWith('F'))
-        return int.tryParse(
-              f.substring(1),
-            ) ??
-            0;
+      if (f.startsWith('F')) return int.tryParse(f.substring(1)) ?? 0;
       return 0;
     }
 
     sortedMaps.sort((a, b) {
-      final ra = floorRank(
-        a['floorNumber'] ?? '',
-      );
-      final rb = floorRank(
-        b['floorNumber'] ?? '',
-      );
+      final ra = floorRank(a['floorNumber'] ?? '');
+      final rb = floorRank(b['floorNumber'] ?? '');
       return rb.compareTo(ra);
     });
 
@@ -2117,64 +1611,33 @@ const timer = setInterval(function() {
             height: 4,
             decoration: BoxDecoration(
               color: Colors.grey[300],
-              borderRadius:
-                  BorderRadius.circular(
-                    2,
-                  ),
+              borderRadius: BorderRadius.circular(2),
             ),
           ),
           Padding(
-            padding:
-                const EdgeInsets.fromLTRB(
-                  10,
-                  10,
-                  20,
-                  10,
-                ),
+            padding: const EdgeInsets.fromLTRB(10, 10, 20, 10),
             child: Row(
               children: [
                 IconButton(
-                  icon: const Icon(
-                    Icons.arrow_back,
-                    color: AppColors
-                        .kGreen,
-                  ),
-                  onPressed: () =>
-                      Navigator.pop(
-                        context,
-                      ),
+                  icon: const Icon(Icons.arrow_back, color: AppColors.kGreen),
+                  onPressed: () => Navigator.pop(context),
                 ),
                 Expanded(
                   child: Column(
-                    crossAxisAlignment:
-                        CrossAxisAlignment
-                            .start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         effectiveTitle, // ← use the computed title
                         style: TextStyle(
-                          fontSize:
-                              screenHeight <
-                                  700
-                              ? 20
-                              : 22,
-                          fontWeight:
-                              FontWeight
-                                  .w600,
-                          color: AppColors
-                              .kGreen,
+                          fontSize: screenHeight < 700 ? 20 : 22,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.kGreen,
                         ),
                       ),
-                      const SizedBox(
-                        height: 2,
-                      ),
+                      const SizedBox(height: 2),
                       Text(
                         effectiveSubtitle, // ← use the computed subtitle
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors
-                              .grey[600],
-                        ),
+                        style: TextStyle(fontSize: 14, color: Colors.grey[600]),
                       ),
                     ],
                   ),
@@ -2184,64 +1647,37 @@ const timer = setInterval(function() {
           ),
           Expanded(
             child: Padding(
-              padding:
-                  const EdgeInsets.symmetric(
-                    horizontal: 16,
-                  ),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
               child: _buildMapContent(),
             ),
           ),
           Padding(
-            padding:
-                EdgeInsets.fromLTRB(
-                  20,
-                  16,
-                  20,
-                  MediaQuery.of(
-                        context,
-                      ).padding.bottom +
-                      20,
-                ),
+            padding: EdgeInsets.fromLTRB(
+              20,
+              16,
+              20,
+              MediaQuery.of(context).padding.bottom + 20,
+            ),
             child: PrimaryButton(
               text: 'Confirm Location',
               enabled: pinPlaced,
               onPressed: pinPlaced
                   ? () async {
                       bool ok = true;
-                      if (widget
-                              .flowType ==
-                          'start') {
-                        ok =
-                            await _saveBlenderPosition();
+                      if (widget.flowType == 'start') {
+                        ok = await _saveBlenderPosition();
                         if (!ok) return;
                       }
                       // For destination, we don't save to Firestore.
-                      if (!mounted)
-                        return;
+                      if (!mounted) return;
 
-                      if (widget.trackingNotificationId !=
-                              null &&
-                          widget
-                              .trackingNotificationId!
-                              .trim()
-                              .isNotEmpty) {
+                      if (widget.trackingNotificationId != null &&
+                          widget.trackingNotificationId!.trim().isNotEmpty) {
                         try {
-                          await FirebaseFirestore
-                              .instance
-                              .collection(
-                                'notifications',
-                              )
-                              .doc(
-                                widget
-                                    .trackingNotificationId!
-                                    .trim(),
-                              )
-                              .update({
-                                'actionTaken':
-                                    true,
-                                'isRead':
-                                    true,
-                              });
+                          await FirebaseFirestore.instance
+                              .collection('notifications')
+                              .doc(widget.trackingNotificationId!.trim())
+                              .update({'actionTaken': true, 'isRead': true});
                         } catch (e) {
                           debugPrint(
                             'Failed to mark tracking location as saved: $e',
@@ -2254,81 +1690,43 @@ const timer = setInterval(function() {
                           );
                       }
 
-                      if (widget
-                          .returnResultOnly) {
+                      if (widget.returnResultOnly) {
                         final res = <String, dynamic>{
-                          'gltf':
-                              _pickedPosGltf,
-                          'blender':
-                              _pickedPosBlender,
-                          'floorLabel':
-                              _pickedFloorLabel
-                                  .isNotEmpty
+                          'gltf': _pickedPosGltf,
+                          'blender': _pickedPosBlender,
+                          'floorLabel': _pickedFloorLabel.isNotEmpty
                               ? _pickedFloorLabel
-                              : _floorLabelForUrl(
-                                  _currentFloorURL,
-                                ),
+                              : _floorLabelForUrl(_currentFloorURL),
                         };
-                        Navigator.pop(
-                          context,
-                          res,
-                        );
+                        Navigator.pop(context, res);
                         return;
                       }
 
                       // Close the current bottom sheet using the root navigator
-                      Navigator.of(
-                        context,
-                        rootNavigator:
-                            true,
-                      ).pop();
+                      Navigator.of(context, rootNavigator: true).pop();
 
                       // Small delay to allow the sheet to be removed
-                      await Future.delayed(
-                        const Duration(
-                          milliseconds:
-                              150,
-                        ),
-                      );
-                      if (!mounted)
-                        return;
+                      await Future.delayed(const Duration(milliseconds: 150));
+                      if (!mounted) return;
 
                       // Push the new screen on top of the underlying page (e.g., VenuePage, TrackPage)
-                      Navigator.of(
-                        context,
-                        rootNavigator:
-                            true,
-                      ).push(
+                      Navigator.of(context, rootNavigator: true).push(
                         MaterialPageRoute(
                           builder: (_) => PathOverviewScreen(
-                            shopName: widget
-                                .shopName,
-                            shopId: widget
-                                .shopId,
-                            startingMethod:
-                                'pin',
+                            shopName: widget.shopName,
+                            shopId: widget.shopId,
+                            startingMethod: 'pin',
                             destinationPoiMaterial:
-                                widget
-                                    .destinationPoiMaterial,
-                            destinationHitGltf:
-                                widget
-                                    .destinationHitGltf,
-                            destinationFloorLabel:
-                                widget
-                                    .destinationFloorLabel,
-                            isFriendNavigation:
-                                widget
-                                    .isFriendNavigation,
-                            floorSrc:
-                                _currentFloorURL
-                                    .isNotEmpty
+                                widget.destinationPoiMaterial,
+                            destinationHitGltf: widget.destinationHitGltf,
+                            destinationFloorLabel: widget.destinationFloorLabel,
+                            isFriendNavigation: widget.isFriendNavigation,
+                            floorSrc: _currentFloorURL.isNotEmpty
                                 ? _currentFloorURL
-                                : widget
-                                      .floorSrc,
-                            originFloorLabel:
-                                _floorLabelForUrl(
-                                  _currentFloorURL,
-                                ),
+                                : widget.floorSrc,
+                            originFloorLabel: _floorLabelForUrl(
+                              _currentFloorURL,
+                            ),
                           ),
                         ),
                       );
@@ -2347,130 +1745,82 @@ const timer = setInterval(function() {
     }
 
     if (_venueMaps.isEmpty) {
-      return const Center(
-        child: Text(
-          "Map missing for Solitaire.",
-        ),
-      );
+      return const Center(child: Text("Map missing for Solitaire."));
     }
 
-    final floorLabel =
-        _floorLabelForUrl(
-          _currentFloorURL,
-        );
+    final floorLabel = _floorLabelForUrl(_currentFloorURL);
     final pos = _pickedPosGltf;
     final bpos = _pickedPosBlender;
 
     return Container(
       decoration: BoxDecoration(
         color: Colors.grey.shade50,
-        borderRadius:
-            BorderRadius.circular(16),
-        border: Border.all(
-          color: Colors.grey.shade200,
-        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
       ),
       child: ClipRRect(
-        borderRadius:
-            BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(16),
         child: Stack(
           children: [
             // 3D Model Viewer (with JS picking)
             ModelViewer(
-              key: ValueKey(
-                _currentFloorURL,
-              ),
+              key: ValueKey(_currentFloorURL),
               src: _currentFloorURL,
               alt: "Solitaire 3D Map",
               cameraControls: true,
               autoRotate: false,
-              backgroundColor:
-                  Colors.transparent,
-              cameraOrbit:
-                  "0deg 65deg 2.5m",
-              minCameraOrbit:
-                  "auto 0deg auto",
-              maxCameraOrbit:
-                  "auto 90deg auto",
+              backgroundColor: Colors.transparent,
+              cameraOrbit: "0deg 65deg 2.5m",
+              minCameraOrbit: "auto 0deg auto",
+              maxCameraOrbit: "auto 90deg auto",
               cameraTarget: "0m 0m 0m",
               relatedJs: _pinPickerJs,
-              onWebViewCreated:
-                  (controller) {
-                    _webCtrl =
-                        controller;
+              onWebViewCreated: (controller) {
+                _webCtrl = controller;
 
-                    // New WebView instance -> JS is not ready yet
-                    _jsBridgeReady =
-                        false;
-                  },
+                // New WebView instance -> JS is not ready yet
+                _jsBridgeReady = false;
+              },
               javascriptChannels: {
                 JavascriptChannel(
                   'JS_TEST_CHANNEL',
-                  onMessageReceived:
-                      (
-                        JavaScriptMessage
-                        message,
-                      ) {
-                        debugPrint(
-                          "✅ JS_TEST_CHANNEL: ${message.message}",
-                        );
+                  onMessageReceived: (JavaScriptMessage message) {
+                    debugPrint("✅ JS_TEST_CHANNEL: ${message.message}");
 
-                        // As soon as JS starts running, our window.setUserPinFromFlutter exists.
-                        if (!_jsBridgeReady &&
-                            message
-                                .message
-                                .contains(
-                                  'PinPicker JS alive',
-                                )) {
-                          _jsBridgeReady =
-                              true;
-                          // Restrict taps to Allowed_floor during Set Location step
-                          _webCtrl?.runJavaScript(
-                            "window.setLocationModeFromFlutter(true);",
-                          );
-                          _webCtrl?.runJavaScript(
-                            "window.setAllowedFloorMaterialFromFlutter('Allowed_floor');",
-                          );
+                    // As soon as JS starts running, our window.setUserPinFromFlutter exists.
+                    if (!_jsBridgeReady &&
+                        message.message.contains('PinPicker JS alive')) {
+                      _jsBridgeReady = true;
+                      // Restrict taps to Allowed_floor during Set Location step
+                      _webCtrl?.runJavaScript(
+                        "window.setLocationModeFromFlutter(true);",
+                      );
+                      _webCtrl?.runJavaScript(
+                        "window.setAllowedFloorMaterialFromFlutter('Allowed_floor');",
+                      );
 
-                          // Send any pending pin (from previous attempts)
-                          final p =
-                              _pendingPinToSend;
-                          if (p !=
-                              null) {
-                            _pendingPinToSend =
-                                null;
-                            _pushUserPinToJs(
-                              p,
-                            );
-                          }
+                      // Send any pending pin (from previous attempts)
+                      final p = _pendingPinToSend;
+                      if (p != null) {
+                        _pendingPinToSend = null;
+                        _pushUserPinToJs(p);
+                      }
 
-                          // 🔥 Also send the current pin if it exists (in case it wasn't pending)
-                          if (_pickedPosGltf !=
-                              null) {
-                            _pushUserPinToJs(
-                              _pickedPosGltf!,
-                            );
-                          }
+                      // 🔥 Also send the current pin if it exists (in case it wasn't pending)
+                      if (_pickedPosGltf != null) {
+                        _pushUserPinToJs(_pickedPosGltf!);
+                      }
 
-                          _pushDestinationHighlightToJs();
-                        }
-                      },
+                      _pushDestinationHighlightToJs();
+                    }
+                  },
                 ),
                 JavascriptChannel(
                   'POI_CHANNEL',
-                  onMessageReceived:
-                      (
-                        JavaScriptMessage
-                        message,
-                      ) {
-                        debugPrint(
-                          "🟦 POI_CHANNEL: ${message.message}",
-                        );
-                        _handleJsMessage(
-                          message
-                              .message,
-                        );
-                      },
+                  onMessageReceived: (JavaScriptMessage message) {
+                    debugPrint("🟦 POI_CHANNEL: ${message.message}");
+                    _handleJsMessage(message.message);
+                  },
                 ),
               },
             ),
@@ -2482,124 +1832,38 @@ const timer = setInterval(function() {
                 right: 16,
                 child: Column(
                   children:
-                      (List<Map<String, String>>.from(
-                            _venueMaps,
-                          )..sort((
-                            a,
-                            b,
-                          ) {
-                            int rank(
-                              String s,
-                            ) {
-                              final f = s
-                                  .trim()
-                                  .toUpperCase();
-                              if (f ==
-                                  'GF')
-                                return 0;
-                              if (f
-                                  .startsWith(
-                                    'F',
-                                  ))
-                                return int.tryParse(
-                                      f.substring(
-                                        1,
-                                      ),
-                                    ) ??
-                                    0;
+                      (List<Map<String, String>>.from(_venueMaps)..sort((a, b) {
+                            int rank(String s) {
+                              final f = s.trim().toUpperCase();
+                              if (f == 'GF') return 0;
+                              if (f.startsWith('F'))
+                                return int.tryParse(f.substring(1)) ?? 0;
                               return 0;
                             }
 
-                            final ra = rank(
-                              a['floorNumber'] ??
-                                  '',
-                            );
-                            final rb = rank(
-                              b['floorNumber'] ??
-                                  '',
-                            );
-                            return rb
-                                .compareTo(
-                                  ra,
-                                ); // higher floors first
+                            final ra = rank(a['floorNumber'] ?? '');
+                            final rb = rank(b['floorNumber'] ?? '');
+                            return rb.compareTo(ra); // higher floors first
                           }))
                           .map((map) {
-                            final label =
-                                map['floorNumber'] ??
-                                '';
-                            final url =
-                                map['mapURL'] ??
-                                '';
-                            final isSelected =
-                                _currentFloorURL ==
-                                url;
+                            final label = map['floorNumber'] ?? '';
+                            final url = map['mapURL'] ?? '';
+                            final isSelected = _currentFloorURL == url;
                             return Padding(
-                              padding: const EdgeInsets.only(
-                                bottom:
-                                    8,
-                              ),
-                              child: _buildFloorButton(
-                                label,
-                                url,
-                                isSelected,
-                              ),
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: _buildFloorButton(label, url, isSelected),
                             );
                           })
                           .toList(),
                 ),
               ),
 
-            // Debug/feedback chip (optional, lightweight)
-            if (pos != null)
-              Positioned(
-                left: 12,
-                bottom: 12,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 8,
-                      ),
-                  decoration: BoxDecoration(
-                    color: Colors.white
-                        .withOpacity(
-                          0.92,
-                        ),
-                    borderRadius:
-                        BorderRadius.circular(
-                          10,
-                        ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors
-                            .black
-                            .withOpacity(
-                              0.08,
-                            ),
-                        blurRadius: 6,
-                      ),
-                    ],
-                  ),
-                  child: Text(
-                    'Floor: $floorLabel\nx: ${pos['x']!.toStringAsFixed(3)}  y: ${pos['y']!.toStringAsFixed(3)}  z: ${pos['z']!.toStringAsFixed(3)}',
-                    style:
-                        const TextStyle(
-                          fontSize: 12,
-                          height: 1.2,
-                        ),
-                  ),
-                ),
-              ),
-            if (_pinErrorMessage !=
-                null)
+            if (_pinErrorMessage != null)
               Positioned(
                 left: 16,
                 right: 16,
                 bottom: 16,
-                child: ErrorMessageBox(
-                  message:
-                      _pinErrorMessage!,
-                ),
+                child: ErrorMessageBox(message: _pinErrorMessage!),
               ),
           ],
         ),
@@ -2607,37 +1871,24 @@ const timer = setInterval(function() {
     );
   }
 
-  Widget _buildFloorButton(
-    String label,
-    String url,
-    bool isSelected,
-  ) {
+  Widget _buildFloorButton(String label, String url, bool isSelected) {
     return GestureDetector(
       onTap: () {
         setState(() {
           _currentFloorURL = url;
         });
         if (_pickedPosGltf != null) {
-          _pushUserPinToJs(
-            _pickedPosGltf!,
-          );
+          _pushUserPinToJs(_pickedPosGltf!);
         }
       },
       child: Container(
         width: 42,
         height: 36,
         decoration: BoxDecoration(
-          color: isSelected
-              ? AppColors.kGreen
-              : Colors.white,
-          borderRadius:
-              BorderRadius.circular(8),
+          color: isSelected ? AppColors.kGreen : Colors.white,
+          borderRadius: BorderRadius.circular(8),
           boxShadow: [
-            BoxShadow(
-              color: Colors.black
-                  .withOpacity(0.1),
-              blurRadius: 4,
-            ),
+            BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 4),
           ],
         ),
         alignment: Alignment.center,
@@ -2646,9 +1897,7 @@ const timer = setInterval(function() {
           style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w700,
-            color: isSelected
-                ? Colors.white
-                : Colors.black87,
+            color: isSelected ? Colors.white : Colors.black87,
           ),
         ),
       ),
@@ -2662,8 +1911,7 @@ const timer = setInterval(function() {
 
 /// Backwards-compatible name used by VenuePage.
 /// This screen lets the user pick a start location (pin) on the map.
-class PinStartLocationScreen
-    extends SetYourLocationDialog {
+class PinStartLocationScreen extends SetYourLocationDialog {
   const PinStartLocationScreen({
     super.key,
     required String shopName,
@@ -2675,18 +1923,14 @@ class PinStartLocationScreen
 
     String destinationPoiMaterial = '',
     String floorSrc = '',
-    Map<String, double>?
-    destinationHitGltf,
+    Map<String, double>? destinationHitGltf,
     String? destinationFloorLabel,
   }) : super(
          shopName: shopName,
          shopId: shopId,
-         destinationPoiMaterial:
-             destinationPoiMaterial,
+         destinationPoiMaterial: destinationPoiMaterial,
          floorSrc: floorSrc,
-         destinationHitGltf:
-             destinationHitGltf,
-         destinationFloorLabel:
-             destinationFloorLabel,
+         destinationHitGltf: destinationHitGltf,
+         destinationFloorLabel: destinationFloorLabel,
        );
 }

@@ -3450,11 +3450,14 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        Flexible(
+                        Expanded(
                           child: Text(
                             isHost ? 'Me (Host)' : 'Me',
+                            maxLines: 1,
                             overflow: TextOverflow.ellipsis,
+                            softWrap: false,
                             style: const TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w700,
@@ -3462,7 +3465,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                             ),
                           ),
                         ),
+
                         const SizedBox(width: 8),
+
                         _arrivalStatusChip(arrivalStatus),
                       ],
                     ),
@@ -3620,8 +3625,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                   }),
             borderRadius: BorderRadius.circular(16),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Container(
                     width: 44,
@@ -3636,78 +3642,106 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                       size: 22,
                     ),
                   ),
-                  const SizedBox(width: 10),
+
+                  const SizedBox(width: 12),
+
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // ROW 1: name + status chip
                         Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
-                            Flexible(
+                            Expanded(
                               child: Text(
                                 p.name.trim().isEmpty ? p.phone : p.name,
+                                maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
+                                softWrap: false,
                                 style: const TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
                                   color: Colors.black87,
                                 ),
                               ),
                             ),
+
                             const SizedBox(width: 8),
+
                             _arrivalStatusChip(effectiveStatus),
                           ],
                         ),
-                        const SizedBox(height: 4),
-                        if (isCancelled)
-                          Text(
-                            p.phone,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Colors.grey[600],
+
+                        const SizedBox(height: 6),
+
+                        // ROW 2: location/arrival text + favorite + expand
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                isCancelled
+                                    ? p.phone
+                                    : isArrived
+                                    ? (arrivedAt != null
+                                          ? 'Arrived at • ${_formatTime(arrivedAt)}'
+                                          : 'Arrived')
+                                    : 'Location updated • ${() {
+                                        final live = _meetingUpdatedAtByUser[p.userId];
+                                        final fallback = p.locationUpdatedAt ?? p.updatedAt;
+                                        final resolved = live ?? fallback;
+                                        return resolved != null ? _timeAgo(resolved) : 'Unknown';
+                                      }()}',
+                                maxLines: 2,
+                                overflow: TextOverflow.visible,
+                                softWrap: true,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  height: 1.25,
+                                  color: Colors.grey[600],
+                                ),
+                              ),
                             ),
-                          )
-                        else if (!isArrived)
-                          Text(
-                            'Location updated • ${() {
-                              final live = _meetingUpdatedAtByUser[p.userId];
-                              final fallback = p.locationUpdatedAt ?? p.updatedAt;
-                              final resolved = live ?? fallback;
-                              return resolved != null ? _timeAgo(resolved) : 'Unknown';
-                            }()}',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Colors.grey[600],
-                            ),
-                          ),
+
+                            if (!isCancelled) ...[
+                              const SizedBox(width: 8),
+
+                              InkWell(
+                                onTap: () =>
+                                    _toggleParticipantFavorite(p.phone, p.name),
+                                borderRadius: BorderRadius.circular(20),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(4),
+                                  child: Icon(
+                                    _favService.isFavorite(p.phone)
+                                        ? Icons.favorite
+                                        : Icons.favorite_border,
+                                    color: _favService.isFavorite(p.phone)
+                                        ? Colors.red
+                                        : Colors.grey[400],
+                                    size: 24,
+                                  ),
+                                ),
+                              ),
+
+                              const SizedBox(width: 8),
+
+                              AnimatedRotation(
+                                turns: isExpanded ? 0.5 : 0,
+                                duration: const Duration(milliseconds: 200),
+                                child: Icon(
+                                  Icons.keyboard_arrow_down,
+                                  color: Colors.grey[600],
+                                  size: 24,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
                       ],
                     ),
                   ),
-                  if (!isCancelled) ...[
-                    const SizedBox(width: 8),
-                    IconButton(
-                      onPressed: () =>
-                          _toggleParticipantFavorite(p.phone, p.name),
-                      icon: Icon(
-                        _favService.isFavorite(p.phone)
-                            ? Icons.favorite
-                            : Icons.favorite_border,
-                        color: _favService.isFavorite(p.phone)
-                            ? Colors.red
-                            : Colors.grey[400],
-                        size: 23,
-                      ),
-                    ),
-                    AnimatedRotation(
-                      turns: isExpanded ? 0.5 : 0,
-                      duration: const Duration(milliseconds: 200),
-                      child: Icon(
-                        Icons.keyboard_arrow_down,
-                        color: Colors.grey[600],
-                        size: 22,
-                      ),
-                    ),
-                  ],
                 ],
               ),
             ),

@@ -2044,7 +2044,7 @@ class _CreateMeetingPointFormState
     'Café',
     'Restaurant',
     'Shop',
-    'Gates',
+    'Gate',
   ];
   final Set<String>
   _selectedPlaceCategories = {'Any'};

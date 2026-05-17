@@ -291,15 +291,6 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     }
   }
 
-  int? _fNumberFromLabel(String? floorLabel) {
-    final s = (floorLabel ?? '').trim().toUpperCase();
-    if (s.isEmpty) return null;
-    if (s == 'GF' || s == 'G' || s == '0' || s == 'F0') return 0;
-    final m = RegExp(r'F?\s*(-?\d+)').firstMatch(s);
-    if (m != null) return int.tryParse(m.group(1)!);
-    return null;
-  }
-
   String _floorLabelFromToken(String? token) {
     final raw = (token ?? '').trim();
     if (raw.isEmpty) return '';
@@ -386,50 +377,6 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     if (rawName.isNotEmpty) return rawName;
 
     return _cleanPoiName(material.isNotEmpty ? material : fallbackKey);
-  }
-
-  bool _isPreferenceAvailableForCurrentRoute(String prefValue) {
-    final pref = prefValue.toLowerCase().trim();
-    if (pref == 'any') return true;
-
-    final startLabel = _desiredStartFloorLabel.isNotEmpty
-        ? _desiredStartFloorLabel
-        : _currentFloorLabel();
-    final destLabel =
-        (_destFloorLabelFixed ??
-                _destFloorLabel ??
-                widget.destinationFloorLabel ??
-                '')
-            .trim();
-    if (destLabel.isEmpty) return true;
-
-    final startF = _fNumberFromLabel(startLabel);
-    final destF = _fNumberFromLabel(destLabel);
-    if (startF == null || destF == null) return true;
-    if (startF == destF) return true;
-
-    bool linksFloors(ConnectorLink c) =>
-        c.endpointsByFNumber.containsKey(startF.toString()) &&
-        c.endpointsByFNumber.containsKey(destF.toString());
-
-    bool matchesPref(ConnectorLink c) {
-      final t = _normalizeConnectorType(c.type);
-      final dirOk = _connectorDirectionAllowed(t, startF, destF);
-      return dirOk && _connectorMatchesPreference(t, pref);
-    }
-
-    return _connectors.any((c) => linksFloors(c) && matchesPref(c));
-  }
-
-  String _navmeshForCurrentFloor() {
-    final url = _currentFloor.trim();
-    if (url.isEmpty) return '';
-    for (final m in _venueMaps) {
-      if ((m['mapURL'] ?? '') == url) {
-        return (m['navmesh'] ?? '').toString();
-      }
-    }
-    return '';
   }
 
   String _currentFloorLabel() {
@@ -557,16 +504,6 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     } catch (e) {
       debugPrint('❌ Failed to load suggested meeting point: $e');
     }
-  }
-
-  bool _isSavedFloorActive() {
-    final savedRaw = _desiredStartFloorLabel.isNotEmpty
-        ? _desiredStartFloorLabel
-        : _originFloorLabel;
-    final saved = _toFNumber(savedRaw);
-    final current = _currentFNumber();
-    if (saved.isEmpty || current.isEmpty) return true;
-    return saved == current;
   }
 
   WebViewController? _webCtrl;
@@ -1502,6 +1439,16 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     return null;
   }
 
+  void _setStartPinFromBlender(Map<String, double>? blender) {
+    if (blender == null) return;
+
+    _pendingUserPinGltf = _blenderToGltf({
+      'x': blender['x'] ?? 0.0,
+      'y': blender['y'] ?? 0.0,
+      'z': blender['z'] ?? 0.0,
+    });
+  }
+
   List<List<double>> _shortcutPathBySampling(
     NavMesh nm,
     List<List<double>> pts,
@@ -1630,6 +1577,8 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
         await _syncOverlaysForCurrentFloor();
         return;
       }
+
+      _setStartPinFromBlender(effectiveStart);
 
       if (_destEntrances != null &&
           _destEntrances!.length > 1 &&

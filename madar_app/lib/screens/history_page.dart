@@ -1364,32 +1364,21 @@ class _HistoryPageState extends State<HistoryPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        item.hostName.isEmpty ? 'Unknown' : item.hostName,
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.black87,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                        maxLines: 1,
-                      ),
-                      const SizedBox(height: 2),
                       Row(
                         children: [
-                          if (item.hostPhone.isNotEmpty) ...[
-                            Expanded(
-                              child: Text(
-                                item.hostPhone,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: Colors.grey[600],
-                                ),
-                                overflow: TextOverflow.ellipsis,
+                          Expanded(
+                            child: Text(
+                              item.hostName.isEmpty ? 'Unknown' : item.hostName,
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.black87,
                               ),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
                             ),
-                            const SizedBox(width: 6),
-                          ],
+                          ),
+                          const SizedBox(width: 6),
                           Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 8,
@@ -1410,6 +1399,17 @@ class _HistoryPageState extends State<HistoryPage> {
                           ),
                         ],
                       ),
+                      if (item.hostPhone.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          item.hostPhone,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey[600],
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
                     ],
                   ),
                 ),

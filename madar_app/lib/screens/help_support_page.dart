@@ -275,6 +275,9 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
         appBar: AppBar(
           backgroundColor: Colors.white,
           elevation: 0,
+          scrolledUnderElevation: 0,
+          surfaceTintColor: Colors.transparent,
+          shadowColor: Colors.transparent,
           centerTitle: true,
           leading: IconButton(
             icon: const Icon(Icons.arrow_back, color: AppColors.kGreen),

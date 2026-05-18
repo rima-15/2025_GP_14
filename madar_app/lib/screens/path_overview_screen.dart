@@ -291,15 +291,6 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     }
   }
 
-  int? _fNumberFromLabel(String? floorLabel) {
-    final s = (floorLabel ?? '').trim().toUpperCase();
-    if (s.isEmpty) return null;
-    if (s == 'GF' || s == 'G' || s == '0' || s == 'F0') return 0;
-    final m = RegExp(r'F?\s*(-?\d+)').firstMatch(s);
-    if (m != null) return int.tryParse(m.group(1)!);
-    return null;
-  }
-
   String _floorLabelFromToken(String? token) {
     final raw = (token ?? '').trim();
     if (raw.isEmpty) return '';
@@ -386,50 +377,6 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     if (rawName.isNotEmpty) return rawName;
 
     return _cleanPoiName(material.isNotEmpty ? material : fallbackKey);
-  }
-
-  bool _isPreferenceAvailableForCurrentRoute(String prefValue) {
-    final pref = prefValue.toLowerCase().trim();
-    if (pref == 'any') return true;
-
-    final startLabel = _desiredStartFloorLabel.isNotEmpty
-        ? _desiredStartFloorLabel
-        : _currentFloorLabel();
-    final destLabel =
-        (_destFloorLabelFixed ??
-                _destFloorLabel ??
-                widget.destinationFloorLabel ??
-                '')
-            .trim();
-    if (destLabel.isEmpty) return true;
-
-    final startF = _fNumberFromLabel(startLabel);
-    final destF = _fNumberFromLabel(destLabel);
-    if (startF == null || destF == null) return true;
-    if (startF == destF) return true;
-
-    bool linksFloors(ConnectorLink c) =>
-        c.endpointsByFNumber.containsKey(startF.toString()) &&
-        c.endpointsByFNumber.containsKey(destF.toString());
-
-    bool matchesPref(ConnectorLink c) {
-      final t = _normalizeConnectorType(c.type);
-      final dirOk = _connectorDirectionAllowed(t, startF, destF);
-      return dirOk && _connectorMatchesPreference(t, pref);
-    }
-
-    return _connectors.any((c) => linksFloors(c) && matchesPref(c));
-  }
-
-  String _navmeshForCurrentFloor() {
-    final url = _currentFloor.trim();
-    if (url.isEmpty) return '';
-    for (final m in _venueMaps) {
-      if ((m['mapURL'] ?? '') == url) {
-        return (m['navmesh'] ?? '').toString();
-      }
-    }
-    return '';
   }
 
   String _currentFloorLabel() {
@@ -539,11 +486,15 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
 
         suggestedPoi = {
           'name': (matchedCandidate['placeName'] ?? suggestedPoint).toString(),
-          'material': entrance['material']?.toString(),
+          'type': 'meeting_point',
+          'material': null, // important: no highlight
           'floor': entrance['floor']?.toString(),
           'x': entrance['x'],
           'y': entrance['y'],
           'z': entrance['z'],
+
+          // optional, only for reference/debug
+          'sourceMaterial': entrance['material']?.toString(),
         };
         break;
       }
@@ -559,20 +510,11 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     }
   }
 
-  bool _isSavedFloorActive() {
-    final savedRaw = _desiredStartFloorLabel.isNotEmpty
-        ? _desiredStartFloorLabel
-        : _originFloorLabel;
-    final saved = _toFNumber(savedRaw);
-    final current = _currentFNumber();
-    if (saved.isEmpty || current.isEmpty) return true;
-    return saved == current;
-  }
-
   WebViewController? _webCtrl;
   bool _jsReady = false;
   int _readyComputeRetry = 0;
   Map<String, double>? _pendingUserPinGltf;
+  String _startPinFloorLabel = '';
   String? _pendingPoiToHighlight;
 
   // --- Entrances only (no POI index) ---
@@ -741,13 +683,16 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
 
     await _pushPathToJs();
 
-    final startLabel = _desiredStartFloorLabel.isNotEmpty
-        ? _desiredStartFloorLabel
-        : _currentFloorLabel();
+    final startLabel = _startPinFloorLabel.isNotEmpty
+        ? _startPinFloorLabel
+        : (_desiredStartFloorLabel.isNotEmpty
+              ? _desiredStartFloorLabel
+              : _originFloorLabel);
+
     final startF = _toFNumber(startLabel);
     final currF = _currentFNumber();
 
-    if (_pendingUserPinGltf != null && currF == startF) {
+    if (_pendingUserPinGltf != null && startF.isNotEmpty && currF == startF) {
       await _pushUserPinToJsPath(_pendingUserPinGltf!);
     } else {
       await _clearUserPinFromJs();
@@ -836,12 +781,6 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
   Future<void> _pushUserPinToJsPath(Map<String, double> gltf) async {
     final c = _webCtrl;
     if (c == null || !_jsReady) return;
-
-    final originF = _toFNumber(_originFloorLabel);
-    if (originF.isNotEmpty && originF != _currentFNumber()) {
-      await _clearUserPinFromJs();
-      return;
-    }
 
     final x = gltf['x'];
     final y = gltf['y'];
@@ -942,6 +881,25 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     return type != 'poi' ||
         material.isEmpty ||
         material.toLowerCase() == 'null';
+  }
+
+  bool _isSuggestedMeetingPointSelection(Map<String, dynamic>? result) {
+    if (result == null || _suggestedMeetingPoi == null) return false;
+
+    final resultName = (result['name'] ?? '').toString().trim().toLowerCase();
+    final suggestedName = (_suggestedMeetingPoi!['name'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+
+    final resultFloor = _toFNumber(result['floor']?.toString());
+    final suggestedFloor = _toFNumber(
+      _suggestedMeetingPoi!['floor']?.toString(),
+    );
+
+    return resultName.isNotEmpty &&
+        resultName == suggestedName &&
+        resultFloor == suggestedFloor;
   }
 
   Future<void> _loadEntrances() async {
@@ -1502,6 +1460,21 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     return null;
   }
 
+  void _setStartPinFromBlender(
+    Map<String, double>? blender,
+    String? floorLabel,
+  ) {
+    if (blender == null) return;
+
+    _pendingUserPinGltf = _blenderToGltf({
+      'x': blender['x'] ?? 0.0,
+      'y': blender['y'] ?? 0.0,
+      'z': blender['z'] ?? 0.0,
+    });
+
+    _startPinFloorLabel = (floorLabel ?? '').trim();
+  }
+
   List<List<double>> _shortcutPathBySampling(
     NavMesh nm,
     List<List<double>> pts,
@@ -1630,6 +1603,8 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
         await _syncOverlaysForCurrentFloor();
         return;
       }
+
+      _setStartPinFromBlender(effectiveStart, effectiveStartFloor);
 
       if (_destEntrances != null &&
           _destEntrances!.length > 1 &&
@@ -3097,8 +3072,7 @@ const timer = setInterval(function() {
     setState(() {
       _usePinAsStart = false;
       _customStartPoi = result;
-      final displayFloor =
-          _floorLabelFromToken(result['floor']) ?? result['floor'];
+      final displayFloor = _floorLabelFromToken(result['floor']?.toString());
       _desiredStartFloorLabel = displayFloor;
       _originFloorLabelFixed = null;
       _originFNumberFixed = null;
@@ -3227,6 +3201,44 @@ const timer = setInterval(function() {
       if (_originFloorLabelFixed == _destFloorLabel) {
         _ensureFloorSelected(_destFloorLabel!);
       }
+      return;
+    } else if (_isSuggestedMeetingPointSelection(result)) {
+      final displayFloor =
+          _floorLabelFromToken(result['floor']?.toString()) ??
+          result['floor']?.toString() ??
+          '';
+
+      setState(() {
+        _selectedDestPoi = {
+          'name': result['name'],
+          'type': 'meeting_point',
+          'floor': displayFloor,
+          'x': result['x'],
+          'y': result['y'],
+          'z': result['z'],
+          'material': null,
+        };
+
+        _destFloorLabel = displayFloor;
+        _destPosBlender = {
+          'x': (result['x'] as num).toDouble(),
+          'y': (result['y'] as num).toDouble(),
+          'z': (result['z'] as num).toDouble(),
+        };
+
+        // Important: pin only, no highlight
+        _pendingPoiToHighlight = null;
+        _destEntrances = null;
+
+        _destFloorLabelFixed = null;
+        _destFNumberFixed = null;
+        _selectedPreference = 'any';
+      });
+
+      _routeComputed = false;
+      _pathPointsByFloorGltf.clear();
+      _maybeComputeAndPushPath();
+      _ensureFloorSelected(_destFloorLabel!);
       return;
     } else {
       setState(() {

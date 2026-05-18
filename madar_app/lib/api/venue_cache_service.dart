@@ -1,7 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:convert';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
+import '../services/app_config.dart';
 
 // ----------------------------------------------------------------------------
 // Venue Cache Service - Caches Google Places data to reduce API calls
@@ -49,9 +49,9 @@ class VenueMeta {
 // ---------- Default Google Places Fetcher ----------
 
 Future<Map<String, dynamic>> defaultPlacesDetailsFetcher(String placeId) async {
-  final key = dotenv.maybeGet('GOOGLE_API_KEY') ?? '';
+  final key = AppConfig.googleApiKey;
   if (key.isEmpty) {
-    throw Exception('Missing GOOGLE_API_KEY in .env');
+    throw Exception('Missing GOOGLE_API_KEY');
   }
   final uri = Uri.https('maps.googleapis.com', '/maps/api/place/details/json', {
     'place_id': placeId,

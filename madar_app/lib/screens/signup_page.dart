@@ -377,12 +377,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
           Expanded(
             flex: 13,
             child: Container(
-              padding: EdgeInsets.fromLTRB(
-                AppSpacing.xxl,
-                isSmallScreen ? 40 : 50,
-                AppSpacing.xxl,
-                AppSpacing.xl + MediaQuery.of(context).padding.bottom,
-              ),
               decoration: const BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.only(
@@ -390,104 +384,133 @@ class _SignUpScreenState extends State<SignUpScreen> {
                   topRight: Radius.circular(AppSpacing.sheetRadius),
                 ),
               ),
-              child: SingleChildScrollView(
-                child: Form(
-                  key: _formSignupKey,
-                  child: Column(
-                    children: [
-                      // Title
-                      Text('Get Started', style: AppTextStyles.largeTitles),
-                      SizedBox(height: isSmallScreen ? 30 : 40),
-
-                      // First Name Field
-                      _buildFirstNameField(),
-                      if (_showFirstNameRequirements) ...[
-                        const SizedBox(height: 10),
-                        _buildRequirementItem(
-                          'Starts with a letter',
-                          _firstNameStartsWithLetter,
-                        ),
-                        _buildRequirementItem(
-                          'Has at least 2 characters',
-                          _firstNameHasMinLength,
-                        ),
-                      ],
-                      const SizedBox(height: 25),
-
-                      // Last Name Field
-                      _buildLastNameField(),
-                      if (_showLastNameRequirements) ...[
-                        const SizedBox(height: 10),
-                        _buildRequirementItem(
-                          'Starts with a letter',
-                          _lastNameStartsWithLetter,
-                        ),
-                        _buildRequirementItem(
-                          'Has at least 2 characters',
-                          _lastNameHasMinLength,
-                        ),
-                      ],
-                      const SizedBox(height: 25),
-
-                      // Email Field
-                      _buildEmailField(),
-                      const SizedBox(height: 25),
-
-                      // Phone Field
-                      _buildPhoneField(),
-                      const SizedBox(height: 25),
-
-                      // Password Field
-                      _buildPasswordField(),
-                      if (_showPasswordRequirements) ...[
-                        const SizedBox(height: 10),
-                        _buildRequirementItem(
-                          'Has at least 8 characters',
-                          _hasMinLength,
-                        ),
-                        _buildRequirementItem(
-                          'Includes an uppercase letter',
-                          _hasUppercase,
-                        ),
-                        _buildRequirementItem(
-                          'Includes a lowercase letter',
-                          _hasLowercase,
-                        ),
-                        _buildRequirementItem('Includes a number', _hasNumber),
-                        _buildRequirementItem(
-                          'Includes a special character',
-                          _hasSpecialChar,
-                        ),
-                      ],
-                      const SizedBox(height: 25),
-
-                      // Sign Up Button
-                      PrimaryButton(
-                        text: 'Sign up',
-                        onPressed: _signUp,
-                        isLoading: _loading,
+              child: Padding(
+                padding: EdgeInsets.only(
+                  top: isSmallScreen ? 40 : 50,
+                  bottom:
+                      AppSpacing.xl + MediaQuery.of(context).padding.bottom,
+                ),
+                child: Center(
+                  child: ConstrainedBox(
+                    // Cap form width on Medium/Expanded screens
+                    constraints: BoxConstraints(
+                      maxWidth: Responsive.formMaxWidth(context),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.xxl,
                       ),
-                      const SizedBox(height: 25),
+                      child: SingleChildScrollView(
+                        child: Form(
+                          key: _formSignupKey,
+                          child: Column(
+                            children: [
+                              // Title
+                              Text(
+                                'Get Started',
+                                style: AppTextStyles.largeTitles,
+                              ),
+                              SizedBox(height: isSmallScreen ? 30 : 40),
 
-                      // Sign In Link
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Text('Already have an account?'),
-                          GestureDetector(
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => const SignInScreen(),
+                              // First Name Field
+                              _buildFirstNameField(),
+                              if (_showFirstNameRequirements) ...[
+                                const SizedBox(height: 10),
+                                _buildRequirementItem(
+                                  'Starts with a letter',
+                                  _firstNameStartsWithLetter,
                                 ),
-                              );
-                            },
-                            child: Text(' Sign in', style: AppTextStyles.link),
+                                _buildRequirementItem(
+                                  'Has at least 2 characters',
+                                  _firstNameHasMinLength,
+                                ),
+                              ],
+                              const SizedBox(height: 25),
+
+                              // Last Name Field
+                              _buildLastNameField(),
+                              if (_showLastNameRequirements) ...[
+                                const SizedBox(height: 10),
+                                _buildRequirementItem(
+                                  'Starts with a letter',
+                                  _lastNameStartsWithLetter,
+                                ),
+                                _buildRequirementItem(
+                                  'Has at least 2 characters',
+                                  _lastNameHasMinLength,
+                                ),
+                              ],
+                              const SizedBox(height: 25),
+
+                              // Email Field
+                              _buildEmailField(),
+                              const SizedBox(height: 25),
+
+                              // Phone Field
+                              _buildPhoneField(),
+                              const SizedBox(height: 25),
+
+                              // Password Field
+                              _buildPasswordField(),
+                              if (_showPasswordRequirements) ...[
+                                const SizedBox(height: 10),
+                                _buildRequirementItem(
+                                  'Has at least 8 characters',
+                                  _hasMinLength,
+                                ),
+                                _buildRequirementItem(
+                                  'Includes an uppercase letter',
+                                  _hasUppercase,
+                                ),
+                                _buildRequirementItem(
+                                  'Includes a lowercase letter',
+                                  _hasLowercase,
+                                ),
+                                _buildRequirementItem(
+                                  'Includes a number',
+                                  _hasNumber,
+                                ),
+                                _buildRequirementItem(
+                                  'Includes a special character',
+                                  _hasSpecialChar,
+                                ),
+                              ],
+                              const SizedBox(height: 25),
+
+                              // Sign Up Button
+                              PrimaryButton(
+                                text: 'Sign up',
+                                onPressed: _signUp,
+                                isLoading: _loading,
+                              ),
+                              const SizedBox(height: 25),
+
+                              // Sign In Link
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Text('Already have an account?'),
+                                  GestureDetector(
+                                    onTap: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => const SignInScreen(),
+                                        ),
+                                      );
+                                    },
+                                    child: Text(
+                                      ' Sign in',
+                                      style: AppTextStyles.link,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ),
-                        ],
+                        ),
                       ),
-                    ],
+                    ),
                   ),
                 ),
               ),

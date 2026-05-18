@@ -511,8 +511,9 @@ class _HistoryPageState extends State<HistoryPage> {
               // If the host explicitly cancelled, keep 'cancelled' so the reason
               // shows as "Cancelled by host" — even after the deadline passes.
               if (pStatus == 'pending' && status == 'cancelled') {
-                final storedReason =
-                    (data['cancellationReason'] ?? '').toString().trim();
+                final storedReason = (data['cancellationReason'] ?? '')
+                    .toString()
+                    .trim();
                 if (storedReason == 'all_participants_declined')
                   displayStatus = 'expired';
                 // else: displayStatus stays 'cancelled' → "Cancelled by host"
@@ -695,6 +696,9 @@ class _HistoryPageState extends State<HistoryPage> {
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
+        shadowColor: Colors.transparent,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: AppColors.kGreen),
           onPressed: () => Navigator.pop(context),
@@ -1029,10 +1033,11 @@ class _HistoryPageState extends State<HistoryPage> {
                               : '${r.otherUserName} (${r.otherUserPhone})',
                         ),
                         const SizedBox(height: 6),
-                        Row(
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             _labeledDetail('Date: ', dateStr),
-                            const SizedBox(width: 16),
+                            const SizedBox(height: 6),
                             _labeledDetail('Time: ', timeStr),
                           ],
                         ),
@@ -1189,13 +1194,19 @@ class _HistoryPageState extends State<HistoryPage> {
                   child: _meetingFilterIndex == 0
                       ? Text(
                           "You haven't hosted any meeting points yet",
-                          style: TextStyle(fontSize: 15, color: Colors.grey[400]),
+                          style: TextStyle(
+                            fontSize: 15,
+                            color: Colors.grey[400],
+                          ),
                         )
                       : Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 48),
                           child: Text(
                             "You haven't been invited to any meeting points yet",
-                            style: TextStyle(fontSize: 15, color: Colors.grey[400]),
+                            style: TextStyle(
+                              fontSize: 15,
+                              color: Colors.grey[400],
+                            ),
                             textAlign: TextAlign.center,
                           ),
                         ),

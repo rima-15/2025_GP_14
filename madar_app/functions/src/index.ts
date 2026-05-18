@@ -6,9 +6,11 @@ import { setGlobalOptions } from "firebase-functions";
 
 import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
 
-import { onRequest } from "firebase-functions/v2/https";
+import { onRequest, onCall, HttpsError } from "firebase-functions/v2/https";
 
 import { onSchedule } from "firebase-functions/v2/scheduler";
+
+import { defineSecret } from "firebase-functions/params";
 
 //import { Timestamp } from "firebase-admin/firestore";
 
@@ -23,6 +25,18 @@ setGlobalOptions({ maxInstances: 10 });
 admin.initializeApp();
 
 const db = admin.firestore();
+
+const googleApiKey = defineSecret("GOOGLE_API_KEY");
+
+export const getConfig = onCall(
+  { secrets: [googleApiKey] },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "Must be signed in.");
+    }
+    return { googleApiKey: googleApiKey.value() };
+  }
+);
 
 type NotificationPreferenceCategory =
   | "trackingRequests"

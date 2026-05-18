@@ -10,8 +10,8 @@ import 'package:madar_app/api/venue_cache_service.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
 import 'package:madar_app/theme/theme.dart';
 import 'package:http/http.dart' as http;
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
+import '../services/app_config.dart';
 import 'package:webview_flutter/webview_flutter.dart'
     show JavaScriptMessage, WebViewController;
 import 'category_page.dart';
@@ -134,8 +134,8 @@ class _VenuePageState extends State<VenuePage>
   Future<void> _loadHours() async {
     // Try Google Place Details API first
     try {
-      final key = dotenv.env['GOOGLE_API_KEY'];
-      if (key != null && widget.placeId.isNotEmpty) {
+      final key = AppConfig.googleApiKey;
+      if (key.isNotEmpty && widget.placeId.isNotEmpty) {
         final uri = Uri.parse(
           'https://maps.googleapis.com/maps/api/place/details/json'
           '?place_id=${Uri.encodeComponent(widget.placeId)}'

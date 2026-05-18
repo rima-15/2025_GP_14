@@ -106,12 +106,6 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
           Expanded(
             flex: 7,
             child: Container(
-              padding: EdgeInsets.fromLTRB(
-                AppSpacing.xxl,
-                isSmallScreen ? 40 : 50,
-                AppSpacing.xxl,
-                AppSpacing.xl + bottomSafeArea,
-              ),
               decoration: const BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.only(
@@ -119,61 +113,86 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                   topRight: Radius.circular(40),
                 ),
               ),
-              child: SingleChildScrollView(
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Title
-                      Text('Forgot Password', style: AppTextStyles.pageTitle),
-                      const SizedBox(height: 10),
-
-                      // Description
-                      Text(
-                        "Enter the email associated with your account and we'll send you a password reset link.",
-                        style: TextStyle(color: Colors.grey[700], fontSize: 15),
+              child: Padding(
+                padding: EdgeInsets.only(
+                  top: isSmallScreen ? 40 : 50,
+                  bottom: AppSpacing.xl + bottomSafeArea,
+                ),
+                child: Center(
+                  child: ConstrainedBox(
+                    // Cap form width on Medium/Expanded screens
+                    constraints: BoxConstraints(
+                      maxWidth: Responsive.formMaxWidth(context),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.xxl,
                       ),
-                      const SizedBox(height: 30),
+                      child: SingleChildScrollView(
+                        child: Form(
+                          key: _formKey,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Title
+                              Text(
+                                'Forgot Password',
+                                style: AppTextStyles.pageTitle,
+                              ),
+                              const SizedBox(height: 10),
 
-                      // Email Field
-                      StyledTextField(
-                        controller: _emailCtrl,
-                        focusNode: _emailFocus,
-                        label: 'Email',
-                        hint: 'Enter your email',
-                        keyboardType: TextInputType.emailAddress,
-                        validator: (v) {
-                          if (v == null || v.trim().isEmpty) {
-                            return 'Please enter your email';
-                          }
-                          if (!v.contains('@') || !v.contains('.')) {
-                            return 'Invalid email address';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 30),
+                              // Description
+                              Text(
+                                "Enter the email associated with your account and we'll send you a password reset link.",
+                                style: TextStyle(
+                                  color: Colors.grey[700],
+                                  fontSize: 15,
+                                ),
+                              ),
+                              const SizedBox(height: 30),
 
-                      // Send Reset Link Button
-                      PrimaryButton(
-                        text: 'Send reset link',
-                        onPressed: _sendPasswordResetEmail,
-                        isLoading: _loading,
-                      ),
-                      const SizedBox(height: 20),
+                              // Email Field
+                              StyledTextField(
+                                controller: _emailCtrl,
+                                focusNode: _emailFocus,
+                                label: 'Email',
+                                hint: 'Enter your email',
+                                keyboardType: TextInputType.emailAddress,
+                                validator: (v) {
+                                  if (v == null || v.trim().isEmpty) {
+                                    return 'Please enter your email';
+                                  }
+                                  if (!v.contains('@') || !v.contains('.')) {
+                                    return 'Invalid email address';
+                                  }
+                                  return null;
+                                },
+                              ),
+                              const SizedBox(height: 30),
 
-                      // Back to Sign In Link
-                      Center(
-                        child: TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: Text(
-                            'Back to Sign In',
-                            style: AppTextStyles.link,
+                              // Send Reset Link Button
+                              PrimaryButton(
+                                text: 'Send reset link',
+                                onPressed: _sendPasswordResetEmail,
+                                isLoading: _loading,
+                              ),
+                              const SizedBox(height: 20),
+
+                              // Back to Sign In Link
+                              Center(
+                                child: TextButton(
+                                  onPressed: () => Navigator.pop(context),
+                                  child: Text(
+                                    'Back to Sign In',
+                                    style: AppTextStyles.link,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
-                    ],
+                    ),
                   ),
                 ),
               ),

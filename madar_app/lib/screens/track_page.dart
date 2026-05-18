@@ -7,10 +7,7 @@ import 'package:madar_app/screens/navigation_flow_complete.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
 import 'package:webview_flutter/webview_flutter.dart'
-    show
-        JavaScriptMessage,
-        JavascriptChannel,
-        WebViewController;
+    show JavaScriptMessage, JavascriptChannel, WebViewController;
 import 'track_request_dialog.dart';
 import 'create_meeting_point_form.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -25,36 +22,19 @@ import 'package:madar_app/nav/navmesh.dart';
 import 'package:madar_app/services/favorites_service.dart';
 
 const bool kFeatureEnabled = true;
-const String kSolitaireVenueId =
-    'ChIJcYTQDwDjLj4RZEiboV6gZzM';
-final Map<String, Map<String, double>>
-_trackedPosByUser =
+const String kSolitaireVenueId = 'ChIJcYTQDwDjLj4RZEiboV6gZzM';
+final Map<String, Map<String, double>> _trackedPosByUser =
     {}; // userDocId -> {x,y,z}
-final Map<String, String>
-_trackedFloorByUser =
-    {}; // userDocId -> floorLabel
-final Map<String, String>
-_trackedNameByUser =
-    {}; // userDocId -> displayName
-final Map<
-  String,
-  StreamSubscription<
-    DocumentSnapshot<
-      Map<String, dynamic>
-    >
-  >
->
+final Map<String, String> _trackedFloorByUser = {}; // userDocId -> floorLabel
+final Map<String, String> _trackedNameByUser = {}; // userDocId -> displayName
+final Map<String, StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>>
 _userLocSubs = {};
-StreamSubscription<
-  QuerySnapshot<Map<String, dynamic>>
->?
-_activeReqSub;
+StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _activeReqSub;
 
 class ConnectorLink {
   final String id;
   final String type;
-  final Map<String, Map<String, double>>
-  endpointsByFNumber;
+  final Map<String, Map<String, double>> endpointsByFNumber;
 
   const ConnectorLink({
     required this.id,
@@ -81,183 +61,94 @@ class TrackPage extends StatefulWidget {
   final String? initialMeetingPointId;
 
   @override
-  State<TrackPage> createState() =>
-      _TrackPageState();
+  State<TrackPage> createState() => _TrackPageState();
 }
 
-class _TrackPageState
-    extends State<TrackPage> {
+class _TrackPageState extends State<TrackPage> {
   bool _pendingPinApply = false;
   bool _isTrackingView = true;
   String _currentFloor = '';
-  List<Map<String, String>> _venueMaps =
-      [];
+  List<Map<String, String>> _venueMaps = [];
   bool _mapsLoading = false;
-  static const double _unitToMeters =
-      69.32;
-  static const double
-  _connectorPenaltyUnits = 0.5;
+  static const double _unitToMeters = 69.32;
+  static const double _connectorPenaltyUnits = 0.5;
   String? _expandedRequestId;
   String? _highlightRequestId;
   String? _highlightMeetingInviteId;
   Timer? _highlightClearTimer;
-  static const Duration
-  _meetingRefreshCooldownDuration =
-      Duration(minutes: 2);
-  static const Duration
-  _kMeetingMinSessionDuration =
-      Duration(minutes: 10);
+  static const Duration _meetingRefreshCooldownDuration = Duration(minutes: 2);
+  static const Duration _kMeetingMinSessionDuration = Duration(minutes: 10);
   // by remas start
-  final Map<String, double>
-  _trackedGpsLatByUser = {};
-  final Map<String, double>
-  _trackedGpsLngByUser = {};
-  final Map<String, DateTime>
-  _trackedUpdatedAtByUser = {};
-  final Map<String, Map<String, double>>
-  _meetingPosByUser = {};
-  final Map<String, Map<String, double>>
-  _meetingPosBlenderByUser = {};
-  final Map<String, String>
-  _meetingFloorByUser = {};
-  final Map<String, String>
-  _meetingNameByUser = {};
-  final Map<String, DateTime>
-  _meetingUpdatedAtByUser = {};
-  final Map<String, String>
-  _meetingLocationSignatureByUser = {};
-  final Map<String, String>
-  _meetingArrivalStatusByUser = {};
-  final Map<String, String>
-  _arrivalOverrideByUser = {};
-  final Map<String, DateTime>
-  _arrivalOverrideAtByUser = {};
-  Map<String, double>?
-  _meetingPointPosGltf;
-  Map<String, double>?
-  _meetingPointPosBlender;
+  final Map<String, double> _trackedGpsLatByUser = {};
+  final Map<String, double> _trackedGpsLngByUser = {};
+  final Map<String, DateTime> _trackedUpdatedAtByUser = {};
+  final Map<String, Map<String, double>> _meetingPosByUser = {};
+  final Map<String, Map<String, double>> _meetingPosBlenderByUser = {};
+  final Map<String, String> _meetingFloorByUser = {};
+  final Map<String, String> _meetingNameByUser = {};
+  final Map<String, DateTime> _meetingUpdatedAtByUser = {};
+  final Map<String, String> _meetingLocationSignatureByUser = {};
+  final Map<String, String> _meetingArrivalStatusByUser = {};
+  final Map<String, String> _arrivalOverrideByUser = {};
+  final Map<String, DateTime> _arrivalOverrideAtByUser = {};
+  Map<String, double>? _meetingPointPosGltf;
+  Map<String, double>? _meetingPointPosBlender;
   String _meetingPointFloorLabel = '';
   String _meetingPointLabel = '';
-  final Map<
-    String,
-    Map<
-      String,
-      List<Map<String, double>>
-    >
-  >
+  final Map<String, Map<String, List<Map<String, double>>>>
   _meetingPathsByUserFloorGltf = {};
-  final Map<String, int>
-  _meetingEtaBaseSecondsByUser = {};
-  final Map<String, DateTime>
-  _meetingEtaBaseTimeByUser = {};
-  final Map<String, int>
-  _meetingEtaResetAnchorMsByUser = {};
-  final Map<String, int>
-  _meetingEtaDisplayedSecondsByUser =
-      {};
-  final Map<String, int?>
-  _meetingEtaDisplayedAnchorMsByUser =
-      {};
-  final Map<String, String>
-  _meetingEtaSyncSignatureByUser = {};
-  final Set<String>
-  _meetingRealExpiryResolvedIds = {};
-  final Set<String>
-  _meetingRealExpirySyncingIds = {};
+  final Map<String, int> _meetingEtaBaseSecondsByUser = {};
+  final Map<String, DateTime> _meetingEtaBaseTimeByUser = {};
+  final Map<String, int> _meetingEtaResetAnchorMsByUser = {};
+  final Map<String, int> _meetingEtaDisplayedSecondsByUser = {};
+  final Map<String, int?> _meetingEtaDisplayedAnchorMsByUser = {};
+  final Map<String, String> _meetingEtaSyncSignatureByUser = {};
+  final Set<String> _meetingRealExpiryResolvedIds = {};
+  final Set<String> _meetingRealExpirySyncingIds = {};
   String? _meetingPathTargetSignature;
-  List<ConnectorLink> _connectors =
-      const [];
+  List<ConnectorLink> _connectors = const [];
   bool _connectorsLoaded = false;
-  final Map<String, NavMesh>
-  _navmeshCache = {};
-  final Map<
-    String,
-    StreamSubscription<
-      DocumentSnapshot<
-        Map<String, dynamic>
-      >
-    >
-  >
+  final Map<String, NavMesh> _navmeshCache = {};
+  final Map<String, StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>>
   _meetingUserSubs = {};
-  StreamSubscription<
-    MeetingPointRecord?
-  >?
-  _activeMeetingSub;
-  final Map<String, double>
-  _venueLatByRequest = {};
-  final Map<String, double>
-  _venueLngByRequest = {};
-  final Map<String, String>
-  _userPinColorMap = {};
+  StreamSubscription<MeetingPointRecord?>? _activeMeetingSub;
+  final Map<String, double> _venueLatByRequest = {};
+  final Map<String, double> _venueLngByRequest = {};
+  final Map<String, String> _userPinColorMap = {};
   int _nextPinColorIndex = 0;
-  final Map<String, String>
-  _requestIdByTrackedUser = {};
+  final Map<String, String> _requestIdByTrackedUser = {};
   // by remas end
   bool _highlightClearScheduled = false;
   Timer? _clockTimer;
   // ===== Track Map (Pin JS) =====
-  WebViewController?
-  _trackMapController;
-  final Set<String>
-  _refreshingRequestIds = {};
-  static const Duration
-  _refreshCooldownDuration = Duration(
-    minutes: 10,
-  );
-  static const Duration
-  _refreshCooldownMessageDuration =
-      Duration(seconds: 2);
-  final Map<String, DateTime>
-  _refreshCooldownUntilByRequestId = {};
-  final Set<String>
-  _refreshCooldownMessageRequestIds =
-      {};
-  final Map<String, Timer>
-  _refreshCooldownMessageTimers = {};
-  final Set<String>
-  _acceptCutoffMessageRequestIds = {};
-  final Map<String, Timer>
-  _acceptCutoffMessageTimers = {};
+  WebViewController? _trackMapController;
+  final Set<String> _refreshingRequestIds = {};
+  static const Duration _refreshCooldownDuration = Duration(minutes: 10);
+  static const Duration _refreshCooldownMessageDuration = Duration(seconds: 2);
+  final Map<String, DateTime> _refreshCooldownUntilByRequestId = {};
+  final Set<String> _refreshCooldownMessageRequestIds = {};
+  final Map<String, Timer> _refreshCooldownMessageTimers = {};
+  final Set<String> _acceptCutoffMessageRequestIds = {};
+  final Map<String, Timer> _acceptCutoffMessageTimers = {};
   // Meeting participant location refresh state (keyed by meetingId + participant userId)
-  final Set<String>
-  _refreshingMeetingParticipantIds = {};
-  final Map<String, DateTime>
-  _meetingRefreshCooldownUntilByKey =
-      {};
+  final Set<String> _refreshingMeetingParticipantIds = {};
+  final Map<String, DateTime> _meetingRefreshCooldownUntilByKey = {};
 
   /// 0 = Sent, 1 = Received (same order as History page)
   int _selectedFilterIndex = 0;
-  static const List<String>
-  _requestFilters = [
-    'Sent',
-    'Received',
-  ];
-  final ScrollController
-  _scrollController =
-      ScrollController();
+  static const List<String> _requestFilters = ['Sent', 'Received'];
+  final ScrollController _scrollController = ScrollController();
   Timer? _meetingPointCardTimer;
-  Stream<MeetingPointRecord?>?
-  _activeMeetingPointCardStream;
-  Stream<MeetingPointRecord?>?
-  _activeMeetingPointCountStream;
-  Stream<List<MeetingPointRecord>>?
-  _activeMeetingPointListStream;
-  MeetingPointRecord?
-  _lastKnownActiveMeetingCard;
-  MeetingPointRecord?
-  _lastKnownActiveMeetingCount;
-  List<MeetingPointRecord>
-  _lastKnownBlockingMeetings = [];
-  MeetingPointRecord?
-  _lastKnownConfirmedMeeting;
-  String?
-  _pendingCompletionHoldMeetingId;
-  DateTime?
-  _pendingCompletionHoldStartedAt;
-  static const Duration
-  _kCompletionHoldGrace = Duration(
-    seconds: 5,
-  );
+  Stream<MeetingPointRecord?>? _activeMeetingPointCardStream;
+  Stream<MeetingPointRecord?>? _activeMeetingPointCountStream;
+  Stream<List<MeetingPointRecord>>? _activeMeetingPointListStream;
+  MeetingPointRecord? _lastKnownActiveMeetingCard;
+  MeetingPointRecord? _lastKnownActiveMeetingCount;
+  List<MeetingPointRecord> _lastKnownBlockingMeetings = [];
+  MeetingPointRecord? _lastKnownConfirmedMeeting;
+  String? _pendingCompletionHoldMeetingId;
+  DateTime? _pendingCompletionHoldStartedAt;
+  static const Duration _kCompletionHoldGrace = Duration(seconds: 5);
   DateTime? _completionHoldUntil;
   String? _completionHoldMeetingId;
   Timer? _completionHoldTimer;
@@ -265,281 +156,172 @@ class _TrackPageState
 
   // ── Arrival section state ──────────────────────────────────────────────────
   Timer? _arrivalTimer;
-  String?
-  _expandedArrivalParticipantId; // userId of expanded participant card
-  final _favService =
-      FavoritesService();
-  DateTime?
-  _lastMeetingMaintainAttemptAt;
-  static const double
-  _autoArriveDistanceMeters = 10.0;
-  static const Duration
-  _autoArriveCooldown = Duration(
-    seconds: 15,
-  );
+  String? _expandedArrivalParticipantId; // userId of expanded participant card
+  final _favService = FavoritesService();
+  DateTime? _lastMeetingMaintainAttemptAt;
+  static const double _autoArriveDistanceMeters = 10.0;
+  static const Duration _autoArriveCooldown = Duration(seconds: 15);
   DateTime? _lastAutoArriveAttemptAt;
   String? _lastAutoArriveMeetingId;
   bool _autoArriveInFlight = false;
 
   /// IDs of meeting invitations the user locally declined — hidden immediately
   /// in the UI before Firestore confirms the write.
-  final Set<String>
-  _locallyDeclinedMeetingIds = {};
+  final Set<String> _locallyDeclinedMeetingIds = {};
 
   /// Tracks confirmed meetings that have been reconciled (arrival-phase check)
   /// so we don't fire the reconciliation on every stream emission.
-  final Set<String>
-  _reconciledArrivalMeetingIds = {};
+  final Set<String> _reconciledArrivalMeetingIds = {};
 
   /// Meeting IDs for which session-expiry reconciliation has been triggered
   /// so we don't call reconcileArrivalPhase on every second tick.
-  final Set<String>
-  _expiredArrivalMeetingIds = {};
+  final Set<String> _expiredArrivalMeetingIds = {};
 
   /// Tracks pending meetings where all participants declined, so we don't
   /// fire maybeMaintain (which writes cancellationReason) on every rebuild.
-  final Set<String>
-  _reconciledDeclinedMeetingIds = {};
+  final Set<String> _reconciledDeclinedMeetingIds = {};
 
   /// Tracks pending meetings where all participants responded and at least one
   /// accepted (hostStep 4→5 advance needed), so we fire maybeMaintain once
   /// immediately without waiting for the 2-second throttle.
-  final Set<String>
-  _reconciledStep5MeetingIds = {};
+  final Set<String> _reconciledStep5MeetingIds = {};
 
   /// Guards stream resets in _maybeMaintainActiveMeetingIfNeeded so the reset
   /// only fires once per (meetingId + hostStep) combination. Without this,
   /// the reset fires every 2 s when writes fail for non-host users and causes
   /// the UI to blink continuously between step 2 and step 3.
-  final Set<String>
-  _maintainAttemptedKeys = {};
+  final Set<String> _maintainAttemptedKeys = {};
 
   /// Local approximate start time for step 3 (invitee), recorded the moment
   /// pendingCount hits 0. Used to show an immediate ~2-min countdown while
   /// waiting for Firestore to deliver hostStep=5 + suggestDeadline.
-  final Map<String, DateTime>
-  _approxStep3StartByMeetingId = {};
+  final Map<String, DateTime> _approxStep3StartByMeetingId = {};
 
   /// Meeting IDs for which hostStep >= 5 has been observed via the live stream.
   /// Used to reject stale cached snapshots that still show hostStep=4 after
   /// the meeting has already advanced — prevents maybeMaintain from
   /// overwriting suggestDeadline and resetting the step-3 (invitee) timer.
-  final Set<String>
-  _observedStep5MeetingIds = {};
+  final Set<String> _observedStep5MeetingIds = {};
 
   /// Last known non-null timer label per meeting, used as a fallback to
   /// prevent the 1-2 s flicker when activeDeadline is briefly null during
   /// Firestore step transitions (e.g. hostStep 4 → 5 before suggestDeadline
   /// arrives).
-  final Map<String, String>
-  _cachedInviteTimerLabel = {};
+  final Map<String, String> _cachedInviteTimerLabel = {};
 
-  static const Duration
-  _kMeetingMaintainThrottle = Duration(
-    seconds: 2,
-  );
+  static const Duration _kMeetingMaintainThrottle = Duration(seconds: 2);
 
   /// Key for the tile to scroll to when opening from notification (by request ID).
-  final GlobalKey _scrollToTargetKey =
-      GlobalKey();
+  final GlobalKey _scrollToTargetKey = GlobalKey();
   Timer? _scrollToTargetTimer;
 
   /// Key for the meeting invitation tile to scroll to when opening from notification.
-  final GlobalKey
-  _scrollToMeetingInviteKey =
-      GlobalKey();
+  final GlobalKey _scrollToMeetingInviteKey = GlobalKey();
   Timer? _scrollToMeetingInviteTimer;
   String? _meetingInviteScrollTargetId;
 
-  String _suggestedPointLabel(
-    MeetingPointRecord meeting,
-  ) {
-    final name = meeting.suggestedPoint
-        .trim();
-    return name.isNotEmpty
-        ? name
-        : '...';
+  String _suggestedPointLabel(MeetingPointRecord meeting) {
+    final name = meeting.suggestedPoint.trim();
+    return name.isNotEmpty ? name : '...';
   }
 
   //Stream<MeetingPointRecord?>
   // get _meetingPointCardStream =>
-  Stream<MeetingPointRecord?>
-  get _meetingPointCardStream =>
+  Stream<MeetingPointRecord?> get _meetingPointCardStream =>
       _activeMeetingPointCardStream ??=
           MeetingPointService.watchActiveForCurrentUser();
 
-  Stream<MeetingPointRecord?>
-  get _meetingPointCountStream =>
+  Stream<MeetingPointRecord?> get _meetingPointCountStream =>
       _activeMeetingPointCountStream ??=
           MeetingPointService.watchActiveForCurrentUser();
 
-  Stream<List<MeetingPointRecord>>
-  get _meetingPointListStream =>
+  Stream<List<MeetingPointRecord>> get _meetingPointListStream =>
       _activeMeetingPointListStream ??=
           MeetingPointService.watchAllBlockingForCurrentUser();
 
-  MeetingPointRecord?
-  _resolveActiveMeetingCardSnapshot(
-    AsyncSnapshot<MeetingPointRecord?>
-    snapshot,
+  MeetingPointRecord? _resolveActiveMeetingCardSnapshot(
+    AsyncSnapshot<MeetingPointRecord?> snapshot,
   ) {
-    if (snapshot.hasError)
-      return _lastKnownActiveMeetingCard;
+    if (snapshot.hasError) return _lastKnownActiveMeetingCard;
 
     // Only update the cache once the stream has settled (active). During the
     // brief ConnectionState.waiting period that occurs when the stream is
     // refreshed, keep the previous cached value so the card doesn't flicker.
-    if (snapshot.connectionState ==
-        ConnectionState.active) {
-      _lastKnownActiveMeetingCard =
-          snapshot.data;
+    if (snapshot.connectionState == ConnectionState.active) {
+      _lastKnownActiveMeetingCard = snapshot.data;
     }
     return _lastKnownActiveMeetingCard;
   }
 
-  MeetingPointRecord?
-  _resolveActiveMeetingCountSnapshot(
-    AsyncSnapshot<MeetingPointRecord?>
-    snapshot,
+  MeetingPointRecord? _resolveActiveMeetingCountSnapshot(
+    AsyncSnapshot<MeetingPointRecord?> snapshot,
   ) {
-    if (snapshot.hasError)
-      return _lastKnownActiveMeetingCount;
+    if (snapshot.hasError) return _lastKnownActiveMeetingCount;
 
-    if (snapshot.connectionState ==
-        ConnectionState.active) {
-      _lastKnownActiveMeetingCount =
-          snapshot.data;
+    if (snapshot.connectionState == ConnectionState.active) {
+      _lastKnownActiveMeetingCount = snapshot.data;
     }
     return _lastKnownActiveMeetingCount;
   }
 
-  int _meetingPointActiveCount(
-    MeetingPointRecord? meeting,
-  ) {
+  int _meetingPointActiveCount(MeetingPointRecord? meeting) {
     if (meeting == null) return 0;
     if (!meeting.isConfirmed) return 0;
-    final hostActive =
-        meeting.hostArrivalStatus !=
-        'cancelled';
-    final accepted = meeting
-        .participants
-        .where((p) => p.isAccepted);
-    final acceptedActive = accepted
-        .where(
-          (p) => !p.isCancelledArrival,
-        );
-    return (hostActive ? 1 : 0) +
-        acceptedActive.length;
+    final hostActive = meeting.hostArrivalStatus != 'cancelled';
+    final accepted = meeting.participants.where((p) => p.isAccepted);
+    final acceptedActive = accepted.where((p) => !p.isCancelledArrival);
+    return (hostActive ? 1 : 0) + acceptedActive.length;
   }
 
-  List<MeetingPointRecord>
-  _resolveMeetingListSnapshot(
-    AsyncSnapshot<
-      List<MeetingPointRecord>
-    >
-    snapshot,
+  List<MeetingPointRecord> _resolveMeetingListSnapshot(
+    AsyncSnapshot<List<MeetingPointRecord>> snapshot,
   ) {
-    if (snapshot.hasError)
-      return _lastKnownBlockingMeetings;
-    if (snapshot.connectionState ==
-        ConnectionState.active) {
-      _lastKnownBlockingMeetings =
-          snapshot.data ?? [];
+    if (snapshot.hasError) return _lastKnownBlockingMeetings;
+    if (snapshot.connectionState == ConnectionState.active) {
+      _lastKnownBlockingMeetings = snapshot.data ?? [];
     }
     // Filter out any stale cancelled/inactive meetings so their timers
     // stop immediately even before the next stream emit arrives.
     return _lastKnownBlockingMeetings
-        .where(
-          (m) =>
-              m.isActive ||
-              m.isConfirmed,
-        )
+        .where((m) => m.isActive || m.isConfirmed)
         .toList();
   }
 
-  Stream<List<TrackingRequest>>
-  _sentRequestsStream() {
-    final uid = FirebaseAuth
-        .instance
-        .currentUser
-        ?.uid;
-    if (uid == null)
-      return Stream.value([]);
+  Stream<List<TrackingRequest>> _sentRequestsStream() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return Stream.value([]);
 
     return FirebaseFirestore.instance
         .collection('trackRequests')
-        .where(
-          'senderId',
-          isEqualTo: uid,
-        )
-        .where(
-          'status',
-          whereIn: [
-            'pending',
-            'accepted',
-          ],
-        )
+        .where('senderId', isEqualTo: uid)
+        .where('status', whereIn: ['pending', 'accepted'])
         .orderBy('startAt')
         .snapshots()
         .map((snap) {
-          _markStaleRequestsIfNeeded(
-            snap.docs,
-          );
+          _markStaleRequestsIfNeeded(snap.docs);
           return snap.docs.map((d) {
             final data = d.data();
 
-            final startAt =
-                (data['startAt']
-                        as Timestamp)
-                    .toDate();
-            final endAt =
-                (data['endAt']
-                        as Timestamp)
-                    .toDate();
-            final refreshRequestedAtRaw =
-                data['refreshRequestedAt'];
-            final refreshRequestedAt =
-                refreshRequestedAtRaw
-                    is Timestamp
-                ? refreshRequestedAtRaw
-                      .toDate()
+            final startAt = (data['startAt'] as Timestamp).toDate();
+            final endAt = (data['endAt'] as Timestamp).toDate();
+            final refreshRequestedAtRaw = data['refreshRequestedAt'];
+            final refreshRequestedAt = refreshRequestedAtRaw is Timestamp
+                ? refreshRequestedAtRaw.toDate()
                 : null;
-            final refreshRequestedBy =
-                (data['refreshRequestedBy'] ??
-                        '')
-                    .toString()
-                    .trim();
+            final refreshRequestedBy = (data['refreshRequestedBy'] ?? '')
+                .toString()
+                .trim();
 
-            final startStr =
-                TimeOfDay.fromDateTime(
-                  startAt,
-                ).format(context);
-            final endStr =
-                TimeOfDay.fromDateTime(
-                  endAt,
-                ).format(context);
+            final startStr = TimeOfDay.fromDateTime(startAt).format(context);
+            final endStr = TimeOfDay.fromDateTime(endAt).format(context);
 
             return TrackingRequest(
               id: d.id,
-              trackedUserName:
-                  (data['receiverName'] ??
-                          '')
-                      .toString(),
-              trackedUserPhone:
-                  (data['receiverPhone'] ??
-                          '')
-                      .toString(),
-              receiverId:
-                  (data['receiverId'] ??
-                          '')
-                      .toString(),
-              senderId:
-                  (data['senderId'] ??
-                          '')
-                      .toString(),
-              status:
-                  (data['status'] ?? '')
-                      .toString(),
+              trackedUserName: (data['receiverName'] ?? '').toString(),
+              trackedUserPhone: (data['receiverPhone'] ?? '').toString(),
+              receiverId: (data['receiverId'] ?? '').toString(),
+              senderId: (data['senderId'] ?? '').toString(),
+              status: (data['status'] ?? '').toString(),
 
               startAt: startAt,
               endAt: endAt,
@@ -547,46 +329,20 @@ class _TrackPageState
               startTime: startStr,
               endTime: endStr,
 
-              venueName:
-                  (data['venueName'] ??
-                          '')
-                      .toString(),
-              venueId:
-                  (data['venueId'] ??
-                          '')
-                      .toString(),
+              venueName: (data['venueName'] ?? '').toString(),
+              venueId: (data['venueId'] ?? '').toString(),
               isFavorite: _favService.isFavorite(
-                (data['senderId'] ??
-                            '') ==
-                        (FirebaseAuth
-                                .instance
-                                .currentUser
-                                ?.uid ??
-                            '')
-                    ? (data['receiverPhone'] ??
-                              '')
-                          .toString()
-                    : (data['senderPhone'] ??
-                              '')
-                          .toString(),
+                (data['senderId'] ?? '') ==
+                        (FirebaseAuth.instance.currentUser?.uid ?? '')
+                    ? (data['receiverPhone'] ?? '').toString()
+                    : (data['senderPhone'] ?? '').toString(),
               ),
-              lastSeen: _timeAgo(
-                startAt,
-              ),
+              lastSeen: _timeAgo(startAt),
               // Add these two lines to satisfy the constructor:
-              senderName:
-                  (data['senderName'] ??
-                          '')
-                      .toString(),
-              senderPhone:
-                  (data['senderPhone'] ??
-                          '')
-                      .toString(),
-              refreshRequestedAt:
-                  refreshRequestedAt,
-              refreshRequestedBy:
-                  refreshRequestedBy
-                      .isEmpty
+              senderName: (data['senderName'] ?? '').toString(),
+              senderPhone: (data['senderPhone'] ?? '').toString(),
+              refreshRequestedAt: refreshRequestedAt,
+              refreshRequestedBy: refreshRequestedBy.isEmpty
                   ? null
                   : refreshRequestedBy,
             );
@@ -594,110 +350,47 @@ class _TrackPageState
         });
   }
 
-  Stream<List<TrackingRequest>>
-  _incomingRequestsStream() {
-    final uid = FirebaseAuth
-        .instance
-        .currentUser
-        ?.uid;
+  Stream<List<TrackingRequest>> _incomingRequestsStream() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
     // You might want to filter by receiverPhone if you store it that way
-    if (uid == null)
-      return Stream.value([]);
+    if (uid == null) return Stream.value([]);
 
     return FirebaseFirestore.instance
         .collection('trackRequests')
-        .where(
-          'receiverId',
-          isEqualTo: uid,
-        )
-        .where(
-          'status',
-          whereIn: [
-            'pending',
-            'accepted',
-          ],
-        )
+        .where('receiverId', isEqualTo: uid)
+        .where('status', whereIn: ['pending', 'accepted'])
         .snapshots()
         .map((snap) {
-          _markStaleRequestsIfNeeded(
-            snap.docs,
-          );
+          _markStaleRequestsIfNeeded(snap.docs);
           return snap.docs.map((d) {
             final data = d.data();
-            final startAt =
-                (data['startAt']
-                        as Timestamp)
-                    .toDate();
-            final endAt =
-                (data['endAt']
-                        as Timestamp)
-                    .toDate();
-            final refreshRequestedAtRaw =
-                data['refreshRequestedAt'];
-            final refreshRequestedAt =
-                refreshRequestedAtRaw
-                    is Timestamp
-                ? refreshRequestedAtRaw
-                      .toDate()
+            final startAt = (data['startAt'] as Timestamp).toDate();
+            final endAt = (data['endAt'] as Timestamp).toDate();
+            final refreshRequestedAtRaw = data['refreshRequestedAt'];
+            final refreshRequestedAt = refreshRequestedAtRaw is Timestamp
+                ? refreshRequestedAtRaw.toDate()
                 : null;
-            final refreshRequestedBy =
-                (data['refreshRequestedBy'] ??
-                        '')
-                    .toString()
-                    .trim();
+            final refreshRequestedBy = (data['refreshRequestedBy'] ?? '')
+                .toString()
+                .trim();
 
             return TrackingRequest(
               id: d.id,
-              trackedUserName:
-                  (data['receiverName'] ??
-                          '')
-                      .toString(),
-              trackedUserPhone:
-                  (data['receiverPhone'] ??
-                          '')
-                      .toString(),
-              receiverId:
-                  (data['receiverId'] ??
-                          '')
-                      .toString(),
-              senderId:
-                  (data['senderId'] ??
-                          '')
-                      .toString(),
-              senderName:
-                  (data['senderName'] ??
-                          'Someone')
-                      .toString(),
-              senderPhone:
-                  (data['senderPhone'] ??
-                          '')
-                      .toString(),
-              status:
-                  (data['status'] ?? '')
-                      .toString(),
+              trackedUserName: (data['receiverName'] ?? '').toString(),
+              trackedUserPhone: (data['receiverPhone'] ?? '').toString(),
+              receiverId: (data['receiverId'] ?? '').toString(),
+              senderId: (data['senderId'] ?? '').toString(),
+              senderName: (data['senderName'] ?? 'Someone').toString(),
+              senderPhone: (data['senderPhone'] ?? '').toString(),
+              status: (data['status'] ?? '').toString(),
               startAt: startAt,
               endAt: endAt,
-              startTime:
-                  TimeOfDay.fromDateTime(
-                    startAt,
-                  ).format(context),
-              endTime:
-                  TimeOfDay.fromDateTime(
-                    endAt,
-                  ).format(context),
-              venueName:
-                  (data['venueName'] ??
-                          '')
-                      .toString(),
-              venueId:
-                  (data['venueId'] ??
-                          '')
-                      .toString(),
-              refreshRequestedAt:
-                  refreshRequestedAt,
-              refreshRequestedBy:
-                  refreshRequestedBy
-                      .isEmpty
+              startTime: TimeOfDay.fromDateTime(startAt).format(context),
+              endTime: TimeOfDay.fromDateTime(endAt).format(context),
+              venueName: (data['venueName'] ?? '').toString(),
+              venueId: (data['venueId'] ?? '').toString(),
+              refreshRequestedAt: refreshRequestedAt,
+              refreshRequestedBy: refreshRequestedBy.isEmpty
                   ? null
                   : refreshRequestedBy,
             );
@@ -705,21 +398,16 @@ class _TrackPageState
         });
   }
 
-  List<TrackingRequest> _upcomingFrom(
-    List<TrackingRequest> all,
-  ) {
+  List<TrackingRequest> _upcomingFrom(List<TrackingRequest> all) {
     final now = DateTime.now();
 
     final upcoming = all.where((r) {
       final start = r.startAt;
       final end = r.endAt;
 
-      if (now.isAfter(end))
-        return false;
+      if (now.isAfter(end)) return false;
 
-      if (r.status != 'pending' &&
-          r.status != 'accepted')
-        return false;
+      if (r.status != 'pending' && r.status != 'accepted') return false;
 
       // Accepted: only show if not started yet
       // Pending: show even if started (still waiting for response)
@@ -729,79 +417,49 @@ class _TrackPageState
       return true; // pending and not expired
     }).toList();
 
-    upcoming.sort(
-      (a, b) => a.startAt.compareTo(
-        b.startAt,
-      ),
-    );
+    upcoming.sort((a, b) => a.startAt.compareTo(b.startAt));
     return upcoming;
   }
 
-  List<TrackingRequest> _activeFrom(
-    List<TrackingRequest> all,
-  ) {
+  List<TrackingRequest> _activeFrom(List<TrackingRequest> all) {
     final now = DateTime.now();
 
     final active = all.where((r) {
-      if (r.status != 'accepted')
-        return false;
+      if (r.status != 'accepted') return false;
 
       final start = r.startAt;
       final end = r.endAt;
 
-      return now.isAfter(start) &&
-          now.isBefore(end);
+      return now.isAfter(start) && now.isBefore(end);
     }).toList();
 
-    active.sort(
-      (a, b) => a.startAt.compareTo(
-        b.startAt,
-      ),
-    );
+    active.sort((a, b) => a.startAt.compareTo(b.startAt));
     return active;
   }
 
   /// Received: scheduled = pending (before end) or accepted but not started yet
-  List<TrackingRequest>
-  _receivedScheduledFrom(
-    List<TrackingRequest> incoming,
-  ) {
+  List<TrackingRequest> _receivedScheduledFrom(List<TrackingRequest> incoming) {
     final now = DateTime.now();
-    final scheduled = incoming.where((
-      r,
-    ) {
-      if (now.isAfter(r.endAt))
-        return false;
-      if (r.status == 'pending')
-        return true;
-      if (r.status == 'accepted')
-        return now.isBefore(r.startAt);
+    final scheduled = incoming.where((r) {
+      if (now.isAfter(r.endAt)) return false;
+      if (r.status == 'pending') return true;
+      if (r.status == 'accepted') return now.isBefore(r.startAt);
       return false;
     }).toList();
-    scheduled.sort(
-      (a, b) => a.startAt.compareTo(
-        b.startAt,
-      ),
-    );
+    scheduled.sort((a, b) => a.startAt.compareTo(b.startAt));
     return scheduled;
   }
 
   /// Received: active = accepted and in time window
-  List<TrackingRequest>
-  _receivedActiveFrom(
-    List<TrackingRequest> incoming,
-  ) {
+  List<TrackingRequest> _receivedActiveFrom(List<TrackingRequest> incoming) {
     return _activeFrom(incoming);
   }
 
   String _timeAgo(DateTime dateTime) {
-    final diff = DateTime.now()
-        .difference(dateTime);
+    final diff = DateTime.now().difference(dateTime);
 
-    if (diff.inSeconds < 60)
-      return 'Just now';
-    if (diff.inMinutes < 60)
-      return '${diff.inMinutes} min ago';
+    if (diff.inSeconds < 60) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
     if (diff.inHours < 24) {
       return '${diff.inHours} hour${diff.inHours == 1 ? '' : 's'} ago';
     }
@@ -1213,31 +871,19 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 ''';
 
   // Meeting point data
-  final List<Participant>
-  meetingParticipants = [
-    Participant(
-      name: 'Alex Chen',
-      status: 'On the way',
-      isHost: false,
-    ),
-    Participant(
-      name: 'Sarah Kim',
-      status: 'Arrived',
-      isHost: false,
-    ),
+  final List<Participant> meetingParticipants = [
+    Participant(name: 'Alex Chen', status: 'On the way', isHost: false),
+    Participant(name: 'Sarah Kim', status: 'Arrived', isHost: false),
   ];
-  final String currentUserName =
-      'Ahmed Hassan';
+  final String currentUserName = 'Ahmed Hassan';
   bool isArrived = false;
   // =======================
   // LIVE LOCATION (TRACKING)
   // =======================
 
-  Map<String, double>?
-  _trackedPos; // {x,y,z}
+  Map<String, double>? _trackedPos; // {x,y,z}
   String _trackedFloorLabel = '';
-  StreamSubscription<DocumentSnapshot>?
-  _liveLocSub;
+  StreamSubscription<DocumentSnapshot>? _liveLocSub;
 
   @override
   void initState() {
@@ -1248,55 +894,34 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         MeetingPointService.watchActiveForCurrentUser();
     _loadVenueMaps();
     _favService.load();
-    if (widget.initialMeetingPointId !=
-        null) {
+    if (widget.initialMeetingPointId != null) {
       _isTrackingView = false;
-      _expandedMeetingInviteId =
-          widget.initialMeetingPointId;
-      _highlightMeetingInviteId =
-          widget.initialMeetingPointId;
-      _meetingInviteScrollTargetId =
-          widget.initialMeetingPointId;
+      _expandedMeetingInviteId = widget.initialMeetingPointId;
+      _highlightMeetingInviteId = widget.initialMeetingPointId;
+      _meetingInviteScrollTargetId = widget.initialMeetingPointId;
       _startScrollToMeetingInviteWhenReady();
-    } else if (widget
-            .initialExpandRequestId !=
-        null) {
-      _expandedRequestId =
-          widget.initialExpandRequestId;
-      _highlightRequestId =
-          widget.initialExpandRequestId;
+    } else if (widget.initialExpandRequestId != null) {
+      _expandedRequestId = widget.initialExpandRequestId;
+      _highlightRequestId = widget.initialExpandRequestId;
       // Notification passes 0 = Received, 1 = Sent; we use 0 = Sent, 1 = Received
-      _selectedFilterIndex =
-          widget.initialFilterIndex !=
-              null
-          ? 1 -
-                widget
-                    .initialFilterIndex!
+      _selectedFilterIndex = widget.initialFilterIndex != null
+          ? 1 - widget.initialFilterIndex!
           : 0;
-      _isTrackingView =
-          true; // Tracking tab
+      _isTrackingView = true; // Tracking tab
       _startScrollToTargetWhenReady();
     }
-    _clockTimer = Timer.periodic(
-      const Duration(seconds: 30),
-      (_) {
-        if (mounted) setState(() {});
-      },
-    );
-    _meetingPointCardTimer = Timer.periodic(
-      const Duration(seconds: 1),
-      (_) {
-        if (!mounted) return;
-        // Tick every second so pending-meeting countdown timers stay accurate
-        // both on the tracking view (full card) and other tabs (badge).
-        setState(() {});
-        // Ensure timed transitions (cancel / step advance) happen immediately
-        // when the displayed countdown reaches 00:00.
-        unawaited(
-          _maybeMaintainActiveMeetingIfNeeded(),
-        );
-      },
-    );
+    _clockTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) setState(() {});
+    });
+    _meetingPointCardTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      // Tick every second so pending-meeting countdown timers stay accurate
+      // both on the tracking view (full card) and other tabs (badge).
+      setState(() {});
+      // Ensure timed transitions (cancel / step advance) happen immediately
+      // when the displayed countdown reaches 00:00.
+      unawaited(_maybeMaintainActiveMeetingIfNeeded());
+    });
     _listenToActiveTrackedUsers();
     _listenToActiveMeetingParticipants();
   }
@@ -1321,41 +946,23 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     return {'x': x, 'y': -z, 'z': y};
   }
 
-  void
-  _listenToActiveTrackedUsers() async {
-    final user = FirebaseAuth
-        .instance
-        .currentUser;
+  void _listenToActiveTrackedUsers() async {
+    final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
     final q = FirebaseFirestore.instance
         .collection('trackRequests')
-        .where(
-          'senderId',
-          isEqualTo: user.uid,
-        )
-        .where(
-          'status',
-          isEqualTo: 'accepted',
-        );
+        .where('senderId', isEqualTo: user.uid)
+        .where('status', isEqualTo: 'accepted');
 
     _activeReqSub?.cancel();
-    _activeReqSub = q.snapshots().listen((
-      snap,
-    ) {
-      final activeReceiverIds =
-          <String>{};
+    _activeReqSub = q.snapshots().listen((snap) {
+      final activeReceiverIds = <String>{};
 
       for (final d in snap.docs) {
         final data = d.data();
-        final startAt =
-            (data['startAt']
-                    as Timestamp?)
-                ?.toDate();
-        final endAt =
-            (data['endAt']
-                    as Timestamp?)
-                ?.toDate();
+        final startAt = (data['startAt'] as Timestamp?)?.toDate();
+        final endAt = (data['endAt'] as Timestamp?)?.toDate();
         final now = DateTime.now();
         final isActiveNow =
             startAt != null &&
@@ -1363,38 +970,23 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             now.isAfter(startAt) &&
             now.isBefore(endAt);
         if (!isActiveNow) continue;
-        final rid =
-            (data['receiverId'] ?? '')
-                .toString()
-                .trim();
+        final rid = (data['receiverId'] ?? '').toString().trim();
         if (rid.isNotEmpty) {
           activeReceiverIds.add(rid);
 
           final requestId = d.id;
-          final venueId =
-              (data['venueId'] ?? '')
-                  .toString()
-                  .trim();
+          final venueId = (data['venueId'] ?? '').toString().trim();
 
-          _requestIdByTrackedUser[rid] =
-              requestId;
+          _requestIdByTrackedUser[rid] = requestId;
 
           if (venueId.isNotEmpty) {
-            _loadVenueCoords(
-              venueId,
-              requestId,
-            );
+            _loadVenueCoords(venueId, requestId);
           }
         }
       }
 
-      final currentIds = _userLocSubs
-          .keys
-          .toSet();
-      final toRemove = currentIds
-          .difference(
-            activeReceiverIds,
-          );
+      final currentIds = _userLocSubs.keys.toSet();
+      final toRemove = currentIds.difference(activeReceiverIds);
       // by remas start
       for (final id in toRemove) {
         _userLocSubs[id]?.cancel();
@@ -1404,47 +996,31 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         _trackedNameByUser.remove(id);
         _trackedGpsLatByUser.remove(id);
         _trackedGpsLngByUser.remove(id);
-        _trackedUpdatedAtByUser.remove(
-          id,
-        );
+        _trackedUpdatedAtByUser.remove(id);
 
-        final requestId =
-            _requestIdByTrackedUser[id];
+        final requestId = _requestIdByTrackedUser[id];
         if (requestId != null) {
-          _venueLatByRequest.remove(
-            requestId,
-          );
-          _venueLngByRequest.remove(
-            requestId,
-          );
+          _venueLatByRequest.remove(requestId);
+          _venueLngByRequest.remove(requestId);
         }
-        _requestIdByTrackedUser.remove(
-          id,
-        );
+        _requestIdByTrackedUser.remove(id);
 
-        _trackMapController
-            ?.runJavaScript(
-              "removeTrackedPin('$id');",
-            );
+        _trackMapController?.runJavaScript("removeTrackedPin('$id');");
       } // by remas end
 
-      final toAdd = activeReceiverIds
-          .difference(currentIds);
+      final toAdd = activeReceiverIds.difference(currentIds);
 
       for (final id in toAdd) {
         // by remas start
         // Assign a unique color to this user if not already assigned
-        if (!_userPinColorMap
-            .containsKey(id)) {
+        if (!_userPinColorMap.containsKey(id)) {
           _userPinColorMap[id] =
-              _pinColors[_nextPinColorIndex %
-                  _pinColors.length];
+              _pinColors[_nextPinColorIndex % _pinColors.length];
           _nextPinColorIndex++;
         }
         // by remas end
 
-        _userLocSubs[id] = FirebaseFirestore
-            .instance
+        _userLocSubs[id] = FirebaseFirestore.instance
             .collection('users')
             .doc(id)
             .snapshots()
@@ -1452,104 +1028,45 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               final u = docSnap.data();
               if (u == null) return;
 
-              final location =
-                  (u['location']
-                      as Map?) ??
-                  {};
-              final blender =
-                  (location['blenderPosition']
-                      as Map?) ??
-                  {};
+              final location = (u['location'] as Map?) ?? {};
+              final blender = (location['blenderPosition'] as Map?) ?? {};
 
-              final bx =
-                  (blender['x'] as num?)
-                      ?.toDouble();
-              final by =
-                  (blender['y'] as num?)
-                      ?.toDouble();
-              final bz =
-                  (blender['z'] as num?)
-                      ?.toDouble();
-              final floorRaw =
-                  (blender['floor'] ??
-                          '')
-                      .toString();
+              final bx = (blender['x'] as num?)?.toDouble();
+              final by = (blender['y'] as num?)?.toDouble();
+              final bz = (blender['z'] as num?)?.toDouble();
+              final floorRaw = (blender['floor'] ?? '').toString();
 
-              final first =
-                  (u['firstName'] ?? '')
-                      .toString()
-                      .trim();
-              final last =
-                  (u['lastName'] ?? '')
-                      .toString()
-                      .trim();
-              final displayName =
-                  (first.isNotEmpty ||
-                      last.isNotEmpty)
-                  ? ('$first $last')
-                        .trim()
-                  : (u['name'] ??
-                            u['fullName'] ??
-                            u['email'] ??
-                            'User')
+              final first = (u['firstName'] ?? '').toString().trim();
+              final last = (u['lastName'] ?? '').toString().trim();
+              final displayName = (first.isNotEmpty || last.isNotEmpty)
+                  ? ('$first $last').trim()
+                  : (u['name'] ?? u['fullName'] ?? u['email'] ?? 'User')
                         .toString();
 
               // by remas start
-              final gpsLat =
-                  (location['gpsLat']
-                          as num?)
-                      ?.toDouble();
-              final gpsLng =
-                  (location['gpsLng']
-                          as num?)
-                      ?.toDouble();
-              final updatedAtRaw =
-                  location['updatedAt'];
-              final updatedAt =
-                  updatedAtRaw
-                      is Timestamp
-                  ? updatedAtRaw
-                        .toDate()
+              final gpsLat = (location['gpsLat'] as num?)?.toDouble();
+              final gpsLng = (location['gpsLng'] as num?)?.toDouble();
+              final updatedAtRaw = location['updatedAt'];
+              final updatedAt = updatedAtRaw is Timestamp
+                  ? updatedAtRaw.toDate()
                   : null;
-              if (gpsLat != null)
-                _trackedGpsLatByUser[id] =
-                    gpsLat;
-              if (gpsLng != null)
-                _trackedGpsLngByUser[id] =
-                    gpsLng;
-              if (updatedAt != null)
-                _trackedUpdatedAtByUser[id] =
-                    updatedAt;
+              if (gpsLat != null) _trackedGpsLatByUser[id] = gpsLat;
+              if (gpsLng != null) _trackedGpsLngByUser[id] = gpsLng;
+              if (updatedAt != null) _trackedUpdatedAtByUser[id] = updatedAt;
               // by remas end
 
-              if (bx == null ||
-                  by == null ||
-                  bz == null) {
-                _trackedPosByUser
-                    .remove(id);
-                _trackedFloorByUser
-                    .remove(id);
-                _trackedNameByUser
-                    .remove(id);
-                _trackMapController
-                    ?.runJavaScript(
-                      "hideTrackedPin('$id');",
-                    );
+              if (bx == null || by == null || bz == null) {
+                _trackedPosByUser.remove(id);
+                _trackedFloorByUser.remove(id);
+                _trackedNameByUser.remove(id);
+                _trackMapController?.runJavaScript("hideTrackedPin('$id');");
                 return;
               }
 
-              final gltf =
-                  _blenderToGltf(
-                    x: bx!,
-                    y: by!,
-                    z: bz!,
-                  );
-              _trackedPosByUser[id] =
-                  gltf;
-              _trackedFloorByUser[id] =
-                  floorRaw;
-              _trackedNameByUser[id] =
-                  displayName;
+              final gltf = _blenderToGltf(x: bx!, y: by!, z: bz!);
+              _trackedPosByUser[id] = gltf;
+              _trackedFloorByUser[id] = floorRaw;
+              _trackedNameByUser[id] = displayName;
               _applyAllTrackedPinsToViewer();
             });
       }
@@ -1558,12 +1075,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     });
   }
 
-  void
-  _listenToActiveMeetingParticipants() {
+  void _listenToActiveMeetingParticipants() {
     _activeMeetingSub?.cancel();
-    _activeMeetingSub = _meetingPointCardStream.listen((
-      meeting,
-    ) {
+    _activeMeetingSub = _meetingPointCardStream.listen((meeting) {
       if (!mounted) return;
       // Keep the card cache current so _maybeMaintainActiveMeetingIfNeeded()
       // always has fresh meeting data regardless of which tab is shown.
@@ -1571,28 +1085,20 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       // StreamBuilder that called _resolveActiveMeetingCardSnapshot was
       // removed), causing deadline-based transitions to stall unless the
       // host happens to open the Meeting Point tab or the form.
-      _lastKnownActiveMeetingCard =
-          meeting;
-      _syncMeetingParticipantSubs(
-        meeting,
-      );
+      _lastKnownActiveMeetingCard = meeting;
+      _syncMeetingParticipantSubs(meeting);
     });
   }
 
   void _clearMeetingParticipantPins() {
-    for (final sub
-        in _meetingUserSubs.values) {
+    for (final sub in _meetingUserSubs.values) {
       sub.cancel();
     }
     _meetingUserSubs.clear();
 
     if (_trackMapController != null) {
-      for (final id
-          in _meetingPosByUser.keys) {
-        _trackMapController!
-            .runJavaScript(
-              "removeTrackedPin('$id');",
-            );
+      for (final id in _meetingPosByUser.keys) {
+        _trackMapController!.runJavaScript("removeTrackedPin('$id');");
       }
     }
 
@@ -1601,12 +1107,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     _meetingFloorByUser.clear();
     _meetingNameByUser.clear();
     _meetingUpdatedAtByUser.clear();
-    _meetingLocationSignatureByUser
-        .clear();
-    _meetingEtaDisplayedSecondsByUser
-        .clear();
-    _meetingEtaDisplayedAnchorMsByUser
-        .clear();
+    _meetingLocationSignatureByUser.clear();
+    _meetingEtaDisplayedSecondsByUser.clear();
+    _meetingEtaDisplayedAnchorMsByUser.clear();
     _meetingArrivalStatusByUser.clear();
     _arrivalOverrideByUser.clear();
     _arrivalOverrideAtByUser.clear();
@@ -1614,169 +1117,100 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     _meetingPointPosBlender = null;
     _meetingPointFloorLabel = '';
     _meetingPointLabel = '';
-    _trackMapController?.runJavaScript(
-      "hideMeetingPointPin();",
-    );
-    _trackMapController?.runJavaScript(
-      "clearMeetingPathsFromFlutter();",
-    );
-    _meetingPathsByUserFloorGltf
-        .clear();
+    _trackMapController?.runJavaScript("hideMeetingPointPin();");
+    _trackMapController?.runJavaScript("clearMeetingPathsFromFlutter();");
+    _meetingPathsByUserFloorGltf.clear();
     _meetingPathTargetSignature = null;
 
     _applyAllTrackedPinsToViewer();
   }
 
-  bool _isFixedMeetingLabel(
-    String label,
-  ) {
+  bool _isFixedMeetingLabel(String label) {
     return label == 'Me';
   }
 
-  void _syncMeetingParticipantSubs(
-    MeetingPointRecord? meeting,
-  ) {
-    final activeMeetingId =
-        meeting != null &&
-            meeting.isConfirmed
+  void _syncMeetingParticipantSubs(MeetingPointRecord? meeting) {
+    final activeMeetingId = meeting != null && meeting.isConfirmed
         ? meeting.id
         : null;
     if (activeMeetingId == null) {
-      _meetingRealExpiryResolvedIds
-          .clear();
-      _meetingRealExpirySyncingIds
-          .clear();
+      _meetingRealExpiryResolvedIds.clear();
+      _meetingRealExpirySyncingIds.clear();
     } else {
-      _meetingRealExpiryResolvedIds
-          .removeWhere(
-            (id) =>
-                id != activeMeetingId,
-          );
-      _meetingRealExpirySyncingIds
-          .removeWhere(
-            (id) =>
-                id != activeMeetingId,
-          );
+      _meetingRealExpiryResolvedIds.removeWhere((id) => id != activeMeetingId);
+      _meetingRealExpirySyncingIds.removeWhere((id) => id != activeMeetingId);
     }
 
-    if (_pendingCompletionHoldStartedAt !=
-            null &&
-        DateTime.now().difference(
-              _pendingCompletionHoldStartedAt!,
-            ) >
+    if (_pendingCompletionHoldStartedAt != null &&
+        DateTime.now().difference(_pendingCompletionHoldStartedAt!) >
             _kCompletionHoldGrace) {
-      _pendingCompletionHoldMeetingId =
-          null;
-      _pendingCompletionHoldStartedAt =
-          null;
+      _pendingCompletionHoldMeetingId = null;
+      _pendingCompletionHoldStartedAt = null;
     }
 
-    final pendingHoldId =
-        _pendingCompletionHoldMeetingId;
+    final pendingHoldId = _pendingCompletionHoldMeetingId;
     final pendingHoldActive =
-        pendingHoldId != null &&
-        _pendingCompletionHoldStartedAt !=
-            null;
+        pendingHoldId != null && _pendingCompletionHoldStartedAt != null;
 
-    if ((meeting == null ||
-            !meeting.isConfirmed) &&
+    if ((meeting == null || !meeting.isConfirmed) &&
         pendingHoldActive &&
-        _lastKnownConfirmedMeeting !=
-            null &&
-        _lastKnownConfirmedMeeting!
-                .id ==
-            pendingHoldId) {
-      _startCompletionHold(
-        _lastKnownConfirmedMeeting!,
-      );
-      _pendingCompletionHoldMeetingId =
-          null;
-      _pendingCompletionHoldStartedAt =
-          null;
+        _lastKnownConfirmedMeeting != null &&
+        _lastKnownConfirmedMeeting!.id == pendingHoldId) {
+      _startCompletionHold(_lastKnownConfirmedMeeting!);
+      _pendingCompletionHoldMeetingId = null;
+      _pendingCompletionHoldStartedAt = null;
     }
 
-    if ((meeting == null ||
-            !meeting.isConfirmed) &&
-        _lastKnownConfirmedMeeting !=
-            null &&
-        _allArrived(
-          _lastKnownConfirmedMeeting!,
-        )) {
-      _maybeStartCompletionHoldFromStream(
-        _lastKnownConfirmedMeeting!,
-      );
+    if ((meeting == null || !meeting.isConfirmed) &&
+        _lastKnownConfirmedMeeting != null &&
+        _allArrived(_lastKnownConfirmedMeeting!)) {
+      _maybeStartCompletionHoldFromStream(_lastKnownConfirmedMeeting!);
     }
 
     final holdActive =
         _completionHoldUntil != null &&
-        DateTime.now().isBefore(
-          _completionHoldUntil!,
-        );
-    if ((meeting == null ||
-            !meeting.isConfirmed) &&
+        DateTime.now().isBefore(_completionHoldUntil!);
+    if ((meeting == null || !meeting.isConfirmed) &&
         holdActive &&
-        _lastKnownConfirmedMeeting !=
-            null &&
-        (_completionHoldMeetingId ==
-                null ||
-            _lastKnownConfirmedMeeting!
-                    .id ==
-                _completionHoldMeetingId)) {
-      meeting =
-          _lastKnownConfirmedMeeting;
+        _lastKnownConfirmedMeeting != null &&
+        (_completionHoldMeetingId == null ||
+            _lastKnownConfirmedMeeting!.id == _completionHoldMeetingId)) {
+      meeting = _lastKnownConfirmedMeeting;
     }
 
-    if (meeting == null ||
-        !meeting.isConfirmed) {
+    if (meeting == null || !meeting.isConfirmed) {
       _clearMeetingParticipantPins();
       return;
     }
 
-    _lastKnownConfirmedMeeting =
-        meeting;
+    _lastKnownConfirmedMeeting = meeting;
 
     final ids = <String>{};
     final names = <String, String>{};
-    final currentUid =
-        FirebaseAuth
-            .instance
-            .currentUser
-            ?.uid
-            ?.trim() ??
-        '';
+    final currentUid = FirebaseAuth.instance.currentUser?.uid?.trim() ?? '';
 
-    final hostId = meeting.hostId
-        .trim();
-    final hostActive =
-        meeting.hostArrivalStatus !=
-        'cancelled';
-    if (hostActive &&
-        hostId.isNotEmpty) {
+    final hostId = meeting.hostId.trim();
+    final hostActive = meeting.hostArrivalStatus != 'cancelled';
+    if (hostActive && hostId.isNotEmpty) {
       ids.add(hostId);
-      if (currentUid.isNotEmpty &&
-          currentUid == hostId) {
+      if (currentUid.isNotEmpty && currentUid == hostId) {
         names[hostId] = 'Me';
       } else {
-        final hostName = meeting
-            .hostName
-            .trim();
+        final hostName = meeting.hostName.trim();
         if (hostName.isNotEmpty) {
           names[hostId] = hostName;
         }
       }
     }
 
-    for (final p
-        in meeting.participants) {
+    for (final p in meeting.participants) {
       if (!p.isAccepted) continue;
-      if (p.isCancelledArrival)
-        continue;
+      if (p.isCancelledArrival) continue;
       final id = p.userId.trim();
       if (id.isEmpty) continue;
       if (id == hostId) continue;
       ids.add(id);
-      if (currentUid.isNotEmpty &&
-          currentUid == id) {
+      if (currentUid.isNotEmpty && currentUid == id) {
         names[id] = 'Me';
       } else {
         final n = p.name.trim();
@@ -1797,201 +1231,109 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     }
 
     _meetingArrivalStatusByUser.clear();
-    if (hostActive &&
-        hostId.isNotEmpty) {
-      _meetingArrivalStatusByUser[hostId] =
-          meeting.hostArrivalStatus;
+    if (hostActive && hostId.isNotEmpty) {
+      _meetingArrivalStatusByUser[hostId] = meeting.hostArrivalStatus;
     }
-    for (final p
-        in meeting.participants) {
+    for (final p in meeting.participants) {
       if (!p.isAccepted) continue;
-      if (p.arrivalStatus ==
-          'cancelled')
-        continue;
-      _meetingArrivalStatusByUser[p
-              .userId] =
-          p.arrivalStatus;
+      if (p.arrivalStatus == 'cancelled') continue;
+      _meetingArrivalStatusByUser[p.userId] = p.arrivalStatus;
     }
 
     // Preserve local "arrived" overrides until Firestore catches up.
-    for (final entry
-        in _arrivalOverrideByUser
-            .entries
-            .toList()) {
+    for (final entry in _arrivalOverrideByUser.entries.toList()) {
       final id = entry.key;
       if (!ids.contains(id)) {
-        _arrivalOverrideByUser.remove(
-          id,
-        );
-        _arrivalOverrideAtByUser.remove(
-          id,
-        );
+        _arrivalOverrideByUser.remove(id);
+        _arrivalOverrideAtByUser.remove(id);
         continue;
       }
-      final overrideStatus =
-          entry.value;
-      final meetingStatus =
-          _meetingArrivalStatusByUser[id];
-      if (meetingStatus == null)
-        continue;
-      if (meetingStatus == 'arrived' ||
-          meetingStatus ==
-              'cancelled') {
-        _arrivalOverrideByUser.remove(
-          id,
-        );
-        _arrivalOverrideAtByUser.remove(
-          id,
-        );
+      final overrideStatus = entry.value;
+      final meetingStatus = _meetingArrivalStatusByUser[id];
+      if (meetingStatus == null) continue;
+      if (meetingStatus == 'arrived' || meetingStatus == 'cancelled') {
+        _arrivalOverrideByUser.remove(id);
+        _arrivalOverrideAtByUser.remove(id);
         continue;
       }
       if (overrideStatus == 'arrived') {
-        _meetingArrivalStatusByUser[id] =
-            'arrived';
+        _meetingArrivalStatusByUser[id] = 'arrived';
       }
     }
 
-    _maybeStartCompletionHoldFromStream(
-      meeting,
-    );
+    _maybeStartCompletionHoldFromStream(meeting);
 
     _meetingPointPosGltf = null;
     _meetingPointPosBlender = null;
     _meetingPointFloorLabel = '';
     _meetingPointLabel = '';
-    if (meeting
-        .suggestedCandidates
-        .isNotEmpty) {
-      final raw = meeting
-          .suggestedCandidates
-          .first;
+    if (meeting.suggestedCandidates.isNotEmpty) {
+      final raw = meeting.suggestedCandidates.first;
       final entrance = raw['entrance'];
       if (entrance is Map) {
-        final ex =
-            (entrance['x'] as num?)
-                ?.toDouble();
-        final ey =
-            (entrance['y'] as num?)
-                ?.toDouble();
-        final ez =
-            (entrance['z'] as num?)
-                ?.toDouble();
-        final floor =
-            (entrance['floor'] ?? '')
-                .toString();
-        if (ex != null &&
-            ey != null &&
-            ez != null) {
-          _meetingPointPosBlender = {
-            'x': ex,
-            'y': ey,
-            'z': ez,
-          };
-          _meetingPointPosGltf =
-              _blenderToGltf(
-                x: ex,
-                y: ey,
-                z: ez,
-              );
-          _meetingPointFloorLabel =
-              floor;
-          final name = meeting
-              .suggestedPoint
-              .trim();
-          _meetingPointLabel =
-              name.isNotEmpty
-              ? name
-              : 'Meeting Point';
+        final ex = (entrance['x'] as num?)?.toDouble();
+        final ey = (entrance['y'] as num?)?.toDouble();
+        final ez = (entrance['z'] as num?)?.toDouble();
+        final floor = (entrance['floor'] ?? '').toString();
+        if (ex != null && ey != null && ez != null) {
+          _meetingPointPosBlender = {'x': ex, 'y': ey, 'z': ez};
+          _meetingPointPosGltf = _blenderToGltf(x: ex, y: ey, z: ez);
+          _meetingPointFloorLabel = floor;
+          final name = meeting.suggestedPoint.trim();
+          _meetingPointLabel = name.isNotEmpty ? name : 'Meeting Point';
         }
       }
     }
     String? nextTargetSignature;
-    if (_meetingPointPosBlender !=
-        null) {
+    if (_meetingPointPosBlender != null) {
       nextTargetSignature =
           '${meeting.id}|${_meetingPointPosBlender!['x']}|${_meetingPointPosBlender!['y']}|${_meetingPointPosBlender!['z']}|$_meetingPointFloorLabel';
     }
-    if (_meetingPointPosBlender !=
-        null) {
-      if (_meetingPathTargetSignature !=
-          nextTargetSignature) {
-        _meetingPathTargetSignature =
-            nextTargetSignature;
-        unawaited(
-          _recomputeAllMeetingPaths(),
-        );
+    if (_meetingPointPosBlender != null) {
+      if (_meetingPathTargetSignature != nextTargetSignature) {
+        _meetingPathTargetSignature = nextTargetSignature;
+        unawaited(_recomputeAllMeetingPaths());
       }
     } else {
-      _meetingPathTargetSignature =
-          null;
+      _meetingPathTargetSignature = null;
       unawaited(_clearMeetingPaths());
     }
 
-    final currentIds = _meetingUserSubs
-        .keys
-        .toSet();
-    final toRemove = currentIds
-        .difference(ids);
+    final currentIds = _meetingUserSubs.keys.toSet();
+    final toRemove = currentIds.difference(ids);
     for (final id in toRemove) {
       _meetingUserSubs[id]?.cancel();
       _meetingUserSubs.remove(id);
       _meetingPosByUser.remove(id);
-      _meetingPosBlenderByUser.remove(
-        id,
-      );
+      _meetingPosBlenderByUser.remove(id);
       _meetingFloorByUser.remove(id);
       _meetingNameByUser.remove(id);
-      _meetingUpdatedAtByUser.remove(
-        id,
-      );
-      _meetingLocationSignatureByUser
-          .remove(id);
-      _meetingEtaBaseSecondsByUser
-          .remove(id);
-      _meetingEtaBaseTimeByUser.remove(
-        id,
-      );
-      _meetingEtaResetAnchorMsByUser
-          .remove(id);
-      _meetingEtaDisplayedSecondsByUser
-          .remove(id);
-      _meetingEtaDisplayedAnchorMsByUser
-          .remove(id);
-      _meetingEtaSyncSignatureByUser
-          .remove(id);
-      _meetingArrivalStatusByUser
-          .remove(id);
+      _meetingUpdatedAtByUser.remove(id);
+      _meetingLocationSignatureByUser.remove(id);
+      _meetingEtaBaseSecondsByUser.remove(id);
+      _meetingEtaBaseTimeByUser.remove(id);
+      _meetingEtaResetAnchorMsByUser.remove(id);
+      _meetingEtaDisplayedSecondsByUser.remove(id);
+      _meetingEtaDisplayedAnchorMsByUser.remove(id);
+      _meetingEtaSyncSignatureByUser.remove(id);
+      _meetingArrivalStatusByUser.remove(id);
       _arrivalOverrideByUser.remove(id);
-      _arrivalOverrideAtByUser.remove(
-        id,
-      );
-      _trackMapController
-          ?.runJavaScript(
-            "removeTrackedPin('$id');",
-          );
-      _trackMapController?.runJavaScript(
-        "clearMeetingPathForUser('$id');",
-      );
-      _meetingPathsByUserFloorGltf
-          .remove(id);
+      _arrivalOverrideAtByUser.remove(id);
+      _trackMapController?.runJavaScript("removeTrackedPin('$id');");
+      _trackMapController?.runJavaScript("clearMeetingPathForUser('$id');");
+      _meetingPathsByUserFloorGltf.remove(id);
     }
 
-    final toAdd = ids.difference(
-      currentIds,
-    );
+    final toAdd = ids.difference(currentIds);
     for (final id in toAdd) {
       // Assign a unique color to this user if not already assigned
-      if (!_userPinColorMap.containsKey(
-        id,
-      )) {
+      if (!_userPinColorMap.containsKey(id)) {
         _userPinColorMap[id] =
-            _pinColors[_nextPinColorIndex %
-                _pinColors.length];
+            _pinColors[_nextPinColorIndex % _pinColors.length];
         _nextPinColorIndex++;
       }
 
-      _meetingUserSubs[id] = FirebaseFirestore
-          .instance
+      _meetingUserSubs[id] = FirebaseFirestore.instance
           .collection('users')
           .doc(id)
           .snapshots()
@@ -1999,130 +1341,57 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             final u = docSnap.data();
             if (u == null) return;
 
-            final location =
-                (u['location']
-                    as Map?) ??
-                {};
-            final blender =
-                (location['blenderPosition']
-                    as Map?) ??
-                {};
+            final location = (u['location'] as Map?) ?? {};
+            final blender = (location['blenderPosition'] as Map?) ?? {};
 
-            final bx =
-                (blender['x'] as num?)
-                    ?.toDouble();
-            final by =
-                (blender['y'] as num?)
-                    ?.toDouble();
-            final bz =
-                (blender['z'] as num?)
-                    ?.toDouble();
-            final floorRaw =
-                (blender['floor'] ?? '')
-                    .toString();
+            final bx = (blender['x'] as num?)?.toDouble();
+            final by = (blender['y'] as num?)?.toDouble();
+            final bz = (blender['z'] as num?)?.toDouble();
+            final floorRaw = (blender['floor'] ?? '').toString();
 
-            final updatedAtRaw =
-                location['updatedAt'];
-            final updatedAt =
-                updatedAtRaw
-                    is Timestamp
+            final updatedAtRaw = location['updatedAt'];
+            final updatedAt = updatedAtRaw is Timestamp
                 ? updatedAtRaw.toDate()
                 : null;
-            if (updatedAt != null)
-              _meetingUpdatedAtByUser[id] =
-                  updatedAt;
+            if (updatedAt != null) _meetingUpdatedAtByUser[id] = updatedAt;
             final locationSignature =
                 '${bx ?? 'null'}|${by ?? 'null'}|${bz ?? 'null'}|$floorRaw|${updatedAt?.millisecondsSinceEpoch ?? 0}';
 
-            final first =
-                (u['firstName'] ?? '')
-                    .toString()
-                    .trim();
-            final last =
-                (u['lastName'] ?? '')
-                    .toString()
-                    .trim();
-            final displayName =
-                (first.isNotEmpty ||
-                    last.isNotEmpty)
-                ? ('$first $last')
-                      .trim()
-                : (u['name'] ??
-                          u['fullName'] ??
-                          u['email'] ??
-                          'User')
+            final first = (u['firstName'] ?? '').toString().trim();
+            final last = (u['lastName'] ?? '').toString().trim();
+            final displayName = (first.isNotEmpty || last.isNotEmpty)
+                ? ('$first $last').trim()
+                : (u['name'] ?? u['fullName'] ?? u['email'] ?? 'User')
                       .toString();
-            if ((_meetingNameByUser[id] ??
-                        '')
-                    .trim()
-                    .isEmpty &&
-                !_isFixedMeetingLabel(
-                  _meetingNameByUser[id] ??
-                      '',
-                )) {
-              _meetingNameByUser[id] =
-                  displayName;
+            if ((_meetingNameByUser[id] ?? '').trim().isEmpty &&
+                !_isFixedMeetingLabel(_meetingNameByUser[id] ?? '')) {
+              _meetingNameByUser[id] = displayName;
             }
 
-            if (bx == null ||
-                by == null ||
-                bz == null) {
-              _meetingPosByUser.remove(
-                id,
+            if (bx == null || by == null || bz == null) {
+              _meetingPosByUser.remove(id);
+              _meetingPosBlenderByUser.remove(id);
+              _meetingFloorByUser.remove(id);
+              _meetingLocationSignatureByUser.remove(id);
+              _trackMapController?.runJavaScript("hideTrackedPin('$id');");
+              _trackMapController?.runJavaScript(
+                "clearMeetingPathForUser('$id');",
               );
-              _meetingPosBlenderByUser
-                  .remove(id);
-              _meetingFloorByUser
-                  .remove(id);
-              _meetingLocationSignatureByUser
-                  .remove(id);
-              _trackMapController
-                  ?.runJavaScript(
-                    "hideTrackedPin('$id');",
-                  );
-              _trackMapController
-                  ?.runJavaScript(
-                    "clearMeetingPathForUser('$id');",
-                  );
-              _meetingPathsByUserFloorGltf
-                  .remove(id);
+              _meetingPathsByUserFloorGltf.remove(id);
               return;
             }
 
-            final gltf = _blenderToGltf(
-              x: bx,
-              y: by,
-              z: bz,
-            );
-            _meetingPosByUser[id] =
-                gltf;
-            _meetingPosBlenderByUser[id] =
-                {
-                  'x': bx,
-                  'y': by,
-                  'z': bz,
-                };
-            _meetingFloorByUser[id] =
-                floorRaw;
-            final previousSignature =
-                _meetingLocationSignatureByUser[id];
-            final locationChanged =
-                previousSignature !=
-                locationSignature;
-            _meetingLocationSignatureByUser[id] =
-                locationSignature;
+            final gltf = _blenderToGltf(x: bx, y: by, z: bz);
+            _meetingPosByUser[id] = gltf;
+            _meetingPosBlenderByUser[id] = {'x': bx, 'y': by, 'z': bz};
+            _meetingFloorByUser[id] = floorRaw;
+            final previousSignature = _meetingLocationSignatureByUser[id];
+            final locationChanged = previousSignature != locationSignature;
+            _meetingLocationSignatureByUser[id] = locationSignature;
             if (locationChanged) {
-              unawaited(
-                _recomputeMeetingPathForUser(
-                  id,
-                ),
-              );
-              if (currentUid
-                      .isNotEmpty &&
-                  id == currentUid) {
-                unawaited(
-                  _maybeAutoArriveForCurrentUser(),
-                );
+              unawaited(_recomputeMeetingPathForUser(id));
+              if (currentUid.isNotEmpty && id == currentUid) {
+                unawaited(_maybeAutoArriveForCurrentUser());
               }
             }
             _applyAllTrackedPinsToViewer();
@@ -2132,73 +1401,47 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     _applyAllTrackedPinsToViewer();
   }
 
-  Future<void>
-  _clearMeetingPaths() async {
-    _meetingPathsByUserFloorGltf
-        .clear();
+  Future<void> _clearMeetingPaths() async {
+    _meetingPathsByUserFloorGltf.clear();
     _meetingPathTargetSignature = null;
-    _meetingLocationSignatureByUser
-        .clear();
+    _meetingLocationSignatureByUser.clear();
     if (_trackMapController != null) {
-      await _trackMapController!
-          .runJavaScript(
-            "clearMeetingPathsFromFlutter();",
-          );
+      await _trackMapController!.runJavaScript(
+        "clearMeetingPathsFromFlutter();",
+      );
     }
     if (mounted) setState(() {});
   }
 
-  Future<void> _clearMeetingPathForUser(
-    String userId,
-  ) async {
-    if (_meetingPathsByUserFloorGltf
-        .containsKey(userId)) {
-      _meetingPathsByUserFloorGltf
-          .remove(userId);
-      _meetingLocationSignatureByUser
-          .remove(userId);
+  Future<void> _clearMeetingPathForUser(String userId) async {
+    if (_meetingPathsByUserFloorGltf.containsKey(userId)) {
+      _meetingPathsByUserFloorGltf.remove(userId);
+      _meetingLocationSignatureByUser.remove(userId);
       if (mounted) setState(() {});
     }
     if (_trackMapController != null) {
-      await _trackMapController!
-          .runJavaScript(
-            "clearMeetingPathForUser('$userId');",
-          );
+      await _trackMapController!.runJavaScript(
+        "clearMeetingPathForUser('$userId');",
+      );
     }
   }
 
-  DateTime? _meetingEtaAnchorForUser(
-    String userId,
-  ) {
-    final meeting =
-        _lastKnownConfirmedMeeting;
-    DateTime? anchor =
-        _meetingUpdatedAtByUser[userId];
+  DateTime? _meetingEtaAnchorForUser(String userId) {
+    final meeting = _lastKnownConfirmedMeeting;
+    DateTime? anchor = _meetingUpdatedAtByUser[userId];
 
-    if (meeting != null &&
-        meeting.isConfirmed) {
-      final meetingAnchor =
-          meeting.isHost(userId)
-          ? meeting
-                .hostLocationUpdatedAt
-          : meeting
-                .participantFor(userId)
-                ?.locationUpdatedAt;
-      final confirmedAt =
-          meeting.confirmedAt;
+    if (meeting != null && meeting.isConfirmed) {
+      final meetingAnchor = meeting.isHost(userId)
+          ? meeting.hostLocationUpdatedAt
+          : meeting.participantFor(userId)?.locationUpdatedAt;
+      final confirmedAt = meeting.confirmedAt;
 
       if (meetingAnchor != null &&
-          (anchor == null ||
-              meetingAnchor.isAfter(
-                anchor,
-              ))) {
+          (anchor == null || meetingAnchor.isAfter(anchor))) {
         anchor = meetingAnchor;
       }
       if (confirmedAt != null &&
-          (anchor == null ||
-              confirmedAt.isAfter(
-                anchor,
-              ))) {
+          (anchor == null || confirmedAt.isAfter(anchor))) {
         anchor = confirmedAt;
       }
     }
@@ -2206,44 +1449,27 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     return anchor;
   }
 
-  Set<String>
-  _activeMeetingArrivalUserIds(
-    MeetingPointRecord meeting,
-  ) {
+  Set<String> _activeMeetingArrivalUserIds(MeetingPointRecord meeting) {
     final ids = <String>{};
 
-    final hostId = meeting.hostId
-        .trim();
-    if (meeting.hostArrivalStatus !=
-            'cancelled' &&
-        hostId.isNotEmpty) {
+    final hostId = meeting.hostId.trim();
+    if (meeting.hostArrivalStatus != 'cancelled' && hostId.isNotEmpty) {
       ids.add(hostId);
     }
 
-    for (final p
-        in meeting.participants) {
-      if (!p.isAccepted ||
-          p.isCancelledArrival)
-        continue;
+    for (final p in meeting.participants) {
+      if (!p.isAccepted || p.isCancelledArrival) continue;
       final userId = p.userId.trim();
-      if (userId.isEmpty ||
-          userId == hostId)
-        continue;
+      if (userId.isEmpty || userId == hostId) continue;
       ids.add(userId);
     }
 
     return ids;
   }
 
-  Future<void>
-  _maybeWriteExpiresAtFromRealEtas() async {
-    final meeting =
-        _lastKnownConfirmedMeeting;
-    final currentUid = FirebaseAuth
-        .instance
-        .currentUser
-        ?.uid
-        ?.trim();
+  Future<void> _maybeWriteExpiresAtFromRealEtas() async {
+    final meeting = _lastKnownConfirmedMeeting;
+    final currentUid = FirebaseAuth.instance.currentUser?.uid?.trim();
     if (meeting == null ||
         !meeting.isConfirmed ||
         currentUid == null ||
@@ -2253,58 +1479,37 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     }
 
     final meetingId = meeting.id;
-    if (_meetingRealExpiryResolvedIds
-            .contains(meetingId) ||
-        _meetingRealExpirySyncingIds
-            .contains(meetingId)) {
+    if (_meetingRealExpiryResolvedIds.contains(meetingId) ||
+        _meetingRealExpirySyncingIds.contains(meetingId)) {
       return;
     }
 
-    final activeIds =
-        _activeMeetingArrivalUserIds(
-          meeting,
-        ).toList();
+    final activeIds = _activeMeetingArrivalUserIds(meeting).toList();
     if (activeIds.length < 2) return;
 
     final etaSeconds = <int>[];
     for (final userId in activeIds) {
-      final anchor =
-          _meetingEtaAnchorForUser(
-            userId,
-          );
-      final baseSeconds =
-          _meetingEtaBaseSecondsByUser[userId];
-      final baseAnchorMs =
-          _meetingEtaResetAnchorMsByUser[userId];
-      if (anchor == null ||
-          baseSeconds == null ||
-          baseAnchorMs == null) {
+      final anchor = _meetingEtaAnchorForUser(userId);
+      final baseSeconds = _meetingEtaBaseSecondsByUser[userId];
+      final baseAnchorMs = _meetingEtaResetAnchorMsByUser[userId];
+      if (anchor == null || baseSeconds == null || baseAnchorMs == null) {
         return;
       }
-      if (baseAnchorMs !=
-          anchor
-              .millisecondsSinceEpoch) {
+      if (baseAnchorMs != anchor.millisecondsSinceEpoch) {
         return;
       }
       etaSeconds.add(baseSeconds);
     }
     if (etaSeconds.isEmpty) return;
 
-    final maxEtaSeconds = etaSeconds
-        .fold<int>(
-          0,
-          (best, value) => value > best
-              ? value
-              : best,
-        );
+    final maxEtaSeconds = etaSeconds.fold<int>(
+      0,
+      (best, value) => value > best ? value : best,
+    );
     if (maxEtaSeconds <= 0) return;
 
-    final rawSession = Duration(
-      seconds: maxEtaSeconds * 3,
-    );
-    final sessionDuration =
-        rawSession <
-            _kMeetingMinSessionDuration
+    final rawSession = Duration(seconds: maxEtaSeconds * 3);
+    final sessionDuration = rawSession < _kMeetingMinSessionDuration
         ? _kMeetingMinSessionDuration
         : rawSession;
     final meetingStartAt =
@@ -2312,96 +1517,51 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         meeting.updatedAt ??
         meeting.createdAt ??
         MeetingPointService.serverNow;
-    final nextExpiresAt = meetingStartAt
-        .add(sessionDuration);
-    final currentExpiresAt =
-        meeting.expiresAt;
+    final nextExpiresAt = meetingStartAt.add(sessionDuration);
+    final currentExpiresAt = meeting.expiresAt;
 
     if (currentExpiresAt != null &&
-        currentExpiresAt
-                .difference(
-                  nextExpiresAt,
-                )
-                .inSeconds
-                .abs() <=
-            1) {
-      _meetingRealExpiryResolvedIds.add(
-        meetingId,
-      );
+        currentExpiresAt.difference(nextExpiresAt).inSeconds.abs() <= 1) {
+      _meetingRealExpiryResolvedIds.add(meetingId);
       return;
     }
 
-    _meetingRealExpirySyncingIds.add(
-      meetingId,
-    );
+    _meetingRealExpirySyncingIds.add(meetingId);
     try {
-      await MeetingPointService.updateExpiresAt(
-        meetingId,
-        nextExpiresAt,
-      );
-      _meetingRealExpiryResolvedIds.add(
-        meetingId,
-      );
+      await MeetingPointService.updateExpiresAt(meetingId, nextExpiresAt);
+      _meetingRealExpiryResolvedIds.add(meetingId);
     } catch (_) {
       // Keep the initial safety expiresAt if the accurate rewrite fails.
     } finally {
-      _meetingRealExpirySyncingIds
-          .remove(meetingId);
+      _meetingRealExpirySyncingIds.remove(meetingId);
     }
   }
 
-  Future<void>
-  _recomputeMeetingPathForUser(
-    String userId,
-  ) async {
-    final destPos =
-        _meetingPointPosBlender;
+  Future<void> _recomputeMeetingPathForUser(String userId) async {
+    final destPos = _meetingPointPosBlender;
     if (destPos == null) {
-      await _clearMeetingPathForUser(
-        userId,
-      );
+      await _clearMeetingPathForUser(userId);
       return;
     }
 
-    final startPos =
-        _meetingPosBlenderByUser[userId];
+    final startPos = _meetingPosBlenderByUser[userId];
     if (startPos == null) {
-      await _clearMeetingPathForUser(
-        userId,
-      );
+      await _clearMeetingPathForUser(userId);
       return;
     }
 
-    final startFloorRaw =
-        _meetingFloorByUser[userId] ??
-        '';
-    final startF = _toFNumber(
-      startFloorRaw,
-    );
-    final destF = _toFNumber(
-      _meetingPointFloorLabel,
-    );
-    if (startF.isEmpty ||
-        destF.isEmpty) {
-      await _clearMeetingPathForUser(
-        userId,
-      );
+    final startFloorRaw = _meetingFloorByUser[userId] ?? '';
+    final startF = _toFNumber(startFloorRaw);
+    final destF = _toFNumber(_meetingPointFloorLabel);
+    if (startF.isEmpty || destF.isEmpty) {
+      await _clearMeetingPathForUser(userId);
       return;
     }
 
-    final startNm =
-        await _ensureNavmeshLoadedForFNumber(
-          startF,
-        );
-    final destNm =
-        await _ensureNavmeshLoadedForFNumber(
-          destF,
-        );
-    if (startNm == null ||
-        destNm == null) {
-      await _clearMeetingPathForUser(
-        userId,
-      );
+    final startNm = await _ensureNavmeshLoadedForFNumber(startF);
+    final destNm = await _ensureNavmeshLoadedForFNumber(destF);
+    if (startNm == null || destNm == null) {
+      await _clearMeetingPathForUser(userId);
       return;
     }
 
@@ -2410,154 +1570,74 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       Map<String, double> aBl,
       Map<String, double> bBl,
     ) {
-      final a = nm.snapPointXY([
-        aBl['x']!,
-        aBl['y']!,
-        aBl['z']!,
-      ]);
-      final b = [
-        bBl['x']!,
-        bBl['y']!,
-        bBl['z']!,
-      ];
-      var raw = nm
-          .findPathFunnelBlenderXY(
-            start: a,
-            goal: b,
-          );
-      var sm = _smoothAndResamplePath(
-        raw,
-        nm,
-      );
+      final a = nm.snapPointXY([aBl['x']!, aBl['y']!, aBl['z']!]);
+      final b = [bBl['x']!, bBl['y']!, bBl['z']!];
+      var raw = nm.findPathFunnelBlenderXY(start: a, goal: b);
+      var sm = _smoothAndResamplePath(raw, nm);
       if (sm.length < 2) {
         raw = [a, b];
-        sm = _smoothAndResamplePath(
-          raw,
-          nm,
-        );
+        sm = _smoothAndResamplePath(raw, nm);
         if (sm.length < 2) sm = raw;
       }
       return sm;
     }
 
-    double pathLen(
-      List<List<double>> pts,
-    ) {
+    double pathLen(List<List<double>> pts) {
       double sum = 0;
-      for (
-        int i = 1;
-        i < pts.length;
-        i++
-      ) {
-        sum += _distXY(
-          pts[i - 1],
-          pts[i],
-        );
+      for (int i = 1; i < pts.length; i++) {
+        sum += _distXY(pts[i - 1], pts[i]);
       }
       return sum;
     }
 
-    final nextPaths =
-        <
-          String,
-          List<Map<String, double>>
-        >{};
+    final nextPaths = <String, List<Map<String, double>>>{};
     var usedConnector = false;
 
     if (startF == destF) {
-      final pts = computePathOn(
-        startNm,
-        startPos,
-        destPos,
-      );
+      final pts = computePathOn(startNm, startPos, destPos);
       if (pts.isNotEmpty) {
         nextPaths[startF] = pts
-            .map(
-              (p) => _blenderToGltf(
-                x: p[0],
-                y: p[1],
-                z: p[2],
-              ),
-            )
+            .map((p) => _blenderToGltf(x: p[0], y: p[1], z: p[2]))
             .toList();
       }
     } else {
       await _ensureConnectorsLoaded();
 
-      final fromFloor = int.tryParse(
-        startF,
-      );
-      final toFloor = int.tryParse(
-        destF,
-      );
+      final fromFloor = int.tryParse(startF);
+      final toFloor = int.tryParse(destF);
 
-      bool directionOk(
-        ConnectorLink c,
-      ) {
-        if (fromFloor == null ||
-            toFloor == null)
-          return true;
-        final t =
-            _normalizeConnectorType(
-              c.type,
-            );
-        return _connectorDirectionAllowed(
-          t,
-          fromFloor,
-          toFloor,
-        );
+      bool directionOk(ConnectorLink c) {
+        if (fromFloor == null || toFloor == null) return true;
+        final t = _normalizeConnectorType(c.type);
+        return _connectorDirectionAllowed(t, fromFloor, toFloor);
       }
 
       final pool = _connectors
           .where(
             (c) =>
-                c.endpointsByFNumber
-                    .containsKey(
-                      startF,
-                    ) &&
-                c.endpointsByFNumber
-                    .containsKey(
-                      destF,
-                    ) &&
+                c.endpointsByFNumber.containsKey(startF) &&
+                c.endpointsByFNumber.containsKey(destF) &&
                 directionOk(c),
           )
           .toList();
 
       if (pool.isEmpty) {
-        await _clearMeetingPathForUser(
-          userId,
-        );
+        await _clearMeetingPathForUser(userId);
         return;
       }
 
-      double bestScore =
-          double.infinity;
-      List<List<double>> bestA =
-          const [];
-      List<List<double>> bestB =
-          const [];
+      double bestScore = double.infinity;
+      List<List<double>> bestA = const [];
+      List<List<double>> bestB = const [];
 
       for (final c in pool) {
-        final aPos = c
-            .endpointsByFNumber[startF]!;
-        final bPos = c
-            .endpointsByFNumber[destF]!;
-        final aPts = computePathOn(
-          startNm,
-          startPos,
-          aPos,
-        );
+        final aPos = c.endpointsByFNumber[startF]!;
+        final bPos = c.endpointsByFNumber[destF]!;
+        final aPts = computePathOn(startNm, startPos, aPos);
         if (aPts.isEmpty) continue;
-        final bPts = computePathOn(
-          destNm,
-          bPos,
-          destPos,
-        );
+        final bPts = computePathOn(destNm, bPos, destPos);
         if (bPts.isEmpty) continue;
-        final score =
-            pathLen(aPts) +
-            pathLen(bPts) +
-            _connectorPenaltyUnits;
+        final score = pathLen(aPts) + pathLen(bPts) + _connectorPenaltyUnits;
         if (score < bestScore) {
           bestScore = score;
           bestA = aPts;
@@ -2567,92 +1647,47 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
       if (bestA.isNotEmpty) {
         nextPaths[startF] = bestA
-            .map(
-              (p) => _blenderToGltf(
-                x: p[0],
-                y: p[1],
-                z: p[2],
-              ),
-            )
+            .map((p) => _blenderToGltf(x: p[0], y: p[1], z: p[2]))
             .toList();
       }
       if (bestB.isNotEmpty) {
         nextPaths[destF] = bestB
-            .map(
-              (p) => _blenderToGltf(
-                x: p[0],
-                y: p[1],
-                z: p[2],
-              ),
-            )
+            .map((p) => _blenderToGltf(x: p[0], y: p[1], z: p[2]))
             .toList();
       }
-      usedConnector =
-          bestA.isNotEmpty &&
-          bestB.isNotEmpty;
+      usedConnector = bestA.isNotEmpty && bestB.isNotEmpty;
     }
 
     if (nextPaths.isEmpty) {
-      await _clearMeetingPathForUser(
-        userId,
-      );
+      await _clearMeetingPathForUser(userId);
       return;
     }
 
-    _meetingPathsByUserFloorGltf[userId] =
-        nextPaths;
-    final rawDist =
-        _meetingPathDistance(nextPaths);
+    _meetingPathsByUserFloorGltf[userId] = nextPaths;
+    final rawDist = _meetingPathDistance(nextPaths);
     final effectiveRawDist =
-        rawDist +
-        (usedConnector
-            ? _connectorPenaltyUnits
-            : 0.0);
+        rawDist + (usedConnector ? _connectorPenaltyUnits : 0.0);
     if (effectiveRawDist > 0) {
-      final totalMeters =
-          effectiveRawDist *
-          _unitToMeters;
-      final seconds =
-          (totalMeters / 1.4).ceil();
-      final baseSeconds = seconds < 60
-          ? 60
-          : seconds;
+      final totalMeters = effectiveRawDist * _unitToMeters;
+      final seconds = (totalMeters / 1.4).ceil();
+      final baseSeconds = seconds < 60 ? 60 : seconds;
       final anchor =
-          _meetingEtaAnchorForUser(
-            userId,
-          ) ??
-          MeetingPointService.serverNow;
-      final anchorMs =
-          anchor.millisecondsSinceEpoch;
+          _meetingEtaAnchorForUser(userId) ?? MeetingPointService.serverNow;
+      final anchorMs = anchor.millisecondsSinceEpoch;
       final hadEtaState =
-          _meetingEtaBaseSecondsByUser
-              .containsKey(userId) &&
-          _meetingEtaBaseTimeByUser
-              .containsKey(userId);
+          _meetingEtaBaseSecondsByUser.containsKey(userId) &&
+          _meetingEtaBaseTimeByUser.containsKey(userId);
       final shouldResetCountdown =
-          !hadEtaState ||
-          _meetingEtaResetAnchorMsByUser[userId] !=
-              anchorMs;
+          !hadEtaState || _meetingEtaResetAnchorMsByUser[userId] != anchorMs;
       if (shouldResetCountdown) {
-        _meetingEtaBaseSecondsByUser[userId] =
-            baseSeconds;
-        _meetingEtaBaseTimeByUser[userId] =
-            anchor;
-        _meetingEtaResetAnchorMsByUser[userId] =
-            anchorMs;
+        _meetingEtaBaseSecondsByUser[userId] = baseSeconds;
+        _meetingEtaBaseTimeByUser[userId] = anchor;
+        _meetingEtaResetAnchorMsByUser[userId] = anchorMs;
       }
-      unawaited(
-        _syncMeetingEtaForUser(
-          userId,
-          baseSeconds,
-        ),
-      );
-      unawaited(
-        _maybeWriteExpiresAtFromRealEtas(),
-      );
+      unawaited(_syncMeetingEtaForUser(userId, baseSeconds));
+      unawaited(_maybeWriteExpiresAtFromRealEtas());
     } else {
-      _meetingEtaSyncSignatureByUser
-          .remove(userId);
+      _meetingEtaSyncSignatureByUser.remove(userId);
     }
     if (mounted) {
       setState(() {});
@@ -2660,19 +1695,10 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     }
   }
 
-  Future<void> _syncMeetingEtaForUser(
-    String userId,
-    int etaSeconds,
-  ) async {
-    final meeting =
-        _lastKnownConfirmedMeeting;
-    final currentUid = FirebaseAuth
-        .instance
-        .currentUser
-        ?.uid
-        ?.trim();
-    final locationUpdatedAt =
-        _meetingUpdatedAtByUser[userId];
+  Future<void> _syncMeetingEtaForUser(String userId, int etaSeconds) async {
+    final meeting = _lastKnownConfirmedMeeting;
+    final currentUid = FirebaseAuth.instance.currentUser?.uid?.trim();
+    final locationUpdatedAt = _meetingUpdatedAtByUser[userId];
     if (meeting == null ||
         !meeting.isConfirmed ||
         locationUpdatedAt == null ||
@@ -2681,49 +1707,35 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       return;
     }
 
-    final etaMinutes = (etaSeconds / 60)
-        .ceil()
-        .clamp(1, 60);
+    final etaMinutes = (etaSeconds / 60).ceil().clamp(1, 60);
     final signature =
         '${meeting.id}|$etaMinutes|${locationUpdatedAt.millisecondsSinceEpoch}';
-    if (_meetingEtaSyncSignatureByUser[userId] ==
-        signature)
-      return;
-    _meetingEtaSyncSignatureByUser[userId] =
-        signature;
+    if (_meetingEtaSyncSignatureByUser[userId] == signature) return;
+    _meetingEtaSyncSignatureByUser[userId] = signature;
 
     try {
       await MeetingPointService.syncLiveArrivalEstimate(
         meetingPointId: meeting.id,
         userId: userId,
         etaSeconds: etaSeconds,
-        locationUpdatedAt:
-            locationUpdatedAt,
+        locationUpdatedAt: locationUpdatedAt,
       );
     } catch (_) {
-      if (_meetingEtaSyncSignatureByUser[userId] ==
-          signature) {
-        _meetingEtaSyncSignatureByUser
-            .remove(userId);
+      if (_meetingEtaSyncSignatureByUser[userId] == signature) {
+        _meetingEtaSyncSignatureByUser.remove(userId);
       }
     }
   }
 
-  Future<void>
-  _recomputeAllMeetingPaths() async {
-    if (_meetingPointPosBlender ==
-        null) {
+  Future<void> _recomputeAllMeetingPaths() async {
+    if (_meetingPointPosBlender == null) {
       await _clearMeetingPaths();
       return;
     }
 
-    final ids = _meetingPosBlenderByUser
-        .keys
-        .toList();
+    final ids = _meetingPosBlenderByUser.keys.toList();
     for (final id in ids) {
-      await _recomputeMeetingPathForUser(
-        id,
-      );
+      await _recomputeMeetingPathForUser(id);
     }
   }
 
@@ -2731,119 +1743,81 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     _highlightClearScheduled = true;
     _highlightClearTimer?.cancel();
 
-    _highlightClearTimer = Timer(
-      const Duration(seconds: 3),
-      () {
-        if (!mounted) return;
+    _highlightClearTimer = Timer(const Duration(seconds: 3), () {
+      if (!mounted) return;
 
-        setState(() {
-          _highlightRequestId = null;
-          _highlightMeetingInviteId =
-              null;
-          _highlightedDisconnectedIds
-              .clear();
-          _highlightClearScheduled =
-              false;
-        });
-      },
-    );
+      setState(() {
+        _highlightRequestId = null;
+        _highlightMeetingInviteId = null;
+        _highlightedDisconnectedIds.clear();
+        _highlightClearScheduled = false;
+      });
+    });
   }
 
   /// Retry until the target tile (by request ID) is built, then scroll so it's visible.
   void _startScrollToTargetWhenReady() {
     int attempts = 0;
-    const maxAttempts =
-        25; // ~2.5 seconds
+    const maxAttempts = 25; // ~2.5 seconds
     _scrollToTargetTimer?.cancel();
-    _scrollToTargetTimer = Timer.periodic(
-      const Duration(milliseconds: 100),
-      (_) {
-        if (!mounted ||
-            attempts >= maxAttempts) {
-          _scrollToTargetTimer
-              ?.cancel();
-          _scrollToTargetTimer = null;
-          return;
-        }
-        attempts++;
-        final ctx = _scrollToTargetKey
-            .currentContext;
-        if (ctx != null) {
-          _scrollToTargetTimer
-              ?.cancel();
-          _scrollToTargetTimer = null;
-          _startHighlightClearTimer();
-          WidgetsBinding.instance
-              .addPostFrameCallback((
-                _,
-              ) {
-                if (!mounted) return;
-                try {
-                  Scrollable.ensureVisible(
-                    ctx,
-                    alignment: 0.15,
-                    duration:
-                        const Duration(
-                          milliseconds:
-                              450,
-                        ),
-                    curve: Curves
-                        .easeInOutCubic,
-                  );
-                } catch (_) {}
-              });
-        }
-      },
-    );
+    _scrollToTargetTimer = Timer.periodic(const Duration(milliseconds: 100), (
+      _,
+    ) {
+      if (!mounted || attempts >= maxAttempts) {
+        _scrollToTargetTimer?.cancel();
+        _scrollToTargetTimer = null;
+        return;
+      }
+      attempts++;
+      final ctx = _scrollToTargetKey.currentContext;
+      if (ctx != null) {
+        _scrollToTargetTimer?.cancel();
+        _scrollToTargetTimer = null;
+        _startHighlightClearTimer();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          try {
+            Scrollable.ensureVisible(
+              ctx,
+              alignment: 0.15,
+              duration: const Duration(milliseconds: 450),
+              curve: Curves.easeInOutCubic,
+            );
+          } catch (_) {}
+        });
+      }
+    });
   }
 
-  void
-  _startScrollToMeetingInviteWhenReady() {
+  void _startScrollToMeetingInviteWhenReady() {
     int attempts = 0;
-    const maxAttempts =
-        25; // ~2.5 seconds
-    _scrollToMeetingInviteTimer
-        ?.cancel();
+    const maxAttempts = 25; // ~2.5 seconds
+    _scrollToMeetingInviteTimer?.cancel();
     _scrollToMeetingInviteTimer = Timer.periodic(
       const Duration(milliseconds: 100),
       (_) {
-        if (!mounted ||
-            attempts >= maxAttempts) {
-          _scrollToMeetingInviteTimer
-              ?.cancel();
-          _scrollToMeetingInviteTimer =
-              null;
+        if (!mounted || attempts >= maxAttempts) {
+          _scrollToMeetingInviteTimer?.cancel();
+          _scrollToMeetingInviteTimer = null;
           return;
         }
         attempts++;
-        final ctx =
-            _scrollToMeetingInviteKey
-                .currentContext;
+        final ctx = _scrollToMeetingInviteKey.currentContext;
         if (ctx != null) {
-          _scrollToMeetingInviteTimer
-              ?.cancel();
-          _scrollToMeetingInviteTimer =
-              null;
+          _scrollToMeetingInviteTimer?.cancel();
+          _scrollToMeetingInviteTimer = null;
           _startHighlightClearTimer();
-          WidgetsBinding.instance
-              .addPostFrameCallback((
-                _,
-              ) {
-                if (!mounted) return;
-                try {
-                  Scrollable.ensureVisible(
-                    ctx,
-                    alignment: 0.15,
-                    duration:
-                        const Duration(
-                          milliseconds:
-                              450,
-                        ),
-                    curve: Curves
-                        .easeInOutCubic,
-                  );
-                } catch (_) {}
-              });
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            try {
+              Scrollable.ensureVisible(
+                ctx,
+                alignment: 0.15,
+                duration: const Duration(milliseconds: 450),
+                curve: Curves.easeInOutCubic,
+              );
+            } catch (_) {}
+          });
         }
       },
     );
@@ -2853,107 +1827,72 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   /// Scrolls to the first disconnected friend and highlights all disconnected tiles briefly
   // by remas start
   // Highlights ALL disconnected friends, not just the first one
-  final Set<String>
-  _highlightedDisconnectedIds = {};
+  final Set<String> _highlightedDisconnectedIds = {};
   // by remas start
-  void _scrollToAllActive(
-    List<TrackingRequest> active,
-  ) {
+  void _scrollToAllActive(List<TrackingRequest> active) {
     if (active.isEmpty) return;
 
     if (_selectedFilterIndex != 0) {
-      setState(
-        () => _selectedFilterIndex = 0,
-      );
+      setState(() => _selectedFilterIndex = 0);
     }
 
     setState(() {
       _highlightedDisconnectedIds
         ..clear()
-        ..addAll(
-          active.map((r) => r.id),
-        );
-      _highlightRequestId =
-          active.first.id;
+        ..addAll(active.map((r) => r.id));
+      _highlightRequestId = active.first.id;
     });
 
-    WidgetsBinding.instance
-        .addPostFrameCallback((_) {
-          if (!mounted) return;
-          _scrollController.animateTo(
-            _scrollController
-                .position
-                .maxScrollExtent,
-            duration: const Duration(
-              milliseconds: 500,
-            ),
-            curve: Curves.easeInOut,
-          );
-        });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 500),
+        curve: Curves.easeInOut,
+      );
+    });
 
     _highlightClearTimer?.cancel();
-    _highlightClearTimer = Timer(
-      const Duration(seconds: 3),
-      () {
-        if (mounted) {
-          setState(() {
-            _highlightRequestId = null;
-            _highlightedDisconnectedIds
-                .clear();
-            _highlightClearScheduled =
-                false;
-          });
-        }
-      },
-    );
+    _highlightClearTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) {
+        setState(() {
+          _highlightRequestId = null;
+          _highlightedDisconnectedIds.clear();
+          _highlightClearScheduled = false;
+        });
+      }
+    });
   }
 
   // by remas end
-  void _scrollToDisconnected(
-    List<TrackingRequest> active,
-  ) {
+  void _scrollToDisconnected(List<TrackingRequest> active) {
     final disconnected = active
-        .where(
-          (r) => !_isConnected(
-            r.receiverId,
-            r.id,
-          ),
-        )
+        .where((r) => !_isConnected(r.receiverId, r.id))
         .toList();
     if (disconnected.isEmpty) return;
 
     // Switch to Sent filter if not already there
     if (_selectedFilterIndex != 0) {
-      setState(
-        () => _selectedFilterIndex = 0,
-      );
+      setState(() => _selectedFilterIndex = 0);
     }
 
     // Highlight all disconnected friends
     setState(() {
       _highlightedDisconnectedIds
         ..clear()
-        ..addAll(
-          disconnected.map((r) => r.id),
-        );
-      _highlightRequestId =
-          disconnected.first.id;
+        ..addAll(disconnected.map((r) => r.id));
+      _highlightRequestId = disconnected.first.id;
     });
 
     // Scroll to first disconnected friend after frame
-    WidgetsBinding.instance
-        .addPostFrameCallback((_) {
-          if (!mounted) return;
-          _scrollController.animateTo(
-            _scrollController
-                .position
-                .maxScrollExtent,
-            duration: const Duration(
-              milliseconds: 500,
-            ),
-            curve: Curves.easeInOut,
-          );
-        });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 500),
+        curve: Curves.easeInOut,
+      );
+    });
 
     // Clear all highlights after 3 seconds
     _startHighlightClearTimer();
@@ -2967,44 +1906,34 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     _arrivalTimer?.cancel();
     _completionHoldTimer?.cancel();
     _scrollToTargetTimer?.cancel();
-    _scrollToMeetingInviteTimer
-        ?.cancel();
+    _scrollToMeetingInviteTimer?.cancel();
     _highlightClearTimer?.cancel();
     _activeReqSub?.cancel();
     _activeMeetingSub?.cancel();
 
     // cancel all tracked-users subscriptions
-    for (final sub
-        in _userLocSubs.values) {
+    for (final sub in _userLocSubs.values) {
       sub.cancel();
     }
     _userLocSubs.clear();
 
     // cancel all meeting participant subscriptions
-    for (final sub
-        in _meetingUserSubs.values) {
+    for (final sub in _meetingUserSubs.values) {
       sub.cancel();
     }
     _meetingUserSubs.clear();
 
-    for (final timer
-        in _refreshCooldownMessageTimers
-            .values) {
+    for (final timer in _refreshCooldownMessageTimers.values) {
       timer.cancel();
     }
-    _refreshCooldownMessageTimers
-        .clear();
-    _refreshCooldownMessageRequestIds
-        .clear();
+    _refreshCooldownMessageTimers.clear();
+    _refreshCooldownMessageRequestIds.clear();
 
-    for (final timer
-        in _acceptCutoffMessageTimers
-            .values) {
+    for (final timer in _acceptCutoffMessageTimers.values) {
       timer.cancel();
     }
     _acceptCutoffMessageTimers.clear();
-    _acceptCutoffMessageRequestIds
-        .clear();
+    _acceptCutoffMessageRequestIds.clear();
 
     _scrollController.dispose();
     super.dispose();
@@ -3012,37 +1941,20 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
   void _toggleExpand(String requestId) {
     setState(() {
-      _expandedRequestId =
-          _expandedRequestId ==
-              requestId
-          ? null
-          : requestId;
+      _expandedRequestId = _expandedRequestId == requestId ? null : requestId;
     });
   }
 
-  Future<void>
-  _toggleParticipantFavorite(
-    String phone,
-    String name,
-  ) async {
+  Future<void> _toggleParticipantFavorite(String phone, String name) async {
     try {
-      await _favService.toggle(
-        phone,
-        name,
-      );
+      await _favService.toggle(phone, name);
       if (mounted) setState(() {});
     } catch (_) {}
   }
 
-  Future<void> _toggleFavorite(
-    String phone,
-    String name,
-  ) async {
+  Future<void> _toggleFavorite(String phone, String name) async {
     try {
-      await _favService.toggle(
-        phone,
-        name,
-      );
+      await _favService.toggle(phone, name);
       if (mounted) setState(() {});
     } catch (_) {}
   }
@@ -3050,76 +1962,34 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   Future<void> _loadVenueMaps() async {
     setState(() => _mapsLoading = true);
     try {
-      final doc =
-          await FirebaseFirestore
-              .instance
-              .collection('venues')
-              .doc(kSolitaireVenueId)
-              .get(
-                const GetOptions(
-                  source: Source
-                      .serverAndCache,
-                ),
-              )
-              .timeout(
-                const Duration(
-                  seconds: 10,
-                ),
-              );
+      final doc = await FirebaseFirestore.instance
+          .collection('venues')
+          .doc(kSolitaireVenueId)
+          .get(const GetOptions(source: Source.serverAndCache))
+          .timeout(const Duration(seconds: 10));
 
       final data = doc.data();
-      if (data != null &&
-          data['map'] is List) {
-        final maps =
-            (data['map'] as List)
-                .cast<
-                  Map<String, dynamic>
-                >();
-        final convertedMaps = maps.map((
-          map,
-        ) {
+      if (data != null && data['map'] is List) {
+        final maps = (data['map'] as List).cast<Map<String, dynamic>>();
+        final convertedMaps = maps.map((map) {
           return {
-            'floorNumber':
-                (map['floorNumber'] ??
-                        '')
-                    .toString(),
-            'mapURL':
-                (map['mapURL'] ?? '')
-                    .toString(),
-            'F_number':
-                (map['F_number'] ??
-                        map['f_number'] ??
-                        '')
-                    .toString(),
-            'navmesh':
-                (map['navmesh'] ?? '')
-                    .toString(),
+            'floorNumber': (map['floorNumber'] ?? '').toString(),
+            'mapURL': (map['mapURL'] ?? '').toString(),
+            'F_number': (map['F_number'] ?? map['f_number'] ?? '').toString(),
+            'navmesh': (map['navmesh'] ?? '').toString(),
           };
         }).toList();
 
         if (mounted) {
           setState(() {
             _venueMaps = convertedMaps;
-            if (convertedMaps
-                .isNotEmpty) {
-              final firstValid =
-                  convertedMaps.firstWhere(
-                    (m) =>
-                        (m['mapURL'] ??
-                                '')
-                            .toString()
-                            .trim()
-                            .isNotEmpty,
-                    orElse: () =>
-                        const {
-                          'mapURL': '',
-                        },
-                  );
+            if (convertedMaps.isNotEmpty) {
+              final firstValid = convertedMaps.firstWhere(
+                (m) => (m['mapURL'] ?? '').toString().trim().isNotEmpty,
+                orElse: () => const {'mapURL': ''},
+              );
 
-              _currentFloor =
-                  (firstValid['mapURL'] ??
-                          '')
-                      .toString();
+              _currentFloor = (firstValid['mapURL'] ?? '').toString();
             }
           });
         }
@@ -3129,20 +1999,13 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     } catch (e) {
       _useFallbackMaps();
     } finally {
-      if (mounted)
-        setState(
-          () => _mapsLoading = false,
-        );
+      if (mounted) setState(() => _mapsLoading = false);
     }
     _pendingPinApply = true;
   }
 
-  int? _parseFloorToIndex(
-    String floorRaw,
-  ) {
-    final s = floorRaw
-        .trim()
-        .toUpperCase();
+  int? _parseFloorToIndex(String floorRaw) {
+    final s = floorRaw.trim().toUpperCase();
     if (s.isEmpty) return null;
 
     // "1", "2"
@@ -3150,37 +2013,22 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     if (n1 != null) return n1 - 1;
 
     // "F1", "F2"
-    final m = RegExp(
-      r'(\d+)',
-    ).firstMatch(s);
-    if (m != null)
-      return int.parse(m.group(1)!) - 1;
+    final m = RegExp(r'(\d+)').firstMatch(s);
+    if (m != null) return int.parse(m.group(1)!) - 1;
 
-    if (s == 'GF' ||
-        s == 'G' ||
-        s == 'GROUND')
-      return 0;
+    if (s == 'GF' || s == 'G' || s == 'GROUND') return 0;
     return null;
   }
 
   String _currentFloorLabel() {
     final m = _venueMaps.firstWhere(
-      (x) =>
-          (x['mapURL'] ?? '') ==
-          _currentFloor,
-      orElse: () => const {
-        'floorNumber': '',
-      },
+      (x) => (x['mapURL'] ?? '') == _currentFloor,
+      orElse: () => const {'floorNumber': ''},
     );
-    return (m['floorNumber'] ?? '')
-        .toString()
-        .trim()
-        .toUpperCase();
+    return (m['floorNumber'] ?? '').toString().trim().toUpperCase();
   }
 
-  String _normalizeTrackedFloorLabel(
-    String raw,
-  ) {
+  String _normalizeTrackedFloorLabel(String raw) {
     final s = raw.trim().toUpperCase();
     if (s.isEmpty) return '';
 
@@ -3194,47 +2042,24 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     return s;
   }
 
-  bool _floorsMatch(
-    String trackedRaw,
-    String currentLabel,
-  ) {
-    final tracked =
-        _normalizeTrackedFloorLabel(
-          trackedRaw,
-        );
-    final cur = currentLabel
-        .trim()
-        .toUpperCase();
+  bool _floorsMatch(String trackedRaw, String currentLabel) {
+    final tracked = _normalizeTrackedFloorLabel(trackedRaw);
+    final cur = currentLabel.trim().toUpperCase();
 
-    if (tracked.isEmpty || cur.isEmpty)
-      return true;
+    if (tracked.isEmpty || cur.isEmpty) return true;
 
     if (cur == tracked) return true;
 
-    final tNum = RegExp(
-      r'\d+',
-    ).firstMatch(tracked)?.group(0);
-    if (tNum != null &&
-        cur.contains(tNum))
-      return true;
+    final tNum = RegExp(r'\d+').firstMatch(tracked)?.group(0);
+    if (tNum != null && cur.contains(tNum)) return true;
 
     return false;
   }
 
-  bool _floorsMatchStrict(
-    String aRaw,
-    String bRaw,
-  ) {
-    final a =
-        _normalizeTrackedFloorLabel(
-          aRaw,
-        );
-    final b =
-        _normalizeTrackedFloorLabel(
-          bRaw,
-        );
-    if (a.isEmpty || b.isEmpty)
-      return false;
+  bool _floorsMatchStrict(String aRaw, String bRaw) {
+    final a = _normalizeTrackedFloorLabel(aRaw);
+    final b = _normalizeTrackedFloorLabel(bRaw);
+    if (a.isEmpty || b.isEmpty) return false;
     return a == b;
   }
 
@@ -3244,97 +2069,60 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     if (s.isEmpty) return '';
 
     final up0 = s.toUpperCase();
-    if (up0 == 'G' ||
-        up0 == 'GF' ||
-        up0.contains('GROUND'))
-      return '0';
+    if (up0 == 'G' || up0 == 'GF' || up0.contains('GROUND')) return '0';
 
-    var up = up0.replaceAll(
-      RegExp(r'[\s_\-]+'),
-      '',
-    );
+    var up = up0.replaceAll(RegExp(r'[\s_\-]+'), '');
     up = up
         .replaceAll('FLOOR', '')
         .replaceAll('LEVEL', '')
         .replaceAll('LVL', '')
         .replaceAll('FL', '');
 
-    final m1 = RegExp(
-      r'^(?:F|L)?(-?\d+)$',
-    ).firstMatch(up);
+    final m1 = RegExp(r'^(?:F|L)?(-?\d+)$').firstMatch(up);
     if (m1 != null) return m1.group(1)!;
 
-    final m2 = RegExp(
-      r'(-?\d+)',
-    ).firstMatch(up);
+    final m2 = RegExp(r'(-?\d+)').firstMatch(up);
     if (m2 != null) return m2.group(1)!;
 
     return '';
   }
 
-  String _currentFNumber() =>
-      _toFNumber(_currentFloorLabel());
+  String _currentFNumber() => _toFNumber(_currentFloorLabel());
 
-  String _normalizeConnectorType(
-    String raw,
-  ) {
+  String _normalizeConnectorType(String raw) {
     final t = raw.toLowerCase().trim();
-    if (t == 'stair' || t == 'stairs')
-      return 'stairs';
-    if (t == 'elev' ||
-        t == 'elevator' ||
-        t == 'lift')
-      return 'elevator';
-    if (t == 'esc_up' ||
-        t == 'escalator_up' ||
-        t == 'escalatorup')
+    if (t == 'stair' || t == 'stairs') return 'stairs';
+    if (t == 'elev' || t == 'elevator' || t == 'lift') return 'elevator';
+    if (t == 'esc_up' || t == 'escalator_up' || t == 'escalatorup')
       return 'escalator_up';
     if (t == 'esc_dn' ||
         t == 'esc_down' ||
         t == 'escalator_down' ||
         t == 'escalatordown')
       return 'escalator_down';
-    if (t.contains('esc') ||
-        t.contains('escalator'))
-      return 'escalator';
+    if (t.contains('esc') || t.contains('escalator')) return 'escalator';
     return t;
   }
 
-  bool _connectorDirectionAllowed(
-    String normType,
-    int fromFloor,
-    int toFloor,
-  ) {
+  bool _connectorDirectionAllowed(String normType, int fromFloor, int toFloor) {
     final t = normType.toLowerCase();
-    if (t == 'escalator_up')
-      return fromFloor < toFloor;
-    if (t == 'escalator_down')
-      return fromFloor > toFloor;
+    if (t == 'escalator_up') return fromFloor < toFloor;
+    if (t == 'escalator_down') return fromFloor > toFloor;
     return true;
   }
 
   double? _asDouble(dynamic v) {
     if (v == null) return null;
     if (v is num) return v.toDouble();
-    return double.tryParse(
-      v.toString(),
-    );
+    return double.tryParse(v.toString());
   }
 
-  Future<NavMesh?>
-  _ensureNavmeshLoadedForFNumber(
-    String fNumber,
-  ) async {
-    if (_navmeshCache.containsKey(
-      fNumber,
-    ))
-      return _navmeshCache[fNumber];
+  Future<NavMesh?> _ensureNavmeshLoadedForFNumber(String fNumber) async {
+    if (_navmeshCache.containsKey(fNumber)) return _navmeshCache[fNumber];
 
     String? assetPath;
     for (final m in _venueMaps) {
-      if ((m["F_number"]?.toString() ??
-              "") ==
-          fNumber) {
+      if ((m["F_number"]?.toString() ?? "") == fNumber) {
         assetPath = m["navmesh"];
         break;
       }
@@ -3342,23 +2130,14 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
     assetPath ??= (fNumber == "0")
         ? 'assets/nav_cor/navmesh_GF.json'
-        : (fNumber == "1"
-              ? 'assets/nav_cor/navmesh_F1.json'
-              : null);
+        : (fNumber == "1" ? 'assets/nav_cor/navmesh_F1.json' : null);
 
-    if (assetPath == null ||
-        assetPath.isEmpty)
-      return null;
+    if (assetPath == null || assetPath.isEmpty) return null;
 
     try {
-      final nm =
-          await NavMesh.loadAsset(
-            assetPath,
-          );
+      final nm = await NavMesh.loadAsset(assetPath);
       _navmeshCache[fNumber] = nm;
-      debugPrint(
-        "✅ Navmesh loaded for floor $fNumber: $assetPath",
-      );
+      debugPrint("✅ Navmesh loaded for floor $fNumber: $assetPath");
       return nm;
     } catch (e) {
       debugPrint(
@@ -3368,203 +2147,113 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     }
   }
 
-  Future<void>
-  _ensureConnectorsLoaded() async {
+  Future<void> _ensureConnectorsLoaded() async {
     if (_connectorsLoaded) return;
     try {
-      const path =
-          'assets/connectors/connectors_merged_local.json';
-      final raw = await rootBundle
-          .loadString(path);
-      debugPrint(
-        '✅ Connectors loaded: $path',
-      );
+      const path = 'assets/connectors/connectors_merged_local.json';
+      final raw = await rootBundle.loadString(path);
+      debugPrint('✅ Connectors loaded: $path');
 
       final decoded = jsonDecode(raw);
-      final List<dynamic> list =
-          (decoded is List)
+      final List<dynamic> list = (decoded is List)
           ? decoded
-          : (decoded is Map &&
-                decoded['connectors']
-                    is List)
-          ? (decoded['connectors']
-                as List)
+          : (decoded is Map && decoded['connectors'] is List)
+          ? (decoded['connectors'] as List)
           : const [];
 
       final out = <ConnectorLink>[];
       for (final item in list) {
         if (item is! Map) continue;
 
-        final id =
-            (item['id'] ??
-                    item['name'] ??
-                    item['connector_id'] ??
-                    '')
-                .toString();
+        final id = (item['id'] ?? item['name'] ?? item['connector_id'] ?? '')
+            .toString();
         if (id.isEmpty) continue;
 
-        final type =
-            (item['type'] ??
-                    item['kind'] ??
-                    item['mode'] ??
-                    '')
-                .toString();
+        final type = (item['type'] ?? item['kind'] ?? item['mode'] ?? '')
+            .toString();
 
         final endpointsRaw =
-            (item['endpoints'] ??
-            item['floors'] ??
-            item['nodes']);
-        final endpoints =
-            <
-              String,
-              Map<String, double>
-            >{};
+            (item['endpoints'] ?? item['floors'] ?? item['nodes']);
+        final endpoints = <String, Map<String, double>>{};
 
         if (endpointsRaw is List) {
-          for (final ep
-              in endpointsRaw) {
+          for (final ep in endpointsRaw) {
             if (ep is! Map) continue;
 
             String? f;
-            if (ep['floorNumber'] !=
-                null) {
-              f = ep['floorNumber']
-                  .toString();
-            } else if (ep['f_number'] !=
-                null) {
-              f = ep['f_number']
-                  .toString();
-            } else if (ep['floor'] !=
-                    null &&
-                (ep['floor'] is num ||
-                    ep['floor']
-                        is String)) {
-              f = ep['floor']
-                  .toString();
-            } else if (ep['floorLabel'] !=
-                    null ||
-                ep['floor_label'] !=
-                    null ||
+            if (ep['floorNumber'] != null) {
+              f = ep['floorNumber'].toString();
+            } else if (ep['f_number'] != null) {
+              f = ep['f_number'].toString();
+            } else if (ep['floor'] != null &&
+                (ep['floor'] is num || ep['floor'] is String)) {
+              f = ep['floor'].toString();
+            } else if (ep['floorLabel'] != null ||
+                ep['floor_label'] != null ||
                 ep['label'] != null) {
-              final lbl =
-                  (ep['floorLabel'] ??
-                          ep['floor_label'] ??
-                          ep['label'])
-                      .toString();
+              final lbl = (ep['floorLabel'] ?? ep['floor_label'] ?? ep['label'])
+                  .toString();
               f = _toFNumber(lbl);
             }
-            if (f == null || f.isEmpty)
-              continue;
+            if (f == null || f.isEmpty) continue;
 
-            Map<String, dynamic>?
-            posMap;
+            Map<String, dynamic>? posMap;
             if (ep['position'] is Map) {
-              posMap =
-                  (ep['position']
-                          as Map)
-                      .cast<
-                        String,
-                        dynamic
-                      >();
+              posMap = (ep['position'] as Map).cast<String, dynamic>();
             }
-            if (posMap == null &&
-                ep['pos'] is Map) {
-              posMap =
-                  (ep['pos'] as Map)
-                      .cast<
-                        String,
-                        dynamic
-                      >();
+            if (posMap == null && ep['pos'] is Map) {
+              posMap = (ep['pos'] as Map).cast<String, dynamic>();
             }
 
-            double? x = _asDouble(
-              posMap?['x'] ?? ep['x'],
-            );
-            double? y = _asDouble(
-              posMap?['y'] ?? ep['y'],
-            );
-            double? z = _asDouble(
-              posMap?['z'] ?? ep['z'],
-            );
+            double? x = _asDouble(posMap?['x'] ?? ep['x']);
+            double? y = _asDouble(posMap?['y'] ?? ep['y']);
+            double? z = _asDouble(posMap?['z'] ?? ep['z']);
 
-            if ((x == null ||
-                    y == null ||
-                    z == null) &&
-                ep['xyz'] is List) {
-              final l =
-                  ep['xyz'] as List;
+            if ((x == null || y == null || z == null) && ep['xyz'] is List) {
+              final l = ep['xyz'] as List;
               if (l.length >= 3) {
                 x = _asDouble(l[0]);
                 y = _asDouble(l[1]);
                 z = _asDouble(l[2]);
               }
             }
-            if (x == null ||
-                y == null ||
-                z == null)
-              continue;
+            if (x == null || y == null || z == null) continue;
 
-            endpoints[f] = {
-              'x': x,
-              'y': y,
-              'z': z,
-            };
+            endpoints[f] = {'x': x, 'y': y, 'z': z};
           }
         }
 
         if (endpoints.isNotEmpty) {
           out.add(
-            ConnectorLink(
-              id: id,
-              type: type,
-              endpointsByFNumber:
-                  endpoints,
-            ),
+            ConnectorLink(id: id, type: type, endpointsByFNumber: endpoints),
           );
         }
       }
 
       _connectors = out;
       _connectorsLoaded = true;
-      debugPrint(
-        "✅ Connectors parsed: ${_connectors.length}",
-      );
+      debugPrint("✅ Connectors parsed: ${_connectors.length}");
     } catch (e) {
       _connectors = const [];
       _connectorsLoaded = true;
-      debugPrint(
-        "❌ Failed to load connectors: $e",
-      );
+      debugPrint("❌ Failed to load connectors: $e");
     }
   }
 
-  List<List<double>>
-  _smoothAndResamplePath(
+  List<List<double>> _smoothAndResamplePath(
     List<List<double>> path,
     NavMesh nm,
   ) {
     var pts = path;
-    pts = _resampleByDistance(
-      pts,
-      step: 0.06,
-    );
+    pts = _resampleByDistance(pts, step: 0.06);
     const maxPts = 180;
     if (pts.length > maxPts) {
-      final stride =
-          (pts.length / maxPts).ceil();
+      final stride = (pts.length / maxPts).ceil();
       final reduced = <List<double>>[];
-      for (
-        var i = 0;
-        i < pts.length;
-        i += stride
-      ) {
+      for (var i = 0; i < pts.length; i += stride) {
         reduced.add(pts[i]);
       }
-      if (reduced.isEmpty ||
-          !_samePoint(
-            reduced.last,
-            pts.last,
-          )) {
+      if (reduced.isEmpty || !_samePoint(reduced.last, pts.last)) {
         reduced.add(pts.last);
       }
       pts = reduced;
@@ -3572,23 +2261,16 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     return pts;
   }
 
-  List<List<double>>
-  _resampleByDistance(
+  List<List<double>> _resampleByDistance(
     List<List<double>> pts, {
     required double step,
   }) {
     if (pts.length < 2) return pts;
 
-    final out = <List<double>>[
-      pts.first,
-    ];
+    final out = <List<double>>[pts.first];
     var acc = 0.0;
 
-    for (
-      var i = 1;
-      i < pts.length;
-      i++
-    ) {
+    for (var i = 1; i < pts.length; i++) {
       var prev = out.last;
       var cur = pts[i];
 
@@ -3597,15 +2279,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
       while (acc + segLen >= step) {
         final t = (step - acc) / segLen;
-        final nx =
-            prev[0] +
-            (cur[0] - prev[0]) * t;
-        final ny =
-            prev[1] +
-            (cur[1] - prev[1]) * t;
-        final nz =
-            prev[2] +
-            (cur[2] - prev[2]) * t;
+        final nx = prev[0] + (cur[0] - prev[0]) * t;
+        final ny = prev[1] + (cur[1] - prev[1]) * t;
+        final nz = prev[2] + (cur[2] - prev[2]) * t;
         final np = <double>[nx, ny, nz];
         out.add(np);
         prev = np;
@@ -3617,217 +2293,133 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       acc += segLen;
     }
 
-    if (!_samePoint(
-      out.last,
-      pts.last,
-    )) {
+    if (!_samePoint(out.last, pts.last)) {
       out.add(pts.last);
     }
     return out;
   }
 
-  double _distXY(
-    List<double> a,
-    List<double> b,
-  ) {
+  double _distXY(List<double> a, List<double> b) {
     final dx = a[0] - b[0];
     final dy = a[1] - b[1];
     return math.sqrt(dx * dx + dy * dy);
   }
 
-  bool _samePoint(
-    List<double> a,
-    List<double> b,
-  ) {
+  bool _samePoint(List<double> a, List<double> b) {
     return (a[0] - b[0]).abs() < 1e-6 &&
         (a[1] - b[1]).abs() < 1e-6 &&
         (a[2] - b[2]).abs() < 1e-6;
   }
 
-  Future<void>
-  _applyAllTrackedPinsToViewer() async {
+  Future<void> _applyAllTrackedPinsToViewer() async {
     if (_trackMapController == null) {
       _pendingPinApply = true;
       return;
     }
 
-    final currentLabel =
-        _currentFloorLabel();
+    final currentLabel = _currentFloorLabel();
     final currentF = _currentFNumber();
 
-    final activePosByUser =
-        _isTrackingView
+    final activePosByUser = _isTrackingView
         ? _trackedPosByUser
         : _meetingPosByUser;
-    final activeFloorByUser =
-        _isTrackingView
+    final activeFloorByUser = _isTrackingView
         ? _trackedFloorByUser
         : _meetingFloorByUser;
-    final activeNameByUser =
-        _isTrackingView
+    final activeNameByUser = _isTrackingView
         ? _trackedNameByUser
         : _meetingNameByUser;
-    final activeUpdatedAtByUser =
-        _isTrackingView
+    final activeUpdatedAtByUser = _isTrackingView
         ? _trackedUpdatedAtByUser
         : _meetingUpdatedAtByUser;
 
     final allIds = <String>{};
-    allIds.addAll(
-      _trackedPosByUser.keys,
-    );
-    allIds.addAll(
-      _meetingPosByUser.keys,
-    );
-    final activeIds = activePosByUser
-        .keys
-        .toSet();
+    allIds.addAll(_trackedPosByUser.keys);
+    allIds.addAll(_meetingPosByUser.keys);
+    final activeIds = activePosByUser.keys.toSet();
 
-    for (final id in allIds.difference(
-      activeIds,
-    )) {
-      await _trackMapController!
-          .runJavaScript(
-            "hideTrackedPin('$id');",
-          );
+    for (final id in allIds.difference(activeIds)) {
+      await _trackMapController!.runJavaScript("hideTrackedPin('$id');");
       if (!_isTrackingView) {
-        await _trackMapController!
-            .runJavaScript(
-              "clearMeetingPathForUser('$id');",
-            );
+        await _trackMapController!.runJavaScript(
+          "clearMeetingPathForUser('$id');",
+        );
       }
     }
 
     if (activePosByUser.isEmpty) {
-      _trackMapController!.runJavaScript(
-        "clearMeetingPathsFromFlutter();",
-      );
-      if (!_isTrackingView &&
-          _meetingPointPosGltf !=
-              null) {
-        final mp =
-            _meetingPointPosGltf!;
-        final ok = _floorsMatch(
-          _meetingPointFloorLabel,
-          currentLabel,
-        );
+      _trackMapController!.runJavaScript("clearMeetingPathsFromFlutter();");
+      if (!_isTrackingView && _meetingPointPosGltf != null) {
+        final mp = _meetingPointPosGltf!;
+        final ok = _floorsMatch(_meetingPointFloorLabel, currentLabel);
         if (ok) {
-          final mx = (mp['x'] ?? 0)
-              .toDouble();
-          final my = (mp['y'] ?? 0)
-              .toDouble();
-          final mz = (mp['z'] ?? 0)
-              .toDouble();
-          final label =
-              _meetingPointLabel
-                  .replaceAll(
-                    "'",
-                    "\\'",
-                  );
-          _trackMapController!
-              .runJavaScript(
-                "upsertMeetingPointPin($mx,$my,$mz,'$label');",
-              );
+          final mx = (mp['x'] ?? 0).toDouble();
+          final my = (mp['y'] ?? 0).toDouble();
+          final mz = (mp['z'] ?? 0).toDouble();
+          final label = _meetingPointLabel.replaceAll("'", "\\'");
+          _trackMapController!.runJavaScript(
+            "upsertMeetingPointPin($mx,$my,$mz,'$label');",
+          );
         } else {
-          _trackMapController!
-              .runJavaScript(
-                "hideMeetingPointPin();",
-              );
+          _trackMapController!.runJavaScript("hideMeetingPointPin();");
         }
       } else {
-        _trackMapController!
-            .runJavaScript(
-              "hideMeetingPointPin();",
-            );
+        _trackMapController!.runJavaScript("hideMeetingPointPin();");
       }
       _pendingPinApply = false;
       return;
     }
 
     // by remas start
-    for (final entry
-        in activePosByUser.entries) {
+    for (final entry in activePosByUser.entries) {
       final userId = entry.key;
       final pos = entry.value;
       // by remas end
 
-      final trackedFloorLabel =
-          activeFloorByUser[userId] ??
-          '';
+      final trackedFloorLabel = activeFloorByUser[userId] ?? '';
       final isArrived =
           !_isTrackingView &&
-          _meetingPointPosGltf !=
-              null &&
-          (_meetingArrivalStatusByUser[userId] ??
-                  '') ==
-              'arrived';
-      final displayFloorLabel =
-          trackedFloorLabel;
-      final ok = _floorsMatch(
-        displayFloorLabel,
-        currentLabel,
-      );
+          _meetingPointPosGltf != null &&
+          (_meetingArrivalStatusByUser[userId] ?? '') == 'arrived';
+      final displayFloorLabel = trackedFloorLabel;
+      final ok = _floorsMatch(displayFloorLabel, currentLabel);
 
       if (!ok) {
-        await _trackMapController!
-            .runJavaScript(
-              "hideTrackedPin('$userId');",
-            );
+        await _trackMapController!.runJavaScript("hideTrackedPin('$userId');");
         continue;
       }
 
       // by remas start
-      final updatedAt =
-          activeUpdatedAtByUser[userId];
+      final updatedAt = activeUpdatedAtByUser[userId];
       final hasRecentLocation =
           updatedAt != null &&
-          DateTime.now()
-                  .difference(updatedAt)
-                  .inHours <
-              24;
+          DateTime.now().difference(updatedAt).inHours < 24;
 
       if (!hasRecentLocation) {
-        await _trackMapController!
-            .runJavaScript(
-              "hideTrackedPin('$userId');",
-            );
+        await _trackMapController!.runJavaScript("hideTrackedPin('$userId');");
         continue;
       }
       String pinColor;
       if (_isTrackingView) {
-        final requestId =
-            _requestIdByTrackedUser[userId];
-        final outsideVenue =
-            requestId != null
-            ? _isOutsideVenue(
-                userId,
-                requestId,
-              )
+        final requestId = _requestIdByTrackedUser[userId];
+        final outsideVenue = requestId != null
+            ? _isOutsideVenue(userId, requestId)
             : false;
         pinColor = outsideVenue
             ? '#9E9E9E'
-            : (_userPinColorMap[userId] ??
-                  '#FF3B30');
+            : (_userPinColorMap[userId] ?? '#FF3B30');
       } else {
-        pinColor =
-            _userPinColorMap[userId] ??
-            '#FF3B30';
+        pinColor = _userPinColorMap[userId] ?? '#FF3B30';
       }
       // by remas end
 
-      double x = (pos['x'] ?? 0)
-          .toDouble();
-      double y = (pos['y'] ?? 0)
-          .toDouble();
-      double z = (pos['z'] ?? 0)
-          .toDouble();
+      double x = (pos['x'] ?? 0).toDouble();
+      double y = (pos['y'] ?? 0).toDouble();
+      double z = (pos['z'] ?? 0).toDouble();
 
       // Keep the user's actual stored location even when arrived.
 
-      final label =
-          (activeNameByUser[userId] ??
-                  'User')
-              .replaceAll("'", "\\'");
+      final label = (activeNameByUser[userId] ?? 'User').replaceAll("'", "\\'");
 
       // by remas start
       _trackMapController!.runJavaScript(
@@ -3838,93 +2430,53 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       // Path rendering handled below (separated from pin visibility).
     }
 
-    if (!_isTrackingView &&
-        _meetingPointPosGltf != null) {
+    if (!_isTrackingView && _meetingPointPosGltf != null) {
       final mp = _meetingPointPosGltf!;
-      final ok = _floorsMatch(
-        _meetingPointFloorLabel,
-        currentLabel,
-      );
+      final ok = _floorsMatch(_meetingPointFloorLabel, currentLabel);
       if (ok) {
-        final mx = (mp['x'] ?? 0)
-            .toDouble();
-        final my = (mp['y'] ?? 0)
-            .toDouble();
-        final mz = (mp['z'] ?? 0)
-            .toDouble();
-        final label = _meetingPointLabel
-            .replaceAll("'", "\\'");
+        final mx = (mp['x'] ?? 0).toDouble();
+        final my = (mp['y'] ?? 0).toDouble();
+        final mz = (mp['z'] ?? 0).toDouble();
+        final label = _meetingPointLabel.replaceAll("'", "\\'");
         _trackMapController!.runJavaScript(
           "upsertMeetingPointPin($mx,$my,$mz,'$label');",
         );
       } else {
-        _trackMapController!
-            .runJavaScript(
-              "hideMeetingPointPin();",
-            );
+        _trackMapController!.runJavaScript("hideMeetingPointPin();");
       }
     } else {
-      _trackMapController!
-          .runJavaScript(
-            "hideMeetingPointPin();",
-          );
+      _trackMapController!.runJavaScript("hideMeetingPointPin();");
     }
 
-    if (_isTrackingView ||
-        _meetingPointPosBlender ==
-            null) {
-      _trackMapController!.runJavaScript(
-        "clearMeetingPathsFromFlutter();",
-      );
+    if (_isTrackingView || _meetingPointPosBlender == null) {
+      _trackMapController!.runJavaScript("clearMeetingPathsFromFlutter();");
     } else {
       if (currentF.isEmpty) {
-        _trackMapController!.runJavaScript(
-          "clearMeetingPathsFromFlutter();",
-        );
+        _trackMapController!.runJavaScript("clearMeetingPathsFromFlutter();");
       } else {
         final shown = <String>{};
-        for (final entry
-            in _meetingPathsByUserFloorGltf
-                .entries) {
+        for (final entry in _meetingPathsByUserFloorGltf.entries) {
           final userId = entry.key;
-          if ((_meetingArrivalStatusByUser[userId] ??
-                  '') ==
-              'arrived') {
+          if ((_meetingArrivalStatusByUser[userId] ?? '') == 'arrived') {
             continue;
           }
           final byFloor = entry.value;
-          final pts =
-              byFloor[currentF] ??
-              const <
-                Map<String, double>
-              >[];
+          final pts = byFloor[currentF] ?? const <Map<String, double>>[];
           if (pts.isNotEmpty) {
-            final pinColor =
-                _userPinColorMap[userId] ??
-                '#FF3B30';
-            final shifted =
-                _offsetPathPointsForUser(
-                  userId,
-                  pts,
-                );
-            final jsPoints = jsonEncode(
-              shifted,
+            final pinColor = _userPinColorMap[userId] ?? '#FF3B30';
+            final shifted = _offsetPathPointsForUser(userId, pts);
+            final jsPoints = jsonEncode(shifted);
+            await _trackMapController!.runJavaScript(
+              "setMeetingPathForUser('$userId',$jsPoints,'$pinColor');",
             );
-            await _trackMapController!
-                .runJavaScript(
-                  "setMeetingPathForUser('$userId',$jsPoints,'$pinColor');",
-                );
             shown.add(userId);
           }
         }
-        for (final userId
-            in _meetingPathsByUserFloorGltf
-                .keys) {
+        for (final userId in _meetingPathsByUserFloorGltf.keys) {
           if (!shown.contains(userId)) {
-            await _trackMapController!
-                .runJavaScript(
-                  "clearMeetingPathForUser('$userId');",
-                );
+            await _trackMapController!.runJavaScript(
+              "clearMeetingPathForUser('$userId');",
+            );
           }
         }
       }
@@ -3935,147 +2487,85 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   // by remas start ─────────────────────────────────────────────────────────
 
   /// Loads venue lat/lng from Firestore and caches it by cacheKey
-  Future<void> _loadVenueCoords(
-    String venueId,
-    String cacheKey,
-  ) async {
-    if (_venueLatByRequest.containsKey(
-      cacheKey,
-    ))
-      return;
+  Future<void> _loadVenueCoords(String venueId, String cacheKey) async {
+    if (_venueLatByRequest.containsKey(cacheKey)) return;
     try {
-      final doc =
-          await FirebaseFirestore
-              .instance
-              .collection('venues')
-              .doc(venueId)
-              .get();
+      final doc = await FirebaseFirestore.instance
+          .collection('venues')
+          .doc(venueId)
+          .get();
       final data = doc.data();
       if (data == null) return;
-      final lat =
-          (data['latitude'] as num?)
-              ?.toDouble();
-      final lng =
-          (data['longitude'] as num?)
-              ?.toDouble();
+      final lat = (data['latitude'] as num?)?.toDouble();
+      final lng = (data['longitude'] as num?)?.toDouble();
       if (lat != null && lng != null) {
-        _venueLatByRequest[cacheKey] =
-            lat;
-        _venueLngByRequest[cacheKey] =
-            lng;
+        _venueLatByRequest[cacheKey] = lat;
+        _venueLngByRequest[cacheKey] = lng;
       }
     } catch (e) {
-      debugPrint(
-        '[TRACK] Failed to load venue coords: $e',
-      );
+      debugPrint('[TRACK] Failed to load venue coords: $e');
     }
   }
 
   /// Returns true if the friend is outside the venue boundary (>500m)
-  bool _isOutsideVenue(
-    String userId,
-    String cacheKey,
-  ) {
-    final lat =
-        _trackedGpsLatByUser[userId];
-    final lng =
-        _trackedGpsLngByUser[userId];
-    final vLat =
-        _venueLatByRequest[cacheKey];
-    final vLng =
-        _venueLngByRequest[cacheKey];
-    if (lat == null ||
-        lng == null ||
-        vLat == null ||
-        vLng == null)
+  bool _isOutsideVenue(String userId, String cacheKey) {
+    final lat = _trackedGpsLatByUser[userId];
+    final lng = _trackedGpsLngByUser[userId];
+    final vLat = _venueLatByRequest[cacheKey];
+    final vLng = _venueLngByRequest[cacheKey];
+    if (lat == null || lng == null || vLat == null || vLng == null)
       return false;
-    final distance =
-        Geolocator.distanceBetween(
-          lat,
-          lng,
-          vLat,
-          vLng,
-        );
+    final distance = Geolocator.distanceBetween(lat, lng, vLat, vLng);
     return distance > 500;
   }
 
   /// Returns true if the friend is connected:
   /// - Has a location updated within the last 24 hours AND inside venue
-  bool _isConnected(
-    String userId,
-    String cacheKey,
-  ) {
-    final updatedAt =
-        _trackedUpdatedAtByUser[userId];
+  bool _isConnected(String userId, String cacheKey) {
+    final updatedAt = _trackedUpdatedAtByUser[userId];
     if (updatedAt == null) return false;
-    final isRecent =
-        DateTime.now()
-            .difference(updatedAt)
-            .inHours <
-        24;
+    final isRecent = DateTime.now().difference(updatedAt).inHours < 24;
     if (!isRecent) return false;
-    return !_isOutsideVenue(
-      userId,
-      cacheKey,
-    );
+    return !_isOutsideVenue(userId, cacheKey);
   }
 
   /// Returns human-readable last update time
-  String _lastUpdateText(
-    String userId,
-  ) {
-    final updatedAt =
-        _trackedUpdatedAtByUser[userId];
+  String _lastUpdateText(String userId) {
+    final updatedAt = _trackedUpdatedAtByUser[userId];
 
     if (updatedAt == null) {
       return 'No recent location';
     }
 
     final now = DateTime.now();
-    final diff = now.difference(
-      updatedAt,
-    );
+    final diff = now.difference(updatedAt);
 
     if (diff.inHours >= 24) {
       return 'No recent location';
     }
 
-    final String timeAgo =
-        diff.inSeconds < 60
+    final String timeAgo = diff.inSeconds < 60
         ? 'Just now'
         : _timeAgo(updatedAt);
 
-    final requestId =
-        _requestIdByTrackedUser[userId];
-    final outsideVenue =
-        requestId != null
-        ? _isOutsideVenue(
-            userId,
-            requestId,
-          )
+    final requestId = _requestIdByTrackedUser[userId];
+    final outsideVenue = requestId != null
+        ? _isOutsideVenue(userId, requestId)
         : false;
 
     return 'Location updated • $timeAgo';
   }
 
   /// Returns a green or grey dot widget based on connection status
-  Widget _connectionDot(
-    String userId,
-    String cacheKey,
-  ) {
-    final connected = _isConnected(
-      userId,
-      cacheKey,
-    );
+  Widget _connectionDot(String userId, String cacheKey) {
+    final connected = _isConnected(userId, cacheKey);
     return Container(
       width: 10,
       height: 10,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         // by remas start
-        color: connected
-            ? const Color(0xFF4CAF50)
-            : Colors.grey[400],
+        color: connected ? const Color(0xFF4CAF50) : Colors.grey[400],
         // by remas end
       ),
     );
@@ -4083,17 +2573,16 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
   // by remas start
   /// Returns a consistent unique color for a connected user based on their userId
-  static const List<String> _pinColors =
-      [
-        '#C77D8E', // soft rose
-        '#6F8FB6', // muted blue
-        '#D0A86E', // soft amber
-        '#8B9A73', // muted olive
-        '#9C7FB6', // muted lavender
-        '#7FA6A5', // muted teal
-        '#B08F7A', // soft clay
-        '#8EA0B7', // soft steel
-      ];
+  static const List<String> _pinColors = [
+    '#C77D8E', // soft rose
+    '#6F8FB6', // muted blue
+    '#D0A86E', // soft amber
+    '#8B9A73', // muted olive
+    '#9C7FB6', // muted lavender
+    '#7FA6A5', // muted teal
+    '#B08F7A', // soft clay
+    '#8EA0B7', // soft steel
+  ];
 
   // by remas end ─────────────────────────────────────────────────────────────
 
@@ -4104,24 +2593,20 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         'mapURL':
             'https://firebasestorage.googleapis.com/v0/b/madar-database.firebasestorage.app/o/3D%20Maps%2FSolitaire%2FGF.glb?alt=media',
         'F_number': '0',
-        'navmesh':
-            'assets/nav_cor/navmesh_GF.json',
+        'navmesh': 'assets/nav_cor/navmesh_GF.json',
       },
       {
         'floorNumber': 'F1',
         'mapURL':
             'https://firebasestorage.googleapis.com/v0/b/madar-database.firebasestorage.app/o/3D%20Maps%2FSolitaire%2FF1.glb?alt=media',
         'F_number': '1',
-        'navmesh':
-            'assets/nav_cor/navmesh_F1.json',
+        'navmesh': 'assets/nav_cor/navmesh_F1.json',
       },
     ];
     if (mounted) {
       setState(() {
         _venueMaps = fallback;
-        _currentFloor =
-            fallback.first['mapURL'] ??
-            '';
+        _currentFloor = fallback.first['mapURL'] ?? '';
       });
     }
   }
@@ -4130,71 +2615,43 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor:
-          Colors.transparent,
-      builder: (context) =>
-          const TrackRequestDialog(),
+      backgroundColor: Colors.transparent,
+      builder: (context) => const TrackRequestDialog(),
     );
   }
 
-  String? _currentStepTimerLabel(
-    MeetingPointRecord meeting,
-  ) {
+  String? _currentStepTimerLabel(MeetingPointRecord meeting) {
     // Meeting is transitioning from step 4 → 5 (either all participants
     // responded, or the 10-min wait deadline expired). Show an immediate
     // ~2-min countdown using a local start time so the invitee doesn't see
     // a gap or "00:00" before Firestore delivers hostStep=5+suggestDeadline.
     final waitExpiredForTimer =
         meeting.waitDeadline != null &&
-        !meeting.waitDeadline!.isAfter(
-          MeetingPointService.serverNow,
-        );
+        !meeting.waitDeadline!.isAfter(MeetingPointService.serverNow);
     if (meeting.hostStep == 4 &&
-        (meeting.pendingCount == 0 ||
-            waitExpiredForTimer) &&
+        (meeting.pendingCount == 0 || waitExpiredForTimer) &&
         meeting.acceptedCount > 0) {
-      final approxStart =
-          _approxStep3StartByMeetingId[meeting
-              .id];
+      final approxStart = _approxStep3StartByMeetingId[meeting.id];
       if (approxStart != null) {
-        final approxDeadline =
-            approxStart.add(
-              const Duration(
-                minutes: 2,
-              ),
-            );
+        final approxDeadline = approxStart.add(const Duration(minutes: 2));
         final seconds = approxDeadline
-            .difference(
-              MeetingPointService
-                  .serverNow,
-            )
+            .difference(MeetingPointService.serverNow)
             .inSeconds
             .clamp(0, 120);
-        final mm = (seconds ~/ 60)
-            .toString()
-            .padLeft(2, '0');
-        final ss = (seconds % 60)
-            .toString()
-            .padLeft(2, '0');
+        final mm = (seconds ~/ 60).toString().padLeft(2, '0');
+        final ss = (seconds % 60).toString().padLeft(2, '0');
         return '$mm:$ss';
       }
       return null;
     }
-    final deadline =
-        meeting.activeDeadline;
+    final deadline = meeting.activeDeadline;
     if (deadline == null) return null;
     final seconds = deadline
-        .difference(
-          MeetingPointService.serverNow,
-        )
+        .difference(MeetingPointService.serverNow)
         .inSeconds
         .clamp(0, 3600);
-    final mm = (seconds ~/ 60)
-        .toString()
-        .padLeft(2, '0');
-    final ss = (seconds % 60)
-        .toString()
-        .padLeft(2, '0');
+    final mm = (seconds ~/ 60).toString().padLeft(2, '0');
+    final ss = (seconds % 60).toString().padLeft(2, '0');
     return '$mm:$ss';
   }
 
@@ -4209,15 +2666,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     }
   }
 
-  int _inviteeStep(
-    MeetingPointRecord meeting,
-    String currentUserId,
-  ) {
-    final me = meeting.participantFor(
-      currentUserId,
-    );
-    if (me == null || me.isPending)
-      return 1;
+  int _inviteeStep(MeetingPointRecord meeting, String currentUserId) {
+    final me = meeting.participantFor(currentUserId);
+    if (me == null || me.isPending) return 1;
     // Step 3 = waiting for host to confirm the suggested point.
     // This happens when the host explicitly advanced (hostStep >= 5),
     // OR when all participants responded (pendingCount == 0),
@@ -4225,13 +2676,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     // but the window closed — the accepted participants move to step 3).
     final waitExpired =
         meeting.waitDeadline != null &&
-        !meeting.waitDeadline!.isAfter(
-          MeetingPointService.serverNow,
-        );
+        !meeting.waitDeadline!.isAfter(MeetingPointService.serverNow);
     if (me.isAccepted &&
-        (meeting.hostStep >= 5 ||
-            meeting.pendingCount == 0 ||
-            waitExpired)) {
+        (meeting.hostStep >= 5 || meeting.pendingCount == 0 || waitExpired)) {
       return 3;
     }
     if (me.isAccepted) return 2;
@@ -4251,93 +2698,55 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     }
   }
 
-  bool _isBlockingMeetingForUser(
-    MeetingPointRecord? meeting,
-    String? uid,
-  ) {
-    if (meeting == null ||
-        uid == null ||
-        uid.trim().isEmpty)
-      return false;
+  bool _isBlockingMeetingForUser(MeetingPointRecord? meeting, String? uid) {
+    if (meeting == null || uid == null || uid.trim().isEmpty) return false;
     // isActive is derived: true only when status == 'pending'.
     if (!meeting.isActive) return false;
-    if (meeting.isHost(uid))
-      return true;
-    final me = meeting.participantFor(
-      uid,
-    );
+    if (meeting.isHost(uid)) return true;
+    final me = meeting.participantFor(uid);
     if (me == null) return false;
     final fullyDeclined =
-        meeting
-            .participants
-            .isNotEmpty &&
-        meeting.participants.every(
-          (p) => p.isDeclined,
-        );
+        meeting.participants.isNotEmpty &&
+        meeting.participants.every((p) => p.isDeclined);
     if (fullyDeclined) return false;
     return !me.isDeclined;
   }
 
-  Future<void>
-  _maybeMaintainActiveMeetingIfNeeded() async {
+  Future<void> _maybeMaintainActiveMeetingIfNeeded() async {
     // Check all blocking meetings for expired deadlines.
     // _lastKnownBlockingMeetings is populated only on the Meeting Point tab.
     // _lastKnownActiveMeetingCard is kept current by _listenToActiveMeetingParticipants
     // (always-on stream subscription) so it works on any tab.
     // _lastKnownActiveMeetingCount is a last-resort fallback for edge cases.
-    final candidates =
-        _lastKnownBlockingMeetings
-            .isNotEmpty
+    final candidates = _lastKnownBlockingMeetings.isNotEmpty
         ? _lastKnownBlockingMeetings
-        : (_lastKnownActiveMeetingCard !=
-                  null
-              ? [
-                  _lastKnownActiveMeetingCard!,
-                ]
-              : (_lastKnownActiveMeetingCount !=
-                        null
-                    ? [
-                        _lastKnownActiveMeetingCount!,
-                      ]
-                    : <
-                        MeetingPointRecord
-                      >[]));
+        : (_lastKnownActiveMeetingCard != null
+              ? [_lastKnownActiveMeetingCard!]
+              : (_lastKnownActiveMeetingCount != null
+                    ? [_lastKnownActiveMeetingCount!]
+                    : <MeetingPointRecord>[]));
 
     final now = DateTime.now();
-    final needsMaintain = candidates
-        .any((m) {
-          if (!m.isActive) return false;
-          final deadline =
-              m.activeDeadline;
-          return deadline != null &&
-              !deadline.isAfter(now);
-        });
+    final needsMaintain = candidates.any((m) {
+      if (!m.isActive) return false;
+      final deadline = m.activeDeadline;
+      return deadline != null && !deadline.isAfter(now);
+    });
     if (!needsMaintain) return;
 
-    final last =
-        _lastMeetingMaintainAttemptAt;
-    if (last != null &&
-        now.difference(last) <
-            _kMeetingMaintainThrottle) {
+    final last = _lastMeetingMaintainAttemptAt;
+    if (last != null && now.difference(last) < _kMeetingMaintainThrottle) {
       return;
     }
     _lastMeetingMaintainAttemptAt = now;
 
     // Run maybeMaintain on any expired meeting (host-only transitions are
     // guarded inside maybeMaintain itself).
-    final meeting = candidates
-        .firstWhere(
-          (m) {
-            if (!m.isActive)
-              return false;
-            final deadline =
-                m.activeDeadline;
-            return deadline != null &&
-                !deadline.isAfter(now);
-          },
-          orElse: () =>
-              candidates.first,
-        );
+    final meeting = candidates.firstWhere((m) {
+      if (!m.isActive) return false;
+      final deadline = m.activeDeadline;
+      return deadline != null && !deadline.isAfter(now);
+    }, orElse: () => candidates.first);
     if (!meeting.isActive) return;
 
     // If we've previously seen this meeting at hostStep >= 5 via the live
@@ -4345,70 +2754,47 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     // cached record delivered after a stream reset. Calling maybeMaintain with
     // it would write a fresh suggestDeadline and reset the invitee's step-3
     // (non-host) timer, so skip it.
-    if (_observedStep5MeetingIds
-            .contains(meeting.id) &&
-        meeting.hostStep < 5) {
+    if (_observedStep5MeetingIds.contains(meeting.id) && meeting.hostStep < 5) {
       return;
     }
 
     // Guard is BEFORE the call so stale Firestore cache data (delivered after
     // a stream reset) never triggers a second maybeMaintain that overwrites
     // suggestDeadline and resets the 2-min host-confirmation timer.
-    final resetKey =
-        '${meeting.id}_${meeting.hostStep}';
-    if (_maintainAttemptedKeys.contains(
-      resetKey,
-    ))
-      return;
-    _maintainAttemptedKeys.add(
-      resetKey,
-    );
+    final resetKey = '${meeting.id}_${meeting.hostStep}';
+    if (_maintainAttemptedKeys.contains(resetKey)) return;
+    _maintainAttemptedKeys.add(resetKey);
 
     try {
-      await MeetingPointService.maybeMaintain(
-        meeting,
-      );
+      await MeetingPointService.maybeMaintain(meeting);
     } catch (_) {}
 
     // Schedule key removal so a failed write can be retried after 30 s.
     // Live Firestore streams notify all listeners of any successful write
     // automatically — no stream reset is needed here.
-    Future.delayed(
-      const Duration(seconds: 30),
-      () {
-        _maintainAttemptedKeys.remove(
-          resetKey,
-        );
-      },
-    );
+    Future.delayed(const Duration(seconds: 30), () {
+      _maintainAttemptedKeys.remove(resetKey);
+    });
     if (mounted) setState(() {});
   }
 
   String _firstName(String fullName) {
     final trimmed = fullName.trim();
     if (trimmed.isEmpty) return 'Host';
-    final parts = trimmed.split(
-      RegExp(r'\s+'),
-    );
+    final parts = trimmed.split(RegExp(r'\s+'));
     return parts.first;
   }
 
-  Future<void>
-  _showCreateMeetingPointForm({
+  Future<void> _showCreateMeetingPointForm({
     bool resumeDraft = false,
     String? meetingPointId,
     bool autoAdvanceToStep5 = false,
   }) async {
-    final id =
-        meetingPointId?.trim() ?? '';
+    final id = meetingPointId?.trim() ?? '';
     if (resumeDraft && id.isNotEmpty) {
-      final meeting =
-          await MeetingPointService.getById(
-            id,
-          );
+      final meeting = await MeetingPointService.getById(id);
       if (!mounted) return;
-      if (meeting == null ||
-          !meeting.isActive) {
+      if (meeting == null || !meeting.isActive) {
         SnackbarHelper.showError(
           context,
           'This meeting point is no longer active.',
@@ -4417,33 +2803,23 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       }
     }
 
-    final pendingWork =
-        await showModalBottomSheet<
-          Future<void>?
-        >(
-          context: context,
-          isScrollControlled: true,
-          backgroundColor:
-              Colors.transparent,
-          builder: (context) =>
-              CreateMeetingPointForm(
-                resumeDraft:
-                    resumeDraft,
-                meetingPointId:
-                    meetingPointId,
-                autoAdvanceToStep5:
-                    autoAdvanceToStep5,
-              ),
-        );
+    final pendingWork = await showModalBottomSheet<Future<void>?>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => CreateMeetingPointForm(
+        resumeDraft: resumeDraft,
+        meetingPointId: meetingPointId,
+        autoAdvanceToStep5: autoAdvanceToStep5,
+      ),
+    );
 
     // If the form fired markHostDecision in the background (auto-confirm),
     // await it so the live Firestore streams have the updated state before we
     // rebuild.  Errors are swallowed — _maybeMaintainActiveMeetingIfNeeded will
     // retry within the next tick if the write failed.
     if (pendingWork != null) {
-      await pendingWork.catchError(
-        (_) {},
-      );
+      await pendingWork.catchError((_) {});
     }
 
     // Do NOT reset streams here.  The existing live Firestore streams already
@@ -4461,22 +2837,17 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       body: SafeArea(
         child: Stack(
           children: [
-            kFeatureEnabled
-                ? _buildFullContent()
-                : _buildComingSoon(),
-            if (_refreshCooldownMessageRequestIds
-                .isNotEmpty)
+            kFeatureEnabled ? _buildFullContent() : _buildComingSoon(),
+            if (_refreshCooldownMessageRequestIds.isNotEmpty)
               const Positioned(
                 left: 16,
                 right: 16,
                 bottom: 16,
                 child: ErrorMessageBox(
-                  message:
-                      'you cannot send many request within short period',
+                  message: 'you cannot send many request within short period',
                 ),
               ),
-            if (_acceptCutoffMessageRequestIds
-                .isNotEmpty)
+            if (_acceptCutoffMessageRequestIds.isNotEmpty)
               const Positioned(
                 left: 16,
                 right: 16,
@@ -4495,52 +2866,36 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   Widget _buildComingSoon() {
     return Center(
       child: Column(
-        mainAxisAlignment:
-            MainAxisAlignment.center,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
-            Icons.construction,
-            size: 80,
-            color: Colors.grey[300],
-          ),
+          Icon(Icons.construction, size: 80, color: Colors.grey[300]),
           const SizedBox(height: 20),
           Text(
             'Coming Soon',
-            style: TextStyle(
-              fontSize: 24,
-              color: Colors.grey[800],
-            ),
+            style: TextStyle(fontSize: 24, color: Colors.grey[800]),
           ),
         ],
       ),
     );
   }
 
-  static const List<String> _mainTabs =
-      ['Tracking', 'Meeting point'];
+  static const List<String> _mainTabs = ['Tracking', 'Meeting point'];
 
   Widget _buildRequestsLoading() {
     return Padding(
-      padding:
-          const EdgeInsets.symmetric(
-            vertical: 32,
-          ),
+      padding: const EdgeInsets.symmetric(vertical: 32),
       child: Center(
         child: Column(
-          mainAxisSize:
-              MainAxisSize.min,
+          mainAxisSize: MainAxisSize.min,
           children: const [
-            CircularProgressIndicator(
-              color: AppColors.kGreen,
-            ),
+            CircularProgressIndicator(color: AppColors.kGreen),
             SizedBox(height: 12),
             Text(
               'Loading requests...',
               style: TextStyle(
                 fontSize: 14,
                 color: Colors.grey,
-                fontWeight:
-                    FontWeight.w500,
+                fontWeight: FontWeight.w500,
               ),
             ),
           ],
@@ -4553,134 +2908,63 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     return Column(
       children: [
         Padding(
-          padding:
-              const EdgeInsets.fromLTRB(
-                16,
-                8,
-                16,
-                0,
-              ),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
           child: _buildMainTabs(),
         ),
-        Container(
-          height: 1,
-          color: Colors.black12,
-        ),
+        Container(height: 1, color: Colors.black12),
         Expanded(
           child: ListView(
-            controller:
-                _scrollController,
-            key: const ValueKey<String>(
-              'track_requests_list',
-            ),
-            padding:
-                const EdgeInsets.fromLTRB(
-                  16,
-                  12,
-                  16,
-                  16,
-                ),
+            controller: _scrollController,
+            key: const ValueKey<String>('track_requests_list'),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
             children: [
               // Map visible for both Tracking and Meeting point
               _buildMapPreview(),
-              const SizedBox(
-                height: 16,
-              ),
+              const SizedBox(height: 16),
 
               if (_isTrackingView) ...[
                 _buildTrackRequestButton(),
-                const SizedBox(
-                  height: 24,
-                ),
+                const SizedBox(height: 24),
                 const Text(
                   'Tracking Requests',
                   style: TextStyle(
                     fontSize: 20,
-                    fontWeight:
-                        FontWeight.w700,
-                    color:
-                        Colors.black87,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.black87,
                   ),
                 ),
-                const SizedBox(
-                  height: 12,
-                ),
+                const SizedBox(height: 12),
                 _buildFilterPills(),
-                const SizedBox(
-                  height: 20,
-                ),
+                const SizedBox(height: 20),
 
-                if (_selectedFilterIndex ==
-                    0)
-                  StreamBuilder<
-                    List<
-                      TrackingRequest
-                    >
-                  >(
-                    stream:
-                        _sentRequestsStream(),
+                if (_selectedFilterIndex == 0)
+                  StreamBuilder<List<TrackingRequest>>(
+                    stream: _sentRequestsStream(),
                     builder: (context, snapshot) {
-                      if (widget.initialExpandRequestId !=
-                              null &&
-                          snapshot.connectionState ==
-                              ConnectionState
-                                  .waiting &&
-                          !snapshot
-                              .hasData) {
+                      if (widget.initialExpandRequestId != null &&
+                          snapshot.connectionState == ConnectionState.waiting &&
+                          !snapshot.hasData) {
                         return _buildRequestsLoading();
                       }
-                      final all =
-                          snapshot
-                              .data ??
-                          [];
-                      final upcoming =
-                          _upcomingFrom(
-                            all,
-                          );
-                      final active =
-                          _activeFrom(
-                            all,
-                          );
-                      return _buildSentContent(
-                        upcoming,
-                        active,
-                      );
+                      final all = snapshot.data ?? [];
+                      final upcoming = _upcomingFrom(all);
+                      final active = _activeFrom(all);
+                      return _buildSentContent(upcoming, active);
                     },
                   )
                 else
-                  StreamBuilder<
-                    List<
-                      TrackingRequest
-                    >
-                  >(
-                    stream:
-                        _incomingRequestsStream(),
+                  StreamBuilder<List<TrackingRequest>>(
+                    stream: _incomingRequestsStream(),
                     builder: (context, snapshot) {
-                      if (widget.initialExpandRequestId !=
-                              null &&
-                          snapshot.connectionState ==
-                              ConnectionState
-                                  .waiting &&
-                          !snapshot
-                              .hasData) {
+                      if (widget.initialExpandRequestId != null &&
+                          snapshot.connectionState == ConnectionState.waiting &&
+                          !snapshot.hasData) {
                         return _buildRequestsLoading();
                       }
-                      final incoming =
-                          snapshot
-                              .data ??
-                          [];
-                      final scheduled =
-                          _receivedScheduledFrom(
-                            incoming,
-                          );
-                      final active =
-                          _receivedActiveFrom(
-                            incoming,
-                          );
-                      return _buildReceivedContent(
-                        scheduled,
-                        active,
-                      );
+                      final incoming = snapshot.data ?? [];
+                      final scheduled = _receivedScheduledFrom(incoming);
+                      final active = _receivedActiveFrom(incoming);
+                      return _buildReceivedContent(scheduled, active);
                     },
                   ),
               ] else ...[
@@ -4699,53 +2983,35 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   String? _lastMaybeMaintainId;
 
   Widget _buildMeetingPointContent() {
-    final uid = FirebaseAuth
-        .instance
-        .currentUser
-        ?.uid;
-    return StreamBuilder<
-      List<MeetingPointRecord>
-    >(
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    return StreamBuilder<List<MeetingPointRecord>>(
       stream: _meetingPointListStream,
       builder: (context, snapshot) {
-        final meetings =
-            _resolveMeetingListSnapshot(
-              snapshot,
-            );
+        final meetings = _resolveMeetingListSnapshot(snapshot);
 
         // Show spinner only on the very first load when nothing is cached yet.
         final isFirstLoad =
-            snapshot.connectionState ==
-                ConnectionState
-                    .waiting &&
-            _lastKnownBlockingMeetings
-                .isEmpty;
+            snapshot.connectionState == ConnectionState.waiting &&
+            _lastKnownBlockingMeetings.isEmpty;
 
         // Split into: confirmed (arrival phase), active setup, and pending invites.
-        MeetingPointRecord?
-        confirmedMeeting; // status == 'active'
+        MeetingPointRecord? confirmedMeeting; // status == 'active'
         MeetingPointRecord?
         activeMeeting; // status == 'pending', host or accepted
-        final List<MeetingPointRecord>
-        pendingMeetings = [];
+        final List<MeetingPointRecord> pendingMeetings = [];
 
         if (uid != null) {
           for (final m in meetings) {
-            if (_locallyDeclinedMeetingIds
-                .contains(m.id))
-              continue;
+            if (_locallyDeclinedMeetingIds.contains(m.id)) continue;
             if (m.isConfirmed) {
               confirmedMeeting ??= m;
             } else if (m.isHost(uid)) {
               activeMeeting ??= m;
             } else {
-              final me = m
-                  .participantFor(uid);
-              if (me != null &&
-                  me.isAccepted) {
+              final me = m.participantFor(uid);
+              if (me != null && me.isAccepted) {
                 activeMeeting ??= m;
-              } else if (me != null &&
-                  me.isPending) {
+              } else if (me != null && me.isPending) {
                 pendingMeetings.add(m);
               }
             }
@@ -4753,26 +3019,17 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         }
 
         if (confirmedMeeting != null) {
-          _lastKnownConfirmedMeeting =
-              confirmedMeeting;
+          _lastKnownConfirmedMeeting = confirmedMeeting;
         }
         final holdActive =
-            _completionHoldUntil !=
-                null &&
-            DateTime.now().isBefore(
-              _completionHoldUntil!,
-            );
+            _completionHoldUntil != null &&
+            DateTime.now().isBefore(_completionHoldUntil!);
         if (confirmedMeeting == null &&
             holdActive &&
-            _lastKnownConfirmedMeeting !=
-                null &&
-            (_completionHoldMeetingId ==
-                    null ||
-                _lastKnownConfirmedMeeting!
-                        .id ==
-                    _completionHoldMeetingId)) {
-          confirmedMeeting =
-              _lastKnownConfirmedMeeting;
+            _lastKnownConfirmedMeeting != null &&
+            (_completionHoldMeetingId == null ||
+                _lastKnownConfirmedMeeting!.id == _completionHoldMeetingId)) {
+          confirmedMeeting = _lastKnownConfirmedMeeting;
         }
 
         // Reconcile confirmed meetings that may be stuck due to old app code
@@ -4781,67 +3038,35 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         // After writing, force a stream reset so the UI updates immediately
         // without waiting for the next Firestore push notification.
         if (confirmedMeeting != null &&
-            !_reconciledArrivalMeetingIds
-                .contains(
-                  confirmedMeeting.id,
-                )) {
-          _reconciledArrivalMeetingIds
-              .add(confirmedMeeting.id);
-          MeetingPointService.reconcileArrivalPhase(
-            confirmedMeeting,
-          ).then((_) {
-            if (mounted)
-              setState(() {});
+            !_reconciledArrivalMeetingIds.contains(confirmedMeeting.id)) {
+          _reconciledArrivalMeetingIds.add(confirmedMeeting.id);
+          MeetingPointService.reconcileArrivalPhase(confirmedMeeting).then((_) {
+            if (mounted) setState(() {});
           });
         }
 
         // Session expiry: auto-complete the meeting once expiresAt has passed.
         if (confirmedMeeting != null &&
-            confirmedMeeting
-                    .expiresAt !=
-                null &&
-            !confirmedMeeting.expiresAt!
-                .isAfter(
-                  MeetingPointService
-                      .serverNow,
-                ) &&
-            !_expiredArrivalMeetingIds
-                .contains(
-                  confirmedMeeting.id,
-                )) {
-          _expiredArrivalMeetingIds.add(
-            confirmedMeeting.id,
-          );
-          MeetingPointService.reconcileArrivalPhase(
-            confirmedMeeting,
-          ).then((_) {
-            if (mounted)
-              setState(() {});
+            confirmedMeeting.expiresAt != null &&
+            !confirmedMeeting.expiresAt!.isAfter(
+              MeetingPointService.serverNow,
+            ) &&
+            !_expiredArrivalMeetingIds.contains(confirmedMeeting.id)) {
+          _expiredArrivalMeetingIds.add(confirmedMeeting.id);
+          MeetingPointService.reconcileArrivalPhase(confirmedMeeting).then((_) {
+            if (mounted) setState(() {});
           });
         }
 
         // Setup-phase: if all participants declined, auto-cancel immediately.
         if (activeMeeting != null &&
-            activeMeeting
-                .participants
-                .isNotEmpty &&
-            activeMeeting
-                    .acceptedCount ==
-                0 &&
-            activeMeeting
-                    .pendingCount ==
-                0 &&
-            !_reconciledDeclinedMeetingIds
-                .contains(
-                  activeMeeting.id,
-                )) {
-          _reconciledDeclinedMeetingIds
-              .add(activeMeeting.id);
-          MeetingPointService.maybeMaintain(
-            activeMeeting,
-          ).then((_) {
-            if (mounted)
-              setState(() {});
+            activeMeeting.participants.isNotEmpty &&
+            activeMeeting.acceptedCount == 0 &&
+            activeMeeting.pendingCount == 0 &&
+            !_reconciledDeclinedMeetingIds.contains(activeMeeting.id)) {
+          _reconciledDeclinedMeetingIds.add(activeMeeting.id);
+          MeetingPointService.maybeMaintain(activeMeeting).then((_) {
+            if (mounted) setState(() {});
           });
         }
 
@@ -4850,36 +3075,20 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         // see an immediate ~2-min countdown before Firestore delivers
         // hostStep=5+suggestDeadline.
         if (activeMeeting != null &&
-            activeMeeting.hostStep ==
-                4 &&
-            activeMeeting
-                    .acceptedCount >
-                0 &&
-            !_observedStep5MeetingIds
-                .contains(
-                  activeMeeting.id,
-                )) {
+            activeMeeting.hostStep == 4 &&
+            activeMeeting.acceptedCount > 0 &&
+            !_observedStep5MeetingIds.contains(activeMeeting.id)) {
           // Guard: once step 5 has been observed (and the approxStart entry was
           // removed), a stale cached step-4 event must not re-create the entry
           // and reset the approximate countdown back to 5:00.
           final waitExpired =
-              activeMeeting
-                      .waitDeadline !=
-                  null &&
-              !activeMeeting
-                  .waitDeadline!
-                  .isAfter(
-                    MeetingPointService
-                        .serverNow,
-                  );
-          if (activeMeeting
-                      .pendingCount ==
-                  0 ||
-              waitExpired) {
-            _approxStep3StartByMeetingId[activeMeeting
-                    .id] ??=
-                MeetingPointService
-                    .serverNow;
+              activeMeeting.waitDeadline != null &&
+              !activeMeeting.waitDeadline!.isAfter(
+                MeetingPointService.serverNow,
+              );
+          if (activeMeeting.pendingCount == 0 || waitExpired) {
+            _approxStep3StartByMeetingId[activeMeeting.id] ??=
+                MeetingPointService.serverNow;
           }
         }
 
@@ -4887,51 +3096,27 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         // and record that this meeting has been seen at hostStep >= 5 so that
         // stale cached snapshots (hostStep=4) can't trigger a maybeMaintain
         // call that would reset the suggestDeadline.
-        if (activeMeeting != null &&
-            activeMeeting.hostStep >=
-                5) {
-          _approxStep3StartByMeetingId
-              .remove(activeMeeting.id);
-          _observedStep5MeetingIds.add(
-            activeMeeting.id,
-          );
+        if (activeMeeting != null && activeMeeting.hostStep >= 5) {
+          _approxStep3StartByMeetingId.remove(activeMeeting.id);
+          _observedStep5MeetingIds.add(activeMeeting.id);
         }
 
         if (activeMeeting != null &&
-            activeMeeting.hostStep ==
-                4 &&
-            activeMeeting
-                    .pendingCount ==
-                0 &&
-            activeMeeting
-                    .acceptedCount >
-                0 &&
-            !_reconciledStep5MeetingIds
-                .contains(
-                  activeMeeting.id,
-                )) {
-          _reconciledStep5MeetingIds
-              .add(activeMeeting.id);
-          MeetingPointService.maybeMaintain(
-            activeMeeting,
-          ).then((_) {
-            if (mounted)
-              setState(() {});
+            activeMeeting.hostStep == 4 &&
+            activeMeeting.pendingCount == 0 &&
+            activeMeeting.acceptedCount > 0 &&
+            !_reconciledStep5MeetingIds.contains(activeMeeting.id)) {
+          _reconciledStep5MeetingIds.add(activeMeeting.id);
+          MeetingPointService.maybeMaintain(activeMeeting).then((_) {
+            if (mounted) setState(() {});
           });
         }
 
         // Start/stop the arrival countdown timer.
         if (confirmedMeeting != null) {
-          _arrivalTimer ??=
-              Timer.periodic(
-                const Duration(
-                  seconds: 1,
-                ),
-                (_) {
-                  if (mounted)
-                    setState(() {});
-                },
-              );
+          _arrivalTimer ??= Timer.periodic(const Duration(seconds: 1), (_) {
+            if (mounted) setState(() {});
+          });
         } else {
           _arrivalTimer?.cancel();
           _arrivalTimer = null;
@@ -4939,27 +3124,20 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
         // Disable create when user is in active setup or confirmed arrival phase.
         final canCreateMeetingPoint =
-            !isFirstLoad &&
-            activeMeeting == null &&
-            confirmedMeeting == null;
+            !isFirstLoad && activeMeeting == null && confirmedMeeting == null;
 
         return Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
                 Expanded(
                   flex: 3,
                   child: PrimaryButton(
-                    icon: Icons
-                        .people_outline,
-                    text:
-                        'Create Meeting Point',
-                    enabled:
-                        canCreateMeetingPoint,
-                    onPressed: () =>
-                        _showCreateMeetingPointForm(),
+                    icon: Icons.people_outline,
+                    text: 'Create Meeting Point',
+                    enabled: canCreateMeetingPoint,
+                    onPressed: () => _showCreateMeetingPointForm(),
                   ),
                 ),
               ],
@@ -4969,40 +3147,23 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               'Meeting Point Requests',
               style: TextStyle(
                 fontSize: 20,
-                fontWeight:
-                    FontWeight.w700,
+                fontWeight: FontWeight.w700,
                 color: Colors.black87,
               ),
             ),
             const SizedBox(height: 10),
             // ── Active meeting point ────────────────────────────────────
-            _buildActiveMeetingSubsectionLabel(
-              confirmedMeeting,
-            ),
+            _buildActiveMeetingSubsectionLabel(confirmedMeeting),
             const SizedBox(height: 4),
-            if (confirmedMeeting !=
-                    null &&
-                uid != null) ...[
+            if (confirmedMeeting != null && uid != null) ...[
               // ── Arrival-phase UI ──────────────────────────────────────
-              _buildRunningMeetingSection(
-                confirmedMeeting,
-                uid,
-              ),
-            ] else if (activeMeeting !=
-                    null &&
-                uid != null) ...[
+              _buildRunningMeetingSection(confirmedMeeting, uid),
+            ] else if (activeMeeting != null && uid != null) ...[
               // ── Setup-phase UI ────────────────────────────────────────
-              if (activeMeeting.isHost(
-                uid,
-              ))
-                _buildHostMeetingPointStatusCard(
-                  activeMeeting,
-                )
+              if (activeMeeting.isHost(uid))
+                _buildHostMeetingPointStatusCard(activeMeeting)
               else
-                _buildInviteeMeetingPointStatusCard(
-                  activeMeeting,
-                  uid,
-                ),
+                _buildInviteeMeetingPointStatusCard(activeMeeting, uid),
             ] else ...[
               SizedBox(
                 height: 52,
@@ -5011,11 +3172,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                     'No active meeting point',
                     style: TextStyle(
                       fontSize: 13,
-                      color: Colors
-                          .grey[500],
-                      fontWeight:
-                          FontWeight
-                              .normal,
+                      color: Colors.grey[500],
+                      fontWeight: FontWeight.normal,
                     ),
                   ),
                 ),
@@ -5024,31 +3182,18 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             const SizedBox(height: 24),
 
             // ── Pending invitations ─────────────────────────────────────
-            _buildSubsectionLabel(
-              'Meeting Point Invitations',
-            ),
+            _buildSubsectionLabel('Meeting Point Invitations'),
             const SizedBox(height: 4),
-            if (pendingMeetings
-                    .isNotEmpty &&
-                uid != null) ...[
+            if (pendingMeetings.isNotEmpty && uid != null) ...[
               ...pendingMeetings.map(
                 (m) => Padding(
                   key:
-                      _meetingInviteScrollTargetId !=
-                              null &&
-                          m.id ==
-                              _meetingInviteScrollTargetId
+                      _meetingInviteScrollTargetId != null &&
+                          m.id == _meetingInviteScrollTargetId
                       ? _scrollToMeetingInviteKey
                       : null,
-                  padding:
-                      const EdgeInsets.only(
-                        bottom: 8,
-                      ),
-                  child:
-                      _buildMeetingPointInvitationTile(
-                        m,
-                        uid,
-                      ),
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: _buildMeetingPointInvitationTile(m, uid),
                 ),
               ),
             ] else ...[
@@ -5059,11 +3204,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                     'No meeting point invitations',
                     style: TextStyle(
                       fontSize: 13,
-                      color: Colors
-                          .grey[500],
-                      fontWeight:
-                          FontWeight
-                              .normal,
+                      color: Colors.grey[500],
+                      fontWeight: FontWeight.normal,
                     ),
                   ),
                 ),
@@ -5080,62 +3222,33 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   // ══════════════════════════════════════════════════════════════════════════
 
   /// Formats a remaining-seconds value as "MM:SS", clamped to min 1:00.
-  String _formatArrivalTimer(
-    int totalSecondsLeft,
-  ) {
-    final secs = totalSecondsLeft < 60
-        ? 60
-        : totalSecondsLeft;
+  String _formatArrivalTimer(int totalSecondsLeft) {
+    final secs = totalSecondsLeft < 60 ? 60 : totalSecondsLeft;
     final m = secs ~/ 60;
     final s = secs % 60;
     return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
 
-  String _effectiveArrivalStatus(
-    String userId,
-    String meetingStatus,
-  ) {
-    return _arrivalOverrideByUser[userId] ??
-        meetingStatus;
+  String _effectiveArrivalStatus(String userId, String meetingStatus) {
+    return _arrivalOverrideByUser[userId] ?? meetingStatus;
   }
 
-  DateTime? _effectiveArrivedAt(
-    String userId,
-    DateTime? meetingArrivedAt,
-  ) {
-    return meetingArrivedAt ??
-        _arrivalOverrideAtByUser[userId];
+  DateTime? _effectiveArrivedAt(String userId, DateTime? meetingArrivedAt) {
+    return meetingArrivedAt ?? _arrivalOverrideAtByUser[userId];
   }
 
   double _meetingPathDistance(
-    Map<
-      String,
-      List<Map<String, double>>
-    >
-    pathByFloor,
+    Map<String, List<Map<String, double>>> pathByFloor,
   ) {
     double total = 0.0;
-    for (final points
-        in pathByFloor.values) {
-      for (
-        int i = 1;
-        i < points.length;
-        i++
-      ) {
+    for (final points in pathByFloor.values) {
+      for (int i = 1; i < points.length; i++) {
         final p1 = points[i - 1];
         final p2 = points[i];
-        final dx =
-            (p1['x'] ?? 0) -
-            (p2['x'] ?? 0);
-        final dy =
-            (p1['y'] ?? 0) -
-            (p2['y'] ?? 0);
-        final dz =
-            (p1['z'] ?? 0) -
-            (p2['z'] ?? 0);
-        total += math.sqrt(
-          dx * dx + dy * dy + dz * dz,
-        );
+        final dx = (p1['x'] ?? 0) - (p2['x'] ?? 0);
+        final dy = (p1['y'] ?? 0) - (p2['y'] ?? 0);
+        final dz = (p1['z'] ?? 0) - (p2['z'] ?? 0);
+        total += math.sqrt(dx * dx + dy * dy + dz * dz);
       }
     }
     return total;
@@ -5146,95 +3259,52 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     int fallbackMins, {
     DateTime? persistedAnchor,
   }) {
-    int remainingFrom(
-      int totalSeconds,
-      DateTime? anchor,
-    ) {
+    int remainingFrom(int totalSeconds, DateTime? anchor) {
       final elapsedRaw = anchor == null
           ? 0
-          : MeetingPointService
-                .serverNow
-                .difference(anchor)
-                .inSeconds;
-      final elapsed = elapsedRaw < 0
-          ? 0
-          : elapsedRaw;
-      final remaining =
-          totalSeconds - elapsed;
-      return remaining < 60
-          ? 60
-          : remaining;
+          : MeetingPointService.serverNow.difference(anchor).inSeconds;
+      final elapsed = elapsedRaw < 0 ? 0 : elapsedRaw;
+      final remaining = totalSeconds - elapsed;
+      return remaining < 60 ? 60 : remaining;
     }
 
-    final persistedSeconds =
-        remainingFrom(
-          fallbackMins * 60,
-          persistedAnchor,
-        );
+    final persistedSeconds = remainingFrom(fallbackMins * 60, persistedAnchor);
 
-    final localBaseSeconds =
-        _meetingEtaBaseSecondsByUser[userId];
-    final localBaseTime =
-        _meetingEtaBaseTimeByUser[userId];
-    final localAnchorMs =
-        _meetingEtaResetAnchorMsByUser[userId];
-    if (localBaseSeconds == null ||
-        localBaseTime == null) {
+    final localBaseSeconds = _meetingEtaBaseSecondsByUser[userId];
+    final localBaseTime = _meetingEtaBaseTimeByUser[userId];
+    final localAnchorMs = _meetingEtaResetAnchorMsByUser[userId];
+    if (localBaseSeconds == null || localBaseTime == null) {
       return persistedSeconds;
     }
 
-    final persistedAnchorMs =
-        persistedAnchor
-            ?.millisecondsSinceEpoch;
+    final persistedAnchorMs = persistedAnchor?.millisecondsSinceEpoch;
     final localIsCurrent =
         localAnchorMs != null &&
-        (persistedAnchorMs == null ||
-            localAnchorMs >=
-                persistedAnchorMs);
-    final currentAnchorMs =
-        localIsCurrent
-        ? localAnchorMs
-        : persistedAnchorMs;
-    final candidateSeconds =
-        localIsCurrent
-        ? remainingFrom(
-            localBaseSeconds,
-            localBaseTime,
-          )
+        (persistedAnchorMs == null || localAnchorMs >= persistedAnchorMs);
+    final currentAnchorMs = localIsCurrent ? localAnchorMs : persistedAnchorMs;
+    final candidateSeconds = localIsCurrent
+        ? remainingFrom(localBaseSeconds, localBaseTime)
         : persistedSeconds;
 
-    final previousAnchorMs =
-        _meetingEtaDisplayedAnchorMsByUser[userId];
-    final previousSeconds =
-        _meetingEtaDisplayedSecondsByUser[userId];
+    final previousAnchorMs = _meetingEtaDisplayedAnchorMsByUser[userId];
+    final previousSeconds = _meetingEtaDisplayedSecondsByUser[userId];
     final resolvedSeconds =
-        previousSeconds != null &&
-            previousAnchorMs ==
-                currentAnchorMs
-        ? math.min(
-            previousSeconds,
-            candidateSeconds,
-          )
+        previousSeconds != null && previousAnchorMs == currentAnchorMs
+        ? math.min(previousSeconds, candidateSeconds)
         : candidateSeconds;
 
-    _meetingEtaDisplayedAnchorMsByUser[userId] =
-        currentAnchorMs;
-    _meetingEtaDisplayedSecondsByUser[userId] =
-        resolvedSeconds;
+    _meetingEtaDisplayedAnchorMsByUser[userId] = currentAnchorMs;
+    _meetingEtaDisplayedSecondsByUser[userId] = resolvedSeconds;
     return resolvedSeconds;
   }
 
-  List<Map<String, double>>
-  _offsetPathPointsForUser(
+  List<Map<String, double>> _offsetPathPointsForUser(
     String userId,
     List<Map<String, double>> pts,
   ) {
     if (pts.isEmpty) return pts;
-    final hash = userId.codeUnits
-        .fold<int>(0, (a, b) => a + b);
-    final angle =
-        (hash % 360) *
-        (math.pi / 180.0);
+    final hash = userId.codeUnits.fold<int>(0, (a, b) => a + b);
+    final angle = (hash % 360) * (math.pi / 180.0);
     const radius = 0.015;
     final dx = math.cos(angle) * radius;
     final dz = math.sin(angle) * radius;
@@ -5249,16 +3319,12 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         .toList();
   }
 
-  Map<String, double>
-  _offsetMeetingPointForUser(
+  Map<String, double> _offsetMeetingPointForUser(
     String userId,
     Map<String, double> base,
   ) {
-    final hash = userId.codeUnits
-        .fold<int>(0, (a, b) => a + b);
-    final angle =
-        (hash % 360) *
-        (math.pi / 180.0);
+    final hash = userId.codeUnits.fold<int>(0, (a, b) => a + b);
+    final angle = (hash % 360) * (math.pi / 180.0);
     const radius = 0.065;
     final dx = math.cos(angle) * radius;
     final dz = math.sin(angle) * radius;
@@ -5271,61 +3337,41 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
   /// Formats a DateTime as "HH:mm" (24-h).
   String _formatTime(DateTime dt) {
-    final period = dt.hour < 12
-        ? 'AM'
-        : 'PM';
-    final h = dt.hour % 12 == 0
-        ? 12
-        : dt.hour % 12;
-    final m = dt.minute
-        .toString()
-        .padLeft(2, '0');
+    final period = dt.hour < 12 ? 'AM' : 'PM';
+    final h = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+    final m = dt.minute.toString().padLeft(2, '0');
     return '$h:$m $period';
   }
 
-  Widget _arrivalStatusChip(
-    String arrivalStatus,
-  ) {
+  Widget _arrivalStatusChip(String arrivalStatus) {
     late Color bg;
     late Color fg;
     late String label;
     switch (arrivalStatus) {
       case 'arrived':
-        bg = AppColors.kGreen
-            .withValues(alpha: 0.12);
+        bg = AppColors.kGreen.withValues(alpha: 0.12);
         fg = AppColors.kGreen;
         label = 'Arrived';
         break;
       case 'cancelled':
-        bg = AppColors.kError
-            .withValues(alpha: 0.12);
+        bg = AppColors.kError.withValues(alpha: 0.12);
         fg = AppColors.kError;
         label = 'Cancelled';
         break;
       default:
-        bg = Colors.orange[600]!
-            .withValues(alpha: 0.12);
+        bg = Colors.orange[600]!.withValues(alpha: 0.12);
         fg = Colors.orange[600]!;
         label = 'On the way';
     }
     return Container(
-      padding:
-          const EdgeInsets.symmetric(
-            horizontal: 10,
-            vertical: 4,
-          ),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: bg,
-        borderRadius:
-            BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
         label,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: fg,
-        ),
+        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: fg),
       ),
     );
   }
@@ -5336,72 +3382,43 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     required String uid,
     required bool isHost,
   }) {
-    final effectiveId = isHost
-        ? meeting.hostId
-        : uid;
+    final effectiveId = isHost ? meeting.hostId : uid;
     final baseArrivalStatus = isHost
         ? meeting.hostArrivalStatus
-        : meeting
-                  .participantFor(uid)
-                  ?.arrivalStatus ??
-              'on_the_way';
-    final arrivalStatus =
-        _effectiveArrivalStatus(
-          effectiveId,
-          baseArrivalStatus,
-        );
+        : meeting.participantFor(uid)?.arrivalStatus ?? 'on_the_way';
+    final arrivalStatus = _effectiveArrivalStatus(
+      effectiveId,
+      baseArrivalStatus,
+    );
     final baseArrivedAt = isHost
         ? meeting.hostArrivedAt
-        : meeting
-              .participantFor(uid)
-              ?.arrivedAt;
-    final arrivedAt =
-        _effectiveArrivedAt(
-          effectiveId,
-          baseArrivedAt,
-        );
+        : meeting.participantFor(uid)?.arrivedAt;
+    final arrivedAt = _effectiveArrivedAt(effectiveId, baseArrivedAt);
     final fallbackMins = isHost
         ? meeting.hostEstimatedMinutes
-        : (meeting
-                  .participantFor(uid)
-                  ?.estimatedArrivalMinutes ??
-              3);
-    final fallbackLocationUpdatedAt =
-        isHost
+        : (meeting.participantFor(uid)?.estimatedArrivalMinutes ?? 3);
+    final fallbackLocationUpdatedAt = isHost
         ? meeting.hostLocationUpdatedAt
-        : meeting
-              .participantFor(uid)
-              ?.locationUpdatedAt;
+        : meeting.participantFor(uid)?.locationUpdatedAt;
     final locationUpdatedAt =
-        _meetingUpdatedAtByUser[uid] ??
-        fallbackLocationUpdatedAt;
+        _meetingUpdatedAtByUser[uid] ?? fallbackLocationUpdatedAt;
 
-    final secsLeft =
-        _etaSecondsLeftForUser(
-          uid,
-          fallbackMins,
-          persistedAnchor:
-              fallbackLocationUpdatedAt,
-        );
-    final isArrived =
-        arrivalStatus == 'arrived';
-    final isCancelled =
-        arrivalStatus == 'cancelled';
+    final secsLeft = _etaSecondsLeftForUser(
+      uid,
+      fallbackMins,
+      persistedAnchor: fallbackLocationUpdatedAt,
+    );
+    final isArrived = arrivalStatus == 'arrived';
+    final isCancelled = arrivalStatus == 'cancelled';
 
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius:
-            BorderRadius.circular(16),
-        border: Border.all(
-          color: Colors.grey.shade200,
-        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
         boxShadow: [
           BoxShadow(
-            color: Colors.black
-                .withValues(
-                  alpha: 0.04,
-                ),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -5409,8 +3426,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       ),
       padding: const EdgeInsets.all(16),
       child: Column(
-        crossAxisAlignment:
-            CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // ── Header row ─────────────────────────────────────────────────
           Row(
@@ -5418,70 +3434,48 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               Container(
                 width: 44,
                 height: 44,
-                decoration:
-                    BoxDecoration(
-                      color: AppColors
-                          .kGreen
-                          .withValues(
-                            alpha: 0.15,
-                          ),
-                      shape: BoxShape
-                          .circle,
-                    ),
+                decoration: BoxDecoration(
+                  color: AppColors.kGreen.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
                 child: const Icon(
                   Icons.person,
-                  color:
-                      AppColors.kGreen,
+                  color: AppColors.kGreen,
                   size: 22,
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment
-                          .start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        Flexible(
+                        Expanded(
                           child: Text(
-                            isHost
-                                ? 'Me (Host)'
-                                : 'Me',
-                            overflow:
-                                TextOverflow
-                                    .ellipsis,
+                            isHost ? 'Me (Host)' : 'Me',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            softWrap: false,
                             style: const TextStyle(
-                              fontSize:
-                                  16,
-                              fontWeight:
-                                  FontWeight
-                                      .w700,
-                              color: Colors
-                                  .black87,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.black87,
                             ),
                           ),
                         ),
-                        const SizedBox(
-                          width: 8,
-                        ),
-                        _arrivalStatusChip(
-                          arrivalStatus,
-                        ),
+
+                        const SizedBox(width: 8),
+
+                        _arrivalStatusChip(arrivalStatus),
                       ],
                     ),
-                    const SizedBox(
-                      height: 4,
-                    ),
+                    const SizedBox(height: 4),
                     if (!isArrived)
                       Text(
                         'Location updated • ${locationUpdatedAt != null ? _timeAgo(locationUpdatedAt) : 'Unknown'}',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Colors
-                              .grey[600],
-                        ),
+                        style: TextStyle(fontSize: 13, color: Colors.grey[600]),
                       ),
                   ],
                 ),
@@ -5499,10 +3493,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                     : 'Arrived',
                 style: TextStyle(
                   fontSize: 13,
-                  color:
-                      Colors.grey[700],
-                  fontWeight:
-                      FontWeight.w500,
+                  color: Colors.grey[700],
+                  fontWeight: FontWeight.w500,
                 ),
               )
             else
@@ -5512,41 +3504,24 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                     'Estimated arrival in: ',
                     style: TextStyle(
                       fontSize: 13,
-                      color: Colors
-                          .grey[700],
-                      fontWeight:
-                          FontWeight
-                              .w500,
+                      color: Colors.grey[700],
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
-                  Icon(
-                    Icons
-                        .timer_outlined,
-                    size: 14,
-                    color: Colors
-                        .grey[600],
-                  ),
-                  const SizedBox(
-                    width: 4,
-                  ),
+                  Icon(Icons.timer_outlined, size: 14, color: Colors.grey[600]),
+                  const SizedBox(width: 4),
                   Text(
-                    _formatArrivalTimer(
-                      secsLeft,
-                    ),
+                    _formatArrivalTimer(secsLeft),
                     style: TextStyle(
                       fontSize: 13,
-                      color: Colors
-                          .grey[700],
-                      fontWeight:
-                          FontWeight
-                              .w600,
+                      color: Colors.grey[700],
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ],
               ),
 
-          if (!isCancelled)
-            const SizedBox(height: 14),
+          if (!isCancelled) const SizedBox(height: 14),
 
           // ── Action buttons ──────────────────────────────────────────────
           if (!isCancelled)
@@ -5555,84 +3530,44 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 Expanded(
                   child: OutlinedButton(
                     onPressed: () =>
-                        _cancelArrival(
-                          meeting,
-                          isHost:
-                              isHost,
-                          uid: uid,
-                        ),
+                        _cancelArrival(meeting, isHost: isHost, uid: uid),
                     style: OutlinedButton.styleFrom(
-                      foregroundColor:
-                          AppColors
-                              .kGreen,
-                      side: const BorderSide(
-                        color: AppColors
-                            .kGreen,
-                        width: 2,
-                      ),
-                      padding:
-                          const EdgeInsets.symmetric(
-                            vertical:
-                                12,
-                          ),
+                      foregroundColor: AppColors.kGreen,
+                      side: const BorderSide(color: AppColors.kGreen, width: 2),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.circular(
-                              10,
-                            ),
+                        borderRadius: BorderRadius.circular(10),
                       ),
                     ),
                     child: const Text(
                       'Cancel',
                       style: TextStyle(
                         fontSize: 14,
-                        fontWeight:
-                            FontWeight
-                                .w600,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
                 ),
                 if (!isArrived) ...[
-                  const SizedBox(
-                    width: 12,
-                  ),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: ElevatedButton(
                       onPressed: () =>
-                          _markArrived(
-                            meeting,
-                            isHost:
-                                isHost,
-                            uid: uid,
-                          ),
+                          _markArrived(meeting, isHost: isHost, uid: uid),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor:
-                            AppColors
-                                .kGreen,
-                        foregroundColor:
-                            Colors
-                                .white,
-                        padding:
-                            const EdgeInsets.symmetric(
-                              vertical:
-                                  12,
-                            ),
+                        backgroundColor: AppColors.kGreen,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
                         elevation: 0,
                         shape: RoundedRectangleBorder(
-                          borderRadius:
-                              BorderRadius.circular(
-                                10,
-                              ),
+                          borderRadius: BorderRadius.circular(10),
                         ),
                       ),
                       child: const Text(
                         'Arrive',
                         style: TextStyle(
                           fontSize: 14,
-                          fontWeight:
-                              FontWeight
-                                  .w600,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ),
@@ -5649,53 +3584,29 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   Widget _buildParticipantArrivalCard({
     required MeetingPointParticipant p,
     required MeetingPointRecord meeting,
-    required bool
-    isHostParticipant, // this participant IS the host
+    required bool isHostParticipant, // this participant IS the host
   }) {
-    final isExpanded =
-        _expandedArrivalParticipantId ==
-        p.userId;
-    final effectiveStatus =
-        _effectiveArrivalStatus(
-          p.userId,
-          p.arrivalStatus,
-        );
-    final arrivedAt =
-        _effectiveArrivedAt(
-          p.userId,
-          p.arrivedAt,
-        );
-    final isCancelled =
-        effectiveStatus == 'cancelled';
-    final isArrived =
-        effectiveStatus == 'arrived';
-    final fallbackMins =
-        p.estimatedArrivalMinutes;
-    final secsLeft =
-        _etaSecondsLeftForUser(
-          p.userId,
-          fallbackMins,
-          persistedAnchor:
-              p.locationUpdatedAt,
-        );
+    final isExpanded = _expandedArrivalParticipantId == p.userId;
+    final effectiveStatus = _effectiveArrivalStatus(p.userId, p.arrivalStatus);
+    final arrivedAt = _effectiveArrivedAt(p.userId, p.arrivedAt);
+    final isCancelled = effectiveStatus == 'cancelled';
+    final isArrived = effectiveStatus == 'arrived';
+    final fallbackMins = p.estimatedArrivalMinutes;
+    final secsLeft = _etaSecondsLeftForUser(
+      p.userId,
+      fallbackMins,
+      persistedAnchor: p.locationUpdatedAt,
+    );
 
     return Container(
-      margin: const EdgeInsets.only(
-        bottom: 8,
-      ),
+      margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius:
-            BorderRadius.circular(16),
-        border: Border.all(
-          color: Colors.grey.shade200,
-        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
         boxShadow: [
           BoxShadow(
-            color: Colors.black
-                .withValues(
-                  alpha: 0.04,
-                ),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 6,
             offset: const Offset(0, 2),
           ),
@@ -5708,215 +3619,165 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             onTap: isCancelled
                 ? null
                 : () => setState(() {
-                    _expandedArrivalParticipantId =
-                        isExpanded
+                    _expandedArrivalParticipantId = isExpanded
                         ? null
                         : p.userId;
                   }),
-            borderRadius:
-                BorderRadius.circular(
-                  16,
-                ),
+            borderRadius: BorderRadius.circular(16),
             child: Padding(
-              padding:
-                  const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 12,
-                  ),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Container(
                     width: 44,
                     height: 44,
-                    decoration:
-                        BoxDecoration(
-                          color: Colors
-                              .grey[200],
-                          shape: BoxShape
-                              .circle,
-                        ),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[200],
+                      shape: BoxShape.circle,
+                    ),
                     child: Icon(
                       Icons.person,
-                      color: Colors
-                          .grey[600],
+                      color: Colors.grey[600],
                       size: 22,
                     ),
                   ),
-                  const SizedBox(
-                    width: 10,
-                  ),
+
+                  const SizedBox(width: 12),
+
                   Expanded(
                     child: Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment
-                              .start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // ROW 1: name + status chip
                         Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
-                            Flexible(
+                            Expanded(
                               child: Text(
-                                p.name.trim().isEmpty
-                                    ? p.phone
-                                    : p.name,
-                                overflow:
-                                    TextOverflow.ellipsis,
+                                p.name.trim().isEmpty ? p.phone : p.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                softWrap: false,
                                 style: const TextStyle(
-                                  fontSize:
-                                      14,
-                                  fontWeight:
-                                      FontWeight.w600,
-                                  color:
-                                      Colors.black87,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.black87,
                                 ),
                               ),
                             ),
-                            const SizedBox(
-                              width: 8,
-                            ),
-                            _arrivalStatusChip(
-                              effectiveStatus,
-                            ),
+
+                            const SizedBox(width: 8),
+
+                            _arrivalStatusChip(effectiveStatus),
                           ],
                         ),
-                        const SizedBox(
-                          height: 4,
+
+                        const SizedBox(height: 6),
+
+                        // ROW 2: location/arrival text + favorite + expand
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                isCancelled
+                                    ? p.phone
+                                    : isArrived
+                                    ? (arrivedAt != null
+                                          ? 'Arrived at • ${_formatTime(arrivedAt)}'
+                                          : 'Arrived')
+                                    : 'Location updated • ${() {
+                                        final live = _meetingUpdatedAtByUser[p.userId];
+                                        final fallback = p.locationUpdatedAt ?? p.updatedAt;
+                                        final resolved = live ?? fallback;
+                                        return resolved != null ? _timeAgo(resolved) : 'Unknown';
+                                      }()}',
+                                maxLines: 2,
+                                overflow: TextOverflow.visible,
+                                softWrap: true,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  height: 1.25,
+                                  color: Colors.grey[600],
+                                ),
+                              ),
+                            ),
+
+                            if (!isCancelled) ...[
+                              const SizedBox(width: 8),
+
+                              InkWell(
+                                onTap: () =>
+                                    _toggleParticipantFavorite(p.phone, p.name),
+                                borderRadius: BorderRadius.circular(20),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(4),
+                                  child: Icon(
+                                    _favService.isFavorite(p.phone)
+                                        ? Icons.favorite
+                                        : Icons.favorite_border,
+                                    color: _favService.isFavorite(p.phone)
+                                        ? Colors.red
+                                        : Colors.grey[400],
+                                    size: 24,
+                                  ),
+                                ),
+                              ),
+
+                              const SizedBox(width: 8),
+
+                              AnimatedRotation(
+                                turns: isExpanded ? 0.5 : 0,
+                                duration: const Duration(milliseconds: 200),
+                                child: Icon(
+                                  Icons.keyboard_arrow_down,
+                                  color: Colors.grey[600],
+                                  size: 24,
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
-                        if (isCancelled)
-                          Text(
-                            p.phone,
-                            style: TextStyle(
-                              fontSize:
-                                  13,
-                              color: Colors
-                                  .grey[600],
-                            ),
-                          )
-                        else if (!isArrived)
-                          Text(
-                            'Location updated • ${() {
-                              final live = _meetingUpdatedAtByUser[p.userId];
-                              final fallback = p.locationUpdatedAt ?? p.updatedAt;
-                              final resolved = live ?? fallback;
-                              return resolved != null ? _timeAgo(resolved) : 'Unknown';
-                            }()}',
-                            style: TextStyle(
-                              fontSize:
-                                  13,
-                              color: Colors
-                                  .grey[600],
-                            ),
-                          ),
                       ],
                     ),
                   ),
-                  if (!isCancelled) ...[
-                    const SizedBox(
-                      width: 8,
-                    ),
-                    IconButton(
-                      onPressed: () =>
-                          _toggleParticipantFavorite(
-                            p.phone,
-                            p.name,
-                          ),
-                      icon: Icon(
-                        _favService
-                                .isFavorite(
-                                  p.phone,
-                                )
-                            ? Icons
-                                  .favorite
-                            : Icons
-                                  .favorite_border,
-                        color:
-                            _favService
-                                .isFavorite(
-                                  p.phone,
-                                )
-                            ? Colors.red
-                            : Colors
-                                  .grey[400],
-                        size: 23,
-                      ),
-                    ),
-                    AnimatedRotation(
-                      turns: isExpanded
-                          ? 0.5
-                          : 0,
-                      duration:
-                          const Duration(
-                            milliseconds:
-                                200,
-                          ),
-                      child: Icon(
-                        Icons
-                            .keyboard_arrow_down,
-                        color: Colors
-                            .grey[600],
-                        size: 22,
-                      ),
-                    ),
-                  ],
                 ],
               ),
             ),
           ),
 
           // ── Expanded body ─────────────────────────────────────────────
-          if (isExpanded &&
-              !isCancelled)
+          if (isExpanded && !isCancelled)
             Padding(
-              padding:
-                  const EdgeInsets.fromLTRB(
-                    14,
-                    0,
-                    14,
-                    14,
-                  ),
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
               child: Column(
-                crossAxisAlignment:
-                    CrossAxisAlignment
-                        .start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const SizedBox(
-                    height: 10,
-                  ),
+                  const SizedBox(height: 10),
                   IntrinsicHeight(
                     child: Row(
-                      crossAxisAlignment:
-                          CrossAxisAlignment
-                              .start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Container(
                           width: 3,
                           decoration: BoxDecoration(
-                            color: AppColors
-                                .kGreen,
-                            borderRadius:
-                                BorderRadius.circular(
-                                  2,
-                                ),
+                            color: AppColors.kGreen,
+                            borderRadius: BorderRadius.circular(2),
                           ),
                         ),
-                        const SizedBox(
-                          width: 12,
-                        ),
+                        const SizedBox(width: 12),
                         Expanded(
                           child: Column(
-                            crossAxisAlignment:
-                                CrossAxisAlignment
-                                    .start,
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               // Participant label
                               RichText(
                                 text: TextSpan(
                                   style: TextStyle(
-                                    fontSize:
-                                        13,
-                                    fontWeight:
-                                        FontWeight.w400,
-                                    color:
-                                        Colors.grey[600],
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w400,
+                                    color: Colors.grey[600],
                                   ),
                                   children: [
                                     TextSpan(
@@ -5929,7 +3790,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                                       ),
                                     ),
                                     TextSpan(
-                                      text: '${p.name.trim().isEmpty ? 'Unknown' : p.name} (${p.phone})',
+                                      text:
+                                          '${p.name.trim().isEmpty ? 'Unknown' : p.name} (${p.phone})',
                                       style: const TextStyle(
                                         fontWeight: FontWeight.w500,
                                         fontSize: 13,
@@ -5939,24 +3801,17 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                                   ],
                                 ),
                               ),
-                              const SizedBox(
-                                height:
-                                    6,
-                              ),
+                              const SizedBox(height: 6),
                               // Timer or arrived-at
                               if (isArrived)
                                 Text(
-                                  arrivedAt !=
-                                          null
+                                  arrivedAt != null
                                       ? 'Arrived at: ${_formatTime(arrivedAt)}'
                                       : 'Arrived',
                                   style: TextStyle(
-                                    fontSize:
-                                        13,
-                                    color:
-                                        Colors.grey[600],
-                                    fontWeight:
-                                        FontWeight.w400,
+                                    fontSize: 13,
+                                    color: Colors.grey[600],
+                                    fontWeight: FontWeight.w400,
                                   ),
                                 )
                               else
@@ -5975,13 +3830,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                                       size: 14,
                                       color: Colors.black87,
                                     ),
-                                    const SizedBox(
-                                      width: 4,
-                                    ),
+                                    const SizedBox(width: 4),
                                     Text(
-                                      _formatArrivalTimer(
-                                        secsLeft,
-                                      ),
+                                      _formatArrivalTimer(secsLeft),
                                       style: TextStyle(
                                         fontSize: 13,
                                         color: Colors.black87,
@@ -5996,49 +3847,33 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                       ],
                     ),
                   ),
-                  const SizedBox(
-                    height: 12,
-                  ),
+                  const SizedBox(height: 12),
                   // Refresh location button — outside the green line
                   if (!isArrived)
                     SizedBox(
-                      width: double
-                          .infinity,
+                      width: double.infinity,
                       child: Builder(
                         builder: (_) {
-                          final refreshKey =
-                              _meetingParticipantRefreshKey(
-                                meeting
-                                    .id,
-                                p.userId,
-                              );
-                          final isBusy =
-                              _refreshingMeetingParticipantIds
-                                  .contains(
-                                    refreshKey,
-                                  );
+                          final refreshKey = _meetingParticipantRefreshKey(
+                            meeting.id,
+                            p.userId,
+                          );
+                          final isBusy = _refreshingMeetingParticipantIds
+                              .contains(refreshKey);
                           final until =
                               _meetingRefreshCooldownUntilByKey[refreshKey];
                           final isCoolingDown =
                               !isBusy &&
-                              until !=
-                                  null &&
-                              DateTime.now()
-                                  .isBefore(
-                                    until,
-                                  );
-                          final disabled =
-                              isBusy ||
-                              isCoolingDown;
+                              until != null &&
+                              DateTime.now().isBefore(until);
+                          final disabled = isBusy || isCoolingDown;
 
                           return Stack(
                             children: [
                               SizedBox(
-                                width: double
-                                    .infinity,
+                                width: double.infinity,
                                 child: ElevatedButton.icon(
-                                  icon:
-                                      isBusy
+                                  icon: isBusy
                                       ? const SizedBox(
                                           width: 18,
                                           height: 18,
@@ -6047,10 +3882,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                                             color: Colors.white,
                                           ),
                                         )
-                                      : const Icon(
-                                          Icons.refresh,
-                                          size: 18,
-                                        ),
+                                      : const Icon(Icons.refresh, size: 18),
                                   label: const Text(
                                     'Refresh Location',
                                     style: TextStyle(
@@ -6059,40 +3891,34 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                                     ),
                                   ),
                                   style: ElevatedButton.styleFrom(
-                                    backgroundColor:
-                                        disabled
+                                    backgroundColor: disabled
                                         ? Colors.grey[300]
                                         : AppColors.kGreen,
-                                    foregroundColor:
-                                        disabled
+                                    foregroundColor: disabled
                                         ? Colors.grey[500]
                                         : Colors.white,
-                                    elevation:
-                                        0,
+                                    elevation: 0,
                                     padding: const EdgeInsets.symmetric(
                                       vertical: 12,
                                     ),
                                     shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(
-                                        12,
-                                      ),
+                                      borderRadius: BorderRadius.circular(12),
                                     ),
                                   ),
-                                  onPressed:
-                                      disabled
+                                  onPressed: disabled
                                       ? null
-                                      : () => _requestMeetingParticipantLocationRefresh(
-                                          meeting,
-                                          p.userId,
-                                          p.name,
-                                        ),
+                                      : () =>
+                                            _requestMeetingParticipantLocationRefresh(
+                                              meeting,
+                                              p.userId,
+                                              p.name,
+                                            ),
                                 ),
                               ),
                               if (isCoolingDown)
                                 Positioned.fill(
                                   child: Material(
-                                    color:
-                                        Colors.transparent,
+                                    color: Colors.transparent,
                                     child: InkWell(
                                       onTap: () {
                                         SnackbarHelper.showError(
@@ -6100,9 +3926,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                                           'you cannot send many request within short period',
                                         );
                                       },
-                                      borderRadius: BorderRadius.circular(
-                                        12,
-                                      ),
+                                      borderRadius: BorderRadius.circular(12),
                                     ),
                                   ),
                                 ),
@@ -6120,112 +3944,67 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   }
 
   /// Main container for the arrival phase.
-  Widget _buildRunningMeetingSection(
-    MeetingPointRecord meeting,
-    String uid,
-  ) {
+  Widget _buildRunningMeetingSection(MeetingPointRecord meeting, String uid) {
     final isHost = meeting.isHost(uid);
 
     // Participants who originally accepted (they are in the arrival phase).
-    final arrivalParticipants = meeting
-        .participants
+    final arrivalParticipants = meeting.participants
         .where((p) => p.isAccepted)
         .toList();
 
     return Column(
-      crossAxisAlignment:
-          CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // ── Destination info ────────────────────────────────────────────
-        if (meeting
-            .venueName
-            .isNotEmpty)
+        if (meeting.venueName.isNotEmpty)
           GestureDetector(
-            onTap: () =>
-                _navigateToMeetingPoint(
-                  meeting,
-                ),
+            onTap: () => _navigateToMeetingPoint(meeting),
             child: Container(
-              margin:
-                  const EdgeInsets.only(
-                    bottom: 10,
-                  ),
-              padding:
-                  const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 12,
-                  ),
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
-                color: AppColors.kGreen
-                    .withValues(
-                      alpha: 0.1,
-                    ),
-                borderRadius:
-                    BorderRadius.circular(
-                      14,
-                    ),
+                color: AppColors.kGreen.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(14),
               ),
               child: Row(
                 children: [
                   const Icon(
                     Icons.location_on,
-                    color: AppColors
-                        .kGreen,
+                    color: AppColors.kGreen,
                     size: 20,
                   ),
-                  const SizedBox(
-                    width: 10,
-                  ),
+                  const SizedBox(width: 10),
                   Expanded(
                     child: Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment
-                              .start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const SizedBox(
-                          height: 2,
-                        ),
+                        const SizedBox(height: 2),
                         Text(
-                          _suggestedPointLabel(
-                            meeting,
-                          ),
+                          _suggestedPointLabel(meeting),
                           style: const TextStyle(
-                            fontSize:
-                                14,
-                            fontWeight:
-                                FontWeight
-                                    .w600,
-                            color: Colors
-                                .black87,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black87,
                           ),
                         ),
                         Text(
-                          meeting
-                              .venueName,
+                          meeting.venueName,
                           style: TextStyle(
-                            fontSize:
-                                12,
-                            color: Colors
-                                .grey[500],
+                            fontSize: 12,
+                            color: Colors.grey[500],
                           ),
                         ),
-                        const SizedBox(
-                          height: 2,
-                        ),
+                        const SizedBox(height: 2),
                       ],
                     ),
                   ),
                   const Tooltip(
                     message: 'Navigate',
                     child: Padding(
-                      padding: EdgeInsets.only(
-                        right: 4,
-                      ),
+                      padding: EdgeInsets.only(right: 4),
                       child: Icon(
-                        FontAwesomeIcons
-                            .locationArrow,
-                        color: AppColors
-                            .kGreen,
+                        FontAwesomeIcons.locationArrow,
+                        color: AppColors.kGreen,
                         size: 15,
                       ),
                     ),
@@ -6237,66 +4016,40 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
         // ── Participants subtitle ───────────────────────────────────────
         Padding(
-          padding:
-              const EdgeInsets.only(
-                bottom: 8,
-              ),
+          padding: const EdgeInsets.only(bottom: 8),
           child: Row(
             children: [
               Text(
                 'Meeting Point Participants',
                 style: TextStyle(
                   fontSize: 12,
-                  fontWeight:
-                      FontWeight.w400,
-                  color:
-                      Colors.grey[500],
+                  fontWeight: FontWeight.w400,
+                  color: Colors.grey[500],
                 ),
               ),
               const Spacer(),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(
-                      horizontal: 7,
-                      vertical: 2,
-                    ),
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                 decoration: BoxDecoration(
-                  color:
-                      const Color.fromARGB(
-                        255,
-                        132,
-                        132,
-                        132,
-                      ).withValues(
-                        alpha: 0.12,
-                      ),
-                  borderRadius:
-                      BorderRadius.circular(
-                        10,
-                      ),
+                  color: const Color.fromARGB(
+                    255,
+                    132,
+                    132,
+                    132,
+                  ).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: Row(
-                  mainAxisSize:
-                      MainAxisSize.min,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(
-                      Icons.group,
-                      size: 14,
-                      color: AppColors
-                          .kGreen,
-                    ),
-                    const SizedBox(
-                      width: 4,
-                    ),
+                    Icon(Icons.group, size: 14, color: AppColors.kGreen),
+                    const SizedBox(width: 4),
                     Text(
                       '${1 + arrivalParticipants.length}',
                       style: const TextStyle(
                         fontSize: 12,
-                        fontWeight:
-                            FontWeight
-                                .w600,
-                        color: AppColors
-                            .kGreen,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.kGreen,
                       ),
                     ),
                   ],
@@ -6307,11 +4060,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         ),
 
         // ── Me card ────────────────────────────────────────────────────
-        _buildMeArrivalCard(
-          meeting: meeting,
-          uid: uid,
-          isHost: isHost,
-        ),
+        _buildMeArrivalCard(meeting: meeting, uid: uid, isHost: isHost),
         const SizedBox(height: 8),
 
         // ── Other participants ──────────────────────────────────────────
@@ -6323,15 +4072,10 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               name: meeting.hostName,
               phone: meeting.hostPhone,
               status: 'accepted',
-              arrivalStatus: meeting
-                  .hostArrivalStatus,
-              arrivedAt:
-                  meeting.hostArrivedAt,
-              estimatedArrivalMinutes:
-                  meeting
-                      .hostEstimatedMinutes,
-              locationUpdatedAt: meeting
-                  .hostLocationUpdatedAt,
+              arrivalStatus: meeting.hostArrivalStatus,
+              arrivedAt: meeting.hostArrivedAt,
+              estimatedArrivalMinutes: meeting.hostEstimatedMinutes,
+              locationUpdatedAt: meeting.hostLocationUpdatedAt,
             ),
             meeting: meeting,
             isHostParticipant: true,
@@ -6340,34 +4084,17 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         // Other participants (excluding me), cancelled ones last.
         ...(() {
           final others =
-              arrivalParticipants
-                  .where(
-                    (p) =>
-                        p.userId != uid,
-                  )
-                  .toList()
-                ..sort(
-                  (a, b) =>
-                      (a.arrivalStatus ==
-                                  'cancelled'
-                              ? 1
-                              : 0)
-                          .compareTo(
-                            b.arrivalStatus ==
-                                    'cancelled'
-                                ? 1
-                                : 0,
-                          ),
-                );
-          return others.map(
-            (p) =>
-                _buildParticipantArrivalCard(
-                  p: p,
-                  meeting: meeting,
-                  isHostParticipant:
-                      p.userId ==
-                      meeting.hostId,
+              arrivalParticipants.where((p) => p.userId != uid).toList()..sort(
+                (a, b) => (a.arrivalStatus == 'cancelled' ? 1 : 0).compareTo(
+                  b.arrivalStatus == 'cancelled' ? 1 : 0,
                 ),
+              );
+          return others.map(
+            (p) => _buildParticipantArrivalCard(
+              p: p,
+              meeting: meeting,
+              isHostParticipant: p.userId == meeting.hostId,
+            ),
           );
         })(),
       ],
@@ -6381,37 +4108,21 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     bool persistUserLocation = true,
   }) async {
     final now = DateTime.now();
-    final willComplete =
-        _willCompleteAfterArrive(
-          meeting,
-          isHost,
-          uid,
-        );
-    final prevArrivalStatus =
-        _meetingArrivalStatusByUser[uid];
-    final prevOverrideStatus =
-        _arrivalOverrideByUser[uid];
-    final prevOverrideAt =
-        _arrivalOverrideAtByUser[uid];
+    final willComplete = _willCompleteAfterArrive(meeting, isHost, uid);
+    final prevArrivalStatus = _meetingArrivalStatusByUser[uid];
+    final prevOverrideStatus = _arrivalOverrideByUser[uid];
+    final prevOverrideAt = _arrivalOverrideAtByUser[uid];
     if (mounted) {
       if (willComplete) {
-        _pendingCompletionHoldMeetingId =
-            meeting.id;
-        _pendingCompletionHoldStartedAt =
-            DateTime.now();
-        _lastKnownConfirmedMeeting =
-            meeting;
+        _pendingCompletionHoldMeetingId = meeting.id;
+        _pendingCompletionHoldStartedAt = DateTime.now();
+        _lastKnownConfirmedMeeting = meeting;
       }
-      _meetingArrivalStatusByUser[uid] =
-          'arrived';
-      _arrivalOverrideByUser[uid] =
-          'arrived';
-      _arrivalOverrideAtByUser[uid] =
-          now;
+      _meetingArrivalStatusByUser[uid] = 'arrived';
+      _arrivalOverrideByUser[uid] = 'arrived';
+      _arrivalOverrideAtByUser[uid] = now;
       _applyAllTrackedPinsToViewer();
-      unawaited(
-        _clearMeetingPathForUser(uid),
-      );
+      unawaited(_clearMeetingPathForUser(uid));
     }
     try {
       await MeetingPointService.updateArrivalStatus(
@@ -6422,18 +4133,12 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         arrivedAt: now,
       );
       if (persistUserLocation) {
-        await _saveArrivedLocationToUserDoc(
-          meeting,
-          uid,
-        );
+        await _saveArrivedLocationToUserDoc(meeting, uid);
       }
       if (mounted) {
-        _meetingArrivalStatusByUser[uid] =
-            'arrived';
+        _meetingArrivalStatusByUser[uid] = 'arrived';
         _applyAllTrackedPinsToViewer();
-        unawaited(
-          _clearMeetingPathForUser(uid),
-        );
+        unawaited(_clearMeetingPathForUser(uid));
       }
       _forceStreamRefresh();
       if (willComplete && mounted) {
@@ -6442,83 +4147,46 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     } catch (e) {
       if (mounted) {
         if (prevArrivalStatus == null) {
-          _meetingArrivalStatusByUser
-              .remove(uid);
+          _meetingArrivalStatusByUser.remove(uid);
         } else {
-          _meetingArrivalStatusByUser[uid] =
-              prevArrivalStatus;
+          _meetingArrivalStatusByUser[uid] = prevArrivalStatus;
         }
-        if (prevOverrideStatus ==
-            null) {
-          _arrivalOverrideByUser.remove(
-            uid,
-          );
+        if (prevOverrideStatus == null) {
+          _arrivalOverrideByUser.remove(uid);
         } else {
-          _arrivalOverrideByUser[uid] =
-              prevOverrideStatus;
+          _arrivalOverrideByUser[uid] = prevOverrideStatus;
         }
         if (prevOverrideAt == null) {
-          _arrivalOverrideAtByUser
-              .remove(uid);
+          _arrivalOverrideAtByUser.remove(uid);
         } else {
-          _arrivalOverrideAtByUser[uid] =
-              prevOverrideAt;
+          _arrivalOverrideAtByUser[uid] = prevOverrideAt;
         }
-        unawaited(
-          _recomputeMeetingPathForUser(
-            uid,
-          ),
-        );
+        unawaited(_recomputeMeetingPathForUser(uid));
         _applyAllTrackedPinsToViewer();
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Failed to mark arrived: $e',
-            ),
-          ),
-        );
+        ).showSnackBar(SnackBar(content: Text('Failed to mark arrived: $e')));
       }
     }
   }
 
-  Future<void>
-  _maybeAutoArriveForCurrentUser() async {
+  Future<void> _maybeAutoArriveForCurrentUser() async {
     if (!mounted) return;
-    final meeting =
-        _lastKnownConfirmedMeeting;
-    if (meeting == null ||
-        !meeting.isConfirmed)
-      return;
-    final uid = FirebaseAuth
-        .instance
-        .currentUser
-        ?.uid;
-    if (uid == null ||
-        uid.trim().isEmpty)
-      return;
+    final meeting = _lastKnownConfirmedMeeting;
+    if (meeting == null || !meeting.isConfirmed) return;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || uid.trim().isEmpty) return;
 
     if (_autoArriveInFlight) return;
     final now = DateTime.now();
-    if (_lastAutoArriveAttemptAt !=
-            null &&
-        now.difference(
-              _lastAutoArriveAttemptAt!,
-            ) <
-            _autoArriveCooldown) {
+    if (_lastAutoArriveAttemptAt != null &&
+        now.difference(_lastAutoArriveAttemptAt!) < _autoArriveCooldown) {
       return;
     }
-    if (_lastAutoArriveMeetingId !=
-            null &&
-        _lastAutoArriveMeetingId !=
-            meeting.id &&
-        _lastAutoArriveAttemptAt !=
-            null &&
-        now.difference(
-              _lastAutoArriveAttemptAt!,
-            ) <
-            _autoArriveCooldown) {
+    if (_lastAutoArriveMeetingId != null &&
+        _lastAutoArriveMeetingId != meeting.id &&
+        _lastAutoArriveAttemptAt != null &&
+        now.difference(_lastAutoArriveAttemptAt!) < _autoArriveCooldown) {
       return;
     }
 
@@ -6526,67 +4194,32 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         _meetingArrivalStatusByUser[uid] ??
         (meeting.isHost(uid)
             ? meeting.hostArrivalStatus
-            : meeting
-                      .participantFor(
-                        uid,
-                      )
-                      ?.arrivalStatus ??
-                  'on_the_way');
-    if (arrivalStatus == 'arrived' ||
-        arrivalStatus == 'cancelled')
-      return;
+            : meeting.participantFor(uid)?.arrivalStatus ?? 'on_the_way');
+    if (arrivalStatus == 'arrived' || arrivalStatus == 'cancelled') return;
 
-    final userFloor =
-        _meetingFloorByUser[uid] ?? '';
-    final meetingFloor =
-        _meetingPointFloorLabel;
-    if (!_floorsMatchStrict(
-      userFloor,
-      meetingFloor,
-    ))
-      return;
+    final userFloor = _meetingFloorByUser[uid] ?? '';
+    final meetingFloor = _meetingPointFloorLabel;
+    if (!_floorsMatchStrict(userFloor, meetingFloor)) return;
 
-    final locationUpdatedAt =
-        _meetingUpdatedAtByUser[uid];
+    final locationUpdatedAt = _meetingUpdatedAtByUser[uid];
     final meetingStartAt =
-        meeting.confirmedAt ??
-        meeting.updatedAt ??
-        meeting.createdAt;
-    if (locationUpdatedAt == null ||
-        meetingStartAt == null)
-      return;
-    if (locationUpdatedAt.isBefore(
-      meetingStartAt,
-    ))
-      return;
+        meeting.confirmedAt ?? meeting.updatedAt ?? meeting.createdAt;
+    if (locationUpdatedAt == null || meetingStartAt == null) return;
+    if (locationUpdatedAt.isBefore(meetingStartAt)) return;
 
-    final userPos =
-        _meetingPosByUser[uid];
-    final meetingPos =
-        _meetingPointPosGltf;
-    if (userPos == null ||
-        meetingPos == null)
-      return;
+    final userPos = _meetingPosByUser[uid];
+    final meetingPos = _meetingPointPosGltf;
+    if (userPos == null || meetingPos == null) return;
 
-    final dx =
-        (userPos['x'] ?? 0) -
-        (meetingPos['x'] ?? 0);
-    final dz =
-        (userPos['z'] ?? 0) -
-        (meetingPos['z'] ?? 0);
-    final distUnits = math.sqrt(
-      (dx * dx) + (dz * dz),
-    );
-    final distMeters =
-        distUnits * _unitToMeters;
-    if (distMeters >
-        _autoArriveDistanceMeters)
-      return;
+    final dx = (userPos['x'] ?? 0) - (meetingPos['x'] ?? 0);
+    final dz = (userPos['z'] ?? 0) - (meetingPos['z'] ?? 0);
+    final distUnits = math.sqrt((dx * dx) + (dz * dz));
+    final distMeters = distUnits * _unitToMeters;
+    if (distMeters > _autoArriveDistanceMeters) return;
 
     _autoArriveInFlight = true;
     _lastAutoArriveAttemptAt = now;
-    _lastAutoArriveMeetingId =
-        meeting.id;
+    _lastAutoArriveMeetingId = meeting.id;
     try {
       await _markArrived(
         meeting,
@@ -6599,63 +4232,34 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     }
   }
 
-  Future<void>
-  _saveArrivedLocationToUserDoc(
+  Future<void> _saveArrivedLocationToUserDoc(
     MeetingPointRecord meeting,
     String uid,
   ) async {
-    Map<String, double>? blender =
-        _meetingPointPosBlender;
-    Map<String, double>? gltf =
-        _meetingPointPosGltf;
-    String floorLabel =
-        _meetingPointFloorLabel;
+    Map<String, double>? blender = _meetingPointPosBlender;
+    Map<String, double>? gltf = _meetingPointPosGltf;
+    String floorLabel = _meetingPointFloorLabel;
 
-    if (blender == null ||
-        blender.isEmpty) {
-      if (meeting
-          .suggestedCandidates
-          .isNotEmpty) {
-        final raw = meeting
-            .suggestedCandidates
-            .first;
-        final entrance =
-            raw['entrance'];
+    if (blender == null || blender.isEmpty) {
+      if (meeting.suggestedCandidates.isNotEmpty) {
+        final raw = meeting.suggestedCandidates.first;
+        final entrance = raw['entrance'];
         if (entrance is Map) {
-          final ex =
-              (entrance['x'] as num?)
-                  ?.toDouble();
-          final ey =
-              (entrance['y'] as num?)
-                  ?.toDouble();
-          final ez =
-              (entrance['z'] as num?)
-                  ?.toDouble();
-          final floor =
-              (entrance['floor'] ?? '')
-                  .toString();
-          if (ex != null &&
-              ey != null &&
-              ez != null) {
-            blender = {
-              'x': ex,
-              'y': ey,
-              'z': ez,
-            };
-            if (floorLabel.isEmpty)
-              floorLabel = floor;
+          final ex = (entrance['x'] as num?)?.toDouble();
+          final ey = (entrance['y'] as num?)?.toDouble();
+          final ez = (entrance['z'] as num?)?.toDouble();
+          final floor = (entrance['floor'] ?? '').toString();
+          if (ex != null && ey != null && ez != null) {
+            blender = {'x': ex, 'y': ey, 'z': ez};
+            if (floorLabel.isEmpty) floorLabel = floor;
           }
         }
       }
     }
 
-    if (blender == null ||
-        blender.isEmpty)
-      return;
+    if (blender == null || blender.isEmpty) return;
     if (floorLabel.isEmpty) {
-      floorLabel =
-          _meetingFloorByUser[uid] ??
-          '';
+      floorLabel = _meetingFloorByUser[uid] ?? '';
     }
     if (gltf == null || gltf.isEmpty) {
       gltf = _blenderToGltf(
@@ -6665,13 +4269,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       );
     }
 
-    if (gltf != null &&
-        gltf.isNotEmpty) {
-      final offsetGltf =
-          _offsetMeetingPointForUser(
-            uid,
-            gltf,
-          );
+    if (gltf != null && gltf.isNotEmpty) {
+      final offsetGltf = _offsetMeetingPointForUser(uid, gltf);
       blender = _gltfToBlender(
         x: (offsetGltf['x'] ?? 0),
         y: (offsetGltf['y'] ?? 0),
@@ -6680,24 +4279,17 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     }
 
     try {
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .update({
-            'location.blenderPosition':
-                {
-                  'x': blender['x'],
-                  'y': blender['y'],
-                  'z': blender['z'],
-                  'floor': floorLabel,
-                },
-            'location.updatedAt':
-                FieldValue.serverTimestamp(),
-          });
+      await FirebaseFirestore.instance.collection('users').doc(uid).update({
+        'location.blenderPosition': {
+          'x': blender['x'],
+          'y': blender['y'],
+          'z': blender['z'],
+          'floor': floorLabel,
+        },
+        'location.updatedAt': FieldValue.serverTimestamp(),
+      });
     } catch (e) {
-      debugPrint(
-        '[TRACK] Failed to save arrived location: $e',
-      );
+      debugPrint('[TRACK] Failed to save arrived location: $e');
     }
   }
 
@@ -6708,17 +4300,14 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   }) async {
     // ── Participant: simple two-button confirmation ────────────────────────
     if (!isHost) {
-      final confirmed =
-          await ConfirmationDialog.showDeleteConfirmation(
-            context,
-            title:
-                'Cancel Participation',
-            message:
-                'Are you sure you want to cancel your participation in this meeting point?',
-            cancelText: 'Discard',
-            confirmText:
-                'Cancel Participation',
-          );
+      final confirmed = await ConfirmationDialog.showDeleteConfirmation(
+        context,
+        title: 'Cancel Participation',
+        message:
+            'Are you sure you want to cancel your participation in this meeting point?',
+        cancelText: 'Discard',
+        confirmText: 'Cancel Participation',
+      );
       if (confirmed != true) return;
       try {
         await MeetingPointService.updateArrivalStatus(
@@ -6745,74 +4334,36 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       barrierColor: Colors.black54,
       builder: (ctx) => AlertDialog(
         backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(
-          borderRadius:
-              BorderRadius.circular(16),
-        ),
-        titlePadding:
-            const EdgeInsets.fromLTRB(
-              24,
-              16,
-              24,
-              0,
-            ),
-        contentPadding:
-            const EdgeInsets.fromLTRB(
-              24,
-              8,
-              24,
-              24,
-            ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        titlePadding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+        contentPadding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
         title: const Text(
           'Cancel Meeting',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            fontSize: 20,
-          ),
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
         ),
         content: const Text(
           'As the host, you can cancel the meeting for everyone or just remove yourself.',
-          style: TextStyle(
-            fontSize: 15,
-          ),
+          style: TextStyle(fontSize: 15),
         ),
-        actionsPadding:
-            const EdgeInsets.fromLTRB(
-              16,
-              0,
-              16,
-              16,
-            ),
+        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         actions: [
           // Cancel for all
           SizedBox(
             width: double.infinity,
             child: TextButton(
-              onPressed: () =>
-                  Navigator.pop(
-                    ctx,
-                    'all',
-                  ),
+              onPressed: () => Navigator.pop(ctx, 'all'),
               style: TextButton.styleFrom(
-                backgroundColor:
-                    AppColors.kError,
-                padding:
-                    const EdgeInsets.symmetric(
-                      vertical: 12,
-                    ),
+                backgroundColor: AppColors.kError,
+                padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.circular(
-                        8,
-                      ),
+                  borderRadius: BorderRadius.circular(8),
                 ),
               ),
               child: const Text(
                 'Cancel for all participants',
                 style: TextStyle(
                   color: Colors.white,
-                  fontWeight:
-                      FontWeight.bold,
+                  fontWeight: FontWeight.bold,
                   fontSize: 15,
                 ),
               ),
@@ -6823,31 +4374,19 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           SizedBox(
             width: double.infinity,
             child: TextButton(
-              onPressed: () =>
-                  Navigator.pop(
-                    ctx,
-                    'me',
-                  ),
+              onPressed: () => Navigator.pop(ctx, 'me'),
               style: TextButton.styleFrom(
-                backgroundColor:
-                    Colors.grey[200],
-                padding:
-                    const EdgeInsets.symmetric(
-                      vertical: 12,
-                    ),
+                backgroundColor: Colors.grey[200],
+                padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.circular(
-                        8,
-                      ),
+                  borderRadius: BorderRadius.circular(8),
                 ),
               ),
               child: const Text(
                 'Cancel for me',
                 style: TextStyle(
                   color: Colors.black87,
-                  fontWeight:
-                      FontWeight.w600,
+                  fontWeight: FontWeight.w600,
                   fontSize: 15,
                 ),
               ),
@@ -6858,31 +4397,19 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           SizedBox(
             width: double.infinity,
             child: TextButton(
-              onPressed: () =>
-                  Navigator.pop(
-                    ctx,
-                    null,
-                  ),
+              onPressed: () => Navigator.pop(ctx, null),
               style: TextButton.styleFrom(
-                backgroundColor:
-                    Colors.grey[200],
-                padding:
-                    const EdgeInsets.symmetric(
-                      vertical: 12,
-                    ),
+                backgroundColor: Colors.grey[200],
+                padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.circular(
-                        8,
-                      ),
+                  borderRadius: BorderRadius.circular(8),
                 ),
               ),
               child: const Text(
                 'Keep',
                 style: TextStyle(
                   color: Colors.black87,
-                  fontWeight:
-                      FontWeight.w600,
+                  fontWeight: FontWeight.w600,
                   fontSize: 15,
                 ),
               ),
@@ -6896,9 +4423,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
     try {
       if (choice == 'all') {
-        await MeetingPointService.cancelMeetingForAll(
-          meeting.id,
-        );
+        await MeetingPointService.cancelMeetingForAll(meeting.id);
         if (mounted)
           SnackbarHelper.showSuccess(
             context,
@@ -6941,326 +4466,187 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   // END ARRIVAL PHASE UI
   // ══════════════════════════════════════════════════════════════════════════
 
-  Widget
-  _buildHostMeetingPointStatusCard(
-    MeetingPointRecord meeting,
-  ) {
-    final timerLabel =
-        _currentStepTimerLabel(meeting);
-    final completedSteps =
-        (meeting.hostStep - 1)
-            .clamp(0, 5)
-            .toInt();
+  Widget _buildHostMeetingPointStatusCard(MeetingPointRecord meeting) {
+    final timerLabel = _currentStepTimerLabel(meeting);
+    final completedSteps = (meeting.hostStep - 1).clamp(0, 5).toInt();
     final progress = completedSteps / 5;
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: () =>
-            _showCreateMeetingPointForm(
-              resumeDraft: true,
-              meetingPointId:
-                  meeting.id,
-            ),
-        borderRadius:
-            BorderRadius.circular(16),
+        onTap: () => _showCreateMeetingPointForm(
+          resumeDraft: true,
+          meetingPointId: meeting.id,
+        ),
+        borderRadius: BorderRadius.circular(16),
         child: Container(
-          margin: const EdgeInsets.only(
-            top: 2,
-          ),
-          padding: const EdgeInsets.all(
-            16,
-          ),
+          margin: const EdgeInsets.only(top: 2),
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: const Color(
-              0xFFE8E9E0,
-            ),
-            borderRadius:
-                BorderRadius.circular(
-                  16,
-                ),
+            color: const Color(0xFFE8E9E0),
+            borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
-                color: AppColors.kGreen
-                    .withOpacity(0.1),
+                color: AppColors.kGreen.withOpacity(0.1),
                 blurRadius: 10,
-                offset: const Offset(
-                  0,
-                  5,
-                ),
+                offset: const Offset(0, 5),
               ),
             ],
           ),
           child: Column(
-            crossAxisAlignment:
-                CrossAxisAlignment
-                    .start,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
-                crossAxisAlignment:
-                    CrossAxisAlignment
-                        .start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
                     child: Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment
-                              .start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text(
                           'Meeting point in progress',
                           style: TextStyle(
-                            fontSize:
-                                16,
-                            fontWeight:
-                                FontWeight
-                                    .w700,
-                            color: AppColors
-                                .kGreen,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.kGreen,
                           ),
                         ),
-                        const SizedBox(
-                          height: 3,
-                        ),
+                        const SizedBox(height: 3),
                         Text(
-                          _hostStepLabel(
-                            meeting
-                                .hostStep,
-                          ),
+                          _hostStepLabel(meeting.hostStep),
                           style: TextStyle(
-                            fontSize:
-                                13,
-                            color: Colors
-                                .grey[600],
+                            fontSize: 13,
+                            color: Colors.grey[600],
                           ),
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(
-                    width: 12,
-                  ),
+                  const SizedBox(width: 12),
                   Container(
-                    padding:
-                        const EdgeInsets.symmetric(
-                          horizontal:
-                              12,
-                          vertical: 8,
-                        ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                     decoration: BoxDecoration(
-                      color: AppColors
-                          .kGreen,
-                      borderRadius:
-                          BorderRadius.circular(
-                            10,
-                          ),
+                      color: AppColors.kGreen,
+                      borderRadius: BorderRadius.circular(10),
                     ),
                     child: const Text(
                       'View details',
                       style: TextStyle(
-                        color: Colors
-                            .white,
-                        fontWeight:
-                            FontWeight
-                                .w700,
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
                         fontSize: 13,
                       ),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(
-                height: 14,
-              ),
+              const SizedBox(height: 14),
               ClipRRect(
-                borderRadius:
-                    BorderRadius.circular(
-                      6,
-                    ),
+                borderRadius: BorderRadius.circular(6),
                 child: LinearProgressIndicator(
                   value: progress,
                   minHeight: 7,
-                  backgroundColor:
-                      AppColors.kGreen
-                          .withOpacity(
-                            0.2,
-                          ),
-                  valueColor:
-                      const AlwaysStoppedAnimation(
-                        (AppColors
-                            .kGreen),
-                      ),
+                  backgroundColor: AppColors.kGreen.withOpacity(0.2),
+                  valueColor: const AlwaysStoppedAnimation((AppColors.kGreen)),
                 ),
               ),
-              const SizedBox(
-                height: 10,
-              ),
+              const SizedBox(height: 10),
               Row(
                 children: [
                   Text(
                     'Step ${meeting.hostStep} of 5',
                     style: TextStyle(
                       fontSize: 12,
-                      color: AppColors
-                          .kGreen,
-                      fontWeight:
-                          FontWeight
-                              .w600,
+                      color: AppColors.kGreen,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-                  if (timerLabel !=
-                      null) ...[
+                  if (timerLabel != null) ...[
                     const Spacer(),
-                    _meetingTimerBadge(
-                      timerLabel,
-                    ),
+                    _meetingTimerBadge(timerLabel),
                   ],
                 ],
               ),
-              if (meeting.hostStep !=
-                  5) ...[
-                const SizedBox(
-                  height: 10,
-                ),
+              if (meeting.hostStep != 5) ...[
+                const SizedBox(height: 10),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
                   children: [
                     _meetingStatusChip(
                       '${meeting.acceptedCount} Accepted',
-                      backgroundColor:
-                          AppColors
-                              .kGreen
-                              .withOpacity(
-                                0.11,
-                              ),
-                      textColor:
-                          AppColors
-                              .kGreen,
+                      backgroundColor: AppColors.kGreen.withOpacity(0.11),
+                      textColor: AppColors.kGreen,
                     ),
                     _meetingStatusChip(
                       '${meeting.pendingCount} Pending',
-                      backgroundColor:
-                          Colors.orange
-                              .withOpacity(
-                                0.1,
-                              ),
-                      textColor: Colors
-                          .orange
-                          .shade700,
+                      backgroundColor: Colors.orange.withOpacity(0.1),
+                      textColor: Colors.orange.shade700,
                     ),
                     _meetingStatusChip(
                       '${meeting.declinedCount} Declined',
-                      backgroundColor:
-                          AppColors
-                              .kError
-                              .withOpacity(
-                                0.1,
-                              ),
-                      textColor:
-                          AppColors
-                              .kError,
+                      backgroundColor: AppColors.kError.withOpacity(0.1),
+                      textColor: AppColors.kError,
                     ),
                   ],
                 ),
               ],
-              if (meeting.hostStep ==
-                  4) ...[
-                const SizedBox(
-                  height: 12,
-                ),
+              if (meeting.hostStep == 4) ...[
+                const SizedBox(height: 12),
                 Row(
                   children: [
                     Expanded(
                       child: OutlinedButton(
-                        onPressed: () =>
-                            _cancelMeetingPoint(
-                              meeting,
-                            ),
+                        onPressed: () => _cancelMeetingPoint(meeting),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor:
-                              AppColors
-                                  .kGreen,
+                          foregroundColor: AppColors.kGreen,
                           side: const BorderSide(
-                            color: AppColors
-                                .kGreen,
+                            color: AppColors.kGreen,
                             width: 2,
                           ),
-                          padding:
-                              const EdgeInsets.symmetric(
-                                vertical:
-                                    12,
-                              ),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
                           shape: RoundedRectangleBorder(
-                            borderRadius:
-                                BorderRadius.circular(
-                                  10,
-                                ),
+                            borderRadius: BorderRadius.circular(10),
                           ),
                         ),
                         child: const Text(
                           'Cancel',
                           style: TextStyle(
-                            fontSize:
-                                14,
-                            fontWeight:
-                                FontWeight
-                                    .w600,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
                     ),
-                    const SizedBox(
-                      width: 12,
-                    ),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: ElevatedButton(
-                        onPressed:
-                            meeting.acceptedCount >
-                                0
+                        onPressed: meeting.acceptedCount > 0
                             ? () => _showCreateMeetingPointForm(
-                                resumeDraft:
-                                    true,
-                                meetingPointId:
-                                    meeting.id,
-                                autoAdvanceToStep5:
-                                    true,
+                                resumeDraft: true,
+                                meetingPointId: meeting.id,
+                                autoAdvanceToStep5: true,
                               )
                             : null,
                         style: ElevatedButton.styleFrom(
-                          backgroundColor:
-                              AppColors
-                                  .kGreen,
-                          foregroundColor:
-                              Colors
-                                  .white,
-                          disabledBackgroundColor:
-                              Colors
-                                  .grey[300],
-                          disabledForegroundColor:
-                              Colors
-                                  .grey[500],
-                          padding:
-                              const EdgeInsets.symmetric(
-                                vertical:
-                                    12,
-                              ),
+                          backgroundColor: AppColors.kGreen,
+                          foregroundColor: Colors.white,
+                          disabledBackgroundColor: Colors.grey[300],
+                          disabledForegroundColor: Colors.grey[500],
+                          padding: const EdgeInsets.symmetric(vertical: 12),
                           elevation: 0,
                           shape: RoundedRectangleBorder(
-                            borderRadius:
-                                BorderRadius.circular(
-                                  10,
-                                ),
+                            borderRadius: BorderRadius.circular(10),
                           ),
                         ),
                         child: const Text(
                           'Proceed',
                           style: TextStyle(
-                            fontSize:
-                                14,
-                            fontWeight:
-                                FontWeight
-                                    .w600,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
@@ -7268,172 +4654,98 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                   ],
                 ),
               ],
-              if (meeting.hostStep ==
-                  5) ...[
-                const SizedBox(
-                  height: 10,
-                ),
-                if (meeting
-                    .venueName
-                    .isNotEmpty)
+              if (meeting.hostStep == 5) ...[
+                const SizedBox(height: 10),
+                if (meeting.venueName.isNotEmpty)
                   Container(
-                    margin:
-                        const EdgeInsets.only(
-                          bottom: 10,
-                        ),
-                    padding:
-                        const EdgeInsets.symmetric(
-                          horizontal:
-                              14,
-                          vertical: 12,
-                        ),
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
                     decoration: BoxDecoration(
-                      color: AppColors
-                          .kGreen
-                          .withValues(
-                            alpha: 0.1,
-                          ),
-                      borderRadius:
-                          BorderRadius.circular(
-                            14,
-                          ),
+                      color: AppColors.kGreen.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(14),
                     ),
                     child: Row(
                       children: [
                         const Icon(
-                          Icons
-                              .location_on,
-                          color: AppColors
-                              .kGreen,
+                          Icons.location_on,
+                          color: AppColors.kGreen,
                           size: 20,
                         ),
-                        const SizedBox(
-                          width: 10,
-                        ),
+                        const SizedBox(width: 10),
                         Expanded(
                           child: Column(
-                            crossAxisAlignment:
-                                CrossAxisAlignment
-                                    .start,
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const SizedBox(
-                                height:
-                                    2,
-                              ),
+                              const SizedBox(height: 2),
                               Text(
-                                _suggestedPointLabel(
-                                  meeting,
-                                ),
+                                _suggestedPointLabel(meeting),
                                 style: const TextStyle(
-                                  fontSize:
-                                      14,
-                                  fontWeight:
-                                      FontWeight.w600,
-                                  color:
-                                      Colors.black87,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.black87,
                                 ),
                               ),
                               Text(
-                                meeting
-                                    .venueName,
+                                meeting.venueName,
                                 style: TextStyle(
-                                  fontSize:
-                                      12,
-                                  color:
-                                      Colors.grey[500],
+                                  fontSize: 12,
+                                  color: Colors.grey[500],
                                 ),
                               ),
-                              const SizedBox(
-                                height:
-                                    2,
-                              ),
+                              const SizedBox(height: 2),
                             ],
                           ),
                         ),
                       ],
                     ),
                   ),
-                const SizedBox(
-                  height: 12,
-                ),
+                const SizedBox(height: 12),
                 Row(
                   children: [
                     Expanded(
                       child: OutlinedButton(
-                        onPressed: () =>
-                            _rejectSuggestedPoint(
-                              meeting,
-                            ),
+                        onPressed: () => _rejectSuggestedPoint(meeting),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor:
-                              AppColors
-                                  .kGreen,
+                          foregroundColor: AppColors.kGreen,
                           side: const BorderSide(
-                            color: AppColors
-                                .kGreen,
+                            color: AppColors.kGreen,
                             width: 2,
                           ),
-                          padding:
-                              const EdgeInsets.symmetric(
-                                vertical:
-                                    12,
-                              ),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
                           shape: RoundedRectangleBorder(
-                            borderRadius:
-                                BorderRadius.circular(
-                                  10,
-                                ),
+                            borderRadius: BorderRadius.circular(10),
                           ),
                         ),
                         child: const Text(
                           'Reject',
                           style: TextStyle(
-                            fontSize:
-                                14,
-                            fontWeight:
-                                FontWeight
-                                    .w600,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
                     ),
-                    const SizedBox(
-                      width: 12,
-                    ),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: ElevatedButton(
-                        onPressed: () =>
-                            _confirmSuggestedPoint(
-                              meeting,
-                            ),
+                        onPressed: () => _confirmSuggestedPoint(meeting),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor:
-                              AppColors
-                                  .kGreen,
-                          foregroundColor:
-                              Colors
-                                  .white,
-                          padding:
-                              const EdgeInsets.symmetric(
-                                vertical:
-                                    12,
-                              ),
+                          backgroundColor: AppColors.kGreen,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
                           elevation: 0,
                           shape: RoundedRectangleBorder(
-                            borderRadius:
-                                BorderRadius.circular(
-                                  10,
-                                ),
+                            borderRadius: BorderRadius.circular(10),
                           ),
                         ),
                         child: const Text(
                           'Confirm',
                           style: TextStyle(
-                            fontSize:
-                                14,
-                            fontWeight:
-                                FontWeight
-                                    .w600,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
@@ -7448,22 +4760,14 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     );
   }
 
-  Widget
-  _buildInviteeMeetingPointStatusCard(
+  Widget _buildInviteeMeetingPointStatusCard(
     MeetingPointRecord meeting,
     String currentUserId,
   ) {
-    final me = meeting.participantFor(
-      currentUserId,
-    );
-    if (me == null)
-      return const SizedBox.shrink();
-    final step = _inviteeStep(
-      meeting,
-      currentUserId,
-    );
-    final timerLabel =
-        _currentStepTimerLabel(meeting);
+    final me = meeting.participantFor(currentUserId);
+    if (me == null) return const SizedBox.shrink();
+    final step = _inviteeStep(meeting, currentUserId);
+    final timerLabel = _currentStepTimerLabel(meeting);
     final title = me.isPending
         ? '${_firstName(meeting.hostName)} invited you to meet'
         : 'Meeting point in progress';
@@ -7472,103 +4776,67 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         : _inviteeStepLabel(step);
 
     return Container(
-      margin: const EdgeInsets.only(
-        top: 2,
-      ),
+      margin: const EdgeInsets.only(top: 2),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: const Color(0xFFE8E9E0),
-        borderRadius:
-            BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: AppColors.kGreen
-                .withOpacity(0.1),
+            color: AppColors.kGreen.withOpacity(0.1),
             blurRadius: 10,
             offset: const Offset(0, 5),
           ),
         ],
       ),
       child: Column(
-        crossAxisAlignment:
-            CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            crossAxisAlignment:
-                CrossAxisAlignment
-                    .start,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
                 child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment
-                          .start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       title,
                       style: const TextStyle(
                         fontSize: 16,
-                        fontWeight:
-                            FontWeight
-                                .w700,
-                        color: AppColors
-                            .kGreen,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.kGreen,
                       ),
                     ),
-                    const SizedBox(
-                      height: 3,
-                    ),
+                    const SizedBox(height: 3),
                     Text(
                       subtitle,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors
-                            .grey[600],
-                      ),
+                      style: TextStyle(fontSize: 13, color: Colors.grey[600]),
                     ),
                   ],
                 ),
               ),
               const SizedBox(width: 12),
               InkWell(
-                borderRadius:
-                    BorderRadius.circular(
-                      10,
-                    ),
-                onTap: () =>
-                    _showInviteeDetailsSheet(
-                      meeting,
-                    ),
+                borderRadius: BorderRadius.circular(10),
+                onTap: () => _showInviteeDetailsSheet(meeting),
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
-                    color: AppColors
-                        .kGreen,
-                    borderRadius:
-                        BorderRadius.circular(
-                          10,
-                        ),
+                    color: AppColors.kGreen,
+                    borderRadius: BorderRadius.circular(10),
                   ),
                   child: const Row(
-                    mainAxisSize:
-                        MainAxisSize
-                            .min,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      SizedBox(
-                        width: 6,
-                      ),
+                      SizedBox(width: 6),
                       Text(
                         'View details',
                         style: TextStyle(
-                          color: Colors
-                              .white,
-                          fontWeight:
-                              FontWeight
-                                  .w700,
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
                           fontSize: 13,
                         ),
                       ),
@@ -7580,22 +4848,12 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           ),
           const SizedBox(height: 14),
           ClipRRect(
-            borderRadius:
-                BorderRadius.circular(
-                  6,
-                ),
+            borderRadius: BorderRadius.circular(6),
             child: LinearProgressIndicator(
               value: (step - 1) / 3,
               minHeight: 7,
-              backgroundColor: AppColors
-                  .kGreen
-                  .withValues(
-                    alpha: 0.2,
-                  ),
-              valueColor:
-                  const AlwaysStoppedAnimation(
-                    AppColors.kGreen,
-                  ),
+              backgroundColor: AppColors.kGreen.withValues(alpha: 0.2),
+              valueColor: const AlwaysStoppedAnimation(AppColors.kGreen),
             ),
           ),
           const SizedBox(height: 10),
@@ -7605,18 +4863,13 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 'Step $step of 3',
                 style: TextStyle(
                   fontSize: 12,
-                  color:
-                      AppColors.kGreen,
-                  fontWeight:
-                      FontWeight.w600,
+                  color: AppColors.kGreen,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
-              if (timerLabel !=
-                  null) ...[
+              if (timerLabel != null) ...[
                 const Spacer(),
-                _meetingTimerBadge(
-                  timerLabel,
-                ),
+                _meetingTimerBadge(timerLabel),
               ],
             ],
           ),
@@ -7628,111 +4881,64 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               children: [
                 _meetingStatusChip(
                   '${meeting.acceptedCount} Accepted',
-                  backgroundColor:
-                      AppColors.kGreen
-                          .withValues(
-                            alpha: 0.11,
-                          ),
-                  textColor:
-                      AppColors.kGreen,
+                  backgroundColor: AppColors.kGreen.withValues(alpha: 0.11),
+                  textColor: AppColors.kGreen,
                 ),
                 _meetingStatusChip(
                   '${meeting.pendingCount} Pending',
-                  backgroundColor:
-                      Colors.orange
-                          .withValues(
-                            alpha: 0.1,
-                          ),
-                  textColor: Colors
-                      .orange
-                      .shade700,
+                  backgroundColor: Colors.orange.withValues(alpha: 0.1),
+                  textColor: Colors.orange.shade700,
                 ),
                 _meetingStatusChip(
                   '${meeting.declinedCount} Declined',
-                  backgroundColor:
-                      AppColors.kError
-                          .withValues(
-                            alpha: 0.1,
-                          ),
-                  textColor:
-                      AppColors.kError,
+                  backgroundColor: AppColors.kError.withValues(alpha: 0.1),
+                  textColor: AppColors.kError,
                 ),
               ],
             ),
           ],
           if (step == 3) ...[
             const SizedBox(height: 10),
-            if (meeting
-                .venueName
-                .isNotEmpty)
+            if (meeting.venueName.isNotEmpty)
               Container(
-                margin:
-                    const EdgeInsets.only(
-                      bottom: 10,
-                    ),
-                padding:
-                    const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 12,
-                    ),
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
                 decoration: BoxDecoration(
-                  color: AppColors
-                      .kGreen
-                      .withValues(
-                        alpha: 0.1,
-                      ),
-                  borderRadius:
-                      BorderRadius.circular(
-                        14,
-                      ),
+                  color: AppColors.kGreen.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(14),
                 ),
                 child: Row(
                   children: [
                     const Icon(
                       Icons.location_on,
-                      color: AppColors
-                          .kGreen,
+                      color: AppColors.kGreen,
                       size: 20,
                     ),
-                    const SizedBox(
-                      width: 10,
-                    ),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Column(
-                        crossAxisAlignment:
-                            CrossAxisAlignment
-                                .start,
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const SizedBox(
-                            height: 2,
-                          ),
+                          const SizedBox(height: 2),
                           Text(
-                            _suggestedPointLabel(
-                              meeting,
-                            ),
+                            _suggestedPointLabel(meeting),
                             style: const TextStyle(
-                              fontSize:
-                                  14,
-                              fontWeight:
-                                  FontWeight
-                                      .w600,
-                              color: Colors
-                                  .black87,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.black87,
                             ),
                           ),
                           Text(
-                            meeting
-                                .venueName,
+                            meeting.venueName,
                             style: TextStyle(
-                              fontSize:
-                                  12,
-                              color: Colors
-                                  .grey[500],
+                              fontSize: 12,
+                              color: Colors.grey[500],
                             ),
                           ),
-                          const SizedBox(
-                            height: 2,
-                          ),
+                          const SizedBox(height: 2),
                         ],
                       ),
                     ),
@@ -7740,36 +4946,23 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 ),
               ),
           ],
-          if (me.isAccepted &&
-              (step == 2 ||
-                  step == 3)) ...[
+          if (me.isAccepted && (step == 2 || step == 3)) ...[
             const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
               child: SecondaryButton(
-                text:
-                    'Cancel Participation',
-                onPressed:
-                    step == 3 &&
-                        meeting
-                            .suggestedPoint
-                            .trim()
-                            .isEmpty
+                text: 'Cancel Participation',
+                onPressed: step == 3 && meeting.suggestedPoint.trim().isEmpty
                     ? null
                     : () => _declineMeetingInvite(
                         meeting,
-                        title:
-                            'Cancel Participation',
+                        title: 'Cancel Participation',
                         message:
                             'Are you sure you want to cancel your participation in this meeting point?',
-                        confirmText:
-                            'Cancel Participation',
-                        cancelText:
-                            'Keep',
-                        successMessage:
-                            'Participation cancelled.',
-                        cancelParticipation:
-                            step == 3,
+                        confirmText: 'Cancel Participation',
+                        cancelText: 'Keep',
+                        successMessage: 'Participation cancelled.',
+                        cancelParticipation: step == 3,
                       ),
               ),
             ),
@@ -7781,46 +4974,29 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
   // ── Meeting Point Invitation Tile ───────────────────────────────────────────
 
-  Widget
-  _buildMeetingPointInvitationTile(
+  Widget _buildMeetingPointInvitationTile(
     MeetingPointRecord meeting,
     String uid,
   ) {
-    final isExpanded =
-        _expandedMeetingInviteId ==
-        meeting.id;
-    final isHighlighted =
-        _highlightMeetingInviteId ==
-        meeting.id;
-    final computed =
-        _currentStepTimerLabel(meeting);
-    if (computed != null)
-      _cachedInviteTimerLabel[meeting
-              .id] =
-          computed;
-    final timerLabel =
-        computed ??
-        _cachedInviteTimerLabel[meeting
-            .id];
+    final isExpanded = _expandedMeetingInviteId == meeting.id;
+    final isHighlighted = _highlightMeetingInviteId == meeting.id;
+    final computed = _currentStepTimerLabel(meeting);
+    if (computed != null) _cachedInviteTimerLabel[meeting.id] = computed;
+    final timerLabel = computed ?? _cachedInviteTimerLabel[meeting.id];
 
     return Container(
       decoration: BoxDecoration(
         color: isHighlighted
-            ? AppColors.kGreen
-                  .withOpacity(0.05)
+            ? AppColors.kGreen.withOpacity(0.05)
             : Colors.white,
-        borderRadius:
-            BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isHighlighted
-              ? AppColors.kGreen
-              : Colors.grey.shade200,
+          color: isHighlighted ? AppColors.kGreen : Colors.grey.shade200,
           width: isHighlighted ? 2 : 1,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black
-                .withOpacity(0.04),
+            color: Colors.black.withOpacity(0.04),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -7830,126 +5006,70 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         children: [
           InkWell(
             onTap: () => setState(() {
-              _expandedMeetingInviteId =
-                  isExpanded
-                  ? null
-                  : meeting.id;
+              _expandedMeetingInviteId = isExpanded ? null : meeting.id;
             }),
-            borderRadius:
-                BorderRadius.circular(
-                  16,
-                ),
+            borderRadius: BorderRadius.circular(16),
             child: Padding(
-              padding:
-                  const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
-                  ),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               child: Row(
                 children: [
                   Container(
                     width: 44,
                     height: 44,
-                    decoration:
-                        BoxDecoration(
-                          color: Colors
-                              .grey[200],
-                          shape: BoxShape
-                              .circle,
-                        ),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[200],
+                      shape: BoxShape.circle,
+                    ),
                     child: Icon(
                       Icons.person,
-                      color: Colors
-                          .grey[600],
+                      color: Colors.grey[600],
                       size: 22,
                     ),
                   ),
-                  const SizedBox(
-                    width: 12,
-                  ),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment
-                              .start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          meeting
-                                  .hostName
-                                  .isEmpty
+                          meeting.hostName.isEmpty
                               ? 'Unknown'
-                              : meeting
-                                    .hostName,
+                              : meeting.hostName,
                           style: const TextStyle(
-                            fontSize:
-                                16,
-                            fontWeight:
-                                FontWeight
-                                    .w700,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
-                        const SizedBox(
-                          height: 4,
-                        ),
-                        if (timerLabel !=
-                            null)
-                          _meetingTimerBadge(
-                            timerLabel,
-                          ),
+                        const SizedBox(height: 4),
+                        if (timerLabel != null) _meetingTimerBadge(timerLabel),
                       ],
                     ),
                   ),
-                  if (meeting
-                      .hostPhone
-                      .isNotEmpty)
+                  if (meeting.hostPhone.isNotEmpty)
                     IconButton(
                       onPressed: () async {
                         await _favService.toggle(
-                          meeting
-                              .hostPhone,
-                          meeting
-                              .hostName,
+                          meeting.hostPhone,
+                          meeting.hostName,
                         );
-                        if (mounted)
-                          setState(
-                            () {},
-                          );
+                        if (mounted) setState(() {});
                       },
                       icon: Icon(
-                        _favService.isFavorite(
-                              meeting
-                                  .hostPhone,
-                            )
-                            ? Icons
-                                  .favorite
-                            : Icons
-                                  .favorite_border,
-                        color:
-                            _favService
-                                .isFavorite(
-                                  meeting
-                                      .hostPhone,
-                                )
+                        _favService.isFavorite(meeting.hostPhone)
+                            ? Icons.favorite
+                            : Icons.favorite_border,
+                        color: _favService.isFavorite(meeting.hostPhone)
                             ? Colors.red
-                            : Colors
-                                  .grey[400],
+                            : Colors.grey[400],
                         size: 23,
                       ),
                     ),
                   AnimatedRotation(
-                    turns: isExpanded
-                        ? 0.5
-                        : 0,
-                    duration:
-                        const Duration(
-                          milliseconds:
-                              200,
-                        ),
+                    turns: isExpanded ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 200),
                     child: Icon(
-                      Icons
-                          .keyboard_arrow_down,
-                      color: Colors
-                          .grey[600],
+                      Icons.keyboard_arrow_down,
+                      color: Colors.grey[600],
                       size: 24,
                     ),
                   ),
@@ -7959,28 +5079,13 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           ),
           if (isExpanded) ...[
             Padding(
-              padding:
-                  const EdgeInsets.fromLTRB(
-                    16,
-                    0,
-                    16,
-                    16,
-                  ),
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               child: Column(
-                crossAxisAlignment:
-                    CrossAxisAlignment
-                        .start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildMeetingPointInvitationDetails(
-                    meeting,
-                    uid,
-                  ),
-                  const SizedBox(
-                    height: 16,
-                  ),
-                  _buildMeetingInviteActionButtons(
-                    meeting,
-                  ),
+                  _buildMeetingPointInvitationDetails(meeting, uid),
+                  const SizedBox(height: 16),
+                  _buildMeetingInviteActionButtons(meeting),
                 ],
               ),
             ),
@@ -7990,95 +5095,58 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     );
   }
 
-  Widget
-  _buildMeetingPointInvitationDetails(
+  Widget _buildMeetingPointInvitationDetails(
     MeetingPointRecord meeting,
     String uid,
   ) {
     return IntrinsicHeight(
       child: Row(
-        crossAxisAlignment:
-            CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
             width: 3,
             decoration: BoxDecoration(
               color: AppColors.kGreen,
-              borderRadius:
-                  BorderRadius.circular(
-                    2,
-                  ),
+              borderRadius: BorderRadius.circular(2),
             ),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment
-                      .start,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _labeledDetail(
                   'Host: ',
-                  meeting
-                          .hostPhone
-                          .isEmpty
+                  meeting.hostPhone.isEmpty
                       ? meeting.hostName
                       : '${meeting.hostName} (${meeting.hostPhone})',
                 ),
-                if (meeting
-                    .venueName
-                    .isNotEmpty) ...[
-                  const SizedBox(
-                    height: 10,
-                  ),
-                  _labeledDetail(
-                    'Venue: ',
-                    meeting.venueName,
-                  ),
+                if (meeting.venueName.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  _labeledDetail('Venue: ', meeting.venueName),
                 ],
-                const SizedBox(
-                  height: 10,
-                ),
+                const SizedBox(height: 10),
                 Text(
                   'Participants:',
                   style: TextStyle(
                     fontSize: 12,
-                    fontWeight:
-                        FontWeight.w400,
-                    color: Colors
-                        .grey[600],
+                    fontWeight: FontWeight.w400,
+                    color: Colors.grey[600],
                   ),
                 ),
-                const SizedBox(
-                  height: 8,
-                ),
-                ...([
-                      ...meeting
-                          .participants,
-                    ]..sort((a, b) {
-                      if (a.userId ==
-                          uid)
-                        return -1;
-                      if (b.userId ==
-                          uid)
-                        return 1;
+                const SizedBox(height: 8),
+                ...([...meeting.participants]..sort((a, b) {
+                      if (a.userId == uid) return -1;
+                      if (b.userId == uid) return 1;
                       return 0;
                     }))
                     .map(
-                      (
-                        p,
-                      ) => _buildMeetingInviteParticipantRow(
+                      (p) => _buildMeetingInviteParticipantRow(
                         name: p.name,
                         phone: p.phone,
                         isHost: false,
-                        status:
-                            p.userId ==
-                                uid
-                            ? null
-                            : p.status,
-                        isMe:
-                            p.userId ==
-                            uid,
+                        status: p.userId == uid ? null : p.status,
+                        isMe: p.userId == uid,
                       ),
                     ),
               ],
@@ -8089,13 +5157,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     );
   }
 
-  Widget
-  _buildMeetingInviteParticipantRow({
+  Widget _buildMeetingInviteParticipantRow({
     required String name,
     required String phone,
     required bool isHost,
-    String?
-    status, // 'pending' | 'accepted' | 'declined' — null for host
+    String? status, // 'pending' | 'accepted' | 'declined' — null for host
     bool isMe = false,
   }) {
     Color? statusColor;
@@ -8103,38 +5169,26 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     if (status != null) {
       switch (status) {
         case 'accepted':
-          statusColor =
-              AppColors.kGreen;
+          statusColor = AppColors.kGreen;
           statusLabel = 'Accepted';
           break;
         case 'declined':
-          statusColor =
-              AppColors.kError;
+          statusColor = AppColors.kError;
           statusLabel = 'Declined';
           break;
         default:
-          statusColor =
-              Colors.orange[600]!;
+          statusColor = Colors.orange[600]!;
           statusLabel = 'Pending';
       }
     }
 
     return Container(
-      margin: const EdgeInsets.only(
-        bottom: 6,
-      ),
-      padding:
-          const EdgeInsets.symmetric(
-            horizontal: 10,
-            vertical: 8,
-          ),
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius:
-            BorderRadius.circular(10),
-        border: Border.all(
-          color: Colors.grey.shade200,
-        ),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.grey.shade200),
       ),
       child: Row(
         children: [
@@ -8145,93 +5199,55 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               color: Colors.grey[200],
               shape: BoxShape.circle,
             ),
-            child: Icon(
-              Icons.person,
-              color: Colors.grey[600],
-              size: 16,
-            ),
+            child: Icon(Icons.person, color: Colors.grey[600], size: 16),
           ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment
-                      .start,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  name.isEmpty
-                      ? 'Unknown'
-                      : name,
-                  style:
-                      const TextStyle(
-                        fontSize: 13,
-                        fontWeight:
-                            FontWeight
-                                .w600,
-                      ),
+                  name.isEmpty ? 'Unknown' : name,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 if (phone.isNotEmpty)
                   Text(
                     phone,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors
-                          .grey[500],
-                    ),
+                    style: TextStyle(fontSize: 12, color: Colors.grey[500]),
                   ),
               ],
             ),
           ),
           if (isHost)
             Container(
-              padding:
-                  const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 3,
-                  ),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
                 color: Colors.grey[200],
-                borderRadius:
-                    BorderRadius.circular(
-                      10,
-                    ),
+                borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
                 'Host',
                 style: TextStyle(
                   fontSize: 11,
-                  fontWeight:
-                      FontWeight.w600,
-                  color:
-                      Colors.grey[600],
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey[600],
                 ),
               ),
             ),
-          if (!isMe &&
-              !isHost &&
-              phone.isNotEmpty) ...[
+          if (!isMe && !isHost && phone.isNotEmpty) ...[
             GestureDetector(
               onTap: () async {
-                await _favService
-                    .toggle(
-                      phone,
-                      name,
-                    );
-                if (mounted)
-                  setState(() {});
+                await _favService.toggle(phone, name);
+                if (mounted) setState(() {});
               },
               child: Icon(
-                _favService.isFavorite(
-                      phone,
-                    )
+                _favService.isFavorite(phone)
                     ? Icons.favorite
-                    : Icons
-                          .favorite_border,
-                color:
-                    _favService
-                        .isFavorite(
-                          phone,
-                        )
+                    : Icons.favorite_border,
+                color: _favService.isFavorite(phone)
                     ? Colors.red
                     : Colors.grey[400],
                 size: 22,
@@ -8241,53 +5257,32 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           ],
           if (isMe)
             Container(
-              padding:
-                  const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 3,
-                  ),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
                 color: Colors.grey[200],
-                borderRadius:
-                    BorderRadius.circular(
-                      10,
-                    ),
+                borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
                 'Me',
                 style: TextStyle(
                   fontSize: 11,
-                  fontWeight:
-                      FontWeight.w600,
-                  color:
-                      Colors.grey[600],
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey[600],
                 ),
               ),
             )
-          else if (!isHost &&
-              statusLabel != null)
+          else if (!isHost && statusLabel != null)
             Container(
-              padding:
-                  const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 3,
-                  ),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
-                color: statusColor!
-                    .withValues(
-                      alpha: 0.12,
-                    ),
-                borderRadius:
-                    BorderRadius.circular(
-                      20,
-                    ),
+                color: statusColor!.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(20),
               ),
               child: Text(
                 statusLabel,
                 style: TextStyle(
                   fontSize: 12,
-                  fontWeight:
-                      FontWeight.w600,
+                  fontWeight: FontWeight.w600,
                   color: statusColor,
                 ),
               ),
@@ -8297,46 +5292,23 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     );
   }
 
-  Widget
-  _buildMeetingInviteActionButtons(
-    MeetingPointRecord meeting,
-  ) {
+  Widget _buildMeetingInviteActionButtons(MeetingPointRecord meeting) {
     return Row(
       children: [
         Expanded(
           child: OutlinedButton.icon(
-            onPressed: () =>
-                _declineMeetingInvite(
-                  meeting,
-                ),
-            icon: const Icon(
-              Icons.close,
-              size: 18,
-            ),
+            onPressed: () => _declineMeetingInvite(meeting),
+            icon: const Icon(Icons.close, size: 18),
             label: const Text(
               'Decline',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight:
-                    FontWeight.w600,
-              ),
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
             ),
             style: OutlinedButton.styleFrom(
-              foregroundColor:
-                  AppColors.kGreen,
-              side: const BorderSide(
-                color: AppColors.kGreen,
-                width: 2,
-              ),
-              padding:
-                  const EdgeInsets.symmetric(
-                    vertical: 12,
-                  ),
+              foregroundColor: AppColors.kGreen,
+              side: const BorderSide(color: AppColors.kGreen, width: 2),
+              padding: const EdgeInsets.symmetric(vertical: 12),
               shape: RoundedRectangleBorder(
-                borderRadius:
-                    BorderRadius.circular(
-                      10,
-                    ),
+                borderRadius: BorderRadius.circular(10),
               ),
             ),
           ),
@@ -8344,37 +5316,19 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         const SizedBox(width: 12),
         Expanded(
           child: ElevatedButton.icon(
-            onPressed: () =>
-                _acceptMeetingInvite(
-                  meeting,
-                ),
-            icon: const Icon(
-              Icons.check,
-              size: 18,
-            ),
+            onPressed: () => _acceptMeetingInvite(meeting),
+            icon: const Icon(Icons.check, size: 18),
             label: const Text(
               'Accept',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight:
-                    FontWeight.w600,
-              ),
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
             ),
             style: ElevatedButton.styleFrom(
-              backgroundColor:
-                  AppColors.kGreen,
-              foregroundColor:
-                  Colors.white,
-              padding:
-                  const EdgeInsets.symmetric(
-                    vertical: 12,
-                  ),
+              backgroundColor: AppColors.kGreen,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 12),
               elevation: 0,
               shape: RoundedRectangleBorder(
-                borderRadius:
-                    BorderRadius.circular(
-                      10,
-                    ),
+                borderRadius: BorderRadius.circular(10),
               ),
             ),
           ),
@@ -8386,71 +5340,43 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   /// Main tabs: Tracking | Meeting point (compact like History — text + underline).
   Widget _buildMainTabs() {
     return Padding(
-      padding:
-          const EdgeInsets.symmetric(
-            vertical: 6,
-          ),
+      padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
-        children: List.generate(
-          _mainTabs.length,
-          (i) {
-            final isSelected = i == 0
-                ? _isTrackingView
-                : !_isTrackingView;
-            return Expanded(
-              child: GestureDetector(
-                onTap: () {
-                  setState(() {
-                    _isTrackingView =
-                        (i == 0);
-                    _expandedRequestId =
-                        null;
-                  });
-                  _applyAllTrackedPinsToViewer();
-                },
-                child: Column(
-                  mainAxisSize:
-                      MainAxisSize.min,
-                  children: [
-                    Text(
-                      _mainTabs[i],
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight:
-                            FontWeight
-                                .w600,
-                        color:
-                            isSelected
-                            ? AppColors
-                                  .kGreen
-                            : Colors
-                                  .grey,
-                      ),
+        children: List.generate(_mainTabs.length, (i) {
+          final isSelected = i == 0 ? _isTrackingView : !_isTrackingView;
+          return Expanded(
+            child: GestureDetector(
+              onTap: () {
+                setState(() {
+                  _isTrackingView = (i == 0);
+                  _expandedRequestId = null;
+                });
+                _applyAllTrackedPinsToViewer();
+              },
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _mainTabs[i],
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: isSelected ? AppColors.kGreen : Colors.grey,
                     ),
-                    const SizedBox(
-                      height: 6,
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    height: 2,
+                    decoration: BoxDecoration(
+                      color: isSelected ? AppColors.kGreen : Colors.transparent,
+                      borderRadius: BorderRadius.circular(1),
                     ),
-                    Container(
-                      height: 2,
-                      decoration: BoxDecoration(
-                        color:
-                            isSelected
-                            ? AppColors
-                                  .kGreen
-                            : Colors
-                                  .transparent,
-                        borderRadius:
-                            BorderRadius.circular(
-                              1,
-                            ),
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            );
-          },
-        ),
+            ),
+          );
+        }),
       ),
     );
   }
@@ -8461,57 +5387,36 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       height: 40,
       decoration: BoxDecoration(
         color: Colors.grey[100],
-        borderRadius:
-            BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(20),
       ),
       padding: const EdgeInsets.all(4),
       child: Row(
-        children: List.generate(
-          _requestFilters.length,
-          (i) {
-            final isSelected =
-                i ==
-                _selectedFilterIndex;
-            return Expanded(
-              child: GestureDetector(
-                onTap: () => setState(() {
-                  _selectedFilterIndex =
-                      i;
-                  _expandedRequestId =
-                      null;
-                }),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? AppColors
-                              .kGreen
-                        : Colors
-                              .transparent,
-                    borderRadius:
-                        BorderRadius.circular(
-                          18,
-                        ),
-                  ),
-                  alignment:
-                      Alignment.center,
-                  child: Text(
-                    _requestFilters[i],
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight:
-                          FontWeight
-                              .w600,
-                      color: isSelected
-                          ? Colors.white
-                          : Colors
-                                .grey[600],
-                    ),
+        children: List.generate(_requestFilters.length, (i) {
+          final isSelected = i == _selectedFilterIndex;
+          return Expanded(
+            child: GestureDetector(
+              onTap: () => setState(() {
+                _selectedFilterIndex = i;
+                _expandedRequestId = null;
+              }),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: isSelected ? AppColors.kGreen : Colors.transparent,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  _requestFilters[i],
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: isSelected ? Colors.white : Colors.grey[600],
                   ),
                 ),
               ),
-            );
-          },
-        ),
+            ),
+          );
+        }),
       ),
     );
   }
@@ -8521,151 +5426,93 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       height: 320,
       decoration: BoxDecoration(
         color: const Color(0xFFF5F5F0),
-        borderRadius:
-            BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black
-                .withOpacity(0.08),
+            color: Colors.black.withOpacity(0.08),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
         ],
       ),
       child: ClipRRect(
-        borderRadius:
-            BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(16),
         child: Stack(
           children: [
             if (_mapsLoading)
               const Center(
-                child:
-                    CircularProgressIndicator(
-                      color: AppColors
-                          .kGreen,
-                    ),
+                child: CircularProgressIndicator(color: AppColors.kGreen),
               )
-            else if (_currentFloor
-                .isEmpty)
-              const Center(
-                child: Text(
-                  'No 3D map',
-                ),
-              )
+            else if (_currentFloor.isEmpty)
+              const Center(child: Text('No 3D map'))
             else
               ModelViewer(
-                key: ValueKey(
-                  _currentFloor,
-                ),
+                key: ValueKey(_currentFloor),
                 src: _currentFloor,
                 alt: "3D Map",
                 ar: false,
                 cameraControls: true,
                 autoRotate: false,
-                backgroundColor:
-                    Colors.transparent,
-                cameraOrbit:
-                    "0deg 65deg 2.5m",
-                minCameraOrbit:
-                    "auto 0deg auto",
-                maxCameraOrbit:
-                    "auto 90deg auto",
-                cameraTarget:
-                    "0m 0m 0m",
+                backgroundColor: Colors.transparent,
+                cameraOrbit: "0deg 65deg 2.5m",
+                minCameraOrbit: "auto 0deg auto",
+                maxCameraOrbit: "auto 90deg auto",
+                cameraTarget: "0m 0m 0m",
 
                 // ===== NEW: JS pin + controller =====
                 relatedJs: _trackPinJs,
-                onWebViewCreated:
-                    (controller) {
-                      _trackMapController =
-                          controller;
+                onWebViewCreated: (controller) {
+                  _trackMapController = controller;
 
-                      _pendingPinApply =
-                          true; // ✅ مهم
+                  _pendingPinApply = true; // ✅ مهم
 
-                      _applyPinsWhenViewerReady();
-                    },
+                  _applyPinsWhenViewerReady();
+                },
               ),
             // by remas start
             Positioned(
               top: 16,
               left: 16,
               child: StreamBuilder<List<TrackingRequest>>(
-                stream:
-                    _sentRequestsStream(),
+                stream: _sentRequestsStream(),
                 builder: (context, snapshot) {
-                  final all =
-                      snapshot.data ??
-                      [];
-                  final active =
-                      _activeFrom(all);
+                  final all = snapshot.data ?? [];
+                  final active = _activeFrom(all);
                   final disconnectedCount = active
-                      .where(
-                        (
-                          r,
-                        ) => !_isConnected(
-                          r.receiverId,
-                          r.id,
-                        ),
-                      )
+                      .where((r) => !_isConnected(r.receiverId, r.id))
                       .length;
                   return Row(
-                    mainAxisSize:
-                        MainAxisSize
-                            .min,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       // ── Active count badge ──
                       GestureDetector(
-                        onTap:
-                            _isTrackingView
-                            ? () => _scrollToAllActive(
-                                active,
-                              )
+                        onTap: _isTrackingView
+                            ? () => _scrollToAllActive(active)
                             : null,
                         child: Container(
-                          padding:
-                              const EdgeInsets.symmetric(
-                                horizontal:
-                                    12,
-                                vertical:
-                                    8,
-                              ),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
                           decoration: BoxDecoration(
-                            color: Colors
-                                .white,
-                            borderRadius:
-                                BorderRadius.circular(
-                                  20,
-                                ),
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(20),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors
-                                    .black
-                                    .withOpacity(
-                                      0.1,
-                                    ),
-                                blurRadius:
-                                    8,
+                                color: Colors.black.withOpacity(0.1),
+                                blurRadius: 8,
                               ),
                             ],
                           ),
                           child: Row(
-                            mainAxisSize:
-                                MainAxisSize
-                                    .min,
+                            mainAxisSize: MainAxisSize.min,
                             children: [
                               const Icon(
-                                Icons
-                                    .people_outline,
-                                size:
-                                    18,
-                                color: AppColors
-                                    .kGreen,
+                                Icons.people_outline,
+                                size: 18,
+                                color: AppColors.kGreen,
                               ),
-                              const SizedBox(
-                                width:
-                                    6,
-                              ),
+                              const SizedBox(width: 6),
                               _isTrackingView
                                   ? Text(
                                       active.length.toString(),
@@ -8674,95 +5521,63 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                                         fontWeight: FontWeight.w700,
                                       ),
                                     )
-                                  : StreamBuilder<
-                                      MeetingPointRecord?
-                                    >(
+                                  : StreamBuilder<MeetingPointRecord?>(
                                       stream: _meetingPointCountStream,
-                                      builder:
-                                          (
-                                            context,
-                                            snap,
-                                          ) {
-                                            final meeting = _resolveActiveMeetingCountSnapshot(
+                                      builder: (context, snap) {
+                                        final meeting =
+                                            _resolveActiveMeetingCountSnapshot(
                                               snap,
                                             );
-                                            final total = _meetingPointActiveCount(
-                                              meeting,
-                                            );
-                                            return Text(
-                                              total.toString(),
-                                              style: const TextStyle(
-                                                fontSize: 15,
-                                                fontWeight: FontWeight.w700,
-                                              ),
-                                            );
-                                          },
+                                        final total = _meetingPointActiveCount(
+                                          meeting,
+                                        );
+                                        return Text(
+                                          total.toString(),
+                                          style: const TextStyle(
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        );
+                                      },
                                     ),
                             ],
                           ),
                         ),
                       ),
                       // ── Not Connected badge ──
-                      if (_isTrackingView &&
-                          disconnectedCount >
-                              0) ...[
-                        const SizedBox(
-                          width: 8,
-                        ),
+                      if (_isTrackingView && disconnectedCount > 0) ...[
+                        const SizedBox(width: 8),
                         GestureDetector(
-                          onTap: () =>
-                              _scrollToDisconnected(
-                                active,
-                              ),
+                          onTap: () => _scrollToDisconnected(active),
                           child: Container(
                             padding: const EdgeInsets.symmetric(
-                              horizontal:
-                                  12,
-                              vertical:
-                                  8,
+                              horizontal: 12,
+                              vertical: 8,
                             ),
                             decoration: BoxDecoration(
-                              color: Colors
-                                  .white,
-                              borderRadius:
-                                  BorderRadius.circular(
-                                    20,
-                                  ),
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(20),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withOpacity(
-                                    0.1,
-                                  ),
-                                  blurRadius:
-                                      8,
+                                  color: Colors.black.withOpacity(0.1),
+                                  blurRadius: 8,
                                 ),
                               ],
                             ),
                             child: Row(
-                              mainAxisSize:
-                                  MainAxisSize
-                                      .min,
+                              mainAxisSize: MainAxisSize.min,
                               children: [
                                 Icon(
-                                  Icons
-                                      .person_off_outlined,
-                                  size:
-                                      16,
-                                  color:
-                                      Colors.grey[500],
+                                  Icons.person_off_outlined,
+                                  size: 16,
+                                  color: Colors.grey[500],
                                 ),
-                                const SizedBox(
-                                  width:
-                                      6,
-                                ),
+                                const SizedBox(width: 6),
                                 Text(
-                                  disconnectedCount
-                                      .toString(),
+                                  disconnectedCount.toString(),
                                   style: const TextStyle(
-                                    fontSize:
-                                        15,
-                                    fontWeight:
-                                        FontWeight.w700,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w700,
                                   ),
                                 ),
                               ],
@@ -8781,29 +5596,18 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 top: 16,
                 right: 16,
                 child: Column(
-                  children: _venueMaps
-                      .reversed
+                  children: _venueMaps.reversed
                       .map(
                         (m) => Padding(
-                          padding:
-                              const EdgeInsets.only(
-                                bottom:
-                                    8,
-                              ),
+                          padding: const EdgeInsets.only(bottom: 8),
                           child: _floorButton(
-                            m['floorNumber'] ??
-                                '',
-                            _currentFloor ==
-                                m['mapURL'],
+                            m['floorNumber'] ?? '',
+                            _currentFloor == m['mapURL'],
                             () {
                               setState(() {
-                                _trackMapController =
-                                    null;
-                                _currentFloor =
-                                    m['mapURL'] ??
-                                    '';
-                                _pendingPinApply =
-                                    true;
+                                _trackMapController = null;
+                                _currentFloor = m['mapURL'] ?? '';
+                                _pendingPinApply = true;
                               });
                             },
                           ),
@@ -8818,57 +5622,36 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     );
   }
 
-  Future<void>
-  _applyPinsWhenViewerReady() async {
-    if (_trackMapController == null)
-      return;
+  Future<void> _applyPinsWhenViewerReady() async {
+    if (_trackMapController == null) return;
 
     int tries = 0;
     while (tries < 20) {
       tries++;
       try {
-        final ok =
-            await _trackMapController!
-                .runJavaScriptReturningResult(
-                  "isViewerReady();",
-                );
-        final ready = ok
-            .toString()
-            .contains('true');
+        final ok = await _trackMapController!.runJavaScriptReturningResult(
+          "isViewerReady();",
+        );
+        final ready = ok.toString().contains('true');
         if (ready) break;
       } catch (_) {}
-      await Future.delayed(
-        const Duration(
-          milliseconds: 150,
-        ),
-      );
+      await Future.delayed(const Duration(milliseconds: 150));
     }
     if (!mounted) return;
     _applyAllTrackedPinsToViewer();
   }
 
-  Widget _floorButton(
-    String label,
-    bool isSelected,
-    VoidCallback onTap,
-  ) {
+  Widget _floorButton(String label, bool isSelected, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
         width: 42,
         height: 36,
         decoration: BoxDecoration(
-          color: isSelected
-              ? AppColors.kGreen
-              : Colors.white,
-          borderRadius:
-              BorderRadius.circular(8),
+          color: isSelected ? AppColors.kGreen : Colors.white,
+          borderRadius: BorderRadius.circular(8),
           boxShadow: [
-            BoxShadow(
-              color: Colors.black
-                  .withOpacity(0.1),
-              blurRadius: 4,
-            ),
+            BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 4),
           ],
         ),
         alignment: Alignment.center,
@@ -8877,9 +5660,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w700,
-            color: isSelected
-                ? Colors.white
-                : Colors.black87,
+            color: isSelected ? Colors.white : Colors.black87,
           ),
         ),
       ),
@@ -8889,19 +5670,13 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   Widget _buildTrackRequestButton() {
     return PrimaryButton(
       text: 'Track Request',
-      icon:
-          Icons.person_search_outlined,
-      onPressed:
-          _showTrackRequestDialog,
+      icon: Icons.person_search_outlined,
+      onPressed: _showTrackRequestDialog,
     );
   }
 
-  Widget _meetingTimerBadge(
-    String timerLabel,
-  ) {
-    return MeetingTimerBadge(
-      label: timerLabel,
-    );
+  Widget _meetingTimerBadge(String timerLabel) {
+    return MeetingTimerBadge(label: timerLabel);
   }
 
   bool _willCompleteAfterArrive(
@@ -8909,320 +5684,186 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     bool isHost,
     String uid,
   ) {
-    final hostActive =
-        meeting.hostArrivalStatus !=
-        'cancelled';
-    final activeParticipants = meeting
-        .participants
-        .where(
-          (p) =>
-              p.isAccepted &&
-              !p.isCancelledArrival,
-        )
+    final hostActive = meeting.hostArrivalStatus != 'cancelled';
+    final activeParticipants = meeting.participants
+        .where((p) => p.isAccepted && !p.isCancelledArrival)
         .toList();
 
     final hostArrived =
-        !hostActive ||
-        (isHost
-            ? true
-            : meeting.hostArrivalStatus ==
-                  'arrived');
+        !hostActive || (isHost ? true : meeting.hostArrivalStatus == 'arrived');
 
     bool allParticipantsArrived = true;
-    for (final p
-        in activeParticipants) {
+    for (final p in activeParticipants) {
       if (!isHost && p.userId == uid) {
         continue; // this user is now arrived
       }
-      if (p.arrivalStatus !=
-          'arrived') {
+      if (p.arrivalStatus != 'arrived') {
         allParticipantsArrived = false;
         break;
       }
     }
-    return hostArrived &&
-        allParticipantsArrived;
+    return hostArrived && allParticipantsArrived;
   }
 
-  bool _allArrived(
-    MeetingPointRecord meeting,
-  ) {
-    if (meeting.hostArrivalStatus ==
-        'cancelled')
-      return false;
-    if (meeting.hostArrivalStatus !=
-        'arrived')
-      return false;
-    for (final p
-        in meeting.participants) {
+  bool _allArrived(MeetingPointRecord meeting) {
+    if (meeting.hostArrivalStatus == 'cancelled') return false;
+    if (meeting.hostArrivalStatus != 'arrived') return false;
+    for (final p in meeting.participants) {
       if (!p.isAccepted) continue;
-      if (p.isCancelledArrival)
-        continue;
-      if (p.arrivalStatus != 'arrived')
-        return false;
+      if (p.isCancelledArrival) continue;
+      if (p.arrivalStatus != 'arrived') return false;
     }
     return true;
   }
 
-  void
-  _maybeStartCompletionHoldFromStream(
-    MeetingPointRecord meeting,
-  ) {
+  void _maybeStartCompletionHoldFromStream(MeetingPointRecord meeting) {
     if (!meeting.isConfirmed) return;
     if (!_allArrived(meeting)) return;
     final holdActive =
         _completionHoldUntil != null &&
-        _completionHoldMeetingId ==
-            meeting.id &&
-        DateTime.now().isBefore(
-          _completionHoldUntil!,
-        );
+        _completionHoldMeetingId == meeting.id &&
+        DateTime.now().isBefore(_completionHoldUntil!);
     if (holdActive) return;
     _startCompletionHold(meeting);
   }
 
-  void _startCompletionHold(
-    MeetingPointRecord meeting,
-  ) {
+  void _startCompletionHold(MeetingPointRecord meeting) {
     _completionHoldTimer?.cancel();
     final holdMeetingId = meeting.id;
-    _completionHoldMeetingId =
-        meeting.id;
-    _completionHoldUntil =
-        DateTime.now().add(
-          const Duration(seconds: 4),
-        );
-    _pendingCompletionHoldMeetingId =
-        null;
-    _pendingCompletionHoldStartedAt =
-        null;
-    _completionHoldTimer = Timer(
-      const Duration(seconds: 4),
-      () {
-        if (!mounted) return;
-        setState(() {
-          _completionHoldUntil = null;
-          _completionHoldMeetingId =
-              null;
-        });
-        if (_lastKnownConfirmedMeeting
-                ?.id ==
-            holdMeetingId) {
-          _clearMeetingParticipantPins();
-        }
-      },
-    );
+    _completionHoldMeetingId = meeting.id;
+    _completionHoldUntil = DateTime.now().add(const Duration(seconds: 4));
+    _pendingCompletionHoldMeetingId = null;
+    _pendingCompletionHoldStartedAt = null;
+    _completionHoldTimer = Timer(const Duration(seconds: 4), () {
+      if (!mounted) return;
+      setState(() {
+        _completionHoldUntil = null;
+        _completionHoldMeetingId = null;
+      });
+      if (_lastKnownConfirmedMeeting?.id == holdMeetingId) {
+        _clearMeetingParticipantPins();
+      }
+    });
     setState(() {});
   }
 
-  Future<void> _showInviteeDetailsSheet(
-    MeetingPointRecord meeting,
-  ) async {
-    final currentUid = FirebaseAuth
-        .instance
-        .currentUser
-        ?.uid;
+  Future<void> _showInviteeDetailsSheet(MeetingPointRecord meeting) async {
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
     if (currentUid == null) return;
-    if (meeting.participantFor(
-          currentUid,
-        ) ==
-        null)
-      return;
+    if (meeting.participantFor(currentUid) == null) return;
     final meetingId = meeting.id;
     var autoCloseScheduled = false;
 
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor:
-          Colors.transparent,
+      backgroundColor: Colors.transparent,
       builder: (ctx) {
         return StreamBuilder<int>(
-          stream: Stream.periodic(
-            const Duration(seconds: 1),
-            (i) => i,
-          ),
+          stream: Stream.periodic(const Duration(seconds: 1), (i) => i),
           builder: (_, snapshot) {
-            final live =
-                _lastKnownBlockingMeetings
-                    .firstWhere(
-                      (m) =>
-                          m.id ==
-                          meetingId,
-                      orElse: () =>
-                          meeting,
-                    );
+            final live = _lastKnownBlockingMeetings.firstWhere(
+              (m) => m.id == meetingId,
+              orElse: () => meeting,
+            );
 
             // Auto-close when the meeting is gone (cancelled) OR has been
             // confirmed by the host. For cancellation, also show an error
             // snackbar. For confirmation, close silently — the main UI will
             // update and show the active meeting card.
-            if (snapshot.hasData &&
-                !autoCloseScheduled) {
-              final stillPresent =
-                  _lastKnownBlockingMeetings
-                      .any(
-                        (m) =>
-                            m.id ==
-                            meetingId,
-                      );
-              final isNowConfirmed =
-                  stillPresent &&
-                  live.isConfirmed;
-              if (!stillPresent ||
-                  isNowConfirmed) {
-                autoCloseScheduled =
-                    true;
-                WidgetsBinding.instance
-                    .addPostFrameCallback((
-                      _,
-                    ) {
-                      if (ctx.mounted)
-                        Navigator.of(
-                          ctx,
-                        ).pop();
-                      if (!isNowConfirmed &&
-                          mounted) {
-                        SnackbarHelper.showError(
-                          context,
-                          'The host rejected the suggested point. Meeting has been cancelled.',
-                        );
-                      }
-                    });
+            if (snapshot.hasData && !autoCloseScheduled) {
+              final stillPresent = _lastKnownBlockingMeetings.any(
+                (m) => m.id == meetingId,
+              );
+              final isNowConfirmed = stillPresent && live.isConfirmed;
+              if (!stillPresent || isNowConfirmed) {
+                autoCloseScheduled = true;
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (ctx.mounted) Navigator.of(ctx).pop();
+                  if (!isNowConfirmed && mounted) {
+                    SnackbarHelper.showError(
+                      context,
+                      'The host rejected the suggested point. Meeting has been cancelled.',
+                    );
+                  }
+                });
               }
             }
-            final me = live
-                .participantFor(
-                  currentUid,
-                );
-            if (me == null)
-              return const SizedBox.shrink();
-            final step = _inviteeStep(
-              live,
-              currentUid,
-            );
-            final timerLabel =
-                _currentStepTimerLabel(
-                  live,
-                );
+            final me = live.participantFor(currentUid);
+            if (me == null) return const SizedBox.shrink();
+            final step = _inviteeStep(live, currentUid);
+            final timerLabel = _currentStepTimerLabel(live);
 
             return Container(
-              height:
-                  MediaQuery.of(
-                    context,
-                  ).size.height *
-                  0.78,
+              height: MediaQuery.of(context).size.height * 0.78,
               decoration: const BoxDecoration(
                 color: Colors.white,
-                borderRadius:
-                    BorderRadius.only(
-                      topLeft:
-                          Radius.circular(
-                            24,
-                          ),
-                      topRight:
-                          Radius.circular(
-                            24,
-                          ),
-                    ),
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(24),
+                  topRight: Radius.circular(24),
+                ),
               ),
               child: Column(
                 children: [
                   // Drag handle
-                  const SizedBox(
-                    height: 12,
-                  ),
+                  const SizedBox(height: 12),
                   Center(
                     child: Container(
                       width: 40,
                       height: 4,
                       decoration: BoxDecoration(
-                        color: Colors
-                            .grey[300],
-                        borderRadius:
-                            BorderRadius.circular(
-                              2,
-                            ),
+                        color: Colors.grey[300],
+                        borderRadius: BorderRadius.circular(2),
                       ),
                     ),
                   ),
                   // ── Header ──────────────────────────────────────────────────
                   Padding(
-                    padding:
-                        const EdgeInsets.fromLTRB(
-                          20,
-                          12,
-                          20,
-                          12,
-                        ),
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
                     child: Row(
-                      crossAxisAlignment:
-                          CrossAxisAlignment
-                              .start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Container(
                           width: 42,
                           height: 42,
                           decoration: BoxDecoration(
-                            color: Colors
-                                .grey[100],
-                            borderRadius:
-                                BorderRadius.circular(
-                                  10,
-                                ),
+                            color: Colors.grey[100],
+                            borderRadius: BorderRadius.circular(10),
                           ),
                           child: const Icon(
-                            Icons
-                                .people_outline,
-                            color: AppColors
-                                .kGreen,
+                            Icons.people_outline,
+                            color: AppColors.kGreen,
                             size: 22,
                           ),
                         ),
-                        const SizedBox(
-                          width: 12,
-                        ),
+                        const SizedBox(width: 12),
                         Expanded(
                           child: Column(
-                            crossAxisAlignment:
-                                CrossAxisAlignment
-                                    .start,
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               const Text(
                                 'Meeting Point Request',
                                 style: TextStyle(
-                                  fontSize:
-                                      17,
-                                  fontWeight:
-                                      FontWeight.w700,
-                                  color:
-                                      Colors.black87,
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.black87,
                                 ),
                               ),
-                              const SizedBox(
-                                height:
-                                    3,
-                              ),
+                              const SizedBox(height: 3),
                               Row(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Expanded(
                                     child: Text(
-                                      _inviteeStepLabel(
-                                        step,
-                                      ),
+                                      _inviteeStepLabel(step),
                                       style: TextStyle(
                                         fontSize: 13,
                                         color: Colors.grey[600],
                                       ),
                                     ),
                                   ),
-                                  if (timerLabel !=
-                                      null)
-                                    _meetingTimerBadge(
-                                      timerLabel,
-                                    ),
+                                  if (timerLabel != null)
+                                    _meetingTimerBadge(timerLabel),
                                 ],
                               ),
                             ],
@@ -9234,106 +5875,62 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                   const Divider(
                     height: 1,
                     thickness: 1,
-                    color: Color(
-                      0xFFEEEEEE,
-                    ),
+                    color: Color(0xFFEEEEEE),
                   ),
                   // ── Scrollable body ──────────────────────────────────────────
                   Expanded(
                     child: SingleChildScrollView(
-                      padding:
-                          const EdgeInsets.fromLTRB(
-                            20,
-                            16,
-                            20,
-                            20,
-                          ),
+                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
                       child: Column(
-                        crossAxisAlignment:
-                            CrossAxisAlignment
-                                .start,
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           // Progress bar
                           ClipRRect(
-                            borderRadius:
-                                BorderRadius.circular(
-                                  6,
-                                ),
+                            borderRadius: BorderRadius.circular(6),
                             child: LinearProgressIndicator(
-                              value:
-                                  (step -
-                                      1) /
-                                  3,
-                              minHeight:
-                                  7,
-                              backgroundColor: AppColors
-                                  .kGreen
-                                  .withValues(
-                                    alpha:
-                                        0.2,
-                                  ),
+                              value: (step - 1) / 3,
+                              minHeight: 7,
+                              backgroundColor: AppColors.kGreen.withValues(
+                                alpha: 0.2,
+                              ),
                               valueColor: const AlwaysStoppedAnimation(
-                                AppColors
-                                    .kGreen,
+                                AppColors.kGreen,
                               ),
                             ),
                           ),
-                          const SizedBox(
-                            height: 8,
-                          ),
+                          const SizedBox(height: 8),
                           Text(
                             'Step $step of 3',
                             style: const TextStyle(
-                              fontSize:
-                                  12,
-                              color: AppColors
-                                  .kGreen,
-                              fontWeight:
-                                  FontWeight
-                                      .w600,
+                              fontSize: 12,
+                              color: AppColors.kGreen,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
-                          const SizedBox(
-                            height: 16,
-                          ),
+                          const SizedBox(height: 16),
                           // Section title
                           const Text(
                             'Meeting point details',
                             style: TextStyle(
-                              fontSize:
-                                  18,
-                              fontWeight:
-                                  FontWeight
-                                      .w700,
-                              color: Colors
-                                  .black87,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.black87,
                             ),
                           ),
-                          const SizedBox(
-                            height: 12,
-                          ),
+                          const SizedBox(height: 12),
                           // Details block with green left bar
                           IntrinsicHeight(
                             child: Row(
-                              crossAxisAlignment:
-                                  CrossAxisAlignment
-                                      .start,
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Container(
-                                  width:
-                                      3,
+                                  width: 3,
                                   decoration: BoxDecoration(
-                                    color:
-                                        AppColors.kGreen,
-                                    borderRadius: BorderRadius.circular(
-                                      2,
-                                    ),
+                                    color: AppColors.kGreen,
+                                    borderRadius: BorderRadius.circular(2),
                                   ),
                                 ),
-                                const SizedBox(
-                                  width:
-                                      12,
-                                ),
+                                const SizedBox(width: 12),
                                 Expanded(
                                   child: Column(
                                     crossAxisAlignment:
@@ -9356,10 +5953,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                                                   live.hostPhone,
                                                   live.hostName,
                                                 );
-                                                if (mounted)
-                                                  setState(
-                                                    () {},
-                                                  );
+                                                if (mounted) setState(() {});
                                               },
                                               child: Icon(
                                                 _favService.isFavorite(
@@ -9378,23 +5972,13 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                                             ),
                                         ],
                                       ),
-                                      const SizedBox(
-                                        height: 8,
-                                      ),
-                                      _labeledDetail(
-                                        'Venue: ',
-                                        live.venueName,
-                                      ),
-                                      if (step ==
-                                          3) ...[
-                                        const SizedBox(
-                                          height: 8,
-                                        ),
+                                      const SizedBox(height: 8),
+                                      _labeledDetail('Venue: ', live.venueName),
+                                      if (step == 3) ...[
+                                        const SizedBox(height: 8),
                                         _labeledDetail(
                                           'Suggested point: ',
-                                          _suggestedPointLabel(
-                                            live,
-                                          ),
+                                          _suggestedPointLabel(live),
                                         ),
                                       ],
                                     ],
@@ -9403,81 +5987,51 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                               ],
                             ),
                           ),
-                          const SizedBox(
-                            height: 14,
-                          ),
+                          const SizedBox(height: 14),
                           // Participants label
                           Row(
                             children: [
                               Text(
                                 'Participants:',
                                 style: TextStyle(
-                                  fontSize:
-                                      14,
-                                  color:
-                                      Colors.grey[700],
-                                  fontWeight:
-                                      FontWeight.w600,
+                                  fontSize: 14,
+                                  color: Colors.grey[700],
+                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
                             ],
                           ),
-                          const SizedBox(
-                            height: 8,
-                          ),
+                          const SizedBox(height: 8),
                           ...() {
-                            final list =
-                                step ==
-                                    3
+                            final list = step == 3
                                 ? [
                                     ...live.participants.where(
-                                      (
-                                        p,
-                                      ) => p.isAccepted,
+                                      (p) => p.isAccepted,
                                     ),
                                     ...live.participants.where(
-                                      (
-                                        p,
-                                      ) => p.isCancelledParticipation,
+                                      (p) => p.isCancelledParticipation,
                                     ),
                                   ]
-                                : [
-                                    ...live.participants,
-                                  ];
-                            list.sort((
-                              a,
-                              b,
-                            ) {
-                              if (a.userId ==
-                                  currentUid)
-                                return -1;
-                              if (b.userId ==
-                                  currentUid)
-                                return 1;
+                                : [...live.participants];
+                            list.sort((a, b) {
+                              if (a.userId == currentUid) return -1;
+                              if (b.userId == currentUid) return 1;
                               return 0;
                             });
                             return list.map(
-                              (
+                              (p) => _buildInviteeParticipantStatusRow(
                                 p,
-                              ) => _buildInviteeParticipantStatusRow(
-                                p,
-                                isMe:
-                                    p.userId ==
-                                    currentUid,
+                                isMe: p.userId == currentUid,
                               ),
                             );
                           }(),
-                          const SizedBox(
-                            height: 12,
-                          ),
+                          const SizedBox(height: 12),
                           // Note
                           Text(
                             'Note: You can cancel your participation in this meeting point.',
                             style: TextStyle(
-                              fontSize:
-                                  12,
-                              color: Colors
-                                  .grey[500],
+                              fontSize: 12,
+                              color: Colors.grey[500],
                             ),
                           ),
                         ],
@@ -9491,51 +6045,31 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                         20,
                         10,
                         20,
-                        MediaQuery.of(
-                                  context,
-                                )
-                                .padding
-                                .bottom +
-                            12,
+                        MediaQuery.of(context).padding.bottom + 12,
                       ),
                       child: SizedBox(
-                        width: double
-                            .infinity,
+                        width: double.infinity,
                         child: SecondaryButton(
-                          text:
-                              'Cancel Participation',
+                          text: 'Cancel Participation',
                           onPressed:
-                              step ==
-                                      3 &&
-                                  live.suggestedPoint
-                                      .trim()
-                                      .isEmpty
+                              step == 3 && live.suggestedPoint.trim().isEmpty
                               ? null
                               : () async {
-                                  final dialogCtx =
-                                      ctx;
+                                  final dialogCtx = ctx;
                                   final confirmed = await _declineMeetingInvite(
                                     live,
-                                    title:
-                                        'Cancel Participation',
+                                    title: 'Cancel Participation',
                                     message:
                                         'Are you sure you want to cancel your participation in this meeting point?',
-                                    confirmText:
-                                        'Cancel Participation',
-                                    cancelText:
-                                        'Keep',
-                                    successMessage:
-                                        'Participation cancelled.',
-                                    cancelParticipation:
-                                        step ==
-                                        3,
+                                    confirmText: 'Cancel Participation',
+                                    cancelText: 'Keep',
+                                    successMessage: 'Participation cancelled.',
+                                    cancelParticipation: step == 3,
                                   );
                                   if (confirmed &&
                                       mounted &&
                                       dialogCtx.mounted) {
-                                    Navigator.pop(
-                                      dialogCtx,
-                                    );
+                                    Navigator.pop(dialogCtx);
                                   }
                                 },
                         ),
@@ -9543,13 +6077,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                     )
                   else
                     SizedBox(
-                      height:
-                          MediaQuery.of(
-                                context,
-                              )
-                              .padding
-                              .bottom +
-                          12,
+                      height: MediaQuery.of(context).padding.bottom + 12,
                     ),
                 ],
               ),
@@ -9560,52 +6088,33 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     );
   }
 
-  Widget
-  _buildInviteeParticipantStatusRow(
+  Widget _buildInviteeParticipantStatusRow(
     MeetingPointParticipant p, {
     bool isMe = false,
   }) {
     final bg = p.isAccepted
-        ? AppColors.kGreen.withValues(
-            alpha: 0.1,
-          )
-        : (p.isDeclined ||
-              p.isCancelledParticipation)
-        ? AppColors.kError.withValues(
-            alpha: 0.1,
-          )
-        : Colors.orange.withValues(
-            alpha: 0.1,
-          );
+        ? AppColors.kGreen.withValues(alpha: 0.1)
+        : (p.isDeclined || p.isCancelledParticipation)
+        ? AppColors.kError.withValues(alpha: 0.1)
+        : Colors.orange.withValues(alpha: 0.1);
     final textColor = p.isAccepted
         ? AppColors.kGreen
-        : (p.isDeclined ||
-              p.isCancelledParticipation)
+        : (p.isDeclined || p.isCancelledParticipation)
         ? AppColors.kError
         : Colors.orange.shade700;
     final label = p.isAccepted
         ? 'Accepted'
-        : (p.isDeclined ||
-              p.isCancelledParticipation)
+        : (p.isDeclined || p.isCancelledParticipation)
         ? 'Declined'
         : 'Pending';
 
     return Container(
-      margin: const EdgeInsets.only(
-        bottom: 8,
-      ),
-      padding:
-          const EdgeInsets.symmetric(
-            horizontal: 12,
-            vertical: 10,
-          ),
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: Colors.grey[50],
-        borderRadius:
-            BorderRadius.circular(12),
-        border: Border.all(
-          color: Colors.grey.shade200,
-        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
       ),
       child: Row(
         children: [
@@ -9616,96 +6125,53 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               color: Colors.grey[300],
               shape: BoxShape.circle,
             ),
-            child: Icon(
-              Icons.person,
-              color: Colors.grey[600],
-              size: 18,
-            ),
+            child: Icon(Icons.person, color: Colors.grey[600], size: 18),
           ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment
-                      .start,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 RichText(
                   text: TextSpan(
-                    style:
-                        const TextStyle(
-                          fontSize: 13,
-                          fontWeight:
-                              FontWeight
-                                  .w600,
-                          color: Colors
-                              .black87,
-                        ),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black87,
+                    ),
                     children: [
-                      TextSpan(
-                        text:
-                            p.name
-                                .trim()
-                                .isEmpty
-                            ? p.phone
-                            : p.name,
-                      ),
+                      TextSpan(text: p.name.trim().isEmpty ? p.phone : p.name),
                       if (isMe)
                         TextSpan(
                           text: ' (me)',
                           style: TextStyle(
-                            fontSize:
-                                12,
-                            fontWeight:
-                                FontWeight
-                                    .w400,
-                            color: Colors
-                                .grey[500],
+                            fontSize: 12,
+                            fontWeight: FontWeight.w400,
+                            color: Colors.grey[500],
                           ),
                         ),
                     ],
                   ),
                 ),
-                if (p
-                        .phone
-                        .isNotEmpty &&
-                    p.name
-                        .trim()
-                        .isNotEmpty)
+                if (p.phone.isNotEmpty && p.name.trim().isNotEmpty)
                   Text(
                     p.phone,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors
-                          .grey[500],
-                    ),
+                    style: TextStyle(fontSize: 12, color: Colors.grey[500]),
                   ),
               ],
             ),
           ),
-          if (!isMe &&
-              p.phone.isNotEmpty) ...[
+          if (!isMe && p.phone.isNotEmpty) ...[
             GestureDetector(
               onTap: () async {
-                await _favService
-                    .toggle(
-                      p.phone,
-                      p.name,
-                    );
-                if (mounted)
-                  setState(() {});
+                await _favService.toggle(p.phone, p.name);
+                if (mounted) setState(() {});
               },
               child: Icon(
-                _favService.isFavorite(
-                      p.phone,
-                    )
+                _favService.isFavorite(p.phone)
                     ? Icons.favorite
-                    : Icons
-                          .favorite_border,
-                color:
-                    _favService
-                        .isFavorite(
-                          p.phone,
-                        )
+                    : Icons.favorite_border,
+                color: _favService.isFavorite(p.phone)
                     ? Colors.red
                     : Colors.grey[400],
                 size: 22, //try
@@ -9714,25 +6180,17 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             const SizedBox(width: 6),
           ],
           Container(
-            padding:
-                const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 5,
-                ),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
             decoration: BoxDecoration(
               color: bg,
-              borderRadius:
-                  BorderRadius.circular(
-                    14,
-                  ),
+              borderRadius: BorderRadius.circular(14),
             ),
             child: Text(
               label,
               style: TextStyle(
                 color: textColor,
                 fontSize: 12,
-                fontWeight:
-                    FontWeight.w600,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ),
@@ -9741,27 +6199,16 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     );
   }
 
-  Future<void> _acceptMeetingInvite(
-    MeetingPointRecord meeting,
-  ) async {
-    final uid = FirebaseAuth
-        .instance
-        .currentUser
-        ?.uid;
+  Future<void> _acceptMeetingInvite(MeetingPointRecord meeting) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
 
     // ── Conflict check ────────────────────────────────────────────────────────
     // Check if the user is already hosting or has accepted another meeting.
     MeetingPointRecord? conflicting;
     if (uid != null) {
-      for (final m
-          in _lastKnownBlockingMeetings) {
-        if (m.id == meeting.id)
-          continue;
-        if (m.isHost(uid) ||
-            m
-                    .participantFor(uid)
-                    ?.isAccepted ==
-                true) {
+      for (final m in _lastKnownBlockingMeetings) {
+        if (m.id == meeting.id) continue;
+        if (m.isHost(uid) || m.participantFor(uid)?.isAccepted == true) {
           conflicting = m;
           break;
         }
@@ -9771,44 +6218,29 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     if (conflicting != null) {
       // ── Conflict exists: show conflict dialog directly (skip normal accept) ──
       if (!mounted) return;
-      final isHostOfConflicting =
-          uid != null &&
-          conflicting.isHost(uid);
+      final isHostOfConflicting = uid != null && conflicting.isHost(uid);
 
       if (isHostOfConflicting) {
         if (conflicting.isActive) {
           // Case 1: host in setup phase — accepting cancels the meeting for all.
-          final proceed =
-              await _showHostActiveConflictDialog();
-          if (!mounted ||
-              proceed != true)
-            return;
+          final proceed = await _showHostActiveConflictDialog();
+          if (!mounted || proceed != true) return;
           try {
-            await MeetingPointService.cancelMeetingForAll(
-              conflicting.id,
-            );
+            await MeetingPointService.cancelMeetingForAll(conflicting.id);
           } catch (_) {}
-        } else if (conflicting
-            .isConfirmed) {
+        } else if (conflicting.isConfirmed) {
           // Case 2: host in confirmed/arrival phase — let host choose scope.
-          final choice =
-              await _showHostConfirmedConflictDialog();
-          if (!mounted ||
-              choice == null)
-            return;
+          final choice = await _showHostConfirmedConflictDialog();
+          if (!mounted || choice == null) return;
           try {
             if (choice == 'all') {
-              await MeetingPointService.cancelMeetingForAll(
-                conflicting.id,
-              );
+              await MeetingPointService.cancelMeetingForAll(conflicting.id);
             } else {
               await MeetingPointService.updateArrivalStatus(
-                meetingPointId:
-                    conflicting.id,
+                meetingPointId: conflicting.id,
                 isHost: true,
                 userId: uid,
-                arrivalStatus:
-                    'cancelled',
+                arrivalStatus: 'cancelled',
               );
             }
           } catch (_) {}
@@ -9819,119 +6251,78 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           context: context,
           barrierColor: Colors.black54,
           builder: (ctx) => AlertDialog(
-            backgroundColor:
-                Colors.white,
+            backgroundColor: Colors.white,
             shape: RoundedRectangleBorder(
-              borderRadius:
-                  BorderRadius.circular(
-                    16,
-                  ),
+              borderRadius: BorderRadius.circular(16),
             ),
             title: const Text(
               'Already in a Meeting Point',
-              style: TextStyle(
-                fontWeight:
-                    FontWeight.bold,
-                fontSize: 20,
-              ),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
             ),
             content: const Text(
               "You're already part of an active meeting point. Proceeding to accept this new "
               'invitation will cancel your participation in it. Would you like to proceed?',
-              style: TextStyle(
-                fontSize: 15,
-              ),
+              style: TextStyle(fontSize: 15),
             ),
             actions: [
               TextButton(
-                onPressed: () =>
-                    Navigator.pop(
-                      ctx,
-                      false,
-                    ),
+                onPressed: () => Navigator.pop(ctx, false),
                 style: TextButton.styleFrom(
-                  backgroundColor:
-                      Colors.grey[200],
-                  padding:
-                      const EdgeInsets.symmetric(
-                        horizontal: 24,
-                        vertical: 12,
-                      ),
+                  backgroundColor: Colors.grey[200],
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
                   shape: RoundedRectangleBorder(
-                    borderRadius:
-                        BorderRadius.circular(
-                          8,
-                        ),
+                    borderRadius: BorderRadius.circular(8),
                   ),
                 ),
                 child: const Text(
                   'Discard',
                   style: TextStyle(
-                    color:
-                        Colors.black87,
-                    fontWeight:
-                        FontWeight.w600,
+                    color: Colors.black87,
+                    fontWeight: FontWeight.w600,
                     fontSize: 15,
                   ),
                 ),
               ),
               TextButton(
-                onPressed: () =>
-                    Navigator.pop(
-                      ctx,
-                      true,
-                    ),
+                onPressed: () => Navigator.pop(ctx, true),
                 style: TextButton.styleFrom(
-                  backgroundColor:
-                      AppColors.kGreen,
-                  padding:
-                      const EdgeInsets.symmetric(
-                        horizontal: 24,
-                        vertical: 12,
-                      ),
+                  backgroundColor: AppColors.kGreen,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
                   shape: RoundedRectangleBorder(
-                    borderRadius:
-                        BorderRadius.circular(
-                          8,
-                        ), // dialog
+                    borderRadius: BorderRadius.circular(8), // dialog
                   ),
                 ),
                 child: const Text(
                   'Proceed',
                   style: TextStyle(
                     color: Colors.white,
-                    fontWeight:
-                        FontWeight.bold,
+                    fontWeight: FontWeight.bold,
                     fontSize: 15,
                   ),
                 ),
               ),
             ],
-            actionsPadding:
-                const EdgeInsets.fromLTRB(
-                  16,
-                  0,
-                  16,
-                  16,
-                ),
+            actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           ),
         );
-        if (!mounted || proceed != true)
-          return;
+        if (!mounted || proceed != true) return;
         try {
           if (conflicting.isConfirmed) {
             await MeetingPointService.updateArrivalStatus(
-              meetingPointId:
-                  conflicting.id,
+              meetingPointId: conflicting.id,
               isHost: false,
               userId: uid ?? '',
-              arrivalStatus:
-                  'cancelled',
+              arrivalStatus: 'cancelled',
             );
           } else {
             await MeetingPointService.respondToInvitation(
-              meetingPointId:
-                  conflicting.id,
+              meetingPointId: conflicting.id,
               accepted: false,
             );
           }
@@ -9939,14 +6330,13 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       }
     } else {
       // ── No conflict: show the normal accept confirmation ───────────────────
-      final confirmed =
-          await ConfirmationDialog.showPositiveConfirmation(
-            context,
-            title: 'Accept Invitation',
-            message:
-                'Are you sure you want to accept this meeting point invitation?',
-            confirmText: 'Accept',
-          );
+      final confirmed = await ConfirmationDialog.showPositiveConfirmation(
+        context,
+        title: 'Accept Invitation',
+        message:
+            'Are you sure you want to accept this meeting point invitation?',
+        confirmText: 'Accept',
+      );
       if (confirmed != true) return;
     }
 
@@ -9955,55 +6345,30 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     // ── Location choice ───────────────────────────────────────────────────────
     // Show the navigation choice sheet (Pin on Map / Scan With Camera).
     // The invitation is confirmed only after the user sets their location.
-    final navChoice =
-        await showModalBottomSheet<
-          String
-        >(
-          context: context,
-          isScrollControlled: true,
-          backgroundColor:
-              Colors.transparent,
-          builder: (ctx) =>
-              _buildAcceptLocationChoiceSheet(
-                ctx,
-                meeting,
-              ),
-        );
-    if (!mounted || navChoice == null)
-      return; // user dismissed without picking
+    final navChoice = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _buildAcceptLocationChoiceSheet(ctx, meeting),
+    );
+    if (!mounted || navChoice == null) return; // user dismissed without picking
 
     // ── Set location ──────────────────────────────────────────────────────────
-    final locationResult =
-        await showModalBottomSheet<
-          Map<String, dynamic>
-        >(
-          context: context,
-          isScrollControlled: true,
-          backgroundColor:
-              Colors.transparent,
-          builder: (_) =>
-              SetYourLocationDialog(
-                shopName:
-                    meeting
-                        .venueName
-                        .isEmpty
-                    ? 'Meeting Point'
-                    : meeting.venueName,
-                shopId: meeting.id,
-                returnResultOnly: true,
-                venueId:
-                    meeting
-                        .venueId
-                        .isEmpty
-                    ? null
-                    : meeting.venueId,
-                headerTitle:
-                    'Set your location',
-              ),
-        );
-    if (!mounted ||
-        locationResult == null)
-      return; // user cancelled location
+    final locationResult = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => SetYourLocationDialog(
+        shopName: meeting.venueName.isEmpty
+            ? 'Meeting Point'
+            : meeting.venueName,
+        shopId: meeting.id,
+        returnResultOnly: true,
+        venueId: meeting.venueId.isEmpty ? null : meeting.venueId,
+        headerTitle: 'Set your location',
+      ),
+    );
+    if (!mounted || locationResult == null) return; // user cancelled location
 
     // ── Accept invitation ─────────────────────────────────────────────────────
     try {
@@ -10012,10 +6377,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         accepted: true,
       );
       if (!mounted) return;
-      SnackbarHelper.showSuccess(
-        context,
-        'Invitation accepted.',
-      );
+      SnackbarHelper.showSuccess(context, 'Invitation accepted.');
     } catch (e) {
       if (!mounted) return;
       SnackbarHelper.showError(
@@ -10027,103 +6389,62 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
   /// Dialog shown when the user (as host in setup phase) tries to accept a new
   /// invitation — warns that the current meeting point will be cancelled for all.
-  Future<bool?>
-  _showHostActiveConflictDialog() {
+  Future<bool?> _showHostActiveConflictDialog() {
     return showDialog<bool>(
       context: context,
       barrierColor: Colors.black54,
       builder: (ctx) => AlertDialog(
         backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(
-          borderRadius:
-              BorderRadius.circular(16),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text(
           'Already in a Meeting Point',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            fontSize: 20,
-          ),
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
         ),
         content: const Text(
           "You're hosting an in-progress meeting point. Proceeding to accept "
           'this new invitation will cancel it for all participants. '
           'Would you like to proceed?',
-          style: TextStyle(
-            fontSize: 15,
-          ),
+          style: TextStyle(fontSize: 15),
         ),
         actions: [
           TextButton(
-            onPressed: () =>
-                Navigator.pop(
-                  ctx,
-                  false,
-                ),
+            onPressed: () => Navigator.pop(ctx, false),
             style: TextButton.styleFrom(
-              backgroundColor:
-                  Colors.grey[200],
-              padding:
-                  const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 12,
-                  ),
+              backgroundColor: Colors.grey[200],
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               shape: RoundedRectangleBorder(
-                borderRadius:
-                    BorderRadius.circular(
-                      8,
-                    ),
+                borderRadius: BorderRadius.circular(8),
               ),
             ),
             child: const Text(
               'Discard',
               style: TextStyle(
                 color: Colors.black87,
-                fontWeight:
-                    FontWeight.w600,
+                fontWeight: FontWeight.w600,
                 fontSize: 15,
               ),
             ),
           ),
           TextButton(
-            onPressed: () =>
-                Navigator.pop(
-                  ctx,
-                  true,
-                ),
+            onPressed: () => Navigator.pop(ctx, true),
             style: TextButton.styleFrom(
-              backgroundColor:
-                  AppColors.kGreen,
-              padding:
-                  const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 12,
-                  ),
+              backgroundColor: AppColors.kGreen,
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               shape: RoundedRectangleBorder(
-                borderRadius:
-                    BorderRadius.circular(
-                      12,
-                    ),
+                borderRadius: BorderRadius.circular(12),
               ),
             ),
             child: const Text(
               'Proceed',
               style: TextStyle(
                 color: Colors.white,
-                fontWeight:
-                    FontWeight.bold,
+                fontWeight: FontWeight.bold,
                 fontSize: 15,
               ),
             ),
           ),
         ],
-        actionsPadding:
-            const EdgeInsets.fromLTRB(
-              16,
-              0,
-              16,
-              16,
-            ),
+        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       ),
     );
   }
@@ -10131,8 +6452,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   /// Dialog shown when the user (as host in confirmed/arrival phase) tries to
   /// accept a new invitation — lets them choose to cancel for all or just
   /// themselves. Returns 'all', 'me', or null (dismissed).
-  Future<String?>
-  _showHostConfirmedConflictDialog() {
+  Future<String?> _showHostConfirmedConflictDialog() {
     String selected = 'all';
     return showDialog<String>(
       context: context,
@@ -10141,128 +6461,82 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         builder: (ctx, setState) => AlertDialog(
           backgroundColor: Colors.white,
           shape: RoundedRectangleBorder(
-            borderRadius:
-                BorderRadius.circular(
-                  16,
-                ),
+            borderRadius: BorderRadius.circular(16),
           ),
           title: const Text(
             'Already in a Meeting Point',
-            style: TextStyle(
-              fontWeight:
-                  FontWeight.bold,
-              fontSize: 20,
-            ),
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
           ),
           content: Column(
-            mainAxisSize:
-                MainAxisSize.min,
-            crossAxisAlignment:
-                CrossAxisAlignment
-                    .start,
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
                 "You're hosting an active meeting point. Proceeding to accept "
                 'this new invitation will cancel it for you or all participants. '
                 'Would you like to proceed?',
-                style: TextStyle(
-                  fontSize: 15,
-                ),
+                style: TextStyle(fontSize: 15),
               ),
-              const SizedBox(
-                height: 16,
-              ),
+              const SizedBox(height: 16),
               _buildRadioRow(
                 value: 'all',
                 selected: selected,
-                label:
-                    'Cancel for all participants',
-                onTap: () => setState(
-                  () =>
-                      selected = 'all',
-                ),
+                label: 'Cancel for all participants',
+                onTap: () => setState(() => selected = 'all'),
               ),
               _buildRadioRow(
                 value: 'me',
                 selected: selected,
                 label: 'Cancel for me',
-                onTap: () => setState(
-                  () => selected = 'me',
-                ),
+                onTap: () => setState(() => selected = 'me'),
               ),
             ],
           ),
           actions: [
             TextButton(
-              onPressed: () =>
-                  Navigator.pop(
-                    ctx,
-                    null,
-                  ),
+              onPressed: () => Navigator.pop(ctx, null),
               style: TextButton.styleFrom(
-                backgroundColor:
-                    Colors.grey[200],
-                padding:
-                    const EdgeInsets.symmetric(
-                      horizontal: 24,
-                      vertical: 12,
-                    ),
+                backgroundColor: Colors.grey[200],
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
                 shape: RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.circular(
-                        8,
-                      ),
+                  borderRadius: BorderRadius.circular(8),
                 ),
               ),
               child: const Text(
                 'Discard',
                 style: TextStyle(
                   color: Colors.black87,
-                  fontWeight:
-                      FontWeight.w600,
+                  fontWeight: FontWeight.w600,
                   fontSize: 15,
                 ),
               ),
             ),
             TextButton(
-              onPressed: () =>
-                  Navigator.pop(
-                    ctx,
-                    selected,
-                  ),
+              onPressed: () => Navigator.pop(ctx, selected),
               style: TextButton.styleFrom(
-                backgroundColor:
-                    AppColors.kGreen,
-                padding:
-                    const EdgeInsets.symmetric(
-                      horizontal: 24,
-                      vertical: 12,
-                    ),
+                backgroundColor: AppColors.kGreen,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
                 shape: RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.circular(
-                        8,
-                      ),
+                  borderRadius: BorderRadius.circular(8),
                 ),
               ),
               child: const Text(
                 'Proceed',
                 style: TextStyle(
                   color: Colors.white,
-                  fontWeight:
-                      FontWeight.bold,
+                  fontWeight: FontWeight.bold,
                   fontSize: 15,
                 ),
               ),
             ),
           ],
-          actionsPadding:
-              const EdgeInsets.fromLTRB(
-                16,
-                0,
-                16,
-                16,
-              ),
+          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         ),
       ),
     );
@@ -10274,17 +6548,12 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     required String label,
     required VoidCallback onTap,
   }) {
-    final isSelected =
-        value == selected;
+    final isSelected = value == selected;
     return InkWell(
       onTap: onTap,
-      borderRadius:
-          BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(8),
       child: Padding(
-        padding:
-            const EdgeInsets.symmetric(
-              vertical: 8,
-            ),
+        padding: const EdgeInsets.symmetric(vertical: 8),
         child: Row(
           children: [
             Container(
@@ -10293,9 +6562,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color: isSelected
-                      ? AppColors.kGreen
-                      : Colors.grey,
+                  color: isSelected ? AppColors.kGreen : Colors.grey,
                   width: 2,
                 ),
               ),
@@ -10305,10 +6572,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                         width: 10,
                         height: 10,
                         decoration: const BoxDecoration(
-                          shape: BoxShape
-                              .circle,
-                          color: AppColors
-                              .kGreen,
+                          shape: BoxShape.circle,
+                          color: AppColors.kGreen,
                         ),
                       ),
                     )
@@ -10320,8 +6585,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 label,
                 style: const TextStyle(
                   fontSize: 14,
-                  fontWeight:
-                      FontWeight.w500,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ),
@@ -10333,13 +6597,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
   /// Bottom sheet that lets the user pick how to set their starting location
   /// before accepting a meeting point invitation. Returns 'map' or 'camera'.
-  Widget
-  _buildAcceptLocationChoiceSheet(
+  Widget _buildAcceptLocationChoiceSheet(
     BuildContext ctx,
     MeetingPointRecord meeting,
   ) {
-    final venueName =
-        meeting.venueName.isEmpty
+    final venueName = meeting.venueName.isEmpty
         ? 'Meeting Point'
         : meeting.venueName;
     return Container(
@@ -10359,90 +6621,49 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             height: 4,
             decoration: BoxDecoration(
               color: Colors.grey[300],
-              borderRadius:
-                  BorderRadius.circular(
-                    2,
-                  ),
+              borderRadius: BorderRadius.circular(2),
             ),
           ),
           Padding(
-            padding:
-                const EdgeInsets.fromLTRB(
-                  20,
-                  14,
-                  20,
-                  4,
-                ),
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 4),
             child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment
-                      .start,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   'Set your current location',
                   style: TextStyle(
                     fontSize: 20,
-                    fontWeight:
-                        FontWeight.w600,
-                    color: AppColors
-                        .kGreen,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.kGreen,
                   ),
                 ),
-                const SizedBox(
-                  height: 4,
-                ),
+                const SizedBox(height: 4),
                 Text(
                   'As step 1, set your location to find suitable meeting point for all participants',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: Colors
-                        .grey[600],
-                  ),
+                  style: TextStyle(fontSize: 13, color: Colors.grey[600]),
                 ),
               ],
             ),
           ),
           const SizedBox(height: 28),
           Padding(
-            padding:
-                const EdgeInsets.symmetric(
-                  horizontal: 20,
-                ),
+            padding: const EdgeInsets.symmetric(horizontal: 20),
             child: SecondaryButton(
               text: 'Pin on Map',
-              icon: Icons
-                  .location_on_outlined,
-              onPressed: () =>
-                  Navigator.pop(
-                    ctx,
-                    'map',
-                  ),
+              icon: Icons.location_on_outlined,
+              onPressed: () => Navigator.pop(ctx, 'map'),
             ),
           ),
           const SizedBox(height: 12),
           Padding(
-            padding:
-                const EdgeInsets.symmetric(
-                  horizontal: 20,
-                ),
+            padding: const EdgeInsets.symmetric(horizontal: 20),
             child: PrimaryButton(
               text: 'Scan With Camera',
-              icon: Icons
-                  .camera_alt_outlined,
-              onPressed: () =>
-                  Navigator.pop(
-                    ctx,
-                    'camera',
-                  ),
+              icon: Icons.camera_alt_outlined,
+              onPressed: () => Navigator.pop(ctx, 'camera'),
             ),
           ),
-          SizedBox(
-            height:
-                MediaQuery.of(
-                  ctx,
-                ).padding.bottom +
-                35,
-          ),
+          SizedBox(height: MediaQuery.of(ctx).padding.bottom + 35),
         ],
       ),
     );
@@ -10455,48 +6676,34 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         'Are you sure you want to decline this meeting point invitation?',
     String confirmText = 'Decline',
     String cancelText = 'Cancel',
-    String successMessage =
-        'Invitation declined.',
+    String successMessage = 'Invitation declined.',
     bool cancelParticipation = false,
   }) async {
-    final confirmed =
-        await ConfirmationDialog.showDeleteConfirmation(
-          context,
-          title: title,
-          message: message,
-          confirmText: confirmText,
-          cancelText: cancelText,
-        );
+    final confirmed = await ConfirmationDialog.showDeleteConfirmation(
+      context,
+      title: title,
+      message: message,
+      confirmText: confirmText,
+      cancelText: cancelText,
+    );
     if (confirmed != true) return false;
 
     // Immediately hide the tile in the UI — don't wait for Firestore round-trip.
-    if (mounted)
-      setState(
-        () => _locallyDeclinedMeetingIds
-            .add(meeting.id),
-      );
+    if (mounted) setState(() => _locallyDeclinedMeetingIds.add(meeting.id));
 
     try {
       await MeetingPointService.respondToInvitation(
         meetingPointId: meeting.id,
         accepted: false,
-        cancelParticipation:
-            cancelParticipation,
+        cancelParticipation: cancelParticipation,
       );
       if (!mounted) return true;
-      SnackbarHelper.showSuccess(
-        context,
-        successMessage,
-      );
+      SnackbarHelper.showSuccess(context, successMessage);
       return true;
     } catch (e) {
       // Restore the tile if the write failed.
       if (mounted)
-        setState(
-          () =>
-              _locallyDeclinedMeetingIds
-                  .remove(meeting.id),
-        );
+        setState(() => _locallyDeclinedMeetingIds.remove(meeting.id));
       if (!mounted) return false;
       SnackbarHelper.showError(
         context,
@@ -10506,40 +6713,29 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     }
   }
 
-  Future<void> _confirmSuggestedPoint(
-    MeetingPointRecord meeting,
-  ) async {
+  Future<void> _confirmSuggestedPoint(MeetingPointRecord meeting) async {
     try {
       await MeetingPointService.markHostDecision(
         meetingPointId: meeting.id,
         accepted: true,
       );
       if (!mounted) return;
-      SnackbarHelper.showSuccess(
-        context,
-        'Meeting point confirmed!',
-      );
+      SnackbarHelper.showSuccess(context, 'Meeting point confirmed!');
     } catch (e) {
       if (!mounted) return;
-      SnackbarHelper.showError(
-        context,
-        'Failed to confirm. Please try again.',
-      );
+      SnackbarHelper.showError(context, 'Failed to confirm. Please try again.');
     }
   }
 
-  Future<void> _rejectSuggestedPoint(
-    MeetingPointRecord meeting,
-  ) async {
-    final confirmed =
-        await ConfirmationDialog.showDeleteConfirmation(
-          context,
-          title: 'Reject Meeting Point',
-          message:
-              'Are you sure you want to reject this meeting point? The meeting will be cancelled for all participants.',
-          cancelText: 'Keep',
-          confirmText: 'Reject',
-        );
+  Future<void> _rejectSuggestedPoint(MeetingPointRecord meeting) async {
+    final confirmed = await ConfirmationDialog.showDeleteConfirmation(
+      context,
+      title: 'Reject Meeting Point',
+      message:
+          'Are you sure you want to reject this meeting point? The meeting will be cancelled for all participants.',
+      cancelText: 'Keep',
+      confirmText: 'Reject',
+    );
     if (confirmed != true) return;
     try {
       await MeetingPointService.markHostDecision(
@@ -10547,31 +6743,22 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         accepted: false,
       );
       if (!mounted) return;
-      SnackbarHelper.showSuccess(
-        context,
-        'Meeting point rejected.',
-      );
+      SnackbarHelper.showSuccess(context, 'Meeting point rejected.');
     } catch (e) {
       if (!mounted) return;
-      SnackbarHelper.showError(
-        context,
-        'Failed to reject. Please try again.',
-      );
+      SnackbarHelper.showError(context, 'Failed to reject. Please try again.');
     }
   }
 
-  Future<void> _cancelMeetingPoint(
-    MeetingPointRecord meeting,
-  ) async {
-    final confirmed =
-        await ConfirmationDialog.showDeleteConfirmation(
-          context,
-          title: 'Cancel Meeting Point',
-          message:
-              'Are you sure you want to cancel this meeting point for all participants?',
-          cancelText: 'Keep',
-          confirmText: 'Cancel Meeting',
-        );
+  Future<void> _cancelMeetingPoint(MeetingPointRecord meeting) async {
+    final confirmed = await ConfirmationDialog.showDeleteConfirmation(
+      context,
+      title: 'Cancel Meeting Point',
+      message:
+          'Are you sure you want to cancel this meeting point for all participants?',
+      cancelText: 'Keep',
+      confirmText: 'Cancel Meeting',
+    );
     if (confirmed != true) return;
     try {
       await FirebaseFirestore.instance
@@ -10579,20 +6766,13 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           .doc(meeting.id)
           .update({
             'status': 'cancelled',
-            'updatedAt':
-                FieldValue.serverTimestamp(),
+            'updatedAt': FieldValue.serverTimestamp(),
           });
       if (!mounted) return;
-      SnackbarHelper.showSuccess(
-        context,
-        'Meeting point cancelled.',
-      );
+      SnackbarHelper.showSuccess(context, 'Meeting point cancelled.');
     } catch (e) {
       if (!mounted) return;
-      SnackbarHelper.showError(
-        context,
-        'Failed to cancel. Please try again.',
-      );
+      SnackbarHelper.showError(context, 'Failed to cancel. Please try again.');
     }
   }
 
@@ -10602,15 +6782,10 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     required Color textColor,
   }) {
     return Container(
-      padding:
-          const EdgeInsets.symmetric(
-            horizontal: 10,
-            vertical: 5,
-          ),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         color: backgroundColor,
-        borderRadius:
-            BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Text(
         label,
@@ -10625,75 +6800,47 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
   /// Subsection label for 'Active Meeting Point' with a session countdown
   /// shown on the right when there is a confirmed (active-phase) meeting.
-  Widget
-  _buildActiveMeetingSubsectionLabel(
-    MeetingPointRecord?
-    confirmedMeeting,
+  Widget _buildActiveMeetingSubsectionLabel(
+    MeetingPointRecord? confirmedMeeting,
   ) {
     // Keep the session timer fixed from the moment the meeting starts.
-    final expiresAt =
-        confirmedMeeting?.expiresAt;
+    final expiresAt = confirmedMeeting?.expiresAt;
     if (expiresAt == null) {
-      return _buildSubsectionLabel(
-        'Active Meeting Point',
-      );
+      return _buildSubsectionLabel('Active Meeting Point');
     }
-    final remaining = expiresAt
-        .difference(
-          MeetingPointService.serverNow,
-        );
-    final isExpired =
-        remaining.isNegative ||
-        remaining.inSeconds == 0;
-    final totalSecs = isExpired
-        ? 0
-        : remaining.inSeconds;
+    final remaining = expiresAt.difference(MeetingPointService.serverNow);
+    final isExpired = remaining.isNegative || remaining.inSeconds == 0;
+    final totalSecs = isExpired ? 0 : remaining.inSeconds;
     final h = totalSecs ~/ 3600;
     final m = (totalSecs % 3600) ~/ 60;
     final s = totalSecs % 60;
     final timerLabel = h > 0
         ? '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}'
         : '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
-    final isEnding =
-        isExpired ||
-        remaining.inSeconds <= 5;
-    final isLastMinute =
-        isExpired ||
-        remaining.inMinutes < 1;
-    final timerColor = isLastMinute
-        ? AppColors.kError
-        : Colors.grey[500]!;
+    final isEnding = isExpired || remaining.inSeconds <= 5;
+    final isLastMinute = isExpired || remaining.inMinutes < 1;
+    final timerColor = isLastMinute ? AppColors.kError : Colors.grey[500]!;
 
     return Padding(
-      padding: const EdgeInsets.only(
-        bottom: 8,
-      ),
+      padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         children: [
           Text(
             'Active Meeting Point',
             style: TextStyle(
               fontSize: 14,
-              fontWeight:
-                  FontWeight.w500,
+              fontWeight: FontWeight.w500,
               color: Colors.grey[600],
             ),
           ),
           const Spacer(),
-          Icon(
-            Icons.timer_outlined,
-            size: 13,
-            color: timerColor,
-          ),
+          Icon(Icons.timer_outlined, size: 13, color: timerColor),
           const SizedBox(width: 3),
           Text(
-            isEnding
-                ? 'Ending...'
-                : timerLabel,
+            isEnding ? 'Ending...' : timerLabel,
             style: TextStyle(
               fontSize: 12,
-              fontWeight:
-                  FontWeight.w500,
+              fontWeight: FontWeight.w500,
               color: timerColor,
             ),
           ),
@@ -10703,13 +6850,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   }
 
   /// Light grey text only, no background, no icon
-  Widget _buildSubsectionLabel(
-    String title,
-  ) {
+  Widget _buildSubsectionLabel(String title) {
     return Padding(
-      padding: const EdgeInsets.only(
-        bottom: 8,
-      ),
+      padding: const EdgeInsets.only(bottom: 8),
       child: Text(
         title,
         style: TextStyle(
@@ -10726,13 +6869,10 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     List<TrackingRequest> active,
   ) {
     return Column(
-      crossAxisAlignment:
-          CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // -------- Active Tracking (always show title) --------
-        _buildSubsectionLabel(
-          'Active Tracking',
-        ),
+        _buildSubsectionLabel('Active Tracking'),
         const SizedBox(height: 4),
         if (active.isEmpty)
           SizedBox(
@@ -10742,10 +6882,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 'No active requests',
                 style: TextStyle(
                   fontSize: 13,
-                  color:
-                      Colors.grey[500],
-                  fontWeight:
-                      FontWeight.normal,
+                  color: Colors.grey[500],
+                  fontWeight: FontWeight.normal,
                 ),
               ),
             ),
@@ -10754,28 +6892,17 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           ...active.map(
             (r) => Padding(
               key:
-                  widget.initialExpandRequestId !=
-                          null &&
-                      r.id ==
-                          widget
-                              .initialExpandRequestId
+                  widget.initialExpandRequestId != null &&
+                      r.id == widget.initialExpandRequestId
                   ? _scrollToTargetKey
                   : null,
-              padding:
-                  const EdgeInsets.only(
-                    bottom: 8,
-                  ),
-              child:
-                  _buildReceivedActiveTile(
-                    r,
-                  ),
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _buildReceivedActiveTile(r),
             ),
           ),
         const SizedBox(height: 16),
         // -------- Scheduled Tracking (always show title) --------
-        _buildSubsectionLabel(
-          'Scheduled Tracking',
-        ),
+        _buildSubsectionLabel('Scheduled Tracking'),
         const SizedBox(height: 4),
         if (scheduled.isEmpty)
           SizedBox(
@@ -10785,10 +6912,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 'No scheduled requests',
                 style: TextStyle(
                   fontSize: 13,
-                  color:
-                      Colors.grey[500],
-                  fontWeight:
-                      FontWeight.normal,
+                  color: Colors.grey[500],
+                  fontWeight: FontWeight.normal,
                 ),
               ),
             ),
@@ -10797,21 +6922,12 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           ...scheduled.map(
             (r) => Padding(
               key:
-                  widget.initialExpandRequestId !=
-                          null &&
-                      r.id ==
-                          widget
-                              .initialExpandRequestId
+                  widget.initialExpandRequestId != null &&
+                      r.id == widget.initialExpandRequestId
                   ? _scrollToTargetKey
                   : null,
-              padding:
-                  const EdgeInsets.only(
-                    bottom: 8,
-                  ),
-              child:
-                  _buildReceivedScheduledTile(
-                    r,
-                  ),
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _buildReceivedScheduledTile(r),
             ),
           ),
       ],
@@ -10820,23 +6936,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
   // by remas start
   /// Sorts active tracking requests: connected (green) first, disconnected (grey) last
-  List<TrackingRequest>
-  _sortByConnectionStatus(
-    List<TrackingRequest> list,
-  ) {
-    final sorted =
-        List<TrackingRequest>.from(
-          list,
-        );
+  List<TrackingRequest> _sortByConnectionStatus(List<TrackingRequest> list) {
+    final sorted = List<TrackingRequest>.from(list);
     sorted.sort((a, b) {
-      final aConn = _isConnected(
-        a.receiverId,
-        a.id,
-      );
-      final bConn = _isConnected(
-        b.receiverId,
-        b.id,
-      );
+      final aConn = _isConnected(a.receiverId, a.id);
+      final bConn = _isConnected(b.receiverId, b.id);
       if (aConn && !bConn) return -1;
       if (!aConn && bConn) return 1;
       return 0;
@@ -10850,12 +6954,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     List<TrackingRequest> active,
   ) {
     return Column(
-      crossAxisAlignment:
-          CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildSubsectionLabel(
-          'Active Tracking',
-        ),
+        _buildSubsectionLabel('Active Tracking'),
         const SizedBox(height: 4),
         if (active.isEmpty)
           SizedBox(
@@ -10865,42 +6966,28 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 'No active requests',
                 style: TextStyle(
                   fontSize: 13,
-                  color:
-                      Colors.grey[500],
-                  fontWeight:
-                      FontWeight.normal,
+                  color: Colors.grey[500],
+                  fontWeight: FontWeight.normal,
                 ),
               ),
             ),
           )
         else
           // by remas start
-          ..._sortByConnectionStatus(
-            active,
-          ).map(
+          ..._sortByConnectionStatus(active).map(
             // by remas end
             (r) => Padding(
               key:
-                  widget.initialExpandRequestId !=
-                          null &&
-                      r.id ==
-                          widget
-                              .initialExpandRequestId
+                  widget.initialExpandRequestId != null &&
+                      r.id == widget.initialExpandRequestId
                   ? _scrollToTargetKey
                   : null,
-              padding:
-                  const EdgeInsets.only(
-                    bottom: 8,
-                  ),
-              child: _buildActiveTile(
-                r,
-              ),
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _buildActiveTile(r),
             ),
           ),
         const SizedBox(height: 16),
-        _buildSubsectionLabel(
-          'Scheduled Tracking',
-        ),
+        _buildSubsectionLabel('Scheduled Tracking'),
         const SizedBox(height: 4),
         if (upcoming.isEmpty)
           SizedBox(
@@ -10910,10 +6997,8 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 'No scheduled requests',
                 style: TextStyle(
                   fontSize: 13,
-                  color:
-                      Colors.grey[500],
-                  fontWeight:
-                      FontWeight.normal,
+                  color: Colors.grey[500],
+                  fontWeight: FontWeight.normal,
                 ),
               ),
             ),
@@ -10922,20 +7007,12 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           ...upcoming.map(
             (r) => Padding(
               key:
-                  widget.initialExpandRequestId !=
-                          null &&
-                      r.id ==
-                          widget
-                              .initialExpandRequestId
+                  widget.initialExpandRequestId != null &&
+                      r.id == widget.initialExpandRequestId
                   ? _scrollToTargetKey
                   : null,
-              padding:
-                  const EdgeInsets.only(
-                    bottom: 8,
-                  ),
-              child: _buildUpcomingTile(
-                r,
-              ),
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _buildUpcomingTile(r),
             ),
           ),
       ],
@@ -10943,46 +7020,33 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   }
 
   /// Received scheduled tile: same design as Sent _buildUpcomingTile (heart, no divider). Pending → Accept/Decline; Accepted (not started) → Cancel Tracking.
-  Widget _buildReceivedScheduledTile(
-    TrackingRequest r,
-  ) {
-    final isExpanded =
-        _expandedRequestId == r.id;
-    final isHighlighted =
-        _highlightRequestId == r.id;
+  Widget _buildReceivedScheduledTile(TrackingRequest r) {
+    final isExpanded = _expandedRequestId == r.id;
+    final isHighlighted = _highlightRequestId == r.id;
     if (isHighlighted) {
-      WidgetsBinding.instance
-          .addPostFrameCallback((_) {
-            if (!mounted) return;
-            _startHighlightClearTimer();
-          });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _startHighlightClearTimer();
+      });
     }
     final now = DateTime.now();
-    final bool isPending =
-        r.status == 'pending' &&
-        now.isBefore(r.endAt);
+    final bool isPending = r.status == 'pending' && now.isBefore(r.endAt);
     final bool isAcceptedScheduled =
-        r.status == 'accepted' &&
-        now.isBefore(r.startAt);
+        r.status == 'accepted' && now.isBefore(r.startAt);
 
     return Container(
       decoration: BoxDecoration(
         color: isHighlighted
-            ? AppColors.kGreen
-                  .withOpacity(0.05)
+            ? AppColors.kGreen.withOpacity(0.05)
             : Colors.white,
-        borderRadius:
-            BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isHighlighted
-              ? AppColors.kGreen
-              : Colors.grey.shade200,
+          color: isHighlighted ? AppColors.kGreen : Colors.grey.shade200,
           width: isHighlighted ? 2 : 1,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black
-                .withOpacity(0.04),
+            color: Colors.black.withOpacity(0.04),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -10991,127 +7055,68 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       child: Column(
         children: [
           InkWell(
-            onTap: () =>
-                _toggleExpand(r.id),
-            borderRadius:
-                BorderRadius.circular(
-                  16,
-                ),
+            onTap: () => _toggleExpand(r.id),
+            borderRadius: BorderRadius.circular(16),
             child: Padding(
-              padding:
-                  const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
-                  ),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               child: Row(
                 children: [
                   Container(
                     width: 44,
                     height: 44,
-                    decoration:
-                        BoxDecoration(
-                          color: Colors
-                              .grey[200],
-                          shape: BoxShape
-                              .circle,
-                        ),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[200],
+                      shape: BoxShape.circle,
+                    ),
                     child: Icon(
                       Icons.person,
-                      color: Colors
-                          .grey[600],
+                      color: Colors.grey[600],
                       size: 22,
                     ),
                   ),
-                  const SizedBox(
-                    width: 12,
-                  ),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment
-                              .start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          r.senderName ??
-                              'Unknown',
+                          r.senderName ?? 'Unknown',
                           style: const TextStyle(
-                            fontSize:
-                                16,
-                            fontWeight:
-                                FontWeight
-                                    .w700,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
-                        const SizedBox(
-                          height: 4,
-                        ),
-                        _statusBadge(
-                          r.status,
-                        ),
+                        const SizedBox(height: 4),
+                        _statusBadge(r.status),
                       ],
                     ),
                   ),
                   Builder(
                     builder: (context) {
-                      final _uid =
-                          FirebaseAuth
-                              .instance
-                              .currentUser
-                              ?.uid ??
-                          '';
-                      final _phone =
-                          r.senderId ==
-                              _uid
+                      final _uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+                      final _phone = r.senderId == _uid
                           ? r.trackedUserPhone
-                          : (r.senderPhone ??
-                                r.trackedUserPhone);
-                      final _name =
-                          r.senderId ==
-                              _uid
+                          : (r.senderPhone ?? r.trackedUserPhone);
+                      final _name = r.senderId == _uid
                           ? r.trackedUserName
-                          : (r.senderName ??
-                                r.trackedUserName);
-                      final _isFav =
-                          _favService
-                              .isFavorite(
-                                _phone,
-                              );
+                          : (r.senderName ?? r.trackedUserName);
+                      final _isFav = _favService.isFavorite(_phone);
                       return IconButton(
-                        onPressed: () =>
-                            _toggleFavorite(
-                              _phone,
-                              _name,
-                            ),
+                        onPressed: () => _toggleFavorite(_phone, _name),
                         icon: Icon(
-                          _isFav
-                              ? Icons
-                                    .favorite
-                              : Icons
-                                    .favorite_border,
-                          color: _isFav
-                              ? Colors
-                                    .red
-                              : Colors
-                                    .grey[400],
+                          _isFav ? Icons.favorite : Icons.favorite_border,
+                          color: _isFav ? Colors.red : Colors.grey[400],
                           size: 22,
                         ),
                       );
                     },
                   ),
                   AnimatedRotation(
-                    turns: isExpanded
-                        ? 0.5
-                        : 0,
-                    duration:
-                        const Duration(
-                          milliseconds:
-                              200,
-                        ),
+                    turns: isExpanded ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 200),
                     child: Icon(
-                      Icons
-                          .keyboard_arrow_down,
-                      color: Colors
-                          .grey[600],
+                      Icons.keyboard_arrow_down,
+                      color: Colors.grey[600],
                       size: 24,
                     ),
                   ),
@@ -11121,31 +7126,16 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           ),
           if (isExpanded) ...[
             Padding(
-              padding:
-                  const EdgeInsets.all(
-                    16,
-                  ),
+              padding: const EdgeInsets.all(16),
               child: Column(
-                crossAxisAlignment:
-                    CrossAxisAlignment
-                        .start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildReceivedDetails(
-                    r,
-                  ),
-                  const SizedBox(
-                    height: 16,
-                  ),
+                  _buildReceivedDetails(r),
+                  const SizedBox(height: 16),
                   if (isPending)
-                    _buildIncomingActionButtons(
-                      context,
-                      r,
-                    )
+                    _buildIncomingActionButtons(context, r)
                   else if (isAcceptedScheduled)
-                    _buildCancelTrackingButton(
-                      context,
-                      r,
-                    ),
+                    _buildCancelTrackingButton(context, r),
                 ],
               ),
             ),
@@ -11158,46 +7148,34 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   /// Received active tile: same design as Sent _buildActiveTile
   /// (heart, same container) but only "Stop Tracking" button.
   /// Show lastSeen (e.g. "2 min ago").
-  Widget _buildReceivedActiveTile(
-    TrackingRequest r,
-  ) {
-    final isExpanded =
-        _expandedRequestId == r.id;
+  Widget _buildReceivedActiveTile(TrackingRequest r) {
+    final isExpanded = _expandedRequestId == r.id;
     final isHighlighted =
         _highlightRequestId == r.id ||
-        _highlightedDisconnectedIds
-            .contains(r.id);
+        _highlightedDisconnectedIds.contains(r.id);
 
     if (isHighlighted) {
-      WidgetsBinding.instance
-          .addPostFrameCallback((_) {
-            if (!mounted) return;
-            _startHighlightClearTimer();
-          });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _startHighlightClearTimer();
+      });
     }
 
-    final lastSeen = _timeAgo(
-      r.startAt,
-    );
+    final lastSeen = _timeAgo(r.startAt);
 
     return Container(
       decoration: BoxDecoration(
         color: isHighlighted
-            ? AppColors.kGreen
-                  .withOpacity(0.05)
+            ? AppColors.kGreen.withOpacity(0.05)
             : Colors.white,
-        borderRadius:
-            BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isHighlighted
-              ? AppColors.kGreen
-              : Colors.grey.shade200,
+          color: isHighlighted ? AppColors.kGreen : Colors.grey.shade200,
           width: isHighlighted ? 2 : 1,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black
-                .withOpacity(0.04),
+            color: Colors.black.withOpacity(0.04),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -11206,66 +7184,43 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       child: Column(
         children: [
           InkWell(
-            onTap: () =>
-                _toggleExpand(r.id),
-            borderRadius:
-                BorderRadius.circular(
-                  16,
-                ),
+            onTap: () => _toggleExpand(r.id),
+            borderRadius: BorderRadius.circular(16),
             child: Padding(
-              padding:
-                  const EdgeInsets.all(
-                    16,
-                  ),
+              padding: const EdgeInsets.all(16),
               child: Row(
                 children: [
                   Container(
                     width: 44,
                     height: 44,
-                    decoration:
-                        BoxDecoration(
-                          color: Colors
-                              .grey[200],
-                          shape: BoxShape
-                              .circle,
-                        ),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[200],
+                      shape: BoxShape.circle,
+                    ),
                     child: Icon(
                       Icons.person,
-                      color: Colors
-                          .grey[600],
+                      color: Colors.grey[600],
                       size: 22,
                     ),
                   ),
-                  const SizedBox(
-                    width: 12,
-                  ),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment
-                              .start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          r.senderName ??
-                              'Unknown',
+                          r.senderName ?? 'Unknown',
                           style: const TextStyle(
-                            fontSize:
-                                16,
-                            fontWeight:
-                                FontWeight
-                                    .w700,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
-                        const SizedBox(
-                          height: 4,
-                        ),
+                        const SizedBox(height: 4),
                         Text(
                           lastSeen,
                           style: TextStyle(
-                            fontSize:
-                                13,
-                            color: Colors
-                                .grey[600],
+                            fontSize: 13,
+                            color: Colors.grey[600],
                           ),
                         ),
                       ],
@@ -11273,65 +7228,30 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                   ),
                   Builder(
                     builder: (context) {
-                      final _uid =
-                          FirebaseAuth
-                              .instance
-                              .currentUser
-                              ?.uid ??
-                          '';
-                      final _phone =
-                          r.senderId ==
-                              _uid
+                      final _uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+                      final _phone = r.senderId == _uid
                           ? r.trackedUserPhone
-                          : (r.senderPhone ??
-                                r.trackedUserPhone);
-                      final _name =
-                          r.senderId ==
-                              _uid
+                          : (r.senderPhone ?? r.trackedUserPhone);
+                      final _name = r.senderId == _uid
                           ? r.trackedUserName
-                          : (r.senderName ??
-                                r.trackedUserName);
-                      final _isFav =
-                          _favService
-                              .isFavorite(
-                                _phone,
-                              );
+                          : (r.senderName ?? r.trackedUserName);
+                      final _isFav = _favService.isFavorite(_phone);
                       return IconButton(
-                        onPressed: () =>
-                            _toggleFavorite(
-                              _phone,
-                              _name,
-                            ),
+                        onPressed: () => _toggleFavorite(_phone, _name),
                         icon: Icon(
-                          _isFav
-                              ? Icons
-                                    .favorite
-                              : Icons
-                                    .favorite_border,
-                          color: _isFav
-                              ? Colors
-                                    .red
-                              : Colors
-                                    .grey[400],
+                          _isFav ? Icons.favorite : Icons.favorite_border,
+                          color: _isFav ? Colors.red : Colors.grey[400],
                           size: 22,
                         ),
                       );
                     },
                   ),
                   AnimatedRotation(
-                    turns: isExpanded
-                        ? 0.5
-                        : 0,
-                    duration:
-                        const Duration(
-                          milliseconds:
-                              200,
-                        ),
+                    turns: isExpanded ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 200),
                     child: Icon(
-                      Icons
-                          .keyboard_arrow_down,
-                      color: Colors
-                          .grey[600],
+                      Icons.keyboard_arrow_down,
+                      color: Colors.grey[600],
                       size: 24,
                     ),
                   ),
@@ -11341,22 +7261,12 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           ),
           if (isExpanded) ...[
             Padding(
-              padding:
-                  const EdgeInsets.all(
-                    16,
-                  ),
+              padding: const EdgeInsets.all(16),
               child: Column(
                 children: [
-                  _buildReceivedDetails(
-                    r,
-                  ),
-                  const SizedBox(
-                    height: 16,
-                  ),
-                  _buildStopTrackingButton(
-                    context,
-                    r,
-                  ),
+                  _buildReceivedDetails(r),
+                  const SizedBox(height: 16),
+                  _buildStopTrackingButton(context, r),
                 ],
               ),
             ),
@@ -11366,61 +7276,39 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     );
   }
 
-  Widget _buildStopTrackingButton(
-    BuildContext context,
-    TrackingRequest r,
-  ) {
-    final senderName =
-        r.senderName ?? 'this person';
+  Widget _buildStopTrackingButton(BuildContext context, TrackingRequest r) {
+    final senderName = r.senderName ?? 'this person';
     return SizedBox(
       width: double.infinity,
       child: OutlinedButton.icon(
         onPressed: () async {
-          final confirmed =
-              await ConfirmationDialog.showDeleteConfirmation(
-                context,
-                title: 'Stop Sharing',
-                message:
-                    'Are you sure you want to stop sharing your location with $senderName?',
-                cancelText: 'Keep',
-                confirmText:
-                    'Stop Sharing',
-              );
+          final confirmed = await ConfirmationDialog.showDeleteConfirmation(
+            context,
+            title: 'Stop Sharing',
+            message:
+                'Are you sure you want to stop sharing your location with $senderName?',
+            cancelText: 'Keep',
+            confirmText: 'Stop Sharing',
+          );
           if (confirmed && mounted) {
             _updateRequestStatus(
               r.id,
               'terminated',
-              successMessage:
-                  'Active tracking has been terminated',
+              successMessage: 'Active tracking has been terminated',
             );
           }
         },
-        icon: const Icon(
-          Icons.stop_circle_outlined,
-          size: 18,
-        ),
+        icon: const Icon(Icons.stop_circle_outlined, size: 18),
         label: const Text(
           'Stop Sharing',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
         ),
         style: OutlinedButton.styleFrom(
-          foregroundColor:
-              AppColors.kError,
-          side: const BorderSide(
-            color: AppColors.kError,
-          ),
-          padding:
-              const EdgeInsets.symmetric(
-                vertical: 12,
-              ),
+          foregroundColor: AppColors.kError,
+          side: const BorderSide(color: AppColors.kError),
+          padding: const EdgeInsets.symmetric(vertical: 12),
           shape: RoundedRectangleBorder(
-            borderRadius:
-                BorderRadius.circular(
-                  12,
-                ),
+            borderRadius: BorderRadius.circular(12),
           ),
         ),
       ),
@@ -11434,89 +7322,53 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     required int count,
   }) {
     return Container(
-      padding:
-          const EdgeInsets.symmetric(
-            vertical: 8,
-          ),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         children: [
           Container(
-            padding:
-                const EdgeInsets.all(
-                  10,
-                ),
+            padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
               color: Colors.grey[200],
               shape: BoxShape.circle,
             ),
-            child: Icon(
-              icon,
-              color: Colors.grey[700],
-              size: 24,
-            ),
+            child: Icon(icon, color: Colors.grey[700], size: 24),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment
-                      .start,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   title,
-                  style:
-                      const TextStyle(
-                        fontSize: 17,
-                        fontWeight:
-                            FontWeight
-                                .w700,
-                        color: Colors
-                            .black87,
-                      ),
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.black87,
+                  ),
                 ),
                 Text(
                   subtitle,
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: Colors
-                        .grey[600],
-                  ),
+                  style: TextStyle(fontSize: 13, color: Colors.grey[600]),
                 ),
               ],
             ),
           ),
           Container(
-            padding:
-                const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 4,
-                ),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
               color: Colors.grey[200],
-              borderRadius:
-                  BorderRadius.circular(
-                    12,
-                  ),
+              borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
               children: [
-                Icon(
-                  Icons.people_outline,
-                  size: 16,
-                  color:
-                      Colors.grey[700],
-                ),
-                const SizedBox(
-                  width: 4,
-                ),
+                Icon(Icons.people_outline, size: 16, color: Colors.grey[700]),
+                const SizedBox(width: 4),
                 Text(
                   count.toString(),
                   style: TextStyle(
                     fontSize: 15,
-                    fontWeight:
-                        FontWeight.w700,
-                    color: Colors
-                        .grey[700],
+                    fontWeight: FontWeight.w700,
+                    color: Colors.grey[700],
                   ),
                 ),
               ],
@@ -11527,40 +7379,30 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     );
   }
 
-  Widget _buildUpcomingTile(
-    TrackingRequest r,
-  ) {
-    final isExpanded =
-        _expandedRequestId == r.id;
+  Widget _buildUpcomingTile(TrackingRequest r) {
+    final isExpanded = _expandedRequestId == r.id;
     // by remas start
     final isHighlighted =
         _highlightRequestId == r.id ||
-        _highlightedDisconnectedIds
-            .contains(r.id);
+        _highlightedDisconnectedIds.contains(r.id);
     // by remas end
     // For sent requests: show receiver name. For received: show sender name.
-    final displayName =
-        r.trackedUserName.isNotEmpty
+    final displayName = r.trackedUserName.isNotEmpty
         ? r.trackedUserName
         : (r.senderName ?? 'Unknown');
     return Container(
       decoration: BoxDecoration(
         color: isHighlighted
-            ? AppColors.kGreen
-                  .withOpacity(0.05)
+            ? AppColors.kGreen.withOpacity(0.05)
             : Colors.white,
-        borderRadius:
-            BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isHighlighted
-              ? AppColors.kGreen
-              : Colors.grey.shade200,
+          color: isHighlighted ? AppColors.kGreen : Colors.grey.shade200,
           width: isHighlighted ? 2 : 1,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black
-                .withOpacity(0.04),
+            color: Colors.black.withOpacity(0.04),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -11569,126 +7411,68 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       child: Column(
         children: [
           InkWell(
-            onTap: () =>
-                _toggleExpand(r.id),
-            borderRadius:
-                BorderRadius.circular(
-                  16,
-                ),
+            onTap: () => _toggleExpand(r.id),
+            borderRadius: BorderRadius.circular(16),
             child: Padding(
-              padding:
-                  const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
-                  ),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               child: Row(
                 children: [
                   Container(
                     width: 44,
                     height: 44,
-                    decoration:
-                        BoxDecoration(
-                          color: Colors
-                              .grey[200],
-                          shape: BoxShape
-                              .circle,
-                        ),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[200],
+                      shape: BoxShape.circle,
+                    ),
                     child: Icon(
                       Icons.person,
-                      color: Colors
-                          .grey[600],
+                      color: Colors.grey[600],
                       size: 22,
                     ),
                   ),
-                  const SizedBox(
-                    width: 12,
-                  ),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment
-                              .start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           displayName,
                           style: const TextStyle(
-                            fontSize:
-                                16,
-                            fontWeight:
-                                FontWeight
-                                    .w700,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
-                        const SizedBox(
-                          height: 4,
-                        ),
-                        _statusBadge(
-                          r.status,
-                        ),
+                        const SizedBox(height: 4),
+                        _statusBadge(r.status),
                       ],
                     ),
                   ),
                   Builder(
                     builder: (context) {
-                      final _uid =
-                          FirebaseAuth
-                              .instance
-                              .currentUser
-                              ?.uid ??
-                          '';
-                      final _phone =
-                          r.senderId ==
-                              _uid
+                      final _uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+                      final _phone = r.senderId == _uid
                           ? r.trackedUserPhone
-                          : (r.senderPhone ??
-                                r.trackedUserPhone);
-                      final _name =
-                          r.senderId ==
-                              _uid
+                          : (r.senderPhone ?? r.trackedUserPhone);
+                      final _name = r.senderId == _uid
                           ? r.trackedUserName
-                          : (r.senderName ??
-                                r.trackedUserName);
-                      final _isFav =
-                          _favService
-                              .isFavorite(
-                                _phone,
-                              );
+                          : (r.senderName ?? r.trackedUserName);
+                      final _isFav = _favService.isFavorite(_phone);
                       return IconButton(
-                        onPressed: () =>
-                            _toggleFavorite(
-                              _phone,
-                              _name,
-                            ),
+                        onPressed: () => _toggleFavorite(_phone, _name),
                         icon: Icon(
-                          _isFav
-                              ? Icons
-                                    .favorite
-                              : Icons
-                                    .favorite_border,
-                          color: _isFav
-                              ? Colors
-                                    .red
-                              : Colors
-                                    .grey[400],
+                          _isFav ? Icons.favorite : Icons.favorite_border,
+                          color: _isFav ? Colors.red : Colors.grey[400],
                           size: 23,
                         ),
                       );
                     },
                   ),
                   AnimatedRotation(
-                    turns: isExpanded
-                        ? 0.5
-                        : 0,
-                    duration:
-                        const Duration(
-                          milliseconds:
-                              200,
-                        ),
+                    turns: isExpanded ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 200),
                     child: Icon(
-                      Icons
-                          .keyboard_arrow_down,
-                      color: Colors
-                          .grey[600],
+                      Icons.keyboard_arrow_down,
+                      color: Colors.grey[600],
                       size: 24,
                     ),
                   ),
@@ -11697,61 +7481,44 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             ),
           ),
           if (isExpanded) ...[
-            Padding(
-              padding:
-                  const EdgeInsets.all(
-                    16,
-                  ),
-              child: _buildDetails(r),
-            ),
+            Padding(padding: const EdgeInsets.all(16), child: _buildDetails(r)),
           ],
         ],
       ),
     );
   }
 
-  Widget _buildActiveTile(
-    TrackingRequest r,
-  ) {
-    final isExpanded =
-        _expandedRequestId == r.id;
+  Widget _buildActiveTile(TrackingRequest r) {
+    final isExpanded = _expandedRequestId == r.id;
     final isHighlighted =
         _highlightRequestId == r.id ||
-        _highlightedDisconnectedIds
-            .contains(r.id);
+        _highlightedDisconnectedIds.contains(r.id);
 
     if (isHighlighted) {
-      WidgetsBinding.instance
-          .addPostFrameCallback((_) {
-            if (!mounted) return;
-            _startHighlightClearTimer();
-          });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _startHighlightClearTimer();
+      });
     }
 
     // For sent requests: show receiver name. For received: show sender name.
-    final displayName =
-        r.trackedUserName.isNotEmpty
+    final displayName = r.trackedUserName.isNotEmpty
         ? r.trackedUserName
         : (r.senderName ?? 'Unknown');
 
     return Container(
       decoration: BoxDecoration(
         color: isHighlighted
-            ? AppColors.kGreen
-                  .withOpacity(0.05)
+            ? AppColors.kGreen.withOpacity(0.05)
             : Colors.white,
-        borderRadius:
-            BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isHighlighted
-              ? AppColors.kGreen
-              : Colors.grey.shade200,
+          color: isHighlighted ? AppColors.kGreen : Colors.grey.shade200,
           width: isHighlighted ? 2 : 1,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black
-                .withOpacity(0.04),
+            color: Colors.black.withOpacity(0.04),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -11760,17 +7527,10 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       child: Column(
         children: [
           InkWell(
-            onTap: () =>
-                _toggleExpand(r.id),
-            borderRadius:
-                BorderRadius.circular(
-                  16,
-                ),
+            onTap: () => _toggleExpand(r.id),
+            borderRadius: BorderRadius.circular(16),
             child: Padding(
-              padding:
-                  const EdgeInsets.all(
-                    16,
-                  ),
+              padding: const EdgeInsets.all(16),
               child: Row(
                 children: [
                   // by remas start
@@ -11780,193 +7540,164 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                         width: 44,
                         height: 44,
                         decoration: BoxDecoration(
-                          color: Colors
-                              .grey[200],
-                          shape: BoxShape
-                              .circle,
+                          color: Colors.grey[200],
+                          shape: BoxShape.circle,
                         ),
                         child: Icon(
                           Icons.person,
-                          color: Colors
-                              .grey[600],
+                          color: Colors.grey[600],
                           size: 22,
                         ),
                       ),
                       Positioned(
                         bottom: 0,
                         right: 0,
-                        child: _connectionDot(
-                          r.receiverId,
-                          r.id,
-                        ),
+                        child: _connectionDot(r.receiverId, r.id),
                       ),
                     ],
                   ),
-                  // by remas end
-                  const SizedBox(
-                    width: 12,
-                  ),
+
+                  const SizedBox(width: 16),
+
                   Expanded(
                     child: Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment
-                              .start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Builder(
-                          builder: (_) {
-                            final requestId =
-                                _requestIdByTrackedUser[r
-                                    .receiverId];
-                            final updatedAt =
-                                _trackedUpdatedAtByUser[r
-                                    .receiverId];
-
-                            final hasRecentLocation =
-                                updatedAt !=
-                                    null &&
-                                DateTime.now().difference(updatedAt).inHours <
-                                    24;
-
-                            final outsideVenue =
-                                requestId !=
-                                    null
-                                ? _isOutsideVenue(
-                                    r.receiverId,
-                                    requestId,
-                                  )
-                                : false;
-
-                            final showOutsideBadge =
-                                hasRecentLocation &&
-                                outsideVenue;
-
-                            return Row(
-                              mainAxisSize:
-                                  MainAxisSize
-                                      .min,
-                              children: [
-                                Flexible(
-                                  child: Text(
-                                    displayName,
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                    overflow:
-                                        TextOverflow.ellipsis,
-                                  ),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                displayName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                softWrap: false,
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
                                 ),
-                                if (showOutsideBadge) ...[
-                                  const SizedBox(
-                                    width:
-                                        4,
-                                  ),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 6,
-                                      vertical: 2,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: Colors.grey.shade200,
-                                      borderRadius: BorderRadius.circular(
-                                        8,
-                                      ),
-                                    ),
-                                    child: Text(
-                                      'Outside venue',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w600,
-                                        color: Colors.grey.shade700,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            );
-                          },
-                        ),
-                        const SizedBox(
-                          height: 4,
-                        ),
-                        // by remas start
-                        Text(
-                          _lastUpdateText(
-                            r.receiverId,
-                          ),
-                          style: TextStyle(
-                            fontSize:
-                                13,
-                            color: Colors
-                                .grey[600],
-                          ),
-                        ),
-                        // by remas end
-                      ],
-                    ),
-                  ),
-                  Builder(
-                    builder: (context) {
-                      final _uid =
-                          FirebaseAuth
-                              .instance
-                              .currentUser
-                              ?.uid ??
-                          '';
-                      final _phone =
-                          r.senderId ==
-                              _uid
-                          ? r.trackedUserPhone
-                          : (r.senderPhone ??
-                                r.trackedUserPhone);
-                      final _name =
-                          r.senderId ==
-                              _uid
-                          ? r.trackedUserName
-                          : (r.senderName ??
-                                r.trackedUserName);
-                      final _isFav =
-                          _favService
-                              .isFavorite(
-                                _phone,
-                              );
-                      return IconButton(
-                        onPressed: () =>
-                            _toggleFavorite(
-                              _phone,
-                              _name,
+                              ),
                             ),
-                        icon: Icon(
-                          _isFav
-                              ? Icons
-                                    .favorite
-                              : Icons
-                                    .favorite_border,
-                          color: _isFav
-                              ? Colors
-                                    .red
-                              : Colors
-                                    .grey[400],
-                          size: 23,
+
+                            const SizedBox(width: 8),
+
+                            Builder(
+                              builder: (_) {
+                                final requestId =
+                                    _requestIdByTrackedUser[r.receiverId];
+                                final updatedAt =
+                                    _trackedUpdatedAtByUser[r.receiverId];
+
+                                final hasRecentLocation =
+                                    updatedAt != null &&
+                                    DateTime.now()
+                                            .difference(updatedAt)
+                                            .inHours <
+                                        24;
+
+                                final outsideVenue = requestId != null
+                                    ? _isOutsideVenue(r.receiverId, requestId)
+                                    : false;
+
+                                final showOutsideBadge =
+                                    hasRecentLocation && outsideVenue;
+
+                                if (!showOutsideBadge)
+                                  return const SizedBox.shrink();
+
+                                return Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey.shade200,
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Text(
+                                    'Outside venue',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.clip,
+                                    softWrap: false,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.grey.shade700,
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
                         ),
-                      );
-                    },
-                  ),
-                  AnimatedRotation(
-                    turns: isExpanded
-                        ? 0.5
-                        : 0,
-                    duration:
-                        const Duration(
-                          milliseconds:
-                              200,
+
+                        const SizedBox(height: 6),
+
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                _lastUpdateText(r.receiverId),
+                                maxLines: 2,
+                                overflow: TextOverflow.visible,
+                                softWrap: true,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  height: 1.25,
+                                  color: Colors.grey[600],
+                                ),
+                              ),
+                            ),
+
+                            const SizedBox(width: 8),
+
+                            Builder(
+                              builder: (context) {
+                                final uid =
+                                    FirebaseAuth.instance.currentUser?.uid ??
+                                    '';
+                                final phone = r.senderId == uid
+                                    ? r.trackedUserPhone
+                                    : (r.senderPhone ?? r.trackedUserPhone);
+                                final name = r.senderId == uid
+                                    ? r.trackedUserName
+                                    : (r.senderName ?? r.trackedUserName);
+                                final isFav = _favService.isFavorite(phone);
+
+                                return InkWell(
+                                  onTap: () => _toggleFavorite(phone, name),
+                                  borderRadius: BorderRadius.circular(20),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(4),
+                                    child: Icon(
+                                      isFav
+                                          ? Icons.favorite
+                                          : Icons.favorite_border,
+                                      color: isFav
+                                          ? Colors.red
+                                          : Colors.grey[400],
+                                      size: 24,
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+
+                            const SizedBox(width: 8),
+
+                            AnimatedRotation(
+                              turns: isExpanded ? 0.5 : 0,
+                              duration: const Duration(milliseconds: 200),
+                              child: Icon(
+                                Icons.keyboard_arrow_down,
+                                color: Colors.grey[600],
+                                size: 24,
+                              ),
+                            ),
+                          ],
                         ),
-                    child: Icon(
-                      Icons
-                          .keyboard_arrow_down,
-                      color: Colors
-                          .grey[600],
-                      size: 24,
+                      ],
                     ),
                   ),
                 ],
@@ -11975,19 +7706,12 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           ),
           if (isExpanded) ...[
             Padding(
-              padding:
-                  const EdgeInsets.all(
-                    16,
-                  ),
+              padding: const EdgeInsets.all(16),
               child: Column(
                 children: [
                   _buildDetails(r),
-                  const SizedBox(
-                    height: 16,
-                  ),
-                  _buildActionButtons(
-                    r,
-                  ),
+                  const SizedBox(height: 16),
+                  _buildActionButtons(r),
                 ],
               ),
             ),
@@ -11997,63 +7721,40 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     );
   }
 
-  Widget _buildCancelTrackingButton(
-    BuildContext context,
-    TrackingRequest r,
-  ) {
-    final senderName =
-        r.senderName ?? 'this person';
+  Widget _buildCancelTrackingButton(BuildContext context, TrackingRequest r) {
+    final senderName = r.senderName ?? 'this person';
     return SizedBox(
       width: double.infinity,
       child: OutlinedButton.icon(
         onPressed: () async {
-          final confirmed =
-              await ConfirmationDialog.showDeleteConfirmation(
-                context,
-                title:
-                    'Cancel Tracking',
-                message:
-                    'Are you sure you want to cancel this tracking request with $senderName?',
-                cancelText: 'Keep',
-                confirmText:
-                    'Cancel Tracking',
-              );
+          final confirmed = await ConfirmationDialog.showDeleteConfirmation(
+            context,
+            title: 'Cancel Tracking',
+            message:
+                'Are you sure you want to cancel this tracking request with $senderName?',
+            cancelText: 'Keep',
+            confirmText: 'Cancel Tracking',
+          );
           if (confirmed && mounted) {
             _updateRequestStatus(
               r.id,
               'declined',
-              successMessage:
-                  'Tracking request declined after acceptance',
+              successMessage: 'Tracking request declined after acceptance',
             );
           }
         },
 
-        icon: const Icon(
-          Icons.cancel_outlined,
-          size: 18,
-        ),
+        icon: const Icon(Icons.cancel_outlined, size: 18),
         label: const Text(
           'Cancel Tracking',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
         ),
         style: OutlinedButton.styleFrom(
-          foregroundColor:
-              AppColors.kError,
-          side: const BorderSide(
-            color: AppColors.kError,
-          ),
-          padding:
-              const EdgeInsets.symmetric(
-                vertical: 12,
-              ),
+          foregroundColor: AppColors.kError,
+          side: const BorderSide(color: AppColors.kError),
+          padding: const EdgeInsets.symmetric(vertical: 12),
           shape: RoundedRectangleBorder(
-            borderRadius:
-                BorderRadius.circular(
-                  12,
-                ),
+            borderRadius: BorderRadius.circular(12),
           ),
         ),
       ),
@@ -12062,181 +7763,114 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
   /// Mark requests that are past endAt as expired (pending) or completed (accepted) so they appear in History.
   void _markStaleRequestsIfNeeded(
-    List<
-      QueryDocumentSnapshot<
-        Map<String, dynamic>
-      >
-    >
-    docs,
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
   ) {
     final now = DateTime.now();
     for (final d in docs) {
       final data = d.data();
-      final status =
-          (data['status'] ?? '')
-              .toString();
-      final endAt =
-          data['endAt'] is Timestamp
-          ? (data['endAt'] as Timestamp)
-                .toDate()
+      final status = (data['status'] ?? '').toString();
+      final endAt = data['endAt'] is Timestamp
+          ? (data['endAt'] as Timestamp).toDate()
           : null;
-      if (endAt == null ||
-          endAt.isAfter(now))
-        continue;
+      if (endAt == null || endAt.isAfter(now)) continue;
       if (status == 'pending') {
-        FirebaseFirestore.instance
-            .collection('trackRequests')
-            .doc(d.id)
-            .update({
-              'status': 'expired',
-            });
+        FirebaseFirestore.instance.collection('trackRequests').doc(d.id).update(
+          {'status': 'expired'},
+        );
       } else if (status == 'accepted') {
-        FirebaseFirestore.instance
-            .collection('trackRequests')
-            .doc(d.id)
-            .update({
-              'status': 'completed',
-            });
+        FirebaseFirestore.instance.collection('trackRequests').doc(d.id).update(
+          {'status': 'completed'},
+        );
       }
     }
   }
 
-  DateTime? _refreshCooldownUntil(
-    TrackingRequest r,
-  ) {
-    final localUntil =
-        _refreshCooldownUntilByRequestId[r
-            .id];
+  DateTime? _refreshCooldownUntil(TrackingRequest r) {
+    final localUntil = _refreshCooldownUntilByRequestId[r.id];
     DateTime? serverUntil;
-    final currentUserId = FirebaseAuth
-        .instance
-        .currentUser
-        ?.uid;
+    final currentUserId = FirebaseAuth.instance.currentUser?.uid;
     if (currentUserId != null &&
         r.refreshRequestedAt != null &&
         r.refreshRequestedBy != null &&
-        r.refreshRequestedBy ==
-            currentUserId) {
-      serverUntil = r
-          .refreshRequestedAt!
-          .add(
-            _refreshCooldownDuration,
-          );
+        r.refreshRequestedBy == currentUserId) {
+      serverUntil = r.refreshRequestedAt!.add(_refreshCooldownDuration);
     }
 
-    if (localUntil == null)
-      return serverUntil;
-    if (serverUntil == null)
-      return localUntil;
-    return localUntil.isAfter(
-          serverUntil,
-        )
-        ? localUntil
-        : serverUntil;
+    if (localUntil == null) return serverUntil;
+    if (serverUntil == null) return localUntil;
+    return localUntil.isAfter(serverUntil) ? localUntil : serverUntil;
   }
 
-  bool _isRefreshCooldownActive(
-    TrackingRequest r,
-  ) {
-    final until = _refreshCooldownUntil(
-      r,
-    );
+  bool _isRefreshCooldownActive(TrackingRequest r) {
+    final until = _refreshCooldownUntil(r);
     if (until == null) return false;
-    return DateTime.now().isBefore(
-      until,
+    return DateTime.now().isBefore(until);
+  }
+
+  void _setRefreshCooldown(String requestId) {
+    _refreshCooldownUntilByRequestId[requestId] = DateTime.now().add(
+      _refreshCooldownDuration,
     );
   }
 
-  void _setRefreshCooldown(
-    String requestId,
-  ) {
-    _refreshCooldownUntilByRequestId[requestId] =
-        DateTime.now().add(
-          _refreshCooldownDuration,
-        );
-  }
-
-  void _showRefreshCooldownMessage(
-    String requestId,
-  ) {
-    _refreshCooldownMessageTimers[requestId]
-        ?.cancel();
+  void _showRefreshCooldownMessage(String requestId) {
+    _refreshCooldownMessageTimers[requestId]?.cancel();
     if (mounted) {
       setState(() {
-        _refreshCooldownMessageRequestIds
-            .add(requestId);
+        _refreshCooldownMessageRequestIds.add(requestId);
       });
     } else {
-      _refreshCooldownMessageRequestIds
-          .add(requestId);
+      _refreshCooldownMessageRequestIds.add(requestId);
     }
 
     _refreshCooldownMessageTimers[requestId] = Timer(
       _refreshCooldownMessageDuration,
       () {
-        _refreshCooldownMessageTimers
-            .remove(requestId);
+        _refreshCooldownMessageTimers.remove(requestId);
         if (!mounted) {
-          _refreshCooldownMessageRequestIds
-              .remove(requestId);
+          _refreshCooldownMessageRequestIds.remove(requestId);
           return;
         }
         setState(() {
-          _refreshCooldownMessageRequestIds
-              .remove(requestId);
+          _refreshCooldownMessageRequestIds.remove(requestId);
         });
       },
     );
   }
 
-  void _showAcceptCutoffMessage(
-    String requestId,
-  ) {
-    _acceptCutoffMessageTimers[requestId]
-        ?.cancel();
+  void _showAcceptCutoffMessage(String requestId) {
+    _acceptCutoffMessageTimers[requestId]?.cancel();
     if (mounted) {
       setState(() {
-        _acceptCutoffMessageRequestIds
-            .add(requestId);
+        _acceptCutoffMessageRequestIds.add(requestId);
       });
     } else {
-      _acceptCutoffMessageRequestIds
-          .add(requestId);
+      _acceptCutoffMessageRequestIds.add(requestId);
     }
     _acceptCutoffMessageTimers[requestId] = Timer(
       const Duration(seconds: 2),
       () {
-        _acceptCutoffMessageTimers
-            .remove(requestId);
+        _acceptCutoffMessageTimers.remove(requestId);
         if (!mounted) {
-          _acceptCutoffMessageRequestIds
-              .remove(requestId);
+          _acceptCutoffMessageRequestIds.remove(requestId);
           return;
         }
         setState(() {
-          _acceptCutoffMessageRequestIds
-              .remove(requestId);
+          _acceptCutoffMessageRequestIds.remove(requestId);
         });
       },
     );
   }
 
   // Logic to update Firestore
-  Future<void> _requestLocationRefresh(
-    TrackingRequest r,
-  ) async {
-    if (_refreshingRequestIds.contains(
-      r.id,
-    ))
-      return;
+  Future<void> _requestLocationRefresh(TrackingRequest r) async {
+    if (_refreshingRequestIds.contains(r.id)) return;
     if (_isRefreshCooldownActive(r)) {
       _showRefreshCooldownMessage(r.id);
       return;
     }
 
-    final currentUser = FirebaseAuth
-        .instance
-        .currentUser;
+    final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) {
       if (mounted) {
         SnackbarHelper.showError(
@@ -12257,11 +7891,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       return;
     }
 
-    setState(
-      () => _refreshingRequestIds.add(
-        r.id,
-      ),
-    );
+    setState(() => _refreshingRequestIds.add(r.id));
 
     try {
       final refreshToken =
@@ -12270,34 +7900,24 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           .collection('trackRequests')
           .doc(r.id)
           .update({
-            'refreshRequestId':
-                refreshToken,
-            'refreshRequestedBy':
-                currentUser.uid,
-            'refreshRequestedAt':
-                FieldValue.serverTimestamp(),
+            'refreshRequestId': refreshToken,
+            'refreshRequestedBy': currentUser.uid,
+            'refreshRequestedAt': FieldValue.serverTimestamp(),
           });
 
       _setRefreshCooldown(r.id);
 
       if (mounted) {
-        final targetName =
-            r.trackedUserName.isNotEmpty
+        final targetName = r.trackedUserName.isNotEmpty
             ? r.trackedUserName
-            : (r
-                      .trackedUserPhone
-                      .isNotEmpty
-                  ? r.trackedUserPhone
-                  : 'friend');
+            : (r.trackedUserPhone.isNotEmpty ? r.trackedUserPhone : 'friend');
         SnackbarHelper.showSuccess(
           context,
           'Refresh location request sent to $targetName.',
         );
       }
     } catch (e) {
-      debugPrint(
-        'Failed to request location refresh: $e',
-      );
+      debugPrint('Failed to request location refresh: $e');
       if (mounted) {
         SnackbarHelper.showError(
           context,
@@ -12306,14 +7926,9 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       }
     } finally {
       if (mounted) {
-        setState(
-          () => _refreshingRequestIds
-              .remove(r.id),
-        );
+        setState(() => _refreshingRequestIds.remove(r.id));
       } else {
-        _refreshingRequestIds.remove(
-          r.id,
-        );
+        _refreshingRequestIds.remove(r.id);
       }
     }
   }
@@ -12329,57 +7944,35 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           .doc(requestId)
           .update({
             'status': newStatus,
-            'respondedAt':
-                FieldValue.serverTimestamp(),
-            if (newStatus == 'accepted')
-              'startNotifiedUsers': [],
+            'respondedAt': FieldValue.serverTimestamp(),
+            if (newStatus == 'accepted') 'startNotifiedUsers': [],
           });
 
       // Show snackbar immediately after status update
       if (mounted) {
-        setState(
-          () =>
-              _expandedRequestId = null,
-        );
+        setState(() => _expandedRequestId = null);
         SnackbarHelper.showSuccess(
           context,
-          successMessage ??
-              _statusUpdateMessage(
-                newStatus,
-              ),
+          successMessage ?? _statusUpdateMessage(newStatus),
         );
       }
 
       // Mark related notifications as read in the background
-      final uid = FirebaseAuth
-          .instance
-          .currentUser
-          ?.uid;
+      final uid = FirebaseAuth.instance.currentUser?.uid;
       if (uid != null) {
         FirebaseFirestore.instance
             .collection('notifications')
-            .where(
-              'data.requestId',
-              isEqualTo: requestId,
-            )
-            .where(
-              'userId',
-              isEqualTo: uid,
-            )
+            .where('data.requestId', isEqualTo: requestId)
+            .where('userId', isEqualTo: uid)
             .get()
             .then((snap) {
-              for (final doc
-                  in snap.docs) {
-                doc.reference.update({
-                  'isRead': true,
-                });
+              for (final doc in snap.docs) {
+                doc.reference.update({'isRead': true});
               }
             });
       }
     } catch (e) {
-      debugPrint(
-        'Error updating request: $e',
-      );
+      debugPrint('Error updating request: $e');
 
       if (mounted) {
         SnackbarHelper.showError(
@@ -12390,9 +7983,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     }
   }
 
-  String _statusUpdateMessage(
-    String status,
-  ) {
+  String _statusUpdateMessage(String status) {
     switch (status) {
       case 'accepted':
         return 'Tracking request accepted';
@@ -12405,22 +7996,12 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     }
   }
 
-  Widget _buildIncomingActionButtons(
-    BuildContext context,
-    TrackingRequest r,
-  ) {
-    final totalDuration = r.endAt
-        .difference(r.startAt);
-    final tenPercent =
-        totalDuration * 0.10;
+  Widget _buildIncomingActionButtons(BuildContext context, TrackingRequest r) {
+    final totalDuration = r.endAt.difference(r.startAt);
+    final tenPercent = totalDuration * 0.10;
     const cap = Duration(minutes: 10);
-    final cutoff = tenPercent < cap
-        ? tenPercent
-        : cap;
-    final canAccept = DateTime.now()
-        .isBefore(
-          r.endAt.subtract(cutoff),
-        );
+    final cutoff = tenPercent < cap ? tenPercent : cap;
+    final canAccept = DateTime.now().isBefore(r.endAt.subtract(cutoff));
 
     return Row(
       children: [
@@ -12428,55 +8009,31 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         Expanded(
           child: OutlinedButton.icon(
             onPressed: () async {
-              final confirmed =
-                  await ConfirmationDialog.showDeleteConfirmation(
-                    context,
-                    title:
-                        'Decline Request',
-                    message:
-                        'Are you sure you want to decline this request?',
-                    confirmText:
-                        'Decline',
-                  );
-              if (confirmed &&
-                  mounted) {
+              final confirmed = await ConfirmationDialog.showDeleteConfirmation(
+                context,
+                title: 'Decline Request',
+                message: 'Are you sure you want to decline this request?',
+                confirmText: 'Decline',
+              );
+              if (confirmed && mounted) {
                 _updateRequestStatus(
                   r.id,
                   'declined',
-                  successMessage:
-                      'Tracking request has been declined.',
+                  successMessage: 'Tracking request has been declined.',
                 );
               }
             },
-            icon: Icon(
-              Icons.close,
-              size: 18,
-              color: AppColors.kGreen,
-            ),
+            icon: Icon(Icons.close, size: 18, color: AppColors.kGreen),
             label: const Text(
               'Decline',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight:
-                    FontWeight.w600,
-              ),
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
             ),
             style: OutlinedButton.styleFrom(
-              foregroundColor:
-                  AppColors.kGreen,
-              side: BorderSide(
-                color: AppColors.kGreen,
-                width: 2,
-              ),
-              padding:
-                  const EdgeInsets.symmetric(
-                    vertical: 12,
-                  ),
+              foregroundColor: AppColors.kGreen,
+              side: BorderSide(color: AppColors.kGreen, width: 2),
+              padding: const EdgeInsets.symmetric(vertical: 12),
               shape: RoundedRectangleBorder(
-                borderRadius:
-                    BorderRadius.circular(
-                      10,
-                    ),
+                borderRadius: BorderRadius.circular(10),
               ),
             ),
           ),
@@ -12492,17 +8049,15 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 child: ElevatedButton.icon(
                   onPressed: canAccept
                       ? () async {
-                          final confirmed = await ConfirmationDialog.showPositiveConfirmation(
-                            context,
-                            title:
-                                'Accept Track Request',
-                            message:
-                                'Are you sure you want to accept this tracking request?',
-                            confirmText:
-                                'Accept',
-                          );
-                          if (confirmed &&
-                              mounted) {
+                          final confirmed =
+                              await ConfirmationDialog.showPositiveConfirmation(
+                                context,
+                                title: 'Accept Track Request',
+                                message:
+                                    'Are you sure you want to accept this tracking request?',
+                                confirmText: 'Accept',
+                              );
+                          if (confirmed && mounted) {
                             _updateRequestStatus(
                               r.id,
                               'accepted',
@@ -12512,41 +8067,22 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                           }
                         }
                       : null,
-                  icon: const Icon(
-                    Icons.check,
-                    size: 18,
-                  ),
+                  icon: const Icon(Icons.check, size: 18),
                   label: const Text(
                     'Accept',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight:
-                          FontWeight
-                              .w600,
-                    ),
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor:
-                        canAccept
-                        ? AppColors
-                              .kGreen
-                        : Colors
-                              .grey[300],
-                    foregroundColor:
-                        canAccept
+                    backgroundColor: canAccept
+                        ? AppColors.kGreen
+                        : Colors.grey[300],
+                    foregroundColor: canAccept
                         ? Colors.white
-                        : Colors
-                              .grey[600],
-                    padding:
-                        const EdgeInsets.symmetric(
-                          vertical: 12,
-                        ),
+                        : Colors.grey[600],
+                    padding: const EdgeInsets.symmetric(vertical: 12),
                     elevation: 0,
                     shape: RoundedRectangleBorder(
-                      borderRadius:
-                          BorderRadius.circular(
-                            10,
-                          ),
+                      borderRadius: BorderRadius.circular(10),
                     ),
                   ),
                 ),
@@ -12554,17 +8090,10 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               if (!canAccept)
                 Positioned.fill(
                   child: Material(
-                    color: Colors
-                        .transparent,
+                    color: Colors.transparent,
                     child: InkWell(
-                      borderRadius:
-                          BorderRadius.circular(
-                            10,
-                          ),
-                      onTap: () =>
-                          _showAcceptCutoffMessage(
-                            r.id,
-                          ),
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: () => _showAcceptCutoffMessage(r.id),
                     ),
                   ),
                 ),
@@ -12580,28 +8109,20 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     String label;
     switch (status) {
       case 'accepted':
-        bg = AppColors.kGreen
-            .withOpacity(0.1);
+        bg = AppColors.kGreen.withOpacity(0.1);
         text = AppColors.kGreen;
         label = 'Accepted';
         break;
       default:
-        bg = Colors.orange.withOpacity(
-          0.1,
-        );
+        bg = Colors.orange.withOpacity(0.1);
         text = Colors.orange.shade700;
         label = 'Pending';
     }
     return Container(
-      padding:
-          const EdgeInsets.symmetric(
-            horizontal: 10,
-            vertical: 4,
-          ),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: bg,
-        borderRadius:
-            BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Text(
         label,
@@ -12615,42 +8136,28 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   }
 
   /// Build duration string with overnight "(next day)" support and • separator
-  String _buildDateStr(
-    TrackingRequest r,
-  ) {
+  String _buildDateStr(TrackingRequest r) {
     final isOvernight =
         r.endAt.day != r.startAt.day ||
-        r.endAt.month !=
-            r.startAt.month ||
+        r.endAt.month != r.startAt.month ||
         r.endAt.year != r.startAt.year;
 
     if (isOvernight) {
       final startDay = r.startAt.day;
       final endDay = r.endAt.day;
-      final startMonth = _shortMonth(
-        r.startAt.month,
-      );
-      final endMonth = _shortMonth(
-        r.endAt.month,
-      );
-      return r.startAt.month ==
-              r.endAt.month
+      final startMonth = _shortMonth(r.startAt.month);
+      final endMonth = _shortMonth(r.endAt.month);
+      return r.startAt.month == r.endAt.month
           ? '$startDay - $endDay $endMonth'
           : '$startDay $startMonth - $endDay $endMonth';
     }
 
     return _formatDateForDuration(
-      DateTime(
-        r.startAt.year,
-        r.startAt.month,
-        r.startAt.day,
-      ),
+      DateTime(r.startAt.year, r.startAt.month, r.startAt.day),
     );
   }
 
-  String _buildTimeStr(
-    TrackingRequest r,
-  ) {
+  String _buildTimeStr(TrackingRequest r) {
     return '${r.startTime} - ${r.endTime}';
   }
 
@@ -12672,9 +8179,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     return months[month - 1];
   }
 
-  Widget _buildDetails(
-    TrackingRequest r,
-  ) {
+  Widget _buildDetails(TrackingRequest r) {
     return _buildDetailsColumn(
       label: 'Tracked User',
       name: r.trackedUserName,
@@ -12685,9 +8190,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     );
   }
 
-  Widget _buildReceivedDetails(
-    TrackingRequest r,
-  ) {
+  Widget _buildReceivedDetails(TrackingRequest r) {
     return _buildDetailsColumn(
       label: 'Sender',
       name: r.senderName ?? 'Unknown',
@@ -12708,57 +8211,35 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   }) {
     return IntrinsicHeight(
       child: Row(
-        crossAxisAlignment:
-            CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
             width: 3,
             decoration: BoxDecoration(
               color: AppColors.kGreen,
-              borderRadius:
-                  BorderRadius.circular(
-                    2,
-                  ),
+              borderRadius: BorderRadius.circular(2),
             ),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment
-                      .start,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _labeledDetail(
                   '$label: ',
-                  phone.isEmpty
-                      ? name
-                      : '$name ($phone)',
+                  phone.isEmpty ? name : '$name ($phone)',
                 ),
-                const SizedBox(
-                  height: 8,
-                ),
-                Row(
+                const SizedBox(height: 8),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _labeledDetail(
-                      'Date: ',
-                      date,
-                    ),
-                    const SizedBox(
-                      width: 16,
-                    ),
-                    _labeledDetail(
-                      'Time: ',
-                      time,
-                    ),
+                    _labeledDetail('Date: ', date),
+                    const SizedBox(height: 6),
+                    _labeledDetail('Time: ', time),
                   ],
                 ),
-                const SizedBox(
-                  height: 8,
-                ),
-                _labeledDetail(
-                  'Venue: ',
-                  venue,
-                ),
+                const SizedBox(height: 8),
+                _labeledDetail('Venue: ', venue),
               ],
             ),
           ),
@@ -12767,10 +8248,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     );
   }
 
-  Widget _labeledDetail(
-    String label,
-    String value,
-  ) {
+  Widget _labeledDetail(String label, String value) {
     return RichText(
       text: TextSpan(
         children: [
@@ -12778,8 +8256,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             text: label,
             style: TextStyle(
               fontSize: 13,
-              fontWeight:
-                  FontWeight.w400,
+              fontWeight: FontWeight.w400,
               color: Colors.grey[600],
             ),
           ),
@@ -12787,8 +8264,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             text: value,
             style: const TextStyle(
               fontSize: 13,
-              fontWeight:
-                  FontWeight.w500,
+              fontWeight: FontWeight.w500,
               color: Colors.black87,
             ),
           ),
@@ -12798,20 +8274,10 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   }
 
   /// For duration: "Today" (no date) or "Jan 31" (date only, no day name). Yesterday/Tomorrow left for later.
-  String _formatDateForDuration(
-    DateTime d,
-  ) {
+  String _formatDateForDuration(DateTime d) {
     final now = DateTime.now();
-    final today = DateTime(
-      now.year,
-      now.month,
-      now.day,
-    );
-    final target = DateTime(
-      d.year,
-      d.month,
-      d.day,
-    );
+    final today = DateTime(now.year, now.month, now.day);
+    final target = DateTime(d.year, d.month, d.day);
     if (target == today) return 'Today';
     const months = [
       'Jan',
@@ -12838,27 +8304,19 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   }
 
   // ========== MEETING PARTICIPANT LOCATION REFRESH ==========
-  Future<void>
-  _requestMeetingParticipantLocationRefresh(
+  Future<void> _requestMeetingParticipantLocationRefresh(
     MeetingPointRecord meeting,
     String participantUserId,
     String participantName,
   ) async {
-    final refreshKey =
-        _meetingParticipantRefreshKey(
-          meeting.id,
-          participantUserId,
-        );
-    if (_refreshingMeetingParticipantIds
-        .contains(refreshKey))
-      return;
+    final refreshKey = _meetingParticipantRefreshKey(
+      meeting.id,
+      participantUserId,
+    );
+    if (_refreshingMeetingParticipantIds.contains(refreshKey)) return;
 
-    final until =
-        _meetingRefreshCooldownUntilByKey[refreshKey];
-    if (until != null &&
-        DateTime.now().isBefore(
-          until,
-        )) {
+    final until = _meetingRefreshCooldownUntilByKey[refreshKey];
+    if (until != null && DateTime.now().isBefore(until)) {
       SnackbarHelper.showError(
         context,
         'you cannot send many request within short period',
@@ -12866,16 +8324,10 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       return;
     }
 
-    final currentUser = FirebaseAuth
-        .instance
-        .currentUser;
+    final currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) return;
 
-    setState(
-      () =>
-          _refreshingMeetingParticipantIds
-              .add(refreshKey),
-    );
+    setState(() => _refreshingMeetingParticipantIds.add(refreshKey));
 
     try {
       final token =
@@ -12884,24 +8336,18 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
           .collection('meetingPoints')
           .doc(meeting.id)
           .update({
-            'locationRefreshTokens.$participantUserId':
-                token,
-            'locationRefreshRequestedBy.$participantUserId':
-                currentUser.uid,
+            'locationRefreshTokens.$participantUserId': token,
+            'locationRefreshRequestedBy.$participantUserId': currentUser.uid,
             'locationRefreshRequestedAt.$participantUserId':
                 FieldValue.serverTimestamp(),
           });
 
-      _meetingRefreshCooldownUntilByKey[refreshKey] =
-          DateTime.now().add(
-            _meetingRefreshCooldownDuration,
-          );
+      _meetingRefreshCooldownUntilByKey[refreshKey] = DateTime.now().add(
+        _meetingRefreshCooldownDuration,
+      );
 
       if (mounted) {
-        final name =
-            participantName
-                .trim()
-                .isNotEmpty
+        final name = participantName.trim().isNotEmpty
             ? participantName
             : 'participant';
         SnackbarHelper.showSuccess(
@@ -12910,9 +8356,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         );
       }
     } catch (e) {
-      debugPrint(
-        'Failed to request meeting participant location refresh: $e',
-      );
+      debugPrint('Failed to request meeting participant location refresh: $e');
       if (mounted) {
         SnackbarHelper.showError(
           context,
@@ -12921,22 +8365,15 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       }
     } finally {
       if (mounted) {
-        setState(
-          () =>
-              _refreshingMeetingParticipantIds
-                  .remove(refreshKey),
-        );
+        setState(() => _refreshingMeetingParticipantIds.remove(refreshKey));
       } else {
-        _refreshingMeetingParticipantIds
-            .remove(refreshKey);
+        _refreshingMeetingParticipantIds.remove(refreshKey);
       }
     }
   }
 
   // ========== NAVIGATE TO MEETING POINT ==========
-  void _navigateToMeetingPoint(
-    MeetingPointRecord meeting,
-  ) {
+  void _navigateToMeetingPoint(MeetingPointRecord meeting) {
     final pos = _meetingPointPosGltf;
     if (pos == null) {
       SnackbarHelper.showError(
@@ -12952,24 +8389,16 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       destinationPoiMaterial: '',
       floorSrc: '',
       destinationHitGltf: pos,
-      destinationFloorLabel:
-          _meetingPointFloorLabel,
+      destinationFloorLabel: _meetingPointFloorLabel,
       venueId: meeting.venueId,
     );
   }
 
   // ========== NAVIGATE TO FRIEND ==========
-  void _navigateToFriend(
-    TrackingRequest r,
-  ) {
-    final pos =
-        _trackedPosByUser[r.receiverId];
-    final floor =
-        _trackedFloorByUser[r
-            .receiverId] ??
-        '0';
-    final friendName =
-        r.trackedUserName.isNotEmpty
+  void _navigateToFriend(TrackingRequest r) {
+    final pos = _trackedPosByUser[r.receiverId];
+    final floor = _trackedFloorByUser[r.receiverId] ?? '0';
+    final friendName = r.trackedUserName.isNotEmpty
         ? r.trackedUserName
         : 'Friend';
 
@@ -12986,13 +8415,10 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       context,
       friendName, // shopName
       r.receiverId, // shopId (friend's userId)
-      destinationPoiMaterial:
-          '', // no material
+      destinationPoiMaterial: '', // no material
       floorSrc: '', // not needed
-      destinationHitGltf:
-          pos, // friend's glTF coordinates
-      destinationFloorLabel:
-          floor, // raw floor string (e.g. "0")
+      destinationHitGltf: pos, // friend's glTF coordinates
+      destinationFloorLabel: floor, // raw floor string (e.g. "0")
       venueId: r.venueId, // same venue
       isFriendNavigation:
           true, // ← Friend navigation flag (correct Unity message: NAVIGATE_TO_USER)
@@ -13000,15 +8426,12 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   }
 
   // ========== ACTION BUTTONS - UPDATED ==========
-  Widget _buildActionButtons(
-    TrackingRequest r,
-  ) {
+  Widget _buildActionButtons(TrackingRequest r) {
     return Row(
       children: [
         Expanded(
           child: OutlinedButton.icon(
-            onPressed: () =>
-                _navigateToFriend(r),
+            onPressed: () => _navigateToFriend(r),
             icon: Icon(
               Icons.navigation_outlined,
               size: 18,
@@ -13016,56 +8439,31 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             ),
             label: const Text(
               'Navigate to friend',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight:
-                    FontWeight.w600,
-              ),
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
             ),
             style: OutlinedButton.styleFrom(
-              foregroundColor:
-                  AppColors.kGreen,
-              side: BorderSide(
-                color: AppColors.kGreen,
-                width: 2,
-              ),
-              padding:
-                  const EdgeInsets.symmetric(
-                    vertical: 12,
-                  ),
+              foregroundColor: AppColors.kGreen,
+              side: BorderSide(color: AppColors.kGreen, width: 2),
+              padding: const EdgeInsets.symmetric(vertical: 12),
               shape: RoundedRectangleBorder(
-                borderRadius:
-                    BorderRadius.circular(
-                      12,
-                    ),
+                borderRadius: BorderRadius.circular(12),
               ),
             ),
           ),
         ),
         const SizedBox(width: 12),
-        Expanded(
-          child: _buildRefreshButton(r),
-        ),
+        Expanded(child: _buildRefreshButton(r)),
       ],
     );
   }
 
-  Widget _buildRefreshButton(
-    TrackingRequest r,
-  ) {
-    final isSendingRefresh =
-        _refreshingRequestIds.contains(
-          r.id,
-        );
-    final isCooldownActive =
-        _isRefreshCooldownActive(r);
-    final isDisabled =
-        isSendingRefresh ||
-        isCooldownActive;
+  Widget _buildRefreshButton(TrackingRequest r) {
+    final isSendingRefresh = _refreshingRequestIds.contains(r.id);
+    final isCooldownActive = _isRefreshCooldownActive(r);
+    final isDisabled = isSendingRefresh || isCooldownActive;
 
     return Column(
-      crossAxisAlignment:
-          CrossAxisAlignment.stretch,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Stack(
           alignment: Alignment.center,
@@ -13073,43 +8471,21 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
-                onPressed: isDisabled
-                    ? null
-                    : () =>
-                          _requestLocationRefresh(
-                            r,
-                          ),
-                icon: const Icon(
-                  Icons.refresh,
-                  size: 18,
-                ),
+                onPressed: isDisabled ? null : () => _requestLocationRefresh(r),
+                icon: const Icon(Icons.refresh, size: 18),
                 label: const Text(
                   'Refresh Location',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight:
-                        FontWeight.w600,
-                  ),
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                 ),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor:
-                      AppColors.kGreen,
-                  foregroundColor:
-                      Colors.white,
-                  disabledBackgroundColor:
-                      Colors.grey[300],
-                  disabledForegroundColor:
-                      Colors.grey[500],
-                  padding:
-                      const EdgeInsets.symmetric(
-                        vertical: 12,
-                      ),
+                  backgroundColor: AppColors.kGreen,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: Colors.grey[300],
+                  disabledForegroundColor: Colors.grey[500],
+                  padding: const EdgeInsets.symmetric(vertical: 12),
                   elevation: 0,
                   shape: RoundedRectangleBorder(
-                    borderRadius:
-                        BorderRadius.circular(
-                          12,
-                        ),
+                    borderRadius: BorderRadius.circular(12),
                   ),
                 ),
               ),
@@ -13117,18 +8493,12 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             if (isDisabled)
               Positioned.fill(
                 child: Material(
-                  color: Colors
-                      .transparent,
+                  color: Colors.transparent,
                   child: InkWell(
-                    borderRadius:
-                        BorderRadius.circular(
-                          12,
-                        ),
+                    borderRadius: BorderRadius.circular(12),
                     onTap: () {
                       if (isCooldownActive) {
-                        _showRefreshCooldownMessage(
-                          r.id,
-                        );
+                        _showRefreshCooldownMessage(r.id);
                       }
                     },
                   ),
@@ -13146,17 +8516,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius:
-            BorderRadius.circular(16),
-        border: Border.all(
-          color: AppColors.kGreen
-              .withOpacity(0.3),
-          width: 2,
-        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.kGreen.withOpacity(0.3), width: 2),
         boxShadow: [
           BoxShadow(
-            color: Colors.black
-                .withOpacity(0.04),
+            color: Colors.black.withOpacity(0.04),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -13171,58 +8535,35 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               Container(
                 width: 44,
                 height: 44,
-                decoration:
-                    BoxDecoration(
-                      color: AppColors
-                          .kGreen,
-                      shape: BoxShape
-                          .circle,
-                    ),
-                child: const Icon(
-                  Icons.person,
-                  color: Colors.white,
-                  size: 24,
+                decoration: BoxDecoration(
+                  color: AppColors.kGreen,
+                  shape: BoxShape.circle,
                 ),
+                child: const Icon(Icons.person, color: Colors.white, size: 24),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment
-                          .start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       children: [
                         Text(
                           currentUserName,
                           style: const TextStyle(
-                            fontSize:
-                                16,
-                            fontWeight:
-                                FontWeight
-                                    .w700,
-                            color: Colors
-                                .black87,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.black87,
                           ),
                         ),
-                        const SizedBox(
-                          width: 8,
-                        ),
-                        _roleChip(
-                          'Host',
-                        ),
+                        const SizedBox(width: 8),
+                        _roleChip('Host'),
                       ],
                     ),
-                    const SizedBox(
-                      height: 2,
-                    ),
+                    const SizedBox(height: 2),
                     Text(
                       'Now',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors
-                            .grey[600],
-                      ),
+                      style: TextStyle(fontSize: 13, color: Colors.grey[600]),
                     ),
                   ],
                 ),
@@ -13240,30 +8581,15 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                       isArrived = true;
                     });
                   },
-                  icon: const Icon(
-                    Icons
-                        .check_circle_outline,
-                    size: 20,
-                  ),
-                  label: const Text(
-                    'Arrived',
-                  ),
+                  icon: const Icon(Icons.check_circle_outline, size: 20),
+                  label: const Text('Arrived'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor:
-                        AppColors
-                            .kGreen,
-                    foregroundColor:
-                        Colors.white,
-                    padding:
-                        const EdgeInsets.symmetric(
-                          vertical: 14,
-                        ),
+                    backgroundColor: AppColors.kGreen,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
                     elevation: 0,
                     shape: RoundedRectangleBorder(
-                      borderRadius:
-                          BorderRadius.circular(
-                            12,
-                          ),
+                      borderRadius: BorderRadius.circular(12),
                     ),
                   ),
                 ),
@@ -13273,32 +8599,16 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 child: OutlinedButton(
                   onPressed: () {},
                   style: OutlinedButton.styleFrom(
-                    side: const BorderSide(
-                      color: AppColors
-                          .kError,
-                      width: 2,
-                    ),
-                    foregroundColor:
-                        AppColors
-                            .kError,
-                    padding:
-                        const EdgeInsets.symmetric(
-                          vertical: 14,
-                        ),
+                    side: const BorderSide(color: AppColors.kError, width: 2),
+                    foregroundColor: AppColors.kError,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(
-                      borderRadius:
-                          BorderRadius.circular(
-                            12,
-                          ),
+                      borderRadius: BorderRadius.circular(12),
                     ),
                   ),
                   child: const Text(
                     'Cancel',
-                    style: TextStyle(
-                      fontWeight:
-                          FontWeight
-                              .w600,
-                    ),
+                    style: TextStyle(fontWeight: FontWeight.w600),
                   ),
                 ),
               ),
@@ -13310,41 +8620,28 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
   }
   // ---------- Participant Tile ----------
 
-  Widget _buildParticipantTile(
-    Participant p,
-  ) {
+  Widget _buildParticipantTile(Participant p) {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius:
-            BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black
-                .withOpacity(0.04),
+            color: Colors.black.withOpacity(0.04),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
         ],
       ),
       child: Theme(
-        data: Theme.of(context)
-            .copyWith(
-              dividerColor:
-                  Colors.transparent,
-            ),
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
-          tilePadding:
-              const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 8,
-              ),
-          childrenPadding:
-              const EdgeInsets.only(
-                left: 16,
-                right: 16,
-                bottom: 16,
-              ),
+          tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          childrenPadding: const EdgeInsets.only(
+            left: 16,
+            right: 16,
+            bottom: 16,
+          ),
           leading: Container(
             width: 44,
             height: 44,
@@ -13352,27 +8649,19 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
               color: Colors.grey[200],
               shape: BoxShape.circle,
             ),
-            child: Icon(
-              Icons.person,
-              color: Colors.grey[600],
-              size: 22,
-            ),
+            child: Icon(Icons.person, color: Colors.grey[600], size: 22),
           ),
           title: Text(
             p.name,
             style: const TextStyle(
               fontSize: 15,
-              fontWeight:
-                  FontWeight.w600,
+              fontWeight: FontWeight.w600,
               color: Colors.black87,
             ),
           ),
           subtitle: Text(
             p.status,
-            style: TextStyle(
-              fontSize: 13,
-              color: Colors.grey[600],
-            ),
+            style: TextStyle(fontSize: 13, color: Colors.grey[600]),
           ),
           trailing: const Icon(
             Icons.keyboard_arrow_down,
@@ -13383,28 +8672,15 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
             const SizedBox(height: 12),
             ElevatedButton.icon(
               onPressed: () {},
-              icon: const Icon(
-                Icons.refresh,
-                size: 20,
-              ),
-              label: const Text(
-                'Refresh Location Request',
-              ),
+              icon: const Icon(Icons.refresh, size: 20),
+              label: const Text('Refresh Location Request'),
               style: ElevatedButton.styleFrom(
-                backgroundColor:
-                    AppColors.kGreen,
-                foregroundColor:
-                    Colors.white,
-                minimumSize:
-                    const Size.fromHeight(
-                      48,
-                    ),
+                backgroundColor: AppColors.kGreen,
+                foregroundColor: Colors.white,
+                minimumSize: const Size.fromHeight(48),
                 elevation: 0,
                 shape: RoundedRectangleBorder(
-                  borderRadius:
-                      BorderRadius.circular(
-                        12,
-                      ),
+                  borderRadius: BorderRadius.circular(12),
                 ),
               ),
             ),
@@ -13418,16 +8694,10 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
   Widget _roleChip(String text) {
     return Container(
-      padding:
-          const EdgeInsets.symmetric(
-            horizontal: 10,
-            vertical: 4,
-          ),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: AppColors.kGreen
-            .withOpacity(0.15),
-        borderRadius:
-            BorderRadius.circular(8),
+        color: AppColors.kGreen.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(8),
       ),
       child: Text(
         text,
@@ -13550,9 +8820,5 @@ class Participant {
   final String name;
   final String status;
   final bool isHost;
-  Participant({
-    required this.name,
-    required this.status,
-    required this.isHost,
-  });
+  Participant({required this.name, required this.status, required this.isHost});
 }

@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:madar_app/api/venue_cache_service.dart';
 import 'package:madar_app/widgets/app_widgets.dart';
+import 'package:madar_app/theme/theme.dart';
 
 // ----------------------------------------------------------------------------
 // Constants
@@ -400,8 +401,7 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final screenWidth = MediaQuery.of(context).size.width;
-    final horizontalPadding = screenWidth < 360 ? 12.0 : 16.0;
+    final horizontalPadding = Responsive.horizontalPadding(context);
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -518,10 +518,26 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
   }
 
   Widget _buildVenueList(double horizontalPadding) {
-    return ListView.builder(
+    final cols = Responsive.gridColumns(context);
+    if (cols == 1) {
+      return ListView.builder(
+        padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+        itemCount: _venues.length,
+        itemBuilder: (context, index) => _buildVenueCard(_venues[index]),
+      );
+    }
+    // 2-column grid for Medium and Expanded screens
+    return GridView.builder(
       padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 16,
+        mainAxisSpacing: 16,
+        mainAxisExtent: 200,
+      ),
       itemCount: _venues.length,
-      itemBuilder: (context, index) => _buildVenueCard(_venues[index]),
+      itemBuilder: (context, index) =>
+          _buildVenueCard(_venues[index], inGrid: true),
     );
   }
 
@@ -619,8 +635,10 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
     }
   }
 
-  /// Large venue card with image, name overlay, stars, distance
-  Widget _buildVenueCard(VenueData v) {
+  /// Large venue card with image, name overlay, stars, distance.
+  /// Pass [inGrid] = true when rendered inside a GridView — the grid's
+  /// mainAxisExtent controls the height, so no explicit height is set.
+  Widget _buildVenueCard(VenueData v, {bool inGrid = false}) {
     final screenWidth = MediaQuery.of(context).size.width;
     final cardHeight = screenWidth < 360 ? 180.0 : 200.0;
 
@@ -631,8 +649,10 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
     return GestureDetector(
       onTap: () => _openVenue(v),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 16),
-        height: cardHeight,
+        // In grid mode the GridView's mainAxisExtent controls height;
+        // in list mode we use an explicit height with a bottom margin.
+        margin: inGrid ? null : const EdgeInsets.only(bottom: 16),
+        height: inGrid ? null : cardHeight,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
           boxShadow: [

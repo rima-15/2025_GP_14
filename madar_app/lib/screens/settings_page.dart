@@ -20,7 +20,8 @@ class SettingsPage extends StatefulWidget {
   State<SettingsPage> createState() => _SettingsPageState();
 }
 
-class _SettingsPageState extends State<SettingsPage> with WidgetsBindingObserver {
+class _SettingsPageState extends State<SettingsPage>
+    with WidgetsBindingObserver {
   bool _securityExpanded = false;
   bool _notificationPrefsLoading = true;
   bool _notificationPrefsSaving = false;
@@ -71,11 +72,10 @@ class _SettingsPageState extends State<SettingsPage> with WidgetsBindingObserver
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _openSettingsRecognizer =
-        TapGestureRecognizer()
-          ..onTap = () async {
-            await openAppSettings();
-          };
+    _openSettingsRecognizer = TapGestureRecognizer()
+      ..onTap = () async {
+        await openAppSettings();
+      };
     _initializeNotificationSettings();
     _newPasswordCtrl.addListener(_checkPasswordRequirements);
     _oldPasswordCtrl.addListener(_checkPasswordRequirements);
@@ -302,8 +302,9 @@ class _SettingsPageState extends State<SettingsPage> with WidgetsBindingObserver
       if (requestSystemPermission && next.allowNotifications) {
         final status = await NotificationService.ensurePermission();
 
-        final permissionGranted =
-            NotificationService.isPermissionGranted(status);
+        final permissionGranted = NotificationService.isPermissionGranted(
+          status,
+        );
 
         if (permissionGranted) {
           await FcmTokenService.saveToken(user.uid);
@@ -465,6 +466,9 @@ class _SettingsPageState extends State<SettingsPage> with WidgetsBindingObserver
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
+        shadowColor: Colors.transparent,
         centerTitle: true,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: AppColors.kGreen),
@@ -609,12 +613,12 @@ class _SettingsPageState extends State<SettingsPage> with WidgetsBindingObserver
                     ),
                   ),
                   Switch(
-                    value:
-                        _systemNotificationsBlocked ? false : _allowNotifications,
-                    onChanged:
-                        _systemNotificationsBlocked
-                            ? null
-                            : _toggleAllowNotifications,
+                    value: _systemNotificationsBlocked
+                        ? false
+                        : _allowNotifications,
+                    onChanged: _systemNotificationsBlocked
+                        ? null
+                        : _toggleAllowNotifications,
                     activeColor: AppColors.kGreen,
                     inactiveThumbColor: Colors.grey[400],
                     inactiveTrackColor: Colors.grey[300],
@@ -689,11 +693,7 @@ class _SettingsPageState extends State<SettingsPage> with WidgetsBindingObserver
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Text.rich(
         TextSpan(
-          style: TextStyle(
-            fontSize: 13,
-            color: Colors.grey[700],
-            height: 1.4,
-          ),
+          style: TextStyle(fontSize: 13, color: Colors.grey[700], height: 1.4),
           children: [
             const TextSpan(
               text:
@@ -763,8 +763,7 @@ class _SettingsPageState extends State<SettingsPage> with WidgetsBindingObserver
             ],
           ),
         ),
-        if (!isLast)
-          Divider(height: 1, thickness: 1, color: Colors.grey[200]),
+        if (!isLast) Divider(height: 1, thickness: 1, color: Colors.grey[200]),
       ],
     );
   }
@@ -829,137 +828,147 @@ class _SettingsPageState extends State<SettingsPage> with WidgetsBindingObserver
             curve: Curves.easeInOut,
             child: _securityExpanded
                 ? Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    StyledTextField(
-                      controller: _oldPasswordCtrl,
-                      label: 'Old password',
-                      hint: 'Enter old password',
-                      obscureText: _obscureOld,
-                      validator: _validateOldPassword,
-                      focusNode: _oldPasswordFocus,
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          _obscureOld ? Icons.visibility_off : Icons.visibility,
-                          color: Colors.grey.shade600,
-                        ),
-                        onPressed: () =>
-                            setState(() => _obscureOld = !_obscureOld),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    StyledTextField(
-                      controller: _newPasswordCtrl,
-                      label: 'New password',
-                      hint: 'Enter new password',
-                      obscureText: _obscureNew,
-                      validator: _validateNewPassword,
-                      focusNode: _newPasswordFocus,
-                      suffixIcon: Row(
-                        mainAxisSize: MainAxisSize.min,
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          IconButton(
-                            icon: Icon(
-                              _obscureNew
-                                  ? Icons.visibility_off
-                                  : Icons.visibility,
-                              color: Colors.grey.shade600,
-                            ),
-                            onPressed: () =>
-                                setState(() => _obscureNew = !_obscureNew),
-                          ),
-                          if (_allNewPasswordRequirementsMet) ...[
-                            const SizedBox(width: 8),
-                            const Padding(
-                              padding: EdgeInsets.only(right: 12),
-                              child: Icon(
-                                Icons.check_circle,
-                                color: AppColors.kGreen,
-                                size: 20,
+                          StyledTextField(
+                            controller: _oldPasswordCtrl,
+                            label: 'Old password',
+                            hint: 'Enter old password',
+                            obscureText: _obscureOld,
+                            validator: _validateOldPassword,
+                            focusNode: _oldPasswordFocus,
+                            suffixIcon: IconButton(
+                              icon: Icon(
+                                _obscureOld
+                                    ? Icons.visibility_off
+                                    : Icons.visibility,
+                                color: Colors.grey.shade600,
                               ),
+                              onPressed: () =>
+                                  setState(() => _obscureOld = !_obscureOld),
                             ),
+                          ),
+                          const SizedBox(height: 16),
+                          StyledTextField(
+                            controller: _newPasswordCtrl,
+                            label: 'New password',
+                            hint: 'Enter new password',
+                            obscureText: _obscureNew,
+                            validator: _validateNewPassword,
+                            focusNode: _newPasswordFocus,
+                            suffixIcon: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: Icon(
+                                    _obscureNew
+                                        ? Icons.visibility_off
+                                        : Icons.visibility,
+                                    color: Colors.grey.shade600,
+                                  ),
+                                  onPressed: () => setState(
+                                    () => _obscureNew = !_obscureNew,
+                                  ),
+                                ),
+                                if (_allNewPasswordRequirementsMet) ...[
+                                  const SizedBox(width: 8),
+                                  const Padding(
+                                    padding: EdgeInsets.only(right: 12),
+                                    child: Icon(
+                                      Icons.check_circle,
+                                      color: AppColors.kGreen,
+                                      size: 20,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          _buildRequirementItem(
+                            'Has at least 8 characters',
+                            _hasMinLength,
+                          ),
+                          _buildRequirementItem(
+                            'Includes an uppercase letter',
+                            _hasUppercase,
+                          ),
+                          _buildRequirementItem(
+                            'Includes a lowercase letter',
+                            _hasLowercase,
+                          ),
+                          _buildRequirementItem(
+                            'Includes a number',
+                            _hasNumber,
+                          ),
+                          _buildRequirementItem(
+                            'Includes a special character',
+                            _hasSpecialChar,
+                          ),
+                          _buildRequirementItem(
+                            'New password not same as old password',
+                            _isDifferentFromOld,
+                          ),
+                          const SizedBox(height: 16),
+                          StyledTextField(
+                            controller: _confirmPasswordCtrl,
+                            label: 'Confirm password',
+                            hint: 'Re-enter new password',
+                            obscureText: _obscureConfirm,
+                            validator: _validateConfirmPassword,
+                            focusNode: _confirmPasswordFocus,
+                            suffixIcon: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: Icon(
+                                    _obscureConfirm
+                                        ? Icons.visibility_off
+                                        : Icons.visibility,
+                                    color: Colors.grey.shade600,
+                                  ),
+                                  onPressed: () => setState(
+                                    () => _obscureConfirm = !_obscureConfirm,
+                                  ),
+                                ),
+                                if (_confirmPasswordMatches) ...[
+                                  const SizedBox(width: 8),
+                                  const Padding(
+                                    padding: EdgeInsets.only(right: 12),
+                                    child: Icon(
+                                      Icons.check_circle,
+                                      color: AppColors.kGreen,
+                                      size: 20,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          PrimaryButton(
+                            text: 'Update Password',
+                            onPressed: _updatePassword,
+                            isLoading: _updating,
+                          ),
+                          if (_messageManager.hasMessage) ...[
+                            const SizedBox(height: 16),
+                            _messageManager.type == MessageType.error
+                                ? ErrorMessageBox(
+                                    message: _messageManager.message,
+                                  )
+                                : SuccessMessageBox(
+                                    message: _messageManager.message,
+                                  ),
                           ],
                         ],
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    _buildRequirementItem(
-                      'Has at least 8 characters',
-                      _hasMinLength,
-                    ),
-                    _buildRequirementItem(
-                      'Includes an uppercase letter',
-                      _hasUppercase,
-                    ),
-                    _buildRequirementItem(
-                      'Includes a lowercase letter',
-                      _hasLowercase,
-                    ),
-                    _buildRequirementItem('Includes a number', _hasNumber),
-                    _buildRequirementItem(
-                      'Includes a special character',
-                      _hasSpecialChar,
-                    ),
-                    _buildRequirementItem(
-                      'New password not same as old password',
-                      _isDifferentFromOld,
-                    ),
-                    const SizedBox(height: 16),
-                    StyledTextField(
-                      controller: _confirmPasswordCtrl,
-                      label: 'Confirm password',
-                      hint: 'Re-enter new password',
-                      obscureText: _obscureConfirm,
-                      validator: _validateConfirmPassword,
-                      focusNode: _confirmPasswordFocus,
-                      suffixIcon: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            icon: Icon(
-                              _obscureConfirm
-                                  ? Icons.visibility_off
-                                  : Icons.visibility,
-                              color: Colors.grey.shade600,
-                            ),
-                            onPressed: () => setState(
-                              () => _obscureConfirm = !_obscureConfirm,
-                            ),
-                          ),
-                          if (_confirmPasswordMatches) ...[
-                            const SizedBox(width: 8),
-                            const Padding(
-                              padding: EdgeInsets.only(right: 12),
-                              child: Icon(
-                                Icons.check_circle,
-                                color: AppColors.kGreen,
-                                size: 20,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    PrimaryButton(
-                      text: 'Update Password',
-                      onPressed: _updatePassword,
-                      isLoading: _updating,
-                    ),
-                    if (_messageManager.hasMessage) ...[
-                      const SizedBox(height: 16),
-                      _messageManager.type == MessageType.error
-                          ? ErrorMessageBox(message: _messageManager.message)
-                          : SuccessMessageBox(message: _messageManager.message),
-                    ],
-                  ],
-                ),
-              ),
-            )
+                  )
                 : const SizedBox.shrink(),
           ),
         ],

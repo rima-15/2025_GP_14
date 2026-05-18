@@ -38,12 +38,6 @@ class WelcomeScreen extends StatelessWidget {
           Expanded(
             flex: 1,
             child: Container(
-              padding: EdgeInsets.fromLTRB(
-                AppSpacing.xxl,
-                isSmallScreen ? 24 : 30,
-                AppSpacing.xxl,
-                AppSpacing.xl + MediaQuery.of(context).padding.bottom,
-              ),
               decoration: const BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.only(
@@ -51,59 +45,79 @@ class WelcomeScreen extends StatelessWidget {
                   topRight: Radius.circular(AppSpacing.sheetRadius),
                 ),
               ),
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    // Title
-                    Text(
-                      'Welcome!',
-                      textAlign: TextAlign.center,
-                      style: AppTextStyles.pageTitle.copyWith(
-                        fontSize: isSmallScreen ? 24 : 28,
+              child: Padding(
+                padding: EdgeInsets.only(
+                  top: isSmallScreen ? 24 : 30,
+                  bottom:
+                      AppSpacing.xl + MediaQuery.of(context).padding.bottom,
+                ),
+                child: Center(
+                  child: ConstrainedBox(
+                    // Cap form width on Medium/Expanded screens
+                    constraints: BoxConstraints(
+                      maxWidth: Responsive.formMaxWidth(context),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.xxl,
+                      ),
+                      child: SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            // Title
+                            Text(
+                              'Welcome!',
+                              textAlign: TextAlign.center,
+                              style: AppTextStyles.pageTitle.copyWith(
+                                fontSize: isSmallScreen ? 24 : 28,
+                              ),
+                            ),
+                            SizedBox(height: isSmallScreen ? 6 : 8),
+
+                            // Subtitle
+                            Text(
+                              'Find venues, meet friends, and explore with confidence!',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Colors.grey[700],
+                                fontSize: isSmallScreen ? 14 : 15,
+                                height: 1.4,
+                              ),
+                            ),
+                            SizedBox(height: isSmallScreen ? 24 : 30),
+
+                            // Sign In Button
+                            SecondaryButton(
+                              text: 'Sign in',
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const SignInScreen(),
+                                  ),
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 12),
+
+                            // Sign Up Button
+                            PrimaryButton(
+                              text: 'Sign up',
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const SignUpScreen(),
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                    SizedBox(height: isSmallScreen ? 6 : 8),
-
-                    // Subtitle
-                    Text(
-                      'Find venues, meet friends, and explore with confidence!',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: Colors.grey[700],
-                        fontSize: isSmallScreen ? 14 : 15,
-                        height: 1.4,
-                      ),
-                    ),
-                    SizedBox(height: isSmallScreen ? 24 : 30),
-
-                    // Sign In Button
-                    SecondaryButton(
-                      text: 'Sign in',
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const SignInScreen(),
-                          ),
-                        );
-                      },
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Sign Up Button
-                    PrimaryButton(
-                      text: 'Sign up',
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const SignUpScreen(),
-                          ),
-                        );
-                      },
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),

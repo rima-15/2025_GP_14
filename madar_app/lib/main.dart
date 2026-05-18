@@ -5,6 +5,7 @@ import 'package:madar_app/widgets/MainLayout.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:madar_app/services/app_config.dart';
 import 'package:madar_app/api/seed_venues.dart';
 import 'package:flutter/foundation.dart'
     show kDebugMode;
@@ -25,11 +26,14 @@ navigatorKey =
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Load environment variables
-  await dotenv.load(fileName: ".env");
+  // Load dev-only flags (.env is gitignored and contains no secrets)
+  await dotenv.load(fileName: ".env", mergeWith: {}, isOptional: true);
 
   // Initialize Firebase
   await Firebase.initializeApp();
+
+  // Fetch API key securely from Cloud Function
+  await AppConfig.init();
   // Check if app opened from notification (terminated state)
   final initialMessage =
       await FirebaseMessaging.instance
@@ -51,9 +55,7 @@ Future<void> main() async {
           'true');
 
   if (doSeed) {
-    final key =
-        dotenv.env['GOOGLE_API_KEY'] ??
-        '';
+    final key = AppConfig.googleApiKey;
     try {
       debugPrint(
         'Running VenueSeeder...',
@@ -79,9 +81,7 @@ Future<void> main() async {
           'true');
 
   if (doSeedContacts) {
-    final key =
-        dotenv.env['GOOGLE_API_KEY'] ??
-        '';
+    final key = AppConfig.googleApiKey;
     try {
       debugPrint(
         'Running VenueContactSeeder...',

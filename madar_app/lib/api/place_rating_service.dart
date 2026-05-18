@@ -2,8 +2,8 @@ import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
+import '../services/app_config.dart';
 
 // ----------------------------------------------------------------------------
 // Place Rating Service - Caches place ratings in Firestore (weekly refresh)
@@ -22,7 +22,7 @@ class PlaceRatingService {
 
   PlaceRatingService([FirebaseFirestore? db])
     : _db = db ?? FirebaseFirestore.instance,
-      _apiKey = dotenv.maybeGet('GOOGLE_API_KEY') ?? '';
+      _apiKey = AppConfig.googleApiKey;
 
   /// Get cached rating for a place from Firestore, refreshing if stale
   /// Returns null if no rating available

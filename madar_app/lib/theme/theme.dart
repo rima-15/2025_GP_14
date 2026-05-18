@@ -43,19 +43,50 @@ class Responsive {
   static double screenHeight(BuildContext context) =>
       MediaQuery.of(context).size.height;
 
+  // ── Android window size classes ──────────────────────────────────────────
+  // https://developer.android.com/develop/ui/views/layout/use-window-size-classes
+
+  /// Compact: < 600dp (phones in portrait)
+  static bool isCompact(BuildContext context) => screenWidth(context) < 600;
+
+  /// Medium: 600–839dp (tablets, large phones landscape)
+  static bool isMedium(BuildContext context) {
+    final w = screenWidth(context);
+    return w >= 600 && w < 840;
+  }
+
+  /// Expanded: ≥ 840dp (tablets in landscape, desktops)
+  static bool isExpanded(BuildContext context) => screenWidth(context) >= 840;
+
+  // ── Legacy helpers (kept for backwards compatibility) ────────────────────
+
   /// Returns true if screen is considered small (< 360dp)
   static bool isSmallScreen(BuildContext context) => screenWidth(context) < 360;
 
-  /// Returns true if screen is considered large (> 600dp)
-  static bool isLargeScreen(BuildContext context) => screenWidth(context) > 600;
+  /// Returns true if screen is medium or expanded (≥ 600dp)
+  static bool isLargeScreen(BuildContext context) => screenWidth(context) >= 600;
 
-  /// Responsive horizontal padding (16 on small, 24 on normal, 32 on large)
+  // ── Responsive sizing ────────────────────────────────────────────────────
+
+  /// Horizontal padding aligned with window size classes.
+  /// Compact: 16dp · Medium: 24dp · Expanded: 32dp
   static double horizontalPadding(BuildContext context) {
     final width = screenWidth(context);
-    if (width < 360) return 16.0;
-    if (width > 600) return 32.0;
-    return 24.0;
+    if (width >= 840) return 32.0;
+    if (width >= 600) return 24.0;
+    return 16.0;
   }
+
+  /// Maximum width for centred form content (auth/profile screens).
+  /// Unconstrained on Compact so forms fill the phone screen naturally.
+  /// On Medium/Expanded the form is capped at 500dp and centred.
+  static double formMaxWidth(BuildContext context) =>
+      isCompact(context) ? double.infinity : 500.0;
+
+  /// Number of columns for venue / card grid layouts.
+  /// 1 column on Compact, 2 columns on Medium and Expanded.
+  static int gridColumns(BuildContext context) =>
+      isCompact(context) ? 1 : 2;
 
   /// Responsive value that scales with screen width
   /// baseValue is the design value for a 375dp screen
@@ -69,7 +100,7 @@ class Responsive {
   static double fontSize(BuildContext context, double baseSize) {
     final width = screenWidth(context);
     if (width < 360) return baseSize * 0.9;
-    if (width > 600) return baseSize * 1.1;
+    if (width >= 600) return baseSize * 1.1;
     return baseSize;
   }
 }

@@ -761,23 +761,29 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
             ),
           ],
         ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _buildNavItem(icon: Icons.home, label: 'Home', index: 0),
-              _buildNavItem(
-                icon: Icons.explore_outlined,
-                label: 'Explore',
-                index: 1,
+        child: Center(
+          child: ConstrainedBox(
+            // Cap width on Medium/Expanded so items don't spread across a tablet
+            constraints: const BoxConstraints(maxWidth: 600),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _buildNavItem(icon: Icons.home, label: 'Home', index: 0),
+                  _buildNavItem(
+                    icon: Icons.explore_outlined,
+                    label: 'Explore',
+                    index: 1,
+                  ),
+                  _buildNavItem(
+                    icon: Icons.group_outlined,
+                    label: 'Social',
+                    index: 2,
+                  ),
+                ],
               ),
-              _buildNavItem(
-                icon: Icons.group_outlined,
-                label: 'Social',
-                index: 2,
-              ),
-            ],
+            ),
           ),
         ),
       ),

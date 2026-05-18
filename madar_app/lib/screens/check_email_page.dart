@@ -109,12 +109,6 @@ class _CheckEmailPageState extends State<CheckEmailPage> {
           Expanded(
             flex: 7,
             child: Container(
-              padding: EdgeInsets.fromLTRB(
-                AppSpacing.xxl,
-                isSmallScreen ? 40 : 50,
-                AppSpacing.xxl,
-                AppSpacing.xl + bottomSafeArea,
-              ),
               decoration: const BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.only(
@@ -122,7 +116,22 @@ class _CheckEmailPageState extends State<CheckEmailPage> {
                   topRight: Radius.circular(40),
                 ),
               ),
-              child: Column(
+              child: Padding(
+                padding: EdgeInsets.only(
+                  top: isSmallScreen ? 40 : 50,
+                  bottom: AppSpacing.xl + bottomSafeArea,
+                ),
+                child: Center(
+                  child: ConstrainedBox(
+                    // Cap content width on Medium/Expanded screens
+                    constraints: BoxConstraints(
+                      maxWidth: Responsive.formMaxWidth(context),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.xxl,
+                      ),
+                      child: Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   // Email Icon
@@ -257,6 +266,10 @@ class _CheckEmailPageState extends State<CheckEmailPage> {
                     },
                   ),
                 ],
+                      ),
+                    ),
+                  ),
+                ),
               ),
             ),
           ),

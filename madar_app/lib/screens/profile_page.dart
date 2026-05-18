@@ -303,9 +303,16 @@ class _ProfilePageState extends State<ProfilePage> {
       ),
       body: _loading
           ? const AppLoadingIndicator()
-          : SingleChildScrollView(
-              padding: EdgeInsets.all(horizontalPadding),
-              child: Form(
+          : Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                // Cap form width on Medium/Expanded screens
+                constraints: BoxConstraints(
+                  maxWidth: Responsive.formMaxWidth(context),
+                ),
+                child: SingleChildScrollView(
+                  padding: EdgeInsets.all(horizontalPadding),
+                  child: Form(
                 key: _formKey,
                 child: Column(
                   children: [
@@ -409,6 +416,8 @@ class _ProfilePageState extends State<ProfilePage> {
                 ),
               ),
             ),
+          ),
+        ),
     );
   }
 }

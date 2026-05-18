@@ -172,12 +172,6 @@ class _SignInScreenState extends State<SignInScreen> {
           Expanded(
             flex: 7,
             child: Container(
-              padding: EdgeInsets.fromLTRB(
-                AppSpacing.xxl,
-                isSmallScreen ? 40 : 50,
-                AppSpacing.xxl,
-                AppSpacing.xl + bottomSafeArea,
-              ),
               decoration: const BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.only(
@@ -185,112 +179,138 @@ class _SignInScreenState extends State<SignInScreen> {
                   topRight: Radius.circular(AppSpacing.sheetRadius),
                 ),
               ),
-              child: SingleChildScrollView(
-                child: Form(
-                  key: _formSignInKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      // Title
-                      Text('Welcome back', style: AppTextStyles.largeTitles),
-                      SizedBox(height: isSmallScreen ? 30 : 40),
-
-                      // Email Field
-                      StyledTextField(
-                        controller: _emailCtrl,
-                        focusNode: _emailFocus,
-                        label: 'Email',
-                        hint: 'Enter Email',
-                        keyboardType: TextInputType.emailAddress,
-                        validator: (v) {
-                          if (v == null || v.isEmpty) {
-                            return 'Please enter email';
-                          }
-                          if (!v.contains('@') || !v.contains('.')) {
-                            return 'Invalid email';
-                          }
-                          return null;
-                        },
+              child: Padding(
+                padding: EdgeInsets.only(
+                  top: isSmallScreen ? 40 : 50,
+                  bottom: AppSpacing.xl + bottomSafeArea,
+                ),
+                child: Center(
+                  child: ConstrainedBox(
+                    // Cap form width on Medium/Expanded screens
+                    constraints: BoxConstraints(
+                      maxWidth: Responsive.formMaxWidth(context),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.xxl,
                       ),
-                      const SizedBox(height: 25),
-
-                      // Password Field
-                      StyledTextField(
-                        controller: _passCtrl,
-                        focusNode: _passFocus,
-                        label: 'Password',
-                        hint: 'Enter Password',
-                        obscureText: _obscurePassword,
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                            _obscurePassword
-                                ? Icons.visibility_off
-                                : Icons.visibility,
-                            color: Colors.grey.shade600,
-                          ),
-                          onPressed: () => setState(() {
-                            _obscurePassword = !_obscurePassword;
-                          }),
-                        ),
-                        validator: (v) {
-                          if (v == null || v.isEmpty) {
-                            return 'Please enter password';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 25),
-
-                      // Forgot Password Link
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: GestureDetector(
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const ForgotPasswordScreen(),
+                      child: SingleChildScrollView(
+                        child: Form(
+                          key: _formSignInKey,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              // Title
+                              Text(
+                                'Welcome back',
+                                style: AppTextStyles.largeTitles,
                               ),
-                            );
-                          },
-                          child: Text(
-                            'Forget password?',
-                            style: AppTextStyles.link,
+                              SizedBox(height: isSmallScreen ? 30 : 40),
+
+                              // Email Field
+                              StyledTextField(
+                                controller: _emailCtrl,
+                                focusNode: _emailFocus,
+                                label: 'Email',
+                                hint: 'Enter Email',
+                                keyboardType: TextInputType.emailAddress,
+                                validator: (v) {
+                                  if (v == null || v.isEmpty) {
+                                    return 'Please enter email';
+                                  }
+                                  if (!v.contains('@') || !v.contains('.')) {
+                                    return 'Invalid email';
+                                  }
+                                  return null;
+                                },
+                              ),
+                              const SizedBox(height: 25),
+
+                              // Password Field
+                              StyledTextField(
+                                controller: _passCtrl,
+                                focusNode: _passFocus,
+                                label: 'Password',
+                                hint: 'Enter Password',
+                                obscureText: _obscurePassword,
+                                suffixIcon: IconButton(
+                                  icon: Icon(
+                                    _obscurePassword
+                                        ? Icons.visibility_off
+                                        : Icons.visibility,
+                                    color: Colors.grey.shade600,
+                                  ),
+                                  onPressed: () => setState(() {
+                                    _obscurePassword = !_obscurePassword;
+                                  }),
+                                ),
+                                validator: (v) {
+                                  if (v == null || v.isEmpty) {
+                                    return 'Please enter password';
+                                  }
+                                  return null;
+                                },
+                              ),
+                              const SizedBox(height: 25),
+
+                              // Forgot Password Link
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: GestureDetector(
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            const ForgotPasswordScreen(),
+                                      ),
+                                    );
+                                  },
+                                  child: Text(
+                                    'Forget password?',
+                                    style: AppTextStyles.link,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 25),
+
+                              // Sign In Button
+                              PrimaryButton(
+                                text: 'Sign in',
+                                onPressed: _signIn,
+                                isLoading: _loading,
+                              ),
+                              const SizedBox(height: 25),
+
+                              // Sign Up Link
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Text(
+                                    'Don\'t have an account? ',
+                                    style: TextStyle(color: Colors.black45),
+                                  ),
+                                  GestureDetector(
+                                    onTap: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => const SignUpScreen(),
+                                        ),
+                                      );
+                                    },
+                                    child: Text(
+                                      'Sign up',
+                                      style: AppTextStyles.link,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ),
                         ),
                       ),
-                      const SizedBox(height: 25),
-
-                      // Sign In Button
-                      PrimaryButton(
-                        text: 'Sign in',
-                        onPressed: _signIn,
-                        isLoading: _loading,
-                      ),
-                      const SizedBox(height: 25),
-
-                      // Sign Up Link
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Text(
-                            'Don\'t have an account? ',
-                            style: TextStyle(color: Colors.black45),
-                          ),
-                          GestureDetector(
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => const SignUpScreen(),
-                                ),
-                              );
-                            },
-                            child: Text('Sign up', style: AppTextStyles.link),
-                          ),
-                        ],
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ),

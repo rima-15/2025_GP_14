@@ -49,9 +49,6 @@ class _UnityCameraPageState
   // When true: the selector shows immediately with all three buttons enabled,
   // ignoring any availability data from Unity. Use this to test the Flutter
   // UI when localization isn't available (e.g., not at the mall).
-  // ⚠️ SET THIS TO false BEFORE SHIPPING.
-  static const bool
-  _devForceSelectorVisible = true;
 
   // Selector state — driven entirely by Unity messages
   bool _showSelector = false;

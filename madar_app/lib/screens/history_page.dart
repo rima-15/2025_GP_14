@@ -696,6 +696,9 @@ class _HistoryPageState extends State<HistoryPage> {
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
+        shadowColor: Colors.transparent,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: AppColors.kGreen),
           onPressed: () => Navigator.pop(context),

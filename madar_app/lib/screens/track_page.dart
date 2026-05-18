@@ -8230,10 +8230,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                   phone.isEmpty ? name : '$name ($phone)',
                 ),
                 const SizedBox(height: 8),
-                Row(
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _labeledDetail('Date: ', date),
-                    const SizedBox(width: 16),
+                    const SizedBox(height: 6),
                     _labeledDetail('Time: ', time),
                   ],
                 ),

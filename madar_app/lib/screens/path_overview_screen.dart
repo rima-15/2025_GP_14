@@ -486,11 +486,15 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
 
         suggestedPoi = {
           'name': (matchedCandidate['placeName'] ?? suggestedPoint).toString(),
-          'material': entrance['material']?.toString(),
+          'type': 'meeting_point',
+          'material': null, // important: no highlight
           'floor': entrance['floor']?.toString(),
           'x': entrance['x'],
           'y': entrance['y'],
           'z': entrance['z'],
+
+          // optional, only for reference/debug
+          'sourceMaterial': entrance['material']?.toString(),
         };
         break;
       }
@@ -877,6 +881,25 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     return type != 'poi' ||
         material.isEmpty ||
         material.toLowerCase() == 'null';
+  }
+
+  bool _isSuggestedMeetingPointSelection(Map<String, dynamic>? result) {
+    if (result == null || _suggestedMeetingPoi == null) return false;
+
+    final resultName = (result['name'] ?? '').toString().trim().toLowerCase();
+    final suggestedName = (_suggestedMeetingPoi!['name'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+
+    final resultFloor = _toFNumber(result['floor']?.toString());
+    final suggestedFloor = _toFNumber(
+      _suggestedMeetingPoi!['floor']?.toString(),
+    );
+
+    return resultName.isNotEmpty &&
+        resultName == suggestedName &&
+        resultFloor == suggestedFloor;
   }
 
   Future<void> _loadEntrances() async {
@@ -3049,8 +3072,7 @@ const timer = setInterval(function() {
     setState(() {
       _usePinAsStart = false;
       _customStartPoi = result;
-      final displayFloor =
-          _floorLabelFromToken(result['floor']) ?? result['floor'];
+      final displayFloor = _floorLabelFromToken(result['floor']?.toString());
       _desiredStartFloorLabel = displayFloor;
       _originFloorLabelFixed = null;
       _originFNumberFixed = null;
@@ -3179,6 +3201,44 @@ const timer = setInterval(function() {
       if (_originFloorLabelFixed == _destFloorLabel) {
         _ensureFloorSelected(_destFloorLabel!);
       }
+      return;
+    } else if (_isSuggestedMeetingPointSelection(result)) {
+      final displayFloor =
+          _floorLabelFromToken(result['floor']?.toString()) ??
+          result['floor']?.toString() ??
+          '';
+
+      setState(() {
+        _selectedDestPoi = {
+          'name': result['name'],
+          'type': 'meeting_point',
+          'floor': displayFloor,
+          'x': result['x'],
+          'y': result['y'],
+          'z': result['z'],
+          'material': null,
+        };
+
+        _destFloorLabel = displayFloor;
+        _destPosBlender = {
+          'x': (result['x'] as num).toDouble(),
+          'y': (result['y'] as num).toDouble(),
+          'z': (result['z'] as num).toDouble(),
+        };
+
+        // Important: pin only, no highlight
+        _pendingPoiToHighlight = null;
+        _destEntrances = null;
+
+        _destFloorLabelFixed = null;
+        _destFNumberFixed = null;
+        _selectedPreference = 'any';
+      });
+
+      _routeComputed = false;
+      _pathPointsByFloorGltf.clear();
+      _maybeComputeAndPushPath();
+      _ensureFloorSelected(_destFloorLabel!);
       return;
     } else {
       setState(() {

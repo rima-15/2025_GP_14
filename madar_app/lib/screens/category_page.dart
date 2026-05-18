@@ -216,6 +216,9 @@ class _CategoryPageState extends State<CategoryPage>
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
+        shadowColor: Colors.transparent,
         leading: Container(
           margin: const EdgeInsets.all(8),
           decoration: const BoxDecoration(

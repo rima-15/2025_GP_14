@@ -648,7 +648,7 @@ class _HistoryPageState extends State<HistoryPage> {
       // An empty storedReason means the host manually cancelled before anyone
       // had a chance to respond.
       if (!anyAccepted && storedReason == 'all_participants_declined')
-        return 'None of participants accept';
+        return 'None of participants accept:::';
       return 'You cancelled this request for all participants';
     } else {
       if (storedReason == 'host_rejected_suggestion') {

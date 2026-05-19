@@ -51,7 +51,7 @@ class VenueMeta {
 Future<Map<String, dynamic>> defaultPlacesDetailsFetcher(String placeId) async {
   final key = AppConfig.googleApiKey;
   if (key.isEmpty) {
-    throw Exception('Missing GOOGLE_API_KEY');
+    throw Exception('Google API key not loaded');
   }
   final uri = Uri.https('maps.googleapis.com', '/maps/api/place/details/json', {
     'place_id': placeId,
@@ -67,6 +67,9 @@ Future<Map<String, dynamic>> defaultPlacesDetailsFetcher(String placeId) async {
   });
   final r = await http.get(uri).timeout(const Duration(seconds: 10));
   final j = jsonDecode(r.body) as Map<String, dynamic>;
+  if (j['status'] != 'OK') {
+    throw Exception('Google Places API error: ${j['status']}');
+  }
   return j;
 }
 

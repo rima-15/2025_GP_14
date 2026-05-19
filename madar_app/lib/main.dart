@@ -33,7 +33,11 @@ Future<void> main() async {
   await Firebase.initializeApp();
 
   // Fetch API key securely from Cloud Function
-  await AppConfig.init();
+  try {
+    await AppConfig.init();
+  } catch (e) {
+    debugPrint('AppConfig.init() failed: $e');
+  }
   // Check if app opened from notification (terminated state)
   final initialMessage =
       await FirebaseMessaging.instance

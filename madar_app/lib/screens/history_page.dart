@@ -1376,8 +1376,9 @@ class _HistoryPageState extends State<HistoryPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Expanded(
+                          Flexible(
                             child: Text(
                               item.hostName.isEmpty ? 'Unknown' : item.hostName,
                               style: const TextStyle(

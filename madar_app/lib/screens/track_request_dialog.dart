@@ -876,9 +876,9 @@ class _TrackRequestDialogState extends State<TrackRequestDialog> {
     if (result != null) {
       final finalPhones = result.map((f) => f.phone).toSet();
       setState(() {
-        // Remove friends that were deselected in the sheet
+        // Remove friends that were deselected in the sheet (only favorites)
         _selectedFriends.removeWhere(
-          (f) => alreadyPhones.contains(f.phone) && !finalPhones.contains(f.phone),
+          (f) => f.isFavorite && alreadyPhones.contains(f.phone) && !finalPhones.contains(f.phone),
         );
         // Add newly selected friends
         for (final friend in result) {

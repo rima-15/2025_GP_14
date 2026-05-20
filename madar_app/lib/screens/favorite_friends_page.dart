@@ -1101,13 +1101,8 @@ class _AddFriendSheetState
                 9,
               ),
             ],
-            onChanged: (_) {
-              if (_errorMsg != null)
-                setState(
-                  () =>
-                      _errorMsg = null,
-                );
-            },
+            onChanged: (_) =>
+                setState(() => _errorMsg = null),
             decoration: InputDecoration(
               hintText:
                   _phoneFocus.hasFocus
@@ -1218,7 +1213,11 @@ class _AddFriendSheetState
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: _loading
+              onPressed: _loading ||
+                      _phoneCtrl.text
+                              .trim()
+                              .length <
+                          9
                   ? null
                   : _handleAdd,
               style: ElevatedButton.styleFrom(
@@ -1227,10 +1226,9 @@ class _AddFriendSheetState
                 foregroundColor:
                     Colors.white,
                 disabledBackgroundColor:
-                    AppColors.kGreen
-                        .withOpacity(
-                          0.6,
-                        ),
+                    Colors.grey[300],
+                disabledForegroundColor:
+                    Colors.grey[500],
                 padding:
                     const EdgeInsets.symmetric(
                       vertical: 14,

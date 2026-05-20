@@ -430,48 +430,40 @@ class _CategoryPageState extends State<CategoryPage>
                     : _buildPlaceImage(img),
               ),
 
-              // Info section
-              Expanded(
-                flex: 4,
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Stack(
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.only(right: 28),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: Color.fromARGB(255, 44, 44, 44),
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-
-                            Flexible(
-                              child: Text(
-                                desc,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.black54,
-                                  height: 1.3,
-                                ),
-                              ),
-                            ),
-
-                            const SizedBox(height: 6),
-
-                            if (widget.categoryName.toLowerCase() != 'services')
-                              FutureBuilder<double?>(
+              // Info section — wraps content, no forced height
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Color.fromARGB(255, 44, 44, 44),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      desc,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.black54,
+                        height: 1.3,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                        children: [
+                          if (widget.categoryName.toLowerCase() != 'services')
+                            Expanded(
+                              child: FutureBuilder<double?>(
                                 future: _getCachedRating(placeId),
                                 builder: (context, snap) {
                                   if (!snap.hasData)
@@ -479,6 +471,7 @@ class _CategoryPageState extends State<CategoryPage>
                                   final r = snap.data ?? 0.0;
                                   if (r == 0.0) return const SizedBox.shrink();
                                   return Row(
+                                    mainAxisSize: MainAxisSize.min,
                                     children: [
                                       const Icon(
                                         Icons.star,
@@ -498,23 +491,19 @@ class _CategoryPageState extends State<CategoryPage>
                                   );
                                 },
                               ),
-                          ],
-                        ),
-                      ),
-
-                      const Positioned(
-                        right: 8,
-                        bottom: 8,
-                        child: Icon(
-                          FontAwesomeIcons.locationArrow,
-                          color: kGreen,
-                          size: 14,
-                        ),
+                            )
+                          else
+                            const Spacer(),
+                          const Icon(
+                            FontAwesomeIcons.locationArrow,
+                            color: kGreen,
+                            size: 14,
+                          ),
+                        ],
                       ),
                     ],
                   ),
                 ),
-              ),
             ],
           ),
         ),

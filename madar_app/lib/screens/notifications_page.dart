@@ -4817,67 +4817,72 @@ class _NotificationsPageState extends State<NotificationsPage> {
   }
 
   Widget _buildMeetingAcceptLocationChoiceSheet(BuildContext ctx) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(24),
-          topRight: Radius.circular(24),
+    return SafeArea(
+      top: false,
+      left: false,
+      right: false,
+      child: Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(24),
+            topRight: Radius.circular(24),
+          ),
         ),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(height: 12),
-          Container(
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: Colors.grey[300],
-              borderRadius: BorderRadius.circular(2),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 14, 20, 4),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Set your current location',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.kGreen,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Set your current location',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.kGreen,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'As step 1, set your location to find suitable meeting point for all participants',
-                  style: TextStyle(fontSize: 13, color: Colors.grey[600]),
-                ),
-              ],
+                  const SizedBox(height: 4),
+                  Text(
+                    'As step 1, set your location to find suitable meeting point for all participants',
+                    style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 28),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: SecondaryButton(
-              text: 'Pin on Map',
-              icon: Icons.location_on_outlined,
-              onPressed: () => Navigator.pop(ctx, 'map'),
+            const SizedBox(height: 28),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: SecondaryButton(
+                text: 'Pin on Map',
+                icon: Icons.location_on_outlined,
+                onPressed: () => Navigator.pop(ctx, 'map'),
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: PrimaryButton(
-              text: 'Scan With Camera',
-              icon: Icons.camera_alt_outlined,
-              onPressed: () => Navigator.pop(ctx, 'camera'),
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: PrimaryButton(
+                text: 'Scan With Camera',
+                icon: Icons.camera_alt_outlined,
+                onPressed: () => Navigator.pop(ctx, 'camera'),
+              ),
             ),
-          ),
-          SizedBox(height: MediaQuery.of(ctx).padding.bottom + 35),
-        ],
+            SizedBox(height: MediaQuery.of(ctx).padding.bottom + 35),
+          ],
+        ),
       ),
     );
   }

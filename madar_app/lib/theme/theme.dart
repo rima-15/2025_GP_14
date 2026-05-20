@@ -84,9 +84,9 @@ class Responsive {
       isCompact(context) ? double.infinity : 500.0;
 
   /// Number of columns for venue / card grid layouts.
-  /// 1 column on Compact, 2 columns on Medium and Expanded.
+  /// 1 column on Compact and Medium, 2 columns on Expanded only.
   static int gridColumns(BuildContext context) =>
-      isCompact(context) ? 1 : 2;
+      isExpanded(context) ? 2 : 1;
 
   /// Responsive value that scales with screen width
   /// baseValue is the design value for a 375dp screen

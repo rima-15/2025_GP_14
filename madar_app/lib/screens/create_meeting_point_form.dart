@@ -932,16 +932,19 @@ class MeetingPointService {
             );
           } catch (_) {}
         } else {
+          // Use the canonical deadline: waitDeadline + 2 min.
+          // This prevents "timer resets to 2:00" when the host comes back
+          // after being offline: the deadline stays anchored to when the
+          // transition should have happened, not to "now".  If it is already
+          // in the past the step-5 auto-confirm handler fires on the next tick.
+          final canonicalDeadline =
+              meeting.waitDeadline!.add(_kSuggestDuration);
           try {
             await _col.doc(meeting.id).update({
               'hostStep': 5,
               // status stays 'pending'; sub-state derived from hostStep + participants
               'suggestDeadline':
-                  Timestamp.fromDate(
-                    now.add(
-                      _kSuggestDuration,
-                    ),
-                  ),
+                  Timestamp.fromDate(canonicalDeadline),
               'updatedAt':
                   FieldValue.serverTimestamp(),
             });
@@ -956,12 +959,19 @@ class MeetingPointService {
             null) {
       if (!meeting.suggestDeadline!
           .isAfter(now)) {
-        try {
-          await markHostDecision(
-            meetingPointId: meeting.id,
-            accepted: true,
-          );
-        } catch (_) {}
+        // Only the meeting host may trigger the step-5 auto-confirm.
+        // Non-host devices must not call markHostDecision: the server would
+        // reject the write (security rules), which causes a Firestore SDK
+        // optimistic-rollback that briefly flips the stream back to
+        // status:'pending' and disrupts the UI for all watchers.
+        if (uid == meeting.hostId) {
+          try {
+            await markHostDecision(
+              meetingPointId: meeting.id,
+              accepted: true,
+            );
+          } catch (_) {}
+        }
       }
       return;
     }
@@ -1375,6 +1385,10 @@ class MeetingPointService {
     final meeting =
         MeetingPointRecord.fromDoc(doc);
     if (meeting == null) return;
+    // Guard against concurrent calls (e.g. form timer + maybeMaintain firing
+    // simultaneously): if the meeting is already active there is nothing to do
+    // and re-writing would reset confirmedAt with a new server timestamp.
+    if (meeting.isConfirmed) return;
 
     final now = DateTime.now();
 
@@ -3279,10 +3293,11 @@ class _CreateMeetingPointFormState
     final finalPhones = result
         .map((f) => f.phone)
         .toSet();
-    // Remove friends that were deselected in the sheet
+    // Remove friends that were deselected in the sheet (only favorites)
     setState(() {
       _selectedFriends.removeWhere(
         (f) =>
+            f.isFavorite &&
             alreadyPhones.contains(
               f.phone,
             ) &&

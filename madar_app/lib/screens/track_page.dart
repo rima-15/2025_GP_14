@@ -1081,11 +1081,42 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
       if (!mounted) return;
       // Keep the card cache current so _maybeMaintainActiveMeetingIfNeeded()
       // always has fresh meeting data regardless of which tab is shown.
-      // Without this, _lastKnownActiveMeetingCard is never updated (the
-      // StreamBuilder that called _resolveActiveMeetingCardSnapshot was
-      // removed), causing deadline-based transitions to stall unless the
-      // host happens to open the Meeting Point tab or the form.
       _lastKnownActiveMeetingCard = meeting;
+
+      // Patch the blocking-meetings list with the freshest snapshot so that
+      // _maybeMaintainActiveMeetingIfNeeded always operates on up-to-date
+      // hostStep / deadlines even when the Meeting Point tab is not visible.
+      // Without this, a stale hostStep=4 entry in _lastKnownBlockingMeetings
+      // causes maybeMaintain to keep rewriting suggestDeadline as "now + 2min"
+      // instead of recognising that the meeting already advanced to step 5.
+      if (meeting != null) {
+        final idx =
+            _lastKnownBlockingMeetings.indexWhere((m) => m.id == meeting.id);
+        if (idx >= 0) {
+          _lastKnownBlockingMeetings =
+              List.of(_lastKnownBlockingMeetings)..[idx] = meeting;
+        }
+
+        // Record the approximate step-3 start time on any tab so that the
+        // 2-min countdown badge is visible to all users (host and invitees)
+        // even before Firestore delivers hostStep=5 + suggestDeadline.
+        if (meeting.hostStep == 4 &&
+            meeting.acceptedCount > 0 &&
+            !_observedStep5MeetingIds.contains(meeting.id)) {
+          final waitExpired = meeting.waitDeadline != null &&
+              !meeting.waitDeadline!
+                  .isAfter(MeetingPointService.serverNow);
+          if (meeting.pendingCount == 0 || waitExpired) {
+            _approxStep3StartByMeetingId[meeting.id] ??=
+                MeetingPointService.serverNow;
+          }
+        }
+        if (meeting.hostStep >= 5) {
+          _approxStep3StartByMeetingId.remove(meeting.id);
+          _observedStep5MeetingIds.add(meeting.id);
+        }
+      }
+
       _syncMeetingParticipantSubs(meeting);
     });
   }
@@ -3003,7 +3034,20 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         if (uid != null) {
           for (final m in meetings) {
             if (_locallyDeclinedMeetingIds.contains(m.id)) continue;
-            if (m.isConfirmed) {
+            // Treat a step-5 meeting whose suggestDeadline has already elapsed as
+            // confirmed locally — the host auto-accept is either in flight or
+            // completed.  This prevents the 00:00 card from lingering until the
+            // Firestore stream delivers status:'active' (which can be delayed by
+            // several seconds and is unacceptable UX).  The stream will
+            // eventually deliver the real confirmed state and the meeting will
+            // satisfy m.isConfirmed directly.
+            final deadlineElapsed = m.isActive &&
+                m.hostStep >= 5 &&
+                m.suggestDeadline != null &&
+                !m.suggestDeadline!.isAfter(
+                  MeetingPointService.serverNow,
+                );
+            if (m.isConfirmed || deadlineElapsed) {
               confirmedMeeting ??= m;
             } else if (m.isHost(uid)) {
               activeMeeting ??= m;
@@ -3035,9 +3079,12 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         // Reconcile confirmed meetings that may be stuck due to old app code
         // not writing meeting-level status transitions (completion/cancellation).
         // Runs at most once per meeting ID so it doesn't loop on every rebuild.
-        // After writing, force a stream reset so the UI updates immediately
-        // without waiting for the next Firestore push notification.
+        // Only fire when the meeting is ACTUALLY confirmed (status:'active') —
+        // not when it's only locally-treated-as-confirmed while still pending,
+        // so we don't prematurely lock the ID into _reconciledArrivalMeetingIds
+        // before the real Firestore write arrives.
         if (confirmedMeeting != null &&
+            confirmedMeeting.isConfirmed &&
             !_reconciledArrivalMeetingIds.contains(confirmedMeeting.id)) {
           _reconciledArrivalMeetingIds.add(confirmedMeeting.id);
           MeetingPointService.reconcileArrivalPhase(confirmedMeeting).then((_) {
@@ -3047,6 +3094,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
         // Session expiry: auto-complete the meeting once expiresAt has passed.
         if (confirmedMeeting != null &&
+            confirmedMeeting.isConfirmed &&
             confirmedMeeting.expiresAt != null &&
             !confirmedMeeting.expiresAt!.isAfter(
               MeetingPointService.serverNow,
@@ -4305,7 +4353,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
         title: 'Cancel Participation',
         message:
             'Are you sure you want to cancel your participation in this meeting point?',
-        cancelText: 'Discard',
+        cancelText: 'Keep',
         confirmText: 'Cancel Participation',
       );
       if (confirmed != true) return;
@@ -6604,67 +6652,72 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     final venueName = meeting.venueName.isEmpty
         ? 'Meeting Point'
         : meeting.venueName;
-    return Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(24),
-          topRight: Radius.circular(24),
+    return SafeArea(
+      top: false,
+      left: false,
+      right: false,
+      child: Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(24),
+            topRight: Radius.circular(24),
+          ),
         ),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(height: 12),
-          Container(
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: Colors.grey[300],
-              borderRadius: BorderRadius.circular(2),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 14, 20, 4),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Set your current location',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.kGreen,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Set your current location',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.kGreen,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'As step 1, set your location to find suitable meeting point for all participants',
-                  style: TextStyle(fontSize: 13, color: Colors.grey[600]),
-                ),
-              ],
+                  const SizedBox(height: 4),
+                  Text(
+                    'As step 1, set your location to find suitable meeting point for all participants',
+                    style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 28),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: SecondaryButton(
-              text: 'Pin on Map',
-              icon: Icons.location_on_outlined,
-              onPressed: () => Navigator.pop(ctx, 'map'),
+            const SizedBox(height: 28),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: SecondaryButton(
+                text: 'Pin on Map',
+                icon: Icons.location_on_outlined,
+                onPressed: () => Navigator.pop(ctx, 'map'),
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: PrimaryButton(
-              text: 'Scan With Camera',
-              icon: Icons.camera_alt_outlined,
-              onPressed: () => Navigator.pop(ctx, 'camera'),
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: PrimaryButton(
+                text: 'Scan With Camera',
+                icon: Icons.camera_alt_outlined,
+                onPressed: () => Navigator.pop(ctx, 'camera'),
+              ),
             ),
-          ),
-          SizedBox(height: MediaQuery.of(ctx).padding.bottom + 35),
-        ],
+            SizedBox(height: MediaQuery.of(ctx).padding.bottom + 35),
+          ],
+        ),
       ),
     );
   }

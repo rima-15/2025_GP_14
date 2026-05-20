@@ -9,7 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:madar_app/nav/navmesh.dart';
-import 'package:madar_app/screens/navigation_flow_complete.dart'
+import 'package:madar_app/screens/set_location_flow.dart'
     show SetYourLocationDialog;
 import 'package:madar_app/screens/AR_page.dart';
 import 'package:madar_app/screens/meeting_point_draft_storage.dart';

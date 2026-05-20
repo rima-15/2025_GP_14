@@ -15,7 +15,7 @@ import 'package:model_viewer_plus/model_viewer_plus.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:madar_app/nav/navmesh.dart';
-import 'navigation_flow_complete.dart';
+import 'set_location_flow.dart';
 import 'package:madar_app/screens/AR_page.dart';
 
 class PathOverviewScreen extends StatefulWidget {

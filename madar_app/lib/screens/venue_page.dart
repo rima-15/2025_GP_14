@@ -15,7 +15,7 @@ import '../services/app_config.dart';
 import 'package:webview_flutter/webview_flutter.dart'
     show JavaScriptMessage, WebViewController;
 import 'category_page.dart';
-import 'navigation_flow_complete.dart';
+import 'set_location_flow.dart';
 
 // ----------------------------------------------------------------------------
 // Constants

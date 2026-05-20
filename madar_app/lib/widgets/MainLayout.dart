@@ -3,7 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:madar_app/screens/home_page.dart';
 import 'package:madar_app/screens/explore_page.dart';
-import 'package:madar_app/screens/track_page.dart';
+import 'package:madar_app/screens/social_page.dart';
 import 'package:madar_app/screens/signin_page.dart';
 import 'package:madar_app/screens/profile_page.dart';
 import 'package:madar_app/screens/settings_page.dart';

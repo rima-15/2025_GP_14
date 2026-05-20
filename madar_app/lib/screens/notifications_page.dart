@@ -10,7 +10,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:madar_app/services/notification_service.dart';
-import 'package:madar_app/screens/navigation_flow_complete.dart';
+import 'package:madar_app/screens/set_location_flow.dart';
 import 'package:madar_app/screens/create_meeting_point_form.dart';
 
 // ----------------------------------------------------------------------------

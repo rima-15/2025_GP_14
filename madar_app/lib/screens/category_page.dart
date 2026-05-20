@@ -5,7 +5,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:madar_app/theme/theme.dart';
 import 'package:madar_app/api/place_rating_service.dart';
-import 'navigation_flow_complete.dart';
+import 'set_location_flow.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 // ----------------------------------------------------------------------------

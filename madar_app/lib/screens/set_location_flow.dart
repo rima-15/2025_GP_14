@@ -17,8 +17,8 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:madar_app/screens/AR_page.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:madar_app/nav/navmesh.dart';
-import 'path_overview_screen.dart';
-export 'path_overview_screen.dart';
+import 'navigation_page.dart';
+export 'navigation_page.dart';
 
 // ============================================================================
 // 1. TRIGGER: Navigation Arrow Click Handler

@@ -16,7 +16,7 @@ The system aims to improve visitors satisfication and reduce confusion during la
 - **AR Tools :** Unity, ARCore, MultiSet SDK  
 - **3D Modeling :** Blender  
 - **Backend & Cloud Services :** Firebase 
-- **Other Tools :** Figma, GitHub, Jira, Google API
+- **Other Tools :** Figma, GitHub, Jira, Google Maps API
 
 ## Launching Instructions
 

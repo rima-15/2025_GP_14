@@ -3497,6 +3497,96 @@ export const onTrackStarted = onSchedule("every 1 minutes", async () => {
 
 -------------------------------------------------------------------*/
 
+const notifyTrackCompletedIfNeeded = async (
+  requestRef: FirebaseFirestore.DocumentReference,
+  requestId: string
+): Promise<void> => {
+  const notificationInfo = await db.runTransaction(async (transaction) => {
+    const requestSnap = await transaction.get(requestRef);
+    if (!requestSnap.exists) return null;
+
+    const data = requestSnap.data();
+    if (!data || data.completedNotified === true) return null;
+
+    const status = (data.status ?? "").toString().trim();
+    if (status !== "accepted" && status !== "completed") return null;
+
+    const receiverId = (data.receiverId ?? "").toString().trim();
+    if (!receiverId) return null;
+
+    const senderName =
+      (data.senderName ?? "Someone").toString().trim() || "Someone";
+
+    const notifRef = db.collection("notifications").doc();
+    const notifId = notifRef.id;
+
+    transaction.set(notifRef, {
+      userId: receiverId,
+      type: "trackCompleted",
+      requiresAction: false,
+      isRead: false,
+      title: "Tracking Completed",
+      body: `Tracking session from ${senderName} has ended`,
+      data: {
+        requestId: notifId,
+        trackRequestId: requestId,
+        senderId: data.senderId ?? null,
+      },
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    const requestUpdate: Record<string, unknown> = {
+      completedNotified: true,
+    };
+
+    if (status !== "completed") {
+      requestUpdate.status = "completed";
+    }
+
+    if (!data.completedAt) {
+      requestUpdate.completedAt = admin.firestore.FieldValue.serverTimestamp();
+    }
+
+    transaction.update(requestRef, requestUpdate);
+
+    return {
+      notifId,
+      receiverId,
+      senderName,
+    };
+  });
+
+  if (!notificationInfo) return;
+
+  const receiverDoc = await db.collection("users").doc(notificationInfo.receiverId).get();
+  const receiverData = receiverDoc.exists ? receiverDoc.data() : undefined;
+  const tokens: string[] = Array.isArray(receiverData?.fcmTokens)
+    ? receiverData.fcmTokens.filter((token: unknown): token is string =>
+        typeof token === "string"
+      )
+    : [];
+
+  if (tokens.length === 0) return;
+
+  await sendPushIfEnabled({
+    userId: notificationInfo.receiverId,
+    category: "trackingUpdates",
+    userData: receiverData,
+    message: {
+      notification: {
+        title: "Tracking Completed",
+        body: `Tracking session from ${notificationInfo.senderName} has ended`,
+      },
+      data: {
+        type: "trackCompleted",
+        requestId: notificationInfo.notifId,
+        trackRequestId: requestId,
+      },
+      tokens,
+    },
+  });
+};
+
 export const onTrackCompleted = onSchedule("every 1 minutes", async () => {
   const now = admin.firestore.Timestamp.now();
 
@@ -3508,95 +3598,35 @@ export const onTrackCompleted = onSchedule("every 1 minutes", async () => {
 
   if (snap.empty) return;
 
-  const batch = db.batch();
-  const userCache = new Map<
-    string,
-    {
-      tokens: string[];
-      data: FirebaseFirestore.DocumentData | undefined;
-    }
-  >();
-
-  const getUserInfo = async (uid: string) => {
-    if (userCache.has(uid)) return userCache.get(uid)!;
-    const userDoc = await db.collection("users").doc(uid).get();
-    if (!userDoc.exists) {
-      const info = {
-        tokens: [] as string[],
-        data: undefined,
-      };
-      userCache.set(uid, info);
-      return info;
-    }
-    const data = userDoc.data();
-    const tokens: string[] = Array.isArray(data?.fcmTokens)
-      ? data.fcmTokens.filter((token: unknown): token is string =>
-          typeof token === "string"
-        )
-      : [];
-    const info = { tokens, data };
-    userCache.set(uid, info);
-    return info;
-  };
-
   for (const doc of snap.docs) {
-    const data = doc.data();
-    if (data.completedNotified === true) continue;
-
-    const receiverId = data.receiverId;
-    if (!receiverId) continue;
-
-    const senderName =
-      (data.senderName ?? "Someone").toString().trim() || "Someone";
-
-    const receiverInfo = await getUserInfo(receiverId);
-    const notifRef = db.collection("notifications").doc();
-    const notifId = notifRef.id;
-
-    if (receiverInfo.tokens.length > 0) {
-      await sendPushIfEnabled({
-        userId: receiverId,
-        category: "trackingUpdates",
-        userData: receiverInfo.data,
-        message: {
-          notification: {
-            title: "Tracking Completed",
-            body: `Tracking session from ${senderName} has ended`,
-          },
-          data: {
-            type: "trackCompleted",
-            requestId: notifId,
-            trackRequestId: doc.id,
-          },
-          tokens: receiverInfo.tokens,
-        },
-      });
-    }
-
-    batch.set(notifRef, {
-      userId: receiverId,
-      type: "trackCompleted",
-      requiresAction: false,
-      isRead: false,
-      title: "Tracking Completed",
-      body: `Tracking session from ${senderName} has ended`,
-      data: {
-        requestId: notifId,
-        trackRequestId: doc.id,
-        senderId: data.senderId ?? null,
-      },
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-    batch.update(doc.ref, {
-      status: "completed",
-      completedNotified: true,
-      completedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
+    await notifyTrackCompletedIfNeeded(doc.ref, doc.id);
   }
-
-  await batch.commit();
 });
+
+export const onTrackCompletedStatusChanged = onDocumentUpdated(
+  "trackRequests/{requestId}",
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    const afterRef = event.data?.after.ref;
+    if (!before || !after) return;
+    if (!afterRef) return;
+
+    const beforeStatus = (before.status ?? "").toString().trim();
+    const afterStatus = (after.status ?? "").toString().trim();
+    if (beforeStatus === afterStatus) return;
+    if (beforeStatus !== "accepted" || afterStatus !== "completed") return;
+    if (after.completedNotified === true) return;
+
+    const endAt =
+      after.endAt && typeof after.endAt.toDate === "function"
+        ? after.endAt.toDate()
+        : null;
+    if (!endAt || endAt > new Date()) return;
+
+    await notifyTrackCompletedIfNeeded(afterRef, event.params.requestId);
+  }
+);
 
 /* ------------------------------------------------------------------
 

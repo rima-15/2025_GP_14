@@ -2,18 +2,18 @@
 > **AI-Powered Indoor Navigation & AR Guidance System**
  
 Madar is a 2025 Graduation Project developed at **King Saud University**   
-It is an augmented reality mobile application that helps visitors navigate large indoor venues — stadiums, malls, festivals, and expo centers — by combining AR-based turn-by-turn navigation, interactive 3D multi-floor maps, real-time friend tracking, and smart meeting-point suggestions.
+It is an augmented reality mobile application that helps visitors navigate large indoor venues — stadiums, malls, festivals, and expo centers — by combining AR-based turn-by-turn navigation, interactive 3D multi-floor maps, real-time friend tracking, and smart meeting-point suggestions
  
-> Built in alignment with Saudi Arabia's **Vision 2030** to enhance visitor experience at large-scale public events.
+> Built in alignment with Saudi Arabia's **Vision 2030** to enhance visitor experience at large-scale public events
 
 ## Key Features
-- **AR Navigation** — Turn-by-turn directions overlaid on the real world through the device camera, dynamically adapting to the user's position and point of view.
-- **AR Exploration** — Scan surroundings to discover nearby facilities, services, and points of interest (POIs).
-- **Interactive 3D Map** — Multi-floor venue visualization with a highlighted path from the user's location to their destination.
-- **Friend Tracking & Navigation** — Navigate directly toward a tracked friend's live position.
-- **Smart Meeting Point** — The app automatically suggests an optimal meeting point based on the shortest paths for all group members.
+- **AR Navigation** — Turn-by-turn directions overlaid on the real world through the device camera, dynamically adapting to the user's position and point of view
+- **AR Exploration** — Scan surroundings to discover nearby facilities, services, and points of interest (POIs)
+- **Interactive 3D Map** — Multi-floor venue visualization with a highlighted path from the user's location to their destination
+- **Friend Tracking & Navigation** — Navigate directly toward a tracked friend's live position
+- **Smart Meeting Point** — The app automatically suggests an optimal meeting point based on the shortest paths for all group members
 
-> **Current prototype venue:** Solitaire Mall, Riyadh. Other venues show basic informational content.
+> **Current prototype venue:** Solitaire Mall, Riyadh. Other venues show basic informational content
 
 ## Technologies 
 | Layer | Technology |
@@ -38,7 +38,7 @@ Before you begin, make sure you have the following installed and configured:
  
 ## Launching Instructions
 
-### 1.Clone the Repository
+### 1. Clone the Repository
 
 Open the Command Prompt or Terminal and run the following command:
 
@@ -46,14 +46,14 @@ Open the Command Prompt or Terminal and run the following command:
 git clone https://github.com/rima-15/2025_GP_14
 ```
 
-### 2.Install Dependencies
+### 2. Install Dependencies
 
 In the project directory, run the following command to fetch all necessary packages:
 
 ```bash
 flutter pub get
 ```
-### 3.Unity Setup (Required for AR Features)
+### 3. Unity Setup (Required for AR Features)
 
 - Step 1 - **Download the full Unity project ZIP** from Google Drive:  
   https://drive.google.com/file/d/1F7o6-_UUwTj8-sqNXyBySFHWlEhCujWp/view?usp=drive_link
@@ -78,7 +78,7 @@ flutter pub get
     with the file you downloaded.
 
 #### Note: 
-We shared the Unity project as a ZIP on Google Drive because Unity files exceed GitHub’s size limits and the unityLibrary output differs across devices. Using a ZIP ensures a consistent, stable version of the AR project that can be opened and exported reliably with Unity 6.
+We shared the Unity project as a ZIP on Google Drive because Unity files exceed GitHub’s size limits and the unityLibrary output differs across devices. Using a ZIP ensures a consistent, stable version of the AR project that can be opened and exported reliably with Unity 6
 ### Run the App
 
 To launch the app on an Android device or emulator, use:
@@ -97,13 +97,13 @@ dart --version
 ```
 
 - **`unityLibrary` folder not found**
-You must complete the Unity export step (Step 4 above) before running the Flutter app. The `unityLibrary` folder is not committed to the repository — it is generated locally from your Unity export.
+You must complete the Unity export step (Step 4 above) before running the Flutter app. The `unityLibrary` folder is not committed to the repository — it is generated locally from your Unity export
  
 - **AR features not working**
-Ensure your Android device supports ARCore. Check the [supported devices list](https://developers.google.com/ar/devices). ARCore must also be installed on the device (it installs automatically on supported devices via Google Play).
+Ensure your Android device supports ARCore. Check the [supported devices list](https://developers.google.com/ar/devices). ARCore must also be installed on the device (it installs automatically on supported devices via Google Play)
 
 - **Google Drive links inaccessible**
-If either Drive link is unavailable, contact the team directly (see below).
+If either Drive link is unavailable, contact the team directly (see below)
 
 ---
  

@@ -5,12 +5,18 @@ The goal of this project is to develop an **AI-powered guidance system for indoo
 Madar helps attendees navigate entrances, exits, and facilites, while also enabling them to locate family members or friends easily  
 The system aims to improve visitors satisfication and reduce confusion during large gatherings
 
+## Key Features
+- Real-time Augmented Reality (AR) navigation and exploration
+- 3D Map visualization with multi-floor navigation support
+- Real-time tracking requests to locate friends and family
+- Smart meeting point creation based on the group's shortest paths and overall convenience
+
 ## Technologies 
 - **Mobile Framework :** Flutter & Dart (cross-platform development)  
 - **AR Tools :** Unity, ARCore, MultiSet SDK  
 - **3D Modeling :** Blender  
 - **Backend & Cloud Services :** Firebase 
-- **Other Tools :** Figma, GitHub, Jira  
+- **Other Tools :** Figma, GitHub, Jira, Google API
 
 ## Launching Instructions
 

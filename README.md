@@ -1,9 +1,10 @@
-# Madar
-## Introduction 
-*Madar* is our 2025 Graduation Project at King Saud University
-The goal of this project is to develop an **AI-powered guidance system for indoor navigation** designed for large, crowded venues such as stadiums, events, malls, and festivals
-Madar helps attendees navigate entrances, exits, and facilites, while also enabling them to locate family members or friends easily  
-The system aims to improve visitors satisfication and reduce confusion during large gatherings
+# Madar — مدار
+> **AI-Powered Indoor Navigation & AR Guidance System**
+ 
+Madar is a 2025 Graduation Project developed at **King Saud University** (IT 496).  
+It is an augmented reality mobile application that helps visitors navigate large indoor venues — stadiums, malls, festivals, and expo centers — by combining AR-based turn-by-turn navigation, interactive 3D multi-floor maps, real-time friend tracking, and smart meeting-point suggestions.
+ 
+> Built in alignment with Saudi Arabia's **Vision 2030** to enhance visitor experience at large-scale public events.
 
 ## Key Features
 - Real-time Augmented Reality (AR) navigation and exploration

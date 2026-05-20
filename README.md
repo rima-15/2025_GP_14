@@ -97,7 +97,7 @@ dart --version
 ```
 
 - **`unityLibrary` folder not found**
-You must complete the Unity export step (Step 4 above) before running the Flutter app. The `unityLibrary` folder is not committed to the repository — it is generated locally from your Unity export
+You must complete the Unity export step (Step 3 above) before running the Flutter app. The `unityLibrary` folder is not committed to the repository — it is generated locally from your Unity export
  
 - **AR features not working**
 Ensure your Android device supports ARCore. Check the [supported devices list](https://developers.google.com/ar/devices). ARCore must also be installed on the device (it installs automatically on supported devices via Google Play)

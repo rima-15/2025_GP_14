@@ -1,5 +1,6 @@
-# Madar — مدار
-
+<p align="center">
+  <img src="madar_app/images/Madar2.png" alt="Madar Logo" width="180"/>
+</p>
 <p align="center">
   <b>AI-Powered Indoor Navigation & AR Guidance System</b>
 </p>

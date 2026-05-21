@@ -92,7 +92,7 @@ The Unity project is required to run the AR features.
 Download the full Unity project ZIP from Google Drive:
 
 ```text
-https://drive.google.com/file/d/1F7o6-_UUwTj8-sqNXyBySFHWlEhCujWp/view?usp=drive_link
+https://drive.google.com/file/d/1NNqKsQVFbJupl3vjhj7zvEinXpqixeg2/view?usp=sharing
 ```
 
 #### Step 2 — Open the Project in Unity 6

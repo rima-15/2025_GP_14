@@ -121,7 +121,9 @@ flutter_native_splash:
 flutter_launcher_icons:
   android: true
   ios: false
-  image_path: "images/MadarLogoWithBackground"
+  image_path: "images/app_icon_padded.png"
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "images/app_icon_padded.png"
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
 

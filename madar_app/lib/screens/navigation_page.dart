@@ -579,9 +579,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       debugPrint("Navmesh loaded for floor $fNumber: $assetPath");
       return nm;
     } catch (e) {
-      debugPrint(
-        "Failed to load navmesh for floor $fNumber ($assetPath): $e",
-      );
+      debugPrint("Failed to load navmesh for floor $fNumber ($assetPath): $e");
       return null;
     }
   }
@@ -707,19 +705,16 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       final destF = _toFNumber(destLabel);
       if (currF == destF && _destPosBlender != null) {
         // Determine if destination is a POI (has a material to highlight)
-        final bool isPoi =
+        final bool shouldHighlightPoi =
             _pendingPoiToHighlight != null &&
-            _pendingPoiToHighlight!.trim().isNotEmpty;
+            _pendingPoiToHighlight!.trim().isNotEmpty &&
+            !_isGateDestination();
 
-        if (isPoi) {
-          // POI destination: clear any leftover destination pin,
-          // the highlight will be handled by _pushDestinationHighlightToJsPath
+        if (shouldHighlightPoi) {
           await _webCtrl?.runJavaScript('window.clearDestPinFromFlutter();');
         } else {
-          // Custom pin: show the green destination pin and clear any POI highlight
           final destGltf = _blenderToGltf(_destPosBlender!);
           await _pushDestPinToJs(destGltf);
-          // _pendingPoiToHighlight is null, so _pushDestinationHighlightToJsPath will clear highlights
         }
       } else {
         // Not on the destination floor: clear both pin and highlight
@@ -815,6 +810,13 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       return;
     }
 
+    if (_isGateDestination()) {
+      await c.runJavaScript(
+        'window.clearPoiHighlightFromFlutter && window.clearPoiHighlightFromFlutter();',
+      );
+      return;
+    }
+
     final name = _pendingPoiToHighlight;
     if (name == null || name.trim().isEmpty) {
       await c.runJavaScript(
@@ -870,6 +872,20 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     return type == 'poi' &&
         material.isNotEmpty &&
         material.toLowerCase() != 'null';
+  }
+
+  bool _isGateDestination() {
+    final dest = _selectedDestPoi;
+    if (dest == null) return false;
+
+    final category = (dest['category'] ?? '').toString().trim().toLowerCase();
+
+    final categories = dest['categories'];
+    final hasGateCategory =
+        categories is List &&
+        categories.any((c) => c.toString().trim().toLowerCase() == 'gates');
+
+    return category == 'gates' || hasGateCategory;
   }
 
   bool _isCustomPinPoint(Map<String, dynamic>? point) {
@@ -1303,6 +1319,8 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
         'z': first['z'],
         'material': first['material'],
         'id': first['id'],
+        'category': first['category'],
+        'categories': first['categories'] ?? [],
       };
 
       if (_venueMaps.isNotEmpty) {
@@ -1751,9 +1769,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
           'pref=$pref start=$startLabel($startF) dest=$destFloor($destF) matched=${candidates.length} pool=${pool.length}',
         );
         if (pool.isEmpty) {
-          debugPrint(
-            "No connectors found linking $startLabel -> $destFloor",
-          );
+          debugPrint("No connectors found linking $startLabel -> $destFloor");
           await _syncOverlaysForCurrentFloor();
           return;
         }
@@ -1875,8 +1891,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     debugPrint('PATH_CHANNEL: $message');
   }
 
-  static const String _pathViewerJs =
-      r'''console.log("PathViewer JS injected");
+  static const String _pathViewerJs = r'''console.log("PathViewer JS injected");
 postToTest("PathViewer JS top-level executed");
 function postToPOI(obj) {
   try { POI_CHANNEL.postMessage(JSON.stringify(obj)); return true; } catch (e) { return false; }

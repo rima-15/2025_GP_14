@@ -933,7 +933,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     required double z,
   }) {
     // Blender (Z-up) -> glTF (Y-up)
-    // ✅ بدون عكس X
+    // بدون عكس X
     return {'x': x, 'y': z, 'z': -y};
   }
 
@@ -2168,11 +2168,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     try {
       final nm = await NavMesh.loadAsset(assetPath);
       _navmeshCache[fNumber] = nm;
-      debugPrint("✅ Navmesh loaded for floor $fNumber: $assetPath");
+      debugPrint("Navmesh loaded for floor $fNumber: $assetPath");
       return nm;
     } catch (e) {
       debugPrint(
-        "❌ Failed to load navmesh for floor $fNumber ($assetPath): $e",
+        "Failed to load navmesh for floor $fNumber ($assetPath): $e",
       );
       return null;
     }
@@ -2183,7 +2183,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
     try {
       const path = 'assets/connectors/connectors_merged_local.json';
       final raw = await rootBundle.loadString(path);
-      debugPrint('✅ Connectors loaded: $path');
+      debugPrint('Connectors loaded: $path');
 
       final decoded = jsonDecode(raw);
       final List<dynamic> list = (decoded is List)
@@ -2263,11 +2263,11 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
 
       _connectors = out;
       _connectorsLoaded = true;
-      debugPrint("✅ Connectors parsed: ${_connectors.length}");
+      debugPrint("Connectors parsed: ${_connectors.length}");
     } catch (e) {
       _connectors = const [];
       _connectorsLoaded = true;
-      debugPrint("❌ Failed to load connectors: $e");
+      debugPrint("Failed to load connectors: $e");
     }
   }
 
@@ -5512,7 +5512,7 @@ window.isViewerReady = function(){ return !!window.__viewerReady; };
                 onWebViewCreated: (controller) {
                   _trackMapController = controller;
 
-                  _pendingPinApply = true; // ✅ مهم
+                  _pendingPinApply = true; // مهم
 
                   _applyPinsWhenViewerReady();
                 },

@@ -21,8 +21,6 @@ import 'set_location_flow.dart';
 // Constants
 // ----------------------------------------------------------------------------
 
-const Color kPrimaryGreen = Color(0xFF777D63);
-
 // ----------------------------------------------------------------------------
 // Venue Page
 // ----------------------------------------------------------------------------
@@ -777,7 +775,7 @@ class _VenuePageState extends State<VenuePage>
             shape: BoxShape.circle,
           ),
           child: IconButton(
-            icon: const Icon(Icons.arrow_back, color: kPrimaryGreen, size: 20),
+            icon: const Icon(Icons.arrow_back, color: kGreen, size: 20),
             onPressed: () => Navigator.pop(context),
           ),
         ),
@@ -785,8 +783,8 @@ class _VenuePageState extends State<VenuePage>
       body: _loading
           ? Center(
               child: CircularProgressIndicator(
-                color: kPrimaryGreen,
-                backgroundColor: kPrimaryGreen.withOpacity(0.2),
+                color: kGreen,
+                backgroundColor: kGreen.withOpacity(0.2),
               ),
             )
           : _error != null
@@ -837,7 +835,7 @@ class _VenuePageState extends State<VenuePage>
                                 style: TextStyle(
                                   fontSize: isSmallScreen ? 20 : 22,
                                   fontWeight: FontWeight.w700,
-                                  color: kPrimaryGreen,
+                                  color: kGreen,
                                 ),
                               ),
                               const SizedBox(height: 4),
@@ -1114,8 +1112,8 @@ class _VenuePageState extends State<VenuePage>
                     }
                     return CircularProgressIndicator(
                       strokeWidth: 2,
-                      color: kPrimaryGreen,
-                      backgroundColor: kPrimaryGreen.withOpacity(0.2),
+                      color: kGreen,
+                      backgroundColor: kGreen.withOpacity(0.2),
                     );
                   },
                 ),
@@ -1175,14 +1173,14 @@ class _VenuePageState extends State<VenuePage>
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(icon, color: kPrimaryGreen, size: 20),
+                Icon(icon, color: kGreen, size: 20),
                 const SizedBox(width: 6),
                 Text(
                   label,
                   maxLines: 1,
                   style: const TextStyle(
                     fontSize: 13,
-                    color: kPrimaryGreen,
+                    color: kGreen,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
@@ -1436,8 +1434,8 @@ class _VenuePageState extends State<VenuePage>
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               CircularProgressIndicator(
-                color: kPrimaryGreen,
-                backgroundColor: kPrimaryGreen.withOpacity(0.2),
+                color: kGreen,
+                backgroundColor: kGreen.withOpacity(0.2),
               ),
               const SizedBox(height: 8),
               const Text('Loading maps...'),
@@ -1779,7 +1777,7 @@ class _FloorMapViewerState extends State<_FloorMapViewer> {
           minCameraOrbit: "auto 0deg auto",
           maxCameraOrbit: "auto 90deg auto",
           cameraTarget: "0m 0m 0m",
-          relatedJs: r'''console.log("✅ relatedJs injected");
+          relatedJs: r'''console.log("relatedJs injected");
 
 // ---------------------------
 // Channels
@@ -2190,7 +2188,7 @@ function doPickAt(viewer, x, y, modeLabel) {
 
 
 // Try to find the CENTER of the tapped material region in screen-space (CSS pixels).
-// This makes the bubble appear near the middle of the POI even if the user tapped a corner.
+// Centers the bubble on the tapped region, not just the raw tap point.
 function findRegionCenterCss(viewer, startX, startY, matName) {
   try {
     if (!viewer || typeof viewer.materialFromPoint !== "function" || !matName) {
@@ -2303,7 +2301,7 @@ function setupViewer() {
 var tries = 0;
 var timer = setInterval(function() {
   tries++;
-  var ok1 = postToTest("✅ JS is alive");
+  var ok1 = postToTest("JS is alive");
   var ok2 = setupViewer();
   if ((ok1 && ok2) || tries > 30) clearInterval(timer);
 }, 300);
@@ -2312,7 +2310,7 @@ var timer = setInterval(function() {
             JavascriptChannel(
               'JS_TEST_CHANNEL',
               onMessageReceived: (JavaScriptMessage message) {
-                debugPrint("✅ JS_TEST_CHANNEL: ${message.message}");
+                debugPrint("JS_TEST_CHANNEL: ${message.message}");
               },
             ),
             JavascriptChannel(
@@ -2526,7 +2524,7 @@ class _PinStartLocationScreenState extends State<PinStartLocationScreen> {
             maxCameraOrbit: "auto 90deg auto",
             cameraTarget: "0m 0m 0m",
             relatedJs: r'''
-console.log("✅ PinStartLocation relatedJs injected");
+console.log("PinStartLocation relatedJs injected");
 
 function postToPOI(msg) {
   try { POI_CHANNEL.postMessage(msg); return true; } catch (e) { return false; }
@@ -2597,7 +2595,7 @@ window.highlightPoiFromFlutter = function(name) {
   }
 
   const ok = _applyPoiHighlight(viewer, n);
-  postToTest(ok ? ("✅ highlightPoiFromFlutter applied: " + n) : ("⚠️ highlightPoiFromFlutter not found yet: " + n));
+  postToTest(ok ? ("highlightPoiFromFlutter applied: " + n) : ("highlightPoiFromFlutter not found yet: " + n));
 
   if (!ok) {
     window.__highlightRetry = (window.__highlightRetry || 0) + 1;
@@ -2658,7 +2656,7 @@ function setupPinMode() {
 var tries = 0;
 var timer = setInterval(function() {
   tries++;
-  var ok1 = postToTest("✅ PinStartLocation JS alive");
+  var ok1 = postToTest("PinStartLocation JS alive");
   var ok2 = setupPinMode();
   if ((ok1 && ok2) || tries > 30) clearInterval(timer);
 }, 300);
@@ -2677,7 +2675,7 @@ function setupViewer() {
   }
 
   viewer.addEventListener("load", () => {
-    postToTest("✅ PinStartLocation model load");
+    postToTest("PinStartLocation model load");
     applyPending();
   });
 
@@ -2696,7 +2694,7 @@ postToTest("PinStartLocation JS alive");
               JavascriptChannel(
                 'JS_TEST_CHANNEL',
                 onMessageReceived: (JavaScriptMessage message) {
-                  debugPrint("✅ JS_TEST_CHANNEL (pin): ${message.message}");
+                  debugPrint("JS_TEST_CHANNEL (pin): ${message.message}");
 
                   if (!_jsBridgeReady &&
                       message.message.contains('PinStartLocation JS alive')) {
@@ -2857,7 +2855,7 @@ class _FloorMapSectionState extends State<_FloorMapSection> {
     sortedMaps.sort((a, b) {
       final ra = floorRank(a['floorNumber'] ?? '');
       final rb = floorRank(b['floorNumber'] ?? '');
-      return rb.compareTo(ra); // ✅ reverse order: F1 above GF
+      return rb.compareTo(ra); // reverse order: F1 above GF
     });
 
     return Container(
@@ -2881,7 +2879,7 @@ class _FloorMapSectionState extends State<_FloorMapSection> {
                 _FloorMapViewer(
                   key: ValueKey(
                     _currentFloor,
-                  ), // ✅ forces rebuild when floor changes
+                  ), // forces rebuild when floor changes
                   currentFloor: _currentFloor,
                   placeId: widget.placeId,
                 ),
@@ -2916,7 +2914,7 @@ class _FloorMapSectionState extends State<_FloorMapSection> {
         width: 42,
         height: 36,
         decoration: BoxDecoration(
-          color: isSelected ? kPrimaryGreen : Colors.white,
+          color: isSelected ? kGreen : Colors.white,
           borderRadius: BorderRadius.circular(8),
           boxShadow: [
             BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 4),
@@ -3012,8 +3010,8 @@ class _DiscoverMoreSectionState extends State<_DiscoverMoreSection>
     if (!_urlsLoaded || _categoryData.isEmpty) {
       return Center(
         child: CircularProgressIndicator(
-          color: kPrimaryGreen,
-          backgroundColor: kPrimaryGreen.withOpacity(0.2),
+          color: kGreen,
+          backgroundColor: kGreen.withOpacity(0.2),
         ),
       );
     }
@@ -3284,8 +3282,8 @@ class _PhotoStripWidgetState extends State<_PhotoStripWidget>
                   child: !_urlsLoaded
                       ? CircularProgressIndicator(
                           strokeWidth: 2,
-                          color: kPrimaryGreen,
-                          backgroundColor: kPrimaryGreen.withOpacity(0.2),
+                          color: kGreen,
+                          backgroundColor: kGreen.withOpacity(0.2),
                         )
                       : const Icon(Icons.image_not_supported, size: 24),
                 ),

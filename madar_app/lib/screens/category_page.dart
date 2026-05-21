@@ -185,7 +185,7 @@ class _CategoryPageState extends State<CategoryPage>
     );
 
     if (material.isEmpty) {
-      debugPrint('❌ No material field found in Firestore for "$placeName"');
+      debugPrint('No material field found in Firestore for "$placeName"');
       return;
     }
 

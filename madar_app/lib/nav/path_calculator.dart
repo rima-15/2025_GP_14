@@ -38,6 +38,8 @@ typedef ConnectorDirectionAllowed = bool Function(String normType, int fromFloor
 typedef ConnectorPreferenceMatcher = bool Function(String normType, String preference);
 
 class PathCalculator {
+  // Computes a walking route between two floors using the navmesh and connectors
+  // (stairs, elevators, escalators). Returns null if no valid path exists.
   static Future<PathComputationResult?> computeRoute({
     required Map<String, double> start,
     required Map<String, double> destination,
@@ -115,14 +117,15 @@ class PathCalculator {
       return directionOk(c) && connectorMatchesPreference(t, pref);
     }
 
+    // Prefer connectors matching the user's preference; fall back to any valid connector.
     final candidates = connectors.where((c) => linksFloors(c) && matchesPref(c)).toList();
     final pool = candidates.isNotEmpty
         ? candidates
         : connectors.where((c) => linksFloors(c) && directionOk(c)).toList();
 
-    debugPrint('🧭 pref=$pref start=$startFloorLabel($startF) dest=$destinationFloorLabel($destF) matched=${candidates.length} pool=${pool.length}');
+    debugPrint('pref=$pref start=$startFloorLabel($startF) dest=$destinationFloorLabel($destF) matched=${candidates.length} pool=${pool.length}');
     if (pool.isEmpty) {
-      debugPrint('⚠️ No connectors found linking $startFloorLabel -> $destinationFloorLabel');
+      debugPrint('No connectors found linking $startFloorLabel -> $destinationFloorLabel');
       return null;
     }
 
@@ -150,7 +153,7 @@ class PathCalculator {
     }
 
     if (best == null) {
-      debugPrint('⚠️ Could not compute a valid connector path.');
+      debugPrint('Could not compute a valid connector path.');
       return null;
     }
 
@@ -170,6 +173,8 @@ class PathCalculator {
     );
   }
 
+  // Resamples the raw funnel path at a fixed spacing, then caps the point count
+  // to keep the JS path renderer performant.
   static List<List<double>> _smoothAndResamplePath(List<List<double>> path) {
     var pts = _resampleByDistance(path, step: 0.06);
     const maxPts = 180;
@@ -234,6 +239,8 @@ class PathCalculator {
         (a[2] - b[2]).abs() < 1e-6;
   }
 
+  // Blender uses Z-up / Y-forward; GLTF (and the AR renderer) uses Y-up / Z-forward.
+  // Remapping: GLTF-x = Blender-x, GLTF-y = Blender-z, GLTF-z = −Blender-y
   static Map<String, double> _blenderToGltf(Map<String, double> b) {
     final xb = b['x'] ?? 0.0;
     final yb = b['y'] ?? 0.0;

@@ -16,8 +16,6 @@ import 'package:madar_app/theme/theme.dart';
 
 const double _riyadhLat = 24.7136;
 const double _riyadhLng = 46.6753;
-const Color kPrimaryGreen = Color(0xFF777D63);
-
 // ----------------------------------------------------------------------------
 // Home Page
 // ----------------------------------------------------------------------------
@@ -493,10 +491,10 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
               margin: const EdgeInsets.only(right: 8),
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
               decoration: BoxDecoration(
-                color: isSelected ? kPrimaryGreen : Colors.white,
+                color: isSelected ? kGreen : Colors.white,
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
-                  color: isSelected ? kPrimaryGreen : Colors.grey.shade300,
+                  color: isSelected ? kGreen : Colors.grey.shade300,
                   width: 1,
                 ),
               ),
@@ -743,9 +741,9 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
     return Row(
       children: List.generate(5, (index) {
         if (rating >= index + 1) {
-          return const Icon(Icons.star, color: kPrimaryGreen, size: 20);
+          return const Icon(Icons.star, color: kGreen, size: 20);
         } else if (rating > index && rating < index + 1) {
-          return const Icon(Icons.star_half, color: kPrimaryGreen, size: 20);
+          return const Icon(Icons.star_half, color: kGreen, size: 20);
         } else {
           return Icon(Icons.star_border, color: Colors.grey.shade400, size: 20);
         }
@@ -806,8 +804,8 @@ class HomePageState extends State<HomePage> with AutomaticKeepAliveClientMixin {
                   }
                   return CircularProgressIndicator(
                     strokeWidth: 2,
-                    color: kPrimaryGreen,
-                    backgroundColor: kPrimaryGreen.withOpacity(0.2),
+                    color: kGreen,
+                    backgroundColor: kGreen.withOpacity(0.2),
                   );
                 },
               ),

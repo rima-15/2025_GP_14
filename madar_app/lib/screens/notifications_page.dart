@@ -526,7 +526,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
           for (final d in snap.docs) {
             final requestId = d.data()['data']?['requestId'];
             if (requestId != null) {
-              map[requestId] = d.id; // 🔥 requestId → notificationDocId
+              map[requestId] = d.id; // requestId → notificationDocId
             }
           }
           return map;
@@ -848,8 +848,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
               message: d['body'] ?? '',
               timestamp: ts,
               isRead: d['isRead'] ?? false,
-              endAt: (d['data']?['endAt'] as Timestamp?)?.toDate(), // 🔥
-              requiresAction: d['requiresAction'] == true, // 🔥
+              endAt: (d['data']?['endAt'] as Timestamp?)?.toDate(), // 
+              requiresAction: d['requiresAction'] == true, // 
               actionTaken: d['actionTaken'] == true,
             );
           }).toList();
@@ -1211,7 +1211,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
         body: Stack(
           children: [
             StreamBuilder<Map<String, String>>(
-              stream: _notificationDocMap(), // 🔥 NEW
+              stream: _notificationDocMap(), // NEW
           builder: (context, docMapSnap) {
             final notifDocMap = docMapSnap.data ?? {};
 
@@ -4388,7 +4388,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
           notification.actionLabel = "Declined";
           notification.isRead = true;
 
-          _localReadOverride[notification.id] = true; // 🔥
+          _localReadOverride[notification.id] = true; // 
 
           _respondedNotifications.add(notification.id);
         });
@@ -5180,7 +5180,7 @@ class _ExpandableNotificationBodyState
           ),
         ],
       ),
-      // This ensures that when NOT expanded, it cuts off at 2 lines
+      // Clamp to 2 lines when collapsed
       maxLines: isExpanded ? null : 2,
       overflow: isExpanded ? TextOverflow.visible : TextOverflow.ellipsis,
     );

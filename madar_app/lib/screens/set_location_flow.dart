@@ -300,10 +300,10 @@ class NavigateToShopDialog extends StatelessWidget {
     NavMesh? nav;
     try {
       nav = await NavMesh.loadAsset('assets/nav_cor/navmesh_GF.json');
-      debugPrint('✅ Navmesh loaded for scan snapping');
+      debugPrint('Navmesh loaded for scan snapping');
     } catch (e) {
       nav = null;
-      debugPrint('⚠️ Navmesh not available for scan snapping: $e');
+      debugPrint('Navmesh not available for scan snapping: $e');
     }
 
     bool didReturn = false;
@@ -555,9 +555,9 @@ class _SetYourLocationDialogState extends State<SetYourLocationDialog> {
       final m = await NavMesh.loadAsset('assets/nav_cor/navmesh_GF.json');
       if (!mounted) return;
       setState(() => _navmeshF1 = m);
-      debugPrint('✅ Navmesh loaded (F1) for snapping');
+      debugPrint('Navmesh loaded (F1) for snapping');
     } catch (e) {
-      debugPrint('❌ Failed to load navmesh_GF.json: $e');
+      debugPrint('Failed to load navmesh_GF.json: $e');
     }
   }
 
@@ -595,11 +595,11 @@ class _SetYourLocationDialogState extends State<SetYourLocationDialog> {
           const Duration(hours: 1),
         );
         if (updatedAt.isBefore(oneHourAgo)) {
-          debugPrint('📍 Saved location is older than 1 hour – not loading.');
+          debugPrint('Saved location is older than 1 hour – not loading.');
           return;
         }
       } else {
-        debugPrint('📍 No updatedAt found – proceeding without time check.');
+        debugPrint('No updatedAt found – proceeding without time check.');
       }
 
       final bp = location['blenderPosition'];
@@ -644,7 +644,7 @@ class _SetYourLocationDialogState extends State<SetYourLocationDialog> {
           setState(() {
             _currentFloorURL = url;
           });
-          // ✅ Re‑send the pin after floor change so it appears on the correct floor
+          // Re‑send the pin after floor change so it appears on the correct floor
           if (_pickedPosGltf != null) {
             _pushUserPinToJs(_pickedPosGltf!);
           }
@@ -700,7 +700,7 @@ class _SetYourLocationDialogState extends State<SetYourLocationDialog> {
 
     final saved = _pickedFloorLabel.trim(); // "0"/"1"
     final current = _fNumberForUrl(_currentFloorURL); // "0"/"1"
-    debugPrint('📌 _pushUserPinToJs: saved="$saved", current="$current"');
+    debugPrint('_pushUserPinToJs: saved="$saved", current="$current"');
 
     if (saved.isNotEmpty && current.isNotEmpty && saved != current) {
       try {
@@ -715,7 +715,7 @@ class _SetYourLocationDialogState extends State<SetYourLocationDialog> {
     try {
       await c.runJavaScript(js);
     } catch (e) {
-      debugPrint('❌ runJavaScript failed: $e');
+      debugPrint('runJavaScript failed: $e');
     }
   }
 
@@ -731,13 +731,13 @@ class _SetYourLocationDialogState extends State<SetYourLocationDialog> {
     try {
       await c.runJavaScript(js);
     } catch (e) {
-      debugPrint('❌ highlight runJavaScript failed: $e');
+      debugPrint('highlight runJavaScript failed: $e');
     }
   }
 
   // JS: tap → positionAndNormalFromPoint → show hotspot pin → send JSON to Flutter via POI_CHANNEL
   String get _pinPickerJs => r'''
-console.log("✅ PinPicker relatedJs injected");
+console.log("PinPicker relatedJs injected");
 
 function postToPOI(obj) {
   try { POI_CHANNEL.postMessage(JSON.stringify(obj)); return true; } catch (e) { return false; }
@@ -884,9 +884,9 @@ function setUserPin(viewer, pos) {
     const rect = hs.getBoundingClientRect();
     postToTest(`🔍 Pin rect: ${rect.width}x${rect.height} at (${rect.left},${rect.top})`);
     if (rect.width === 0 || rect.height === 0) {
-      postToTest("❌ Pin has zero size – not visible");
+      postToTest("Pin has zero size – not visible");
     } else {
-      postToTest("✅ Pin has non-zero size – should be visible");
+      postToTest("Pin has non-zero size – should be visible");
     }
   }, 500);
 }
@@ -921,7 +921,7 @@ window.setUserPinFromFlutter = function(x, y, z) {
 
   setUserPin(viewer, p);
   window.__pendingUserPin = null;
-  postToTest("✅ setUserPinFromFlutter applied");
+  postToTest("setUserPinFromFlutter applied");
   return true;
 };
 
@@ -1103,7 +1103,7 @@ window.highlightPoiFromFlutter = function(name) {
   }
 
   const ok = _applyPoiHighlight(viewer, n);
-  postToTest(ok ? ("✅ highlightPoiFromFlutter applied: " + n) : ("⚠️ highlightPoiFromFlutter: material not found: " + n));
+  postToTest(ok ? ("highlightPoiFromFlutter applied: " + n) : ("highlightPoiFromFlutter: material not found: " + n));
 };
 
 function hitWithFallback(viewer, x, y) {
@@ -1183,14 +1183,14 @@ function setupViewer() {
 
     if (window.__pendingUserPin) {
       setUserPin(viewer, window.__pendingUserPin);
-      postToTest("✅ applied pending pin on load");
+      postToTest("applied pending pin on load");
       window.__pendingUserPin = null;
     }
 
     if (window.__pendingPoiHighlight) {
       const n = window.__pendingPoiHighlight;
       const ok = _applyPoiHighlight(viewer, n);
-      postToTest(ok ? ("✅ applied pending highlight on load: " + n) : ("⚠️ pending highlight not found: " + n));
+      postToTest(ok ? ("applied pending highlight on load: " + n) : ("pending highlight not found: " + n));
       window.__pendingPoiHighlight = null;
     }
   });
@@ -1273,7 +1273,7 @@ function setupViewer() {
 let tries = 0;
 const timer = setInterval(function() {
   tries++;
-  postToTest("✅ PinPicker JS alive");
+  postToTest("PinPicker JS alive");
   if (setupViewer() || tries > 30) clearInterval(timer);
 }, 250);
 ''';
@@ -1367,12 +1367,12 @@ const timer = setInterval(function() {
             'floorLabel': floor,
           });
 
-          // ✅ Move the visible pin to the snapped position (Flutter -> JS)
+          // Move the visible pin to the snapped position (Flutter -> JS)
           _pushUserPinToJs(snappedGltf);
 
-          debugPrint('📌 PIN glTF: $gltf');
-          debugPrint('📌 PIN Blender: $blender');
-          debugPrint('📌 SNAPPED Blender: $snappedBlender');
+          debugPrint('PIN glTF: $gltf');
+          debugPrint('PIN Blender: $blender');
+          debugPrint('SNAPPED Blender: $snappedBlender');
         }
       }
     } catch (_) {
@@ -1451,7 +1451,7 @@ const timer = setInterval(function() {
       if (!mounted) return true;
       return true;
     } catch (e) {
-      debugPrint('❌ Failed to save location: $e');
+      debugPrint('Failed to save location: $e');
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -1785,7 +1785,7 @@ const timer = setInterval(function() {
                 JavascriptChannel(
                   'JS_TEST_CHANNEL',
                   onMessageReceived: (JavaScriptMessage message) {
-                    debugPrint("✅ JS_TEST_CHANNEL: ${message.message}");
+                    debugPrint("JS_TEST_CHANNEL: ${message.message}");
 
                     // As soon as JS starts running, our window.setUserPinFromFlutter exists.
                     if (!_jsBridgeReady &&
@@ -1806,7 +1806,7 @@ const timer = setInterval(function() {
                         _pushUserPinToJs(p);
                       }
 
-                      // 🔥 Also send the current pin if it exists (in case it wasn't pending)
+                      // Also send the current pin if it exists (in case it wasn't pending)
                       if (_pickedPosGltf != null) {
                         _pushUserPinToJs(_pickedPosGltf!);
                       }

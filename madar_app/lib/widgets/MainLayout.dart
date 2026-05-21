@@ -524,7 +524,7 @@ class _MainLayoutState extends State<MainLayout> with WidgetsBindingObserver {
                           color: AppColors.kGreen,
                         ),
 
-                        // 🔴
+                        // 
                         if (count > 0)
                           Positioned(
                             right: -6,

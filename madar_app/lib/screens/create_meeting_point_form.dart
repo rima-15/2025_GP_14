@@ -815,7 +815,7 @@ class MeetingPointService {
   ///
   /// This runs client-side (from Track page) and performs only safe transitions:
   /// - Step 4 expired: cancel if nobody accepted; otherwise move to step 5.
-  /// - Step 5 expired: auto-accept (same as your current form behavior).
+  /// - Step 5 expired: auto-accept (mirrors the host-accept logic in the form).
   /// - All declined: cancel (host or invitee can do this; rules allow it).
   static Future<void> maybeMaintain(
     MeetingPointRecord meeting,
@@ -6800,7 +6800,7 @@ class _CreateMeetingPointFormState
       });
     } catch (e) {
       debugPrint(
-        '❌ Failed to save user location from meeting form: $e',
+        'Failed to save user location from meeting form: $e',
       );
     }
   }

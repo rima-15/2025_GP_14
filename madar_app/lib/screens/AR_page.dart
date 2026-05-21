@@ -82,6 +82,8 @@ class _UnityCameraPageState
     super.didChangeAppLifecycleState(
       state,
     );
+    // Unity loses its Flutter-sent state when the app is backgrounded,
+    // so we re-send the handshake and mode on every resume.
     if (state ==
         AppLifecycleState.resumed)
       _sendHandshakeAndMode();
@@ -150,6 +152,8 @@ class _UnityCameraPageState
     return 'none';
   }
 
+  // Unity needs the Firestore document ID (not the Firebase Auth UID)
+  // because all venue/navigation data is keyed by that doc ID.
   Future<String?>
   _resolveUserDocIdByEmail() async {
     final user = FirebaseAuth
@@ -184,12 +188,17 @@ class _UnityCameraPageState
       );
     } catch (e) {
       debugPrint(
-        "❌ Failed to get ID token: $e",
+        "Failed to get ID token: $e",
       );
       return null;
     }
   }
 
+  // Sends three messages to Unity in sequence:
+  //   1. USER_DOC_ID — identifies the user in Firestore
+  //   2. ID_TOKEN    — Firebase Auth token so Unity can make authenticated requests
+  //   3. mode msg    — tells Unity what to do (navigate, scan, explore, friend-nav)
+  // Small delays between messages prevent Unity from dropping rapid back-to-back calls.
   Future<void>
   _sendHandshakeAndMode() async {
     if (!_isUnityReady) return;
@@ -199,7 +208,7 @@ class _UnityCameraPageState
     if (_cachedUserDocId == null ||
         _cachedUserDocId!.isEmpty) {
       debugPrint(
-        "❌ Could not resolve Firestore user docId.",
+        "Could not resolve Firestore user docId.",
       );
       return;
     }
@@ -209,7 +218,7 @@ class _UnityCameraPageState
     if (idToken == null ||
         idToken.isEmpty) {
       debugPrint(
-        "❌ Could not get Firebase Auth ID token.",
+        "Could not get Firebase Auth ID token.",
       );
       return;
     }
@@ -221,11 +230,11 @@ class _UnityCameraPageState
         "USER_DOC_ID:${_cachedUserDocId!}",
       );
       debugPrint(
-        "✅ Sent USER_DOC_ID to Unity: ${_cachedUserDocId!}",
+        "Sent USER_DOC_ID to Unity: ${_cachedUserDocId!}",
       );
     } catch (e) {
       debugPrint(
-        "❌ Failed to send USER_DOC_ID: $e",
+        "Failed to send USER_DOC_ID: $e",
       );
       return;
     }
@@ -241,11 +250,11 @@ class _UnityCameraPageState
         "ID_TOKEN:$idToken",
       );
       debugPrint(
-        "✅ Sent ID_TOKEN to Unity (len=${idToken.length})",
+        "Sent ID_TOKEN to Unity (len=${idToken.length})",
       );
     } catch (e) {
       debugPrint(
-        "❌ Failed to send ID_TOKEN: $e",
+        "Failed to send ID_TOKEN: $e",
       );
       return;
     }
@@ -287,11 +296,11 @@ class _UnityCameraPageState
         modeMessage,
       );
       debugPrint(
-        "✅ Sent mode to Unity: $modeMessage",
+        "Sent mode to Unity: $modeMessage",
       );
     } catch (e) {
       debugPrint(
-        "❌ Failed to send mode message: $e",
+        "Failed to send mode message: $e",
       );
     }
   }
@@ -300,7 +309,7 @@ class _UnityCameraPageState
 
   void _onMessageFromUnity(String msg) {
     debugPrint(
-      "📩 Message from Unity: $msg",
+      "Message from Unity: $msg",
     );
 
     if (msg == "HIDE_SELECTOR") {
@@ -342,7 +351,7 @@ class _UnityCameraPageState
       });
 
       debugPrint(
-        "✅ Selector shown — "
+        "Selector shown — "
         "stairs=$_stairsAvailable "
         "elevator=$_elevatorAvailable "
         "escalator=$_escalatorAvailable "
@@ -373,11 +382,11 @@ class _UnityCameraPageState
         "NAVIGATION_PREFERENCE:$newPref",
       );
       debugPrint(
-        "✅ Sent preference to Unity: $newPref",
+        "Sent preference to Unity: $newPref",
       );
     } catch (e) {
       debugPrint(
-        "❌ Failed to send preference: $e",
+        "Failed to send preference: $e",
       );
     }
   }

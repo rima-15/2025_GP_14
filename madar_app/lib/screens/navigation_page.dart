@@ -504,9 +504,9 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
         _suggestedMeetingPoi = suggestedPoi;
       });
 
-      debugPrint('✅ Suggested meeting poi: $_suggestedMeetingPoi');
+      debugPrint('Suggested meeting poi: $_suggestedMeetingPoi');
     } catch (e) {
-      debugPrint('❌ Failed to load suggested meeting point: $e');
+      debugPrint('Failed to load suggested meeting point: $e');
     }
   }
 
@@ -576,11 +576,11 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     try {
       final nm = await NavMesh.loadAsset(assetPath);
       _navmeshCache[fNumber] = nm;
-      debugPrint("✅ Navmesh loaded for floor $fNumber: $assetPath");
+      debugPrint("Navmesh loaded for floor $fNumber: $assetPath");
       return nm;
     } catch (e) {
       debugPrint(
-        "❌ Failed to load navmesh for floor $fNumber ($assetPath): $e",
+        "Failed to load navmesh for floor $fNumber ($assetPath): $e",
       );
       return null;
     }
@@ -592,7 +592,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
     try {
       const path = 'assets/connectors/connectors_merged_local.json';
       final raw = await rootBundle.loadString(path);
-      debugPrint('✅ Connectors loaded: $path');
+      debugPrint('Connectors loaded: $path');
 
       final decoded = jsonDecode(raw);
       final List<dynamic> list = (decoded is List)
@@ -670,11 +670,11 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
 
       _connectors = out;
       _connectorsLoaded = true;
-      debugPrint("✅ Connectors parsed: ${_connectors.length}");
+      debugPrint("Connectors parsed: ${_connectors.length}");
     } catch (e) {
       _connectors = const [];
       _connectorsLoaded = true;
-      debugPrint("❌ Failed to load connectors: $e");
+      debugPrint("Failed to load connectors: $e");
     }
   }
 
@@ -830,21 +830,21 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
   Future<void> _pushDestPinToJs(Map<String, double> gltf) async {
     final c = _webCtrl;
     if (c == null || !_jsReady) {
-      debugPrint('❌ _pushDestPinToJs: webCtrl or jsReady false');
+      debugPrint('_pushDestPinToJs: webCtrl or jsReady false');
       return;
     }
     final x = gltf['x'];
     final y = gltf['y'];
     final z = gltf['z'];
     if (x == null || y == null || z == null) {
-      debugPrint('❌ _pushDestPinToJs: invalid coordinates $gltf');
+      debugPrint('_pushDestPinToJs: invalid coordinates $gltf');
       return;
     }
     try {
       await c.runJavaScript('window.setDestPinFromFlutter($x,$y,$z);');
       await c.runJavaScript('window.testDestPin();');
     } catch (e) {
-      debugPrint('❌ pushDestPinToJs failed: $e');
+      debugPrint('pushDestPinToJs failed: $e');
     }
   }
 
@@ -956,7 +956,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
 
       _entrancesByPoi = map;
       _entrancesLoaded = true;
-      debugPrint('✅ Entrances loaded: ${map.length} POIs with entrances');
+      debugPrint('Entrances loaded: ${map.length} POIs with entrances');
       final gateEntries = <Map<String, dynamic>>[];
       _entrancesByPoi.forEach((key, entrances) {
         for (final e in entrances) {
@@ -1005,7 +1005,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
               e['description'] = descMap[entranceName] ?? 'Gate';
             }
           } catch (e) {
-            debugPrint('⚠️ Failed to fetch gate descriptions: $e');
+            debugPrint('Failed to fetch gate descriptions: $e');
             for (final e in gateEntries) {
               e['description'] = 'Gate';
             }
@@ -1016,10 +1016,10 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       _entrancesLoaded = true;
       if (mounted) setState(() {});
       debugPrint(
-        '✅ Entrances loaded: ${_entrancesByPoi.length} POIs with entrances',
+        'Entrances loaded: ${_entrancesByPoi.length} POIs with entrances',
       );
     } catch (e) {
-      debugPrint('❌ Failed to load entrances: $e');
+      debugPrint('Failed to load entrances: $e');
     }
   }
 
@@ -1112,7 +1112,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
         setState(() {
           _activeRequests = active;
         });
-        debugPrint('✅ Active requests loaded: ${active.length}');
+        debugPrint('Active requests loaded: ${active.length}');
       }
     } catch (e) {
       debugPrint('Error loading active requests: $e');
@@ -1319,11 +1319,11 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       }
 
       debugPrint(
-        '✅ Destination resolved from entrances: $name -> floor=$_destFloorLabel',
+        'Destination resolved from entrances: $name -> floor=$_destFloorLabel',
       );
     } else {
       debugPrint(
-        '⚠️ Destination not found in entrances for "$name" (norm="$normName")',
+        'Destination not found in entrances for "$name" (norm="$normName")',
       );
     }
   }
@@ -1599,7 +1599,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
           _selectedDestPoi?['floor'] ?? _destFloorLabel;
 
       if (effectiveStart == null || effectiveDest == null) {
-        debugPrint('⚠️ Missing start or destination coordinates');
+        debugPrint('Missing start or destination coordinates');
         await _syncOverlaysForCurrentFloor();
         return;
       }
@@ -1646,11 +1646,11 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
               _selectedDestPoi!['y'] = bestEntrance['y'];
               _selectedDestPoi!['z'] = bestEntrance['z'];
             }
-            debugPrint('✅ Chosen closest entrance');
+            debugPrint('Chosen closest entrance');
           }
         } else {
           debugPrint(
-            '⚠️ Start and destination on different floors – using first entrance',
+            'Start and destination on different floors – using first entrance',
           );
         }
       }
@@ -1658,7 +1658,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
       final startLabel = effectiveStartFloor ?? _desiredStartFloorLabel;
       final destLabel = effectiveDestFloor ?? '';
       if (startLabel.trim().isEmpty) {
-        debugPrint('⚠️ Start floor unknown — abort routing');
+        debugPrint('Start floor unknown — abort routing');
         await _syncOverlaysForCurrentFloor();
         return;
       }
@@ -1748,11 +1748,11 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
                   .toList();
 
         debugPrint(
-          '🧭 pref=$pref start=$startLabel($startF) dest=$destFloor($destF) matched=${candidates.length} pool=${pool.length}',
+          'pref=$pref start=$startLabel($startF) dest=$destFloor($destF) matched=${candidates.length} pool=${pool.length}',
         );
         if (pool.isEmpty) {
           debugPrint(
-            "⚠️ No connectors found linking $startLabel -> $destFloor",
+            "No connectors found linking $startLabel -> $destFloor",
           );
           await _syncOverlaysForCurrentFloor();
           return;
@@ -1802,7 +1802,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
           }
         }
         if (best == null) {
-          debugPrint("⚠️ Could not compute a valid connector path.");
+          debugPrint("Could not compute a valid connector path.");
           return;
         }
 
@@ -1813,7 +1813,7 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
 
         _chosenConnectorId = '${best.type}:${best.id}';
         debugPrint(
-          '✅ chosen connector pref=$pref -> $_chosenConnectorId score=${bestScore.toStringAsFixed(2)}',
+          'chosen connector pref=$pref -> $_chosenConnectorId score=${bestScore.toStringAsFixed(2)}',
         );
         _connectorStartBlender = best.endpointsByFNumber[startF];
         _connectorDestBlender = best.endpointsByFNumber[destF];
@@ -1876,8 +1876,8 @@ class _PathOverviewScreenState extends State<PathOverviewScreen> {
   }
 
   static const String _pathViewerJs =
-      r'''console.log("✅ PathViewer JS injected");
-postToTest("✅ PathViewer JS top-level executed");
+      r'''console.log("PathViewer JS injected");
+postToTest("PathViewer JS top-level executed");
 function postToPOI(obj) {
   try { POI_CHANNEL.postMessage(JSON.stringify(obj)); return true; } catch (e) { return false; }
 }
@@ -1886,10 +1886,10 @@ function postToTest(msg) {
 }
 function getViewer() { return document.querySelector('model-viewer'); }
 window.onerror = function(msg, url, line, col, error) {
-  postToTest("❌ JS Error: " + msg + " at " + line + ":" + col);
+  postToTest("JS Error: " + msg + " at " + line + ":" + col);
   return true;
 };
-window.testDestPin = function() { postToTest("✅ testDestPin called"); }
+window.testDestPin = function() { postToTest("testDestPin called"); }
 function ensurePinStyle() {
   if (document.getElementById("user_pin_hotspot_style")) return;
 
@@ -2062,10 +2062,10 @@ window.setPathFromFlutter = function(points) {
     }
 
     viewer.requestUpdate();
-    postToTest('✅ setPathFromFlutter applied: ' + points.length + ' points');
+    postToTest('setPathFromFlutter applied: ' + points.length + ' points');
     return true;
   } catch(e) {
-    postToTest('❌ setPathFromFlutter error: ' + e);
+    postToTest('setPathFromFlutter error: ' + e);
     return false;
   }
 };
@@ -2156,7 +2156,7 @@ function setDestPin(viewer, pos) {
     hs.setAttribute('data-normal', `0 1 0`);
     viewer.requestUpdate();
   } catch(e) {
-    postToTest("❌ setDestPin error: " + e);
+    postToTest("setDestPin error: " + e);
   }
 }
 
@@ -2185,7 +2185,7 @@ window.setDestPinFromFlutter = function(x, y, z) {
 
   setDestPin(viewer, p);
   window.__pendingDestPin = null;
-  postToTest("✅ setDestPinFromFlutter applied");
+  postToTest("setDestPinFromFlutter applied");
   return true;
 };
 
@@ -2342,7 +2342,7 @@ window.setUserPinFromFlutter = function(x, y, z) {
 
   setUserPin(viewer, p);
   window.__pendingUserPin = null;
-  postToTest("✅ setUserPinFromFlutter applied");
+  postToTest("setUserPinFromFlutter applied");
   return true;
 };
 
@@ -2358,7 +2358,7 @@ window.highlightPoiFromFlutter = function(name) {
   }
 
   const ok = _applyPoiHighlight(viewer, n);
-  postToTest(ok ? ("✅ highlightPoiFromFlutter applied: " + n) : ("⚠️ highlightPoiFromFlutter: material not found yet: " + n));
+  postToTest(ok ? ("highlightPoiFromFlutter applied: " + n) : ("highlightPoiFromFlutter: material not found yet: " + n));
   if (!ok) {
     window.__highlightRetry = (window.__highlightRetry || 0) + 1;
     if (window.__highlightRetry <= 8) {
@@ -2396,14 +2396,14 @@ function setupViewer() {
 
     if (window.__pendingUserPin) {
       setUserPin(viewer, window.__pendingUserPin);
-      postToTest("✅ applied pending pin on load");
+      postToTest("applied pending pin on load");
       window.__pendingUserPin = null;
     }
 
     if (window.__pendingPoiHighlight) {
       const n = window.__pendingPoiHighlight;
       const ok = _applyPoiHighlight(viewer, n);
-      postToTest(ok ? ("✅ applied pending highlight on load: " + n) : ("⚠️ pending highlight not found: " + n));
+      postToTest(ok ? ("applied pending highlight on load: " + n) : ("pending highlight not found: " + n));
       window.__pendingPoiHighlight = null;
     }
 
@@ -2411,12 +2411,12 @@ function setupViewer() {
       const pts = window.__pendingPathPoints;
       window.__pendingPathPoints = null;
       window.setPathFromFlutter(pts);
-      postToTest('✅ applied pending path on load');
+      postToTest('applied pending path on load');
     }
 
     if (window.__pendingDestPin) {
   setDestPin(viewer, window.__pendingDestPin);
-  postToTest("✅ applied pending dest pin on load");
+  postToTest("applied pending dest pin on load");
   window.__pendingDestPin = null;
 }
   });
@@ -2425,24 +2425,24 @@ function setupViewer() {
     if (viewer && viewer.model) {
       if (window.__pendingUserPin) {
         setUserPin(viewer, window.__pendingUserPin);
-        postToTest("✅ applied pending pin (immediate)");
+        postToTest("applied pending pin (immediate)");
         window.__pendingUserPin = null;
       }
       if (window.__pendingPoiHighlight) {
         const n = window.__pendingPoiHighlight;
         const ok = _applyPoiHighlight(viewer, n);
-        postToTest(ok ? ("✅ applied pending highlight (immediate): " + n) : ("⚠️ pending highlight not found (immediate): " + n));
+        postToTest(ok ? ("applied pending highlight (immediate): " + n) : ("pending highlight not found (immediate): " + n));
         if (ok) window.__pendingPoiHighlight = null;
       }
       if (window.__pendingPathPoints && window.__pendingPathPoints.length) {
         const pts = window.__pendingPathPoints;
         window.__pendingPathPoints = null;
         window.setPathFromFlutter(pts);
-        postToTest("✅ applied pending path (immediate)");
+        postToTest("applied pending path (immediate)");
       }
       if (window.__pendingDestPin) {
         setDestPin(viewer, window.__pendingDestPin);
-        postToTest("✅ applied pending dest pin (immediate)");
+        postToTest("applied pending dest pin (immediate)");
         window.__pendingDestPin = null;
       }
     }
@@ -2455,7 +2455,7 @@ function setupViewer() {
 let tries = 0;
 const timer = setInterval(function() {
   tries++;
-  postToTest("✅ PathViewer JS alive");
+  postToTest("PathViewer JS alive");
   if (setupViewer() || tries > 30) clearInterval(timer);
 }, 250);''';
 
@@ -2940,7 +2940,7 @@ const timer = setInterval(function() {
         ? 'any'
         : preference;
 
-    debugPrint('🎛️ changePreference: $_selectedPreference -> $nextPreference');
+    debugPrint('changePreference: $_selectedPreference -> $nextPreference');
 
     setState(() {
       _selectedPreference = nextPreference;
@@ -2961,7 +2961,7 @@ const timer = setInterval(function() {
         await _maybeComputeAndPushPath();
 
         debugPrint(
-          '🎛️ recompute done. chosen=' +
+          'recompute done. chosen=' +
               (_chosenConnectorId ?? 'none') +
               ' routeComputed=' +
               _routeComputed.toString() +
@@ -2972,7 +2972,7 @@ const timer = setInterval(function() {
         );
       }
     } catch (e) {
-      debugPrint('⚠️ Failed to recompute route after preference change: $e');
+      debugPrint('Failed to recompute route after preference change: $e');
     }
   }
 

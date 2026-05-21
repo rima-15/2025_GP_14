@@ -311,12 +311,12 @@ class GpsTrackingService {
           });
 
       debugPrint(
-        '[GPS-SERVICE] ✅ Uploaded GPS for $userDocId: '
+        '[GPS-SERVICE] Uploaded GPS for $userDocId: '
         '${position.latitude}, ${position.longitude}',
       );
     } catch (e) {
       debugPrint(
-        '[GPS-SERVICE] ❌ Error uploading GPS: $e',
+        '[GPS-SERVICE] Error uploading GPS: $e',
       );
     }
   }

@@ -3008,12 +3008,7 @@ class _DiscoverMoreSectionState extends State<_DiscoverMoreSection>
     super.build(context);
 
     if (!_urlsLoaded || _categoryData.isEmpty) {
-      return Center(
-        child: CircularProgressIndicator(
-          color: kGreen,
-          backgroundColor: kGreen.withOpacity(0.2),
-        ),
-      );
+      return Container(color: Colors.grey.shade200);
     }
 
     final categories = _categoryData.values.toList();

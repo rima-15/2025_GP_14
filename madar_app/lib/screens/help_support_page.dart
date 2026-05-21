@@ -610,14 +610,12 @@ class _HelpSupportPageState extends State<HelpSupportPage> {
                                       SizedBox(
                                         width: double.infinity,
                                         child: PrimaryButton(
-                                          text: _isSending
-                                              ? 'Sending...'
-                                              : 'Send message',
+                                          text: 'Send message',
+                                          isLoading: _isSending,
                                           onPressed:
-                                              (_isSending ||
-                                                  _messageController.text
+                                              _messageController.text
                                                       .trim()
-                                                      .isEmpty)
+                                                      .isEmpty
                                               ? null
                                               : _onSendMessage,
                                         ),
